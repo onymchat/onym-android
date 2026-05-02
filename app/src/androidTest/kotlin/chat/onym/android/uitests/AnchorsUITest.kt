@@ -96,7 +96,7 @@ class AnchorsUITest {
                     saveConfiguration(
                         chat.onym.android.chain.RelayerConfiguration(
                             endpoints = listOf(
-                                chat.onym.android.chain.RelayerEndpoint("Onym Testnet", "https://relayer-testnet.onym.chat", "testnet")
+                                chat.onym.android.chain.RelayerEndpoint("Onym Testnet", "https://relayer-testnet.onym.chat", listOf("testnet"))
                             ),
                             hasUserInteracted = true,
                         )

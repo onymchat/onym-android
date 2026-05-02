@@ -49,8 +49,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material3.CircularProgressIndicator
 import chat.onym.android.R
 import chat.onym.android.chain.RelayerEndpoint
+import chat.onym.android.chain.RelayerFetchStatus
 import chat.onym.android.chain.RelayerStrategy
 
 /**
@@ -136,25 +138,51 @@ fun RelayerSettingsScreen(
             }
 
             // ─── Add from Published List ─────────────────────────
+            // Gate on fetchStatus, not just `unconfiguredKnownList.isEmpty()`.
+            // PR #20 spun the spinner forever after a failed fetch
+            // because the only "empty" branch was the spinner. The
+            // four-way gate below surfaces the failure with a Try
+            // Again button (Failed), the genuinely-empty state with a
+            // dedicated string (Success + empty published list), and
+            // keeps the spinner only for the truly-fetching cold path.
+            // Mirrors `knownSectionContent` from onym-ios PR #23.
             item { SectionHeader(stringResource(R.string.relayer_section_add_known)) }
-            if (state.unconfiguredKnownList.isEmpty()) {
-                item {
-                    Text(
-                        stringResource(
-                            if (state.configuration.endpoints.isEmpty()) R.string.relayer_known_fetching
-                            else R.string.relayer_known_all_added
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 32.dp, vertical = 12.dp),
-                    )
+            when (val status = state.fetchStatus) {
+                RelayerFetchStatus.Idle, RelayerFetchStatus.Fetching -> {
+                    if (state.knownList.isEmpty()) {
+                        item { FetchingSpinnerWithLabel() }
+                    } else {
+                        knownAddItems(state.unconfiguredKnownList) { viewModel.addKnown(it) }
+                    }
                 }
-            } else {
-                items(state.unconfiguredKnownList, key = { "known:${it.url}" }) { endpoint ->
-                    KnownRelayerAddRow(
-                        endpoint = endpoint,
-                        onClick = { viewModel.addKnown(endpoint) },
-                    )
+                RelayerFetchStatus.Success -> {
+                    when {
+                        state.knownList.isEmpty() -> item {
+                            Text(
+                                stringResource(R.string.relayer_fetch_no_published_yet),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 32.dp, vertical = 12.dp),
+                            )
+                        }
+                        state.unconfiguredKnownList.isEmpty() -> item {
+                            Text(
+                                stringResource(R.string.relayer_known_all_added),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 32.dp, vertical = 12.dp),
+                            )
+                        }
+                        else -> knownAddItems(state.unconfiguredKnownList) { viewModel.addKnown(it) }
+                    }
+                }
+                is RelayerFetchStatus.Failed -> {
+                    item {
+                        FetchFailedRow(
+                            message = status.message,
+                            onRetry = viewModel::tappedRetryFetch,
+                        )
+                    }
                 }
             }
 
@@ -170,6 +198,74 @@ fun RelayerSettingsScreen(
             }
             item { Footer(stringResource(R.string.relayer_custom_footer)) }
         }
+    }
+}
+
+/** Spinner + label, used while the boot fetch is in flight. */
+@Composable
+private fun FetchingSpinnerWithLabel() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 32.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.testTag("relayer.add.known.fetching"),
+            strokeWidth = 2.dp,
+        )
+        Text(
+            stringResource(R.string.relayer_known_fetching),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Failure copy + Try Again button. The retry intent re-fires
+ *  `RelayerRepository.refresh()`, which republishes a fresh
+ *  Fetching → Success/Failed cycle. */
+@Composable
+private fun FetchFailedRow(message: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
+            .padding(16.dp)
+            .testTag("relayer.add.known.failed"),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+        )
+        Button(
+            onClick = onRetry,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("relayer.add.known.retry"),
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = PaddingValues(vertical = 12.dp),
+        ) {
+            Text(stringResource(R.string.relayer_fetch_retry), fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/** LazyListScope helper — emits one [KnownRelayerAddRow] item per
+ *  endpoint with the standard test-tag key. Extracted so the
+ *  fetch-status `when` doesn't have three call sites for the same
+ *  block. */
+private fun androidx.compose.foundation.lazy.LazyListScope.knownAddItems(
+    endpoints: List<RelayerEndpoint>,
+    onClick: (RelayerEndpoint) -> Unit,
+) {
+    items(endpoints, key = { "known:${it.url}" }) { endpoint ->
+        KnownRelayerAddRow(endpoint = endpoint, onClick = { onClick(endpoint) })
     }
 }
 
@@ -299,7 +395,21 @@ private fun EndpointRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        NetworkBadge(network = endpoint.network)
+        NetworkBadges(networks = endpoint.networks)
+    }
+}
+
+/** One chip per network the endpoint serves. PR #23 changed
+ *  endpoints from singular `network: String` to plural
+ *  `networks: List<String>` because a single deployment can serve
+ *  testnet + public. Custom endpoints carry the [CUSTOM_NETWORK]
+ *  sentinel as their only network. */
+@Composable
+private fun NetworkBadges(networks: List<String>) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (network in networks) {
+            NetworkBadge(network = network)
+        }
     }
 }
 
@@ -355,7 +465,7 @@ private fun KnownRelayerAddRow(endpoint: RelayerEndpoint, onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        NetworkBadge(network = endpoint.network)
+        NetworkBadges(networks = endpoint.networks)
     }
 }
 

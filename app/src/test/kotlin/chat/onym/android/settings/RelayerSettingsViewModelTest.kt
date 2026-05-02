@@ -4,8 +4,10 @@ package chat.onym.android.settings
 
 import chat.onym.android.chain.RelayerConfiguration
 import chat.onym.android.chain.RelayerEndpoint
+import chat.onym.android.chain.RelayerFetchStatus
 import chat.onym.android.chain.RelayerRepository
 import chat.onym.android.chain.RelayerStrategy
+import java.io.IOException
 import chat.onym.android.support.FakeKnownRelayersFetcher
 import chat.onym.android.support.InMemoryRelayerSelectionStore
 import kotlinx.coroutines.Dispatchers
@@ -31,8 +33,8 @@ import org.junit.Test
  */
 class RelayerSettingsViewModelTest {
 
-    private val a = RelayerEndpoint("A", "https://a.example", "testnet")
-    private val b = RelayerEndpoint("B", "https://b.example", "public")
+    private val a = RelayerEndpoint("A", "https://a.example", listOf("testnet"))
+    private val b = RelayerEndpoint("B", "https://b.example", listOf("public"))
 
     @Before fun setUp() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
     @After  fun tearDown() { Dispatchers.resetMain() }
@@ -60,7 +62,7 @@ class RelayerSettingsViewModelTest {
 
         val endpoints = repo.snapshots.value.configuration.endpoints
         assertEquals(1, endpoints.size)
-        assertEquals("custom", endpoints.single().network)
+        assertEquals(listOf("custom"), endpoints.single().networks)
         assertEquals("https://localhost:9090", endpoints.single().url)  // trimmed
     }
 
@@ -123,6 +125,62 @@ class RelayerSettingsViewModelTest {
         vm.setStrategy(RelayerStrategy.RANDOM); yield()
 
         assertEquals(RelayerStrategy.RANDOM, repo.snapshots.value.configuration.strategy)
+    }
+
+    // ─── PR #23: tappedRetryFetch + fetchStatus plumbing ──────────
+
+    @Test
+    fun fetchStatus_isPlumbedFromRepositorySnapshot() = runTest {
+        // After bootstrap (no fetch yet) the snapshot is Idle —
+        // the VM should mirror it so the screen's `when` gate
+        // doesn't render the "Failed" or "Success" branches before
+        // the first fetch happens.
+        val (_, vm) = makeViewModel()
+        assertEquals(RelayerFetchStatus.Idle, vm.state.value.fetchStatus)
+    }
+
+    @Test
+    fun tappedRetryFetch_onFailure_publishesFailedStatusAndDoesNotPropagate() = runTest {
+        // The user taps "Try Again". The repository fetch fails;
+        // the VM must catch the throw (so the UI doesn't crash) and
+        // surface the failure via the snapshot.
+        val store = InMemoryRelayerSelectionStore()
+        val fetcher = FakeKnownRelayersFetcher(
+            FakeKnownRelayersFetcher.Mode.Failing(IOException("offline"))
+        )
+        val repo = RelayerRepository(
+            store, fetcher,
+            errorMessageResolver = { "OFFLINE" },
+        )
+        repo.bootstrap()
+        val vm = RelayerSettingsViewModel(repo)
+        yield()
+
+        vm.tappedRetryFetch()
+        yield()
+
+        val status = vm.state.value.fetchStatus
+        assertTrue("status must be Failed, was $status", status is RelayerFetchStatus.Failed)
+        assertEquals("OFFLINE", (status as RelayerFetchStatus.Failed).message)
+    }
+
+    @Test
+    fun tappedRetryFetch_onSuccess_clearsFailedAndExposesKnownList() = runTest {
+        // After a successful retry, the VM must surface the new list
+        // (so the screen can render it via `state.knownList` /
+        // `state.unconfiguredKnownList`) and flip the gate to Success.
+        val store = InMemoryRelayerSelectionStore()
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a, b)))
+        val repo = RelayerRepository(store, fetcher)
+        repo.bootstrap()
+        val vm = RelayerSettingsViewModel(repo)
+        yield()
+
+        vm.tappedRetryFetch()
+        yield()
+
+        assertEquals(RelayerFetchStatus.Success, vm.state.value.fetchStatus)
+        assertEquals(listOf(a, b), vm.state.value.knownList)
     }
 
     // ─── unconfiguredKnownList filtering ──────────────────────────

@@ -14,6 +14,7 @@ import chat.onym.android.chain.DataStorePreferencesRelayerSelectionStore
 import chat.onym.android.chain.GitHubReleasesContractsManifestFetcher
 import chat.onym.android.chain.GitHubReleasesKnownRelayersFetcher
 import chat.onym.android.chain.RelayerRepository
+import chat.onym.android.chain.relayerFetchErrorMessageResolver
 import chat.onym.android.identity.IdentityRepository
 import chat.onym.android.identity.IdentitySecretStore
 import chat.onym.android.identity.OnymNostrSignerProvider
@@ -166,6 +167,7 @@ class OnymApplication : Application() {
         val relayerRepository = RelayerRepository(
             store = relayerStore,
             fetcher = relayerFetcher,
+            errorMessageResolver = relayerFetchErrorMessageResolver(applicationContext.resources),
         )
         applicationScope.launch {
             relayerRepository.bootstrap()

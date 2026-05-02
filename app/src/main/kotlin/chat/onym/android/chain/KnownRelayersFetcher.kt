@@ -51,14 +51,19 @@ class GitHubReleasesKnownRelayersFetcher(
             .header("Accept", "application/json")
             .build()
         httpClient.newCall(request).execute().use { response ->
+            // Typed errors so the repository can map each kind to a
+            // distinct localised user-facing message
+            // ([RelayersFetchError]). Network-layer failures stay as
+            // raw [IOException]; only HTTP-status + JSON-decode get
+            // wrapped here.
             if (!response.isSuccessful) {
-                throw IOException("GET $url returned HTTP ${response.code}")
+                throw RelayersFetchError.BadStatus(response.code)
             }
             val body = response.body?.string() ?: throw IOException("empty response body")
             try {
                 jsonFormat.decodeFromString(KnownRelayersDocument.serializer(), body).relayers
             } catch (e: SerializationException) {
-                throw IOException("invalid relayers.json: ${e.message}", e)
+                throw RelayersFetchError.MalformedDocument(e)
             }
         }
     }

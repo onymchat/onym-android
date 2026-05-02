@@ -15,32 +15,30 @@ import kotlin.random.Random
  *
  * Touch-surface compliance:
  *
- *  - Holds **only** [store] + [fetcher]. No transport, no OnymSDK,
- *    no Compose, no `Context`.
+ *  - Holds **only** [store] + [fetcher] + [errorMessageResolver].
+ *    No transport, no OnymSDK, no Compose, no `Context`.
  *  - Exposes a [StateFlow] for observation; [addEndpoint] /
  *    [removeEndpoint] / [setPrimary] / [setStrategy] / [start] /
  *    [refresh] / [bootstrap] are the suspend mutators.
  *  - Mutations serialise through a [Mutex]; reads are lock-free
- *    off the [StateFlow].
+ *    off the [StateFlow]. The mutex is **not** held across
+ *    [fetcher.fetch] — the network call runs on its own
+ *    coroutine continuation.
  *
- * Mirrors `RelayerRepository` from onym-ios PR #20.
+ * Mirrors `RelayerRepository` from onym-ios PR #20 / PR #23.
  */
 class RelayerRepository(
     private val store: RelayerSelectionStore,
     private val fetcher: KnownRelayersFetcher,
+    /** Maps a fetch failure to a user-facing localised string. The
+     *  default returns the throwable's message — production wires a
+     *  resource-backed implementation through `OnymApplication`;
+     *  tests typically pass `{ it.message ?: "" }` or a controlled
+     *  fixture. */
+    private val errorMessageResolver: (Throwable) -> String = { it.message ?: "" },
 ) {
     private val mutex = Mutex()
-    private val _snapshots = MutableStateFlow(
-        RelayerState(
-            knownRelayers = emptyList(),
-            // Cold-fresh in-memory state until bootstrap() reads disk.
-            // `empty` has hasUserInteracted = false so a first-launch
-            // refresh() seeds the published list. Once disk is loaded
-            // (legacy migration paths set it to true), the snapshot
-            // reflects whatever the user already had.
-            configuration = RelayerConfiguration.empty,
-        )
-    )
+    private val _snapshots = MutableStateFlow(RelayerState.empty)
 
     val snapshots: StateFlow<RelayerState> = _snapshots.asStateFlow()
 
@@ -48,41 +46,71 @@ class RelayerRepository(
 
     /** Hydrate from disk — cached known list + persisted multi-
      *  endpoint configuration (or migrate from the PR #17 single-
-     *  selection blob). Idempotent. */
+     *  selection blob). Idempotent. Preserves the in-memory
+     *  [RelayerFetchStatus] (which is `Idle` until the first
+     *  [start] / [refresh]). */
     suspend fun bootstrap() = mutex.withLock {
         val cached = store.loadCachedKnownRelayers()
         val config = store.loadConfiguration()
-        _snapshots.value = RelayerState(knownRelayers = cached, configuration = config)
+        _snapshots.value = _snapshots.value.copy(
+            knownRelayers = cached,
+            configuration = config,
+        )
     }
 
     /** Fire-and-forget the GitHub-Releases fetch. Idempotent.
      *  Errors swallowed (app launch must not crash on a network
-     *  blip). On success, [autoPopulateIfFreshLocked] seeds the
-     *  configured list with the published entries when the user
-     *  hasn't yet interacted with the picker. */
-    suspend fun start() = mutex.withLock {
-        if (startInvoked) return@withLock
-        startInvoked = true
-        runCatching { fetcher.fetch() }.onSuccess { fresh ->
-            store.saveCachedKnownRelayers(fresh)
-            applyKnownListAndAutoPopulateLocked(fresh)
+     *  blip); the [RelayerFetchStatus.Failed] snapshot is still
+     *  published before the swallow so the picker UI can react. */
+    suspend fun start() {
+        val shouldFetch = mutex.withLock {
+            if (startInvoked) false
+            else { startInvoked = true; true }
+        }
+        if (shouldFetch) {
+            runCatching { refreshInternal() }
         }
     }
 
-    /** User-initiated refresh; failures propagate. */
+    /** User-initiated refresh; failures propagate to the caller AND
+     *  a [RelayerFetchStatus.Failed] snapshot is published. */
     suspend fun refresh() {
-        val fresh = fetcher.fetch()
+        refreshInternal()
+    }
+
+    /** Shared body of [start] + [refresh]. Publishes [RelayerFetchStatus.Fetching]
+     *  → fetch → publishes [RelayerFetchStatus.Success] (via
+     *  [applyKnownListAndAutoPopulateLocked]) OR
+     *  [RelayerFetchStatus.Failed] then rethrows. */
+    private suspend fun refreshInternal() {
+        mutex.withLock {
+            _snapshots.value = _snapshots.value.copy(fetchStatus = RelayerFetchStatus.Fetching)
+        }
+        val fresh = try {
+            fetcher.fetch()
+        } catch (e: Throwable) {
+            mutex.withLock {
+                _snapshots.value = _snapshots.value.copy(
+                    fetchStatus = RelayerFetchStatus.Failed(errorMessageResolver(e)),
+                )
+            }
+            throw e
+        }
         mutex.withLock {
             store.saveCachedKnownRelayers(fresh)
             applyKnownListAndAutoPopulateLocked(fresh)
+            _snapshots.value = _snapshots.value.copy(fetchStatus = RelayerFetchStatus.Success)
         }
     }
 
-    /** Common path for [start] + [refresh]: stash the fetched list,
-     *  and if the user hasn't yet interacted with the picker,
-     *  fan it into the configured endpoints (RANDOM strategy, no
-     *  primary). Once `hasUserInteracted` flips, future fetches
-     *  only update the cached known list — never the configuration. */
+    /** Common path called by [refreshInternal] under the mutex:
+     *  stash the fetched list, and if the user hasn't yet
+     *  interacted with the picker, fan it into the configured
+     *  endpoints (RANDOM strategy, no primary). Once
+     *  [RelayerConfiguration.hasUserInteracted] flips, future
+     *  fetches only update the cached known list — never the
+     *  configuration. Preserves the current [RelayerFetchStatus]
+     *  via `.copy()`; the caller sets it explicitly afterwards. */
     private suspend fun applyKnownListAndAutoPopulateLocked(fresh: List<RelayerEndpoint>) {
         val current = _snapshots.value.configuration
         val updatedConfig = if (!current.hasUserInteracted && fresh.isNotEmpty()) {
@@ -101,7 +129,7 @@ class RelayerRepository(
         if (updatedConfig != current) {
             store.saveConfiguration(updatedConfig)
         }
-        _snapshots.value = RelayerState(
+        _snapshots.value = _snapshots.value.copy(
             knownRelayers = fresh,
             configuration = updatedConfig,
         )
@@ -110,7 +138,7 @@ class RelayerRepository(
     // ─── list-shaped mutators ─────────────────────────────────────
 
     /** Add (or replace metadata for) an endpoint, keyed by URL. If
-     *  the URL is already configured, the metadata (name, network)
+     *  the URL is already configured, the metadata (name, networks)
      *  is updated in place — useful when the same URL is added
      *  first as a custom and then "rediscovered" in the published
      *  list, or vice versa. Insertion order preserved for new

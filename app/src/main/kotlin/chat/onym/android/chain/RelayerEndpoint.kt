@@ -2,35 +2,57 @@ package chat.onym.android.chain
 
 import androidx.annotation.StringRes
 import chat.onym.android.R
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import java.net.URI
 import java.net.URISyntaxException
 import kotlin.random.Random
 
 /**
- * One published relayer endpoint. Wire format pinned by
- * [KnownRelayersDocument] — interop with the iOS client + the
- * server-side `relayers.json` artifact rides on the JSON field
- * names being exactly `name` / `url` / `network`.
+ * One published relayer endpoint. Wire format:
  *
- * The `network` field is `"testnet"` / `"public"` for published
- * relayers and `"custom"` for user-typed URLs (synthesised via
- * [RelayerEndpoint.Companion.custom]).
+ * ```json
+ * { "name": "Onym Official",
+ *   "url": "https://relayer.onym.chat",
+ *   "networks": ["testnet", "public"] }
+ * ```
  *
- * Mirrors `RelayerEndpoint` from onym-ios PR #18 / PR #20.
+ * The `networks` field is a list because a single deployment can
+ * serve multiple Stellar networks (this is what the published
+ * `relayers.json` actually emits).
+ *
+ * **Backward-compat with PR #20 / PR #22 saves.** Old saved
+ * configurations used a singular `network: String` field. The
+ * custom [RelayerEndpointSerializer] decodes both shapes — singular
+ * is promoted to a one-element list at decode time. Encoder always
+ * emits the plural shape, so a future load reads only the new
+ * format.
+ *
+ * The "custom" endpoint type (user-typed URLs not in the published
+ * list) carries `networks = listOf("custom")` — a sentinel the UI
+ * uses to colour the network badge differently.
+ *
+ * Mirrors `RelayerEndpoint` from onym-ios PR #18 / PR #20 / PR #23.
  */
-@Serializable
+@Serializable(with = RelayerEndpointSerializer::class)
 data class RelayerEndpoint(
     val name: String,
     val url: String,
-    val network: String,
+    val networks: List<String>,
 ) {
     companion object {
+        /** Sentinel network tag for user-typed URLs. */
+        const val CUSTOM_NETWORK = "custom"
+
         /**
-         * Build a "custom" endpoint from a user-typed URL. Network
-         * tag is fixed at `"custom"`; name defaults to the URL host
-         * (or the raw URL if the host can't be parsed — defensive
-         * fallback; the ViewModel rejects malformed URLs upstream).
+         * Build a "custom" endpoint from a user-typed URL. Networks
+         * is the single-element `[CUSTOM_NETWORK]` sentinel; name
+         * defaults to the URL host (or the raw URL if the host
+         * can't be parsed — defensive fallback; the ViewModel
+         * rejects malformed URLs upstream).
          */
         fun custom(url: String): RelayerEndpoint {
             val host = try {
@@ -41,9 +63,62 @@ data class RelayerEndpoint(
             return RelayerEndpoint(
                 name = host ?: url,
                 url = url,
-                network = "custom",
+                networks = listOf(CUSTOM_NETWORK),
             )
         }
+    }
+}
+
+/**
+ * Hand-rolled serializer that reads both the new `networks: [...]`
+ * shape (the current published format + every save going forward)
+ * AND the legacy singular `network: "..."` shape (PR #20 / PR #22
+ * saved configurations on disk). Encoder always emits the plural
+ * shape; the legacy field is never written by this version.
+ *
+ * Surrogate trick: declare an internal `@Serializable` data class
+ * with both fields nullable, decode through it, then merge into
+ * the typed [RelayerEndpoint]. Avoids hand-rolling the decoder
+ * structurally — kotlinx.serialization handles the JSON traversal
+ * and missing-field defaults.
+ *
+ * Pinned by `RelayerEndpointSchemaTest`.
+ */
+internal object RelayerEndpointSerializer : KSerializer<RelayerEndpoint> {
+
+    @Serializable
+    internal data class Surrogate(
+        val name: String,
+        val url: String,
+        // Plural — the new wire shape. Optional so legacy decode doesn't fail.
+        val networks: List<String>? = null,
+        // Legacy singular — read on decode to backfill `networks`,
+        // never written on encode.
+        val network: String? = null,
+    )
+
+    override val descriptor: SerialDescriptor = Surrogate.serializer().descriptor
+
+    override fun deserialize(decoder: Decoder): RelayerEndpoint {
+        val s = Surrogate.serializer().deserialize(decoder)
+        // Prefer plural; fall back to promoting singular; otherwise
+        // empty list (a published-but-unspecified endpoint — would
+        // render with no badges).
+        val networks = s.networks ?: listOfNotNull(s.network)
+        return RelayerEndpoint(name = s.name, url = s.url, networks = networks)
+    }
+
+    override fun serialize(encoder: Encoder, value: RelayerEndpoint) {
+        Surrogate.serializer().serialize(
+            encoder,
+            Surrogate(
+                name = value.name,
+                url = value.url,
+                networks = value.networks,
+                // Always null — never write the legacy singular field.
+                network = null,
+            ),
+        )
     }
 }
 
@@ -166,18 +241,74 @@ data class RelayerConfiguration(
 }
 
 /**
+ * Status of the most recent (or in-flight) fetch of the published
+ * relayers list. Drives the UI's "Add from Published List" gating
+ * — the picker shows a spinner / error / empty-state copy depending
+ * on this enum, replacing the PR #20 logic that gated everything
+ * on `knownList.isEmpty` (which spun forever after a failed fetch).
+ *
+ * Mirrors `RelayerFetchStatus` from onym-ios PR #23.
+ */
+sealed interface RelayerFetchStatus {
+    /** No fetch has been attempted yet. UI shows the spinner. */
+    data object Idle : RelayerFetchStatus
+
+    /** A fetch is in flight. UI shows the spinner if the cached
+     *  list is empty, or the cached list (with optional staleness
+     *  badge later) if it's not. */
+    data object Fetching : RelayerFetchStatus
+
+    /** Last fetch succeeded. UI shows the published list, or a
+     *  "no published relayers yet" message if the list is empty. */
+    data object Success : RelayerFetchStatus
+
+    /** Last fetch failed. [message] is a localised user-facing
+     *  string. UI surfaces it with a Try Again button. */
+    data class Failed(val message: String) : RelayerFetchStatus
+}
+
+/**
+ * Sealed taxonomy of fetch failures, raised by the
+ * [KnownRelayersFetcher] implementation when something goes wrong
+ * before the typed [RelayerEndpoint] list lands. Used by the
+ * repository to map to a localised user-facing message.
+ *
+ * Mirrors `KnownRelayersFetchError` from onym-ios PR #23.
+ */
+sealed class RelayersFetchError(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    /** Server returned a non-2xx response. */
+    class BadStatus(val code: Int) : RelayersFetchError("server returned HTTP $code")
+
+    /** JSON decoding of the response body failed (schema drift). */
+    class MalformedDocument(cause: Throwable) :
+        RelayersFetchError("response body didn't match the expected schema", cause)
+}
+
+/**
  * Snapshot the [RelayerRepository] publishes through its StateFlow.
- * Two parallel pieces of state:
+ * Three pieces of state:
  *
  *  - [knownRelayers] — last successful fetch (or empty if never
  *    fetched / cleared). Cached to disk so the picker has something
  *    to show before the next start() / refresh() completes.
  *  - [configuration] — the user's multi-endpoint config + strategy.
+ *  - [fetchStatus] — drives the "Add from Published List" UI gate.
  */
 data class RelayerState(
     val knownRelayers: List<RelayerEndpoint>,
     val configuration: RelayerConfiguration,
+    val fetchStatus: RelayerFetchStatus,
 ) {
     /** Convenience pass-through to [RelayerConfiguration.selectUrl]. */
     fun selectUrl(random: Random = Random.Default): String? = configuration.selectUrl(random)
+
+    companion object {
+        /** Cold-start in-memory state until the repository's
+         *  bootstrap reads from disk + start kicks off a fetch. */
+        val empty: RelayerState = RelayerState(
+            knownRelayers = emptyList(),
+            configuration = RelayerConfiguration.empty,
+            fetchStatus = RelayerFetchStatus.Idle,
+        )
+    }
 }

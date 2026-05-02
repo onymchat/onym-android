@@ -17,8 +17,8 @@ import kotlin.random.Random
  */
 class RelayerRepositoryTest {
 
-    private val a = RelayerEndpoint("A", "https://a.example", "testnet")
-    private val b = RelayerEndpoint("B", "https://b.example", "testnet")
+    private val a = RelayerEndpoint("A", "https://a.example", listOf("testnet"))
+    private val b = RelayerEndpoint("B", "https://b.example", listOf("testnet"))
     private val custom = RelayerEndpoint.custom("https://localhost:8080")
 
     private fun makeRepo(
@@ -195,7 +195,7 @@ class RelayerRepositoryTest {
 
         // Re-add `a`'s URL with new metadata (e.g. user typed it as
         // custom first, then the published list landed).
-        val refreshedA = a.copy(name = "Onym A (refreshed)", network = "public")
+        val refreshedA = a.copy(name = "Onym A (refreshed)", networks = listOf("public"))
         repo.addEndpoint(refreshedA)
 
         val endpoints = repo.snapshots.value.configuration.endpoints
@@ -344,5 +344,89 @@ class RelayerRepositoryTest {
         repo.setStrategy(RelayerStrategy.PRIMARY)
         // No setPrimary call → primaryUrl is null → fall through to first.
         assertEquals(a.url, repo.selectUrl())
+    }
+
+    // ─── PR #23: fetchStatus snapshots ────────────────────────────
+
+    @Test
+    fun bootstrap_leavesFetchStatusIdle() = runTest {
+        val (repo, _) = makeRepo()
+        repo.bootstrap()
+        assertEquals(RelayerFetchStatus.Idle, repo.snapshots.value.fetchStatus)
+    }
+
+    @Test
+    fun start_publishesSuccess_onHappyPath() = runTest {
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a, b)))
+        val (repo, _) = makeRepo(fetcher = fetcher)
+        repo.bootstrap()
+
+        repo.start()
+
+        assertEquals(RelayerFetchStatus.Success, repo.snapshots.value.fetchStatus)
+    }
+
+    @Test
+    fun start_publishesFailed_andStillSwallowsThrow_onError() = runTest {
+        // Repository must wire the typed error into a localised
+        // message via `errorMessageResolver` AND continue to swallow
+        // the throw so app launch survives a network blip.
+        val fetcher = FakeKnownRelayersFetcher(
+            FakeKnownRelayersFetcher.Mode.Failing(RelayersFetchError.BadStatus(503))
+        )
+        val (repo, _) = makeRepo(
+            fetcher = fetcher,
+        ).let { (r, s) ->
+            // Recreate with a controlled resolver so the assertion isn't
+            // tied to the Throwable's default message.
+            RelayerRepository(s, fetcher, errorMessageResolver = { "RESOLVED: ${it::class.simpleName}" }) to s
+        }
+        repo.bootstrap()
+
+        repo.start()  // must not throw — `start` swallows after publishing Failed
+
+        val status = repo.snapshots.value.fetchStatus
+        assertTrue("status must be Failed, was $status", status is RelayerFetchStatus.Failed)
+        assertEquals("RESOLVED: BadStatus", (status as RelayerFetchStatus.Failed).message)
+    }
+
+    @Test
+    fun refresh_publishesFailed_andRethrows_onError() = runTest {
+        // User-initiated retry: the Failed snapshot must be visible
+        // to UI observers BEFORE the throw propagates.
+        val store = InMemoryRelayerSelectionStore()
+        val fetcher = FakeKnownRelayersFetcher(
+            FakeKnownRelayersFetcher.Mode.Failing(RelayersFetchError.MalformedDocument(IOException("boom")))
+        )
+        val repo = RelayerRepository(
+            store, fetcher,
+            errorMessageResolver = { "RESOLVED: ${it::class.simpleName}" },
+        )
+        repo.bootstrap()
+
+        val thrown = runCatching { repo.refresh() }.exceptionOrNull()
+
+        assertTrue("refresh must rethrow", thrown is RelayersFetchError.MalformedDocument)
+        val status = repo.snapshots.value.fetchStatus
+        assertTrue(status is RelayerFetchStatus.Failed)
+        assertEquals("RESOLVED: MalformedDocument", (status as RelayerFetchStatus.Failed).message)
+    }
+
+    @Test
+    fun refresh_clearsStaleFailed_onSuccessfulRetry() = runTest {
+        // A retry that succeeds must flip the snapshot back to
+        // Success so the UI hides the error row.
+        val fetcher = FakeKnownRelayersFetcher(
+            FakeKnownRelayersFetcher.Mode.Failing(IOException("offline"))
+        )
+        val (repo, _) = makeRepo(fetcher = fetcher)
+        repo.bootstrap()
+        repo.start()
+        assertTrue(repo.snapshots.value.fetchStatus is RelayerFetchStatus.Failed)
+
+        fetcher.mode = FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a))
+        repo.refresh()
+
+        assertEquals(RelayerFetchStatus.Success, repo.snapshots.value.fetchStatus)
     }
 }

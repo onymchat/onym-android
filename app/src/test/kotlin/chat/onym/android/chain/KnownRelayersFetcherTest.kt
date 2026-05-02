@@ -7,7 +7,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.IOException
 
 /**
  * Wire-format pin for the GitHub-Releases-backed fetcher. Uses a
@@ -31,12 +30,16 @@ class KnownRelayersFetcherTest {
 
     @Test
     fun fetch_happyPath_parsesTwoRelayerDocument() = runTest {
+        // PR #23 wire shape: `networks` is a plural list. The
+        // [RelayerEndpointSerializer] also accepts the legacy singular
+        // `network` field — pinned separately in
+        // `RelayerEndpointSchemaTest`.
         val json = """
             {
               "version": 1,
               "relayers": [
-                { "name": "Onym Official Testnet", "url": "https://relayer-testnet.onym.chat", "network": "testnet" },
-                { "name": "Onym Official Mainnet", "url": "https://relayer.onym.chat",         "network": "public"  }
+                { "name": "Onym Official Testnet", "url": "https://relayer-testnet.onym.chat", "networks": ["testnet"] },
+                { "name": "Onym Official Mainnet", "url": "https://relayer.onym.chat",         "networks": ["public"]  }
               ]
             }
         """.trimIndent()
@@ -45,8 +48,8 @@ class KnownRelayersFetcherTest {
 
         val list = fetcher.fetch()
         assertEquals(2, list.size)
-        assertEquals(RelayerEndpoint("Onym Official Testnet", "https://relayer-testnet.onym.chat", "testnet"), list[0])
-        assertEquals(RelayerEndpoint("Onym Official Mainnet", "https://relayer.onym.chat", "public"), list[1])
+        assertEquals(RelayerEndpoint("Onym Official Testnet", "https://relayer-testnet.onym.chat", listOf("testnet")), list[0])
+        assertEquals(RelayerEndpoint("Onym Official Mainnet", "https://relayer.onym.chat", listOf("public")), list[1])
     }
 
     @Test
@@ -60,52 +63,55 @@ class KnownRelayersFetcherTest {
     }
 
     @Test
-    fun fetch_404_throwsIOException() = runTest {
+    fun fetch_404_throwsBadStatus() = runTest {
+        // PR #23 raises typed errors (`RelayersFetchError.BadStatus`)
+        // so the repository can map each kind to its own localised
+        // user-facing message.
         val client = FakeOkHttpClient.build { req ->
             FakeOkHttpClient.status(req, 404, "Not Found")
         }
         val fetcher = GitHubReleasesKnownRelayersFetcher(client)
 
-        val thrown = assertThrows(IOException::class.java) {
+        val thrown = assertThrows(RelayersFetchError.BadStatus::class.java) {
             kotlinx.coroutines.runBlocking { fetcher.fetch() }
         }
-        assertTrue("error message should reference 404", thrown.message?.contains("404") == true)
+        assertEquals(404, thrown.code)
     }
 
     @Test
-    fun fetch_500_throwsIOException() = runTest {
+    fun fetch_500_throwsBadStatus() = runTest {
         val client = FakeOkHttpClient.build { req ->
             FakeOkHttpClient.status(req, 500, "Internal Server Error")
         }
         val fetcher = GitHubReleasesKnownRelayersFetcher(client)
 
-        val thrown = assertThrows(IOException::class.java) {
+        val thrown = assertThrows(RelayersFetchError.BadStatus::class.java) {
             kotlinx.coroutines.runBlocking { fetcher.fetch() }
         }
-        assertTrue(thrown.message?.contains("500") == true)
+        assertEquals(500, thrown.code)
     }
 
     @Test
-    fun fetch_malformedJson_throwsIOException() = runTest {
+    fun fetch_malformedJson_throwsMalformedDocument() = runTest {
         val client = FakeOkHttpClient.build { req ->
             FakeOkHttpClient.ok(req, "not really json {{{")
         }
         val fetcher = GitHubReleasesKnownRelayersFetcher(client)
 
-        assertThrows(IOException::class.java) {
+        assertThrows(RelayersFetchError.MalformedDocument::class.java) {
             kotlinx.coroutines.runBlocking { fetcher.fetch() }
         }
         Unit
     }
 
     @Test
-    fun fetch_missingRelayersField_throwsIOException() = runTest {
+    fun fetch_missingRelayersField_throwsMalformedDocument() = runTest {
         val client = FakeOkHttpClient.build { req ->
             FakeOkHttpClient.ok(req, """{ "version": 1 }""")
         }
         val fetcher = GitHubReleasesKnownRelayersFetcher(client)
 
-        assertThrows(IOException::class.java) {
+        assertThrows(RelayersFetchError.MalformedDocument::class.java) {
             kotlinx.coroutines.runBlocking { fetcher.fetch() }
         }
         Unit

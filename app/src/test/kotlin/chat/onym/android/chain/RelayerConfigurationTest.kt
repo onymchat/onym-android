@@ -20,9 +20,9 @@ import kotlin.random.Random
  */
 class RelayerConfigurationTest {
 
-    private val a = RelayerEndpoint("A", "https://a.example", "testnet")
-    private val b = RelayerEndpoint("B", "https://b.example", "testnet")
-    private val c = RelayerEndpoint("C", "https://c.example", "public")
+    private val a = RelayerEndpoint("A", "https://a.example", listOf("testnet"))
+    private val b = RelayerEndpoint("B", "https://b.example", listOf("testnet"))
+    private val c = RelayerEndpoint("C", "https://c.example", listOf("public"))
 
     // ─── Empty list ───────────────────────────────────────────────
 
@@ -150,7 +150,7 @@ class RelayerConfigurationTest {
     @Test
     fun custom_factory_setsNetworkAndDerivesNameFromHost() {
         val ep = RelayerEndpoint.custom("https://relayer.example.com:9443/path")
-        assertEquals("custom", ep.network)
+        assertEquals(listOf("custom"), ep.networks)
         assertEquals("relayer.example.com", ep.name)
         assertEquals("https://relayer.example.com:9443/path", ep.url)
     }

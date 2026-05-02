@@ -44,8 +44,8 @@ import kotlin.time.Duration.Companion.seconds
 @RunWith(AndroidJUnit4::class)
 class RelayerSettingsUITest {
 
-    private val testnet = RelayerEndpoint("Onym Testnet", "https://relayer-testnet.onym.chat", "testnet")
-    private val mainnet = RelayerEndpoint("Onym Mainnet", "https://relayer.onym.chat", "public")
+    private val testnet = RelayerEndpoint("Onym Testnet", "https://relayer-testnet.onym.chat", listOf("testnet"))
+    private val mainnet = RelayerEndpoint("Onym Mainnet", "https://relayer.onym.chat", listOf("public"))
 
     private val relayerStore = InMemoryRelayerSelectionStore()
     private val relayerFetcher = FakeKnownRelayersFetcher(
@@ -155,7 +155,7 @@ class RelayerSettingsUITest {
             relayerStore.loadConfigurationBlocking().endpoints.size == 3
         }
         val endpoints = relayerStore.loadConfigurationBlocking().endpoints
-        assertEquals("custom", endpoints.last().network)
+        assertEquals(listOf("custom"), endpoints.last().networks)
         assertEquals("https://custom.example/relayer", endpoints.last().url)
     }
 

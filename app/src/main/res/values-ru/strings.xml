@@ -94,6 +94,12 @@
     <string name="relayer_row_primary_label">Основной релеер</string>
     <string name="relayer_row_mark_primary">Сделать основным</string>
     <string name="relayer_row_delete">Удалить</string>
+    <!-- Fetch error / empty / retry copy (PR #23) -->
+    <string name="relayer_fetch_failed_status">Не удалось получить опубликованный список (код %1$d).</string>
+    <string name="relayer_fetch_failed_malformed">Опубликованный список в неожиданном формате.</string>
+    <string name="relayer_fetch_failed_offline">Не удалось получить опубликованный список.</string>
+    <string name="relayer_fetch_no_published_yet">Опубликованных релееров пока нет.</string>
+    <string name="relayer_fetch_retry">Повторить</string>
 
     <!-- ─── Settings → Anchors screen ────────────────────────────── -->
     <string name="anchors_title">Якоря</string>
