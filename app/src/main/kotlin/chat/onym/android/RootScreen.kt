@@ -31,8 +31,8 @@ import chat.onym.android.settings.AnchorsNetworkScreen
 import chat.onym.android.settings.AnchorsPickerViewModel
 import chat.onym.android.settings.AnchorsRootScreen
 import chat.onym.android.settings.AnchorsVersionScreen
-import chat.onym.android.settings.RelayerPickerScreen
-import chat.onym.android.settings.RelayerPickerViewModel
+import chat.onym.android.settings.RelayerSettingsScreen
+import chat.onym.android.settings.RelayerSettingsViewModel
 import chat.onym.android.settings.SettingsScreen
 
 /**
@@ -108,20 +108,20 @@ fun RootScreen(dependencies: AppDependencies) {
             composable(Tab.Settings.route) {
                 SettingsScreen(
                     onBackupClick = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
-                    onRelayerClick = { navController.navigate(ROUTE_RELAYER_PICKER) },
+                    onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
                     onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
                 )
             }
             composable(Tab.Search.route) {
                 SearchScreen()
             }
-            composable(ROUTE_RELAYER_PICKER) {
-                val vm: RelayerPickerViewModel = viewModel(
+            composable(ROUTE_RELAYER_SETTINGS) {
+                val vm: RelayerSettingsViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { dependencies.makeRelayerPickerViewModel() }
+                        initializer { dependencies.makeRelayerSettingsViewModel() }
                     },
                 )
-                RelayerPickerScreen(
+                RelayerSettingsScreen(
                     viewModel = vm,
                     onBackClick = { navController.popBackStack() },
                 )
@@ -210,6 +210,6 @@ private enum class Tab(val route: String, val labelRes: Int) {
 }
 
 private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
-private const val ROUTE_RELAYER_PICKER = "relayer_picker"
+private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private val TAB_ROUTES = setOf(Tab.Settings.route, Tab.Search.route)
