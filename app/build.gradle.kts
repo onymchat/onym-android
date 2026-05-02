@@ -89,6 +89,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.navigation.compose)
 
     // BiometricPrompt requires a FragmentActivity host. fragment-ktx
     // pulls in the FragmentActivity class; biometric pulls in the

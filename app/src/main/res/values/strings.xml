@@ -64,4 +64,13 @@
     <string name="authenticate_to_reveal_recovery_phrase">Authenticate to reveal your recovery phrase</string>
     <string name="recovery_phrase_unavailable">Recovery phrase unavailable. Your identity may not be BIP39-backed.</string>
 
+    <!-- ─── App shell (RootScreen + tabs) ────────────────────────── -->
+    <string name="back">Back</string>
+    <string name="settings">Settings</string>
+    <string name="search">Search</string>
+    <string name="security">Security</string>
+    <string name="backup_recovery_phrase">Backup Recovery Phrase</string>
+    <string name="security_footer_view_recovery_phrase">View your 12-word recovery phrase. You will need it to restore your identity on a new device.</string>
+    <string name="search_placeholder_body">Search lands in a later chunk.</string>
+
 </resources>

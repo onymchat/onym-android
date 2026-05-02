@@ -20,6 +20,7 @@ androidx-security-crypto = "1.1.0-alpha06"
 androidx-biometric = "1.2.0-alpha05"
 androidx-fragment = "1.8.5"
 androidx-lifecycle-viewmodel-compose = "2.8.7"
+androidx-navigation-compose = "2.8.5"
 
 # OnymSDK — published to the static Maven repo at
 # raw.githubusercontent.com/onymchat/onym-sdk-kotlin/releases/
@@ -53,6 +54,7 @@ androidx-security-crypto = { module = "androidx.security:security-crypto", versi
 androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "androidx-biometric" }
 androidx-fragment-ktx = { module = "androidx.fragment:fragment-ktx", version.ref = "androidx-fragment" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidx-lifecycle-viewmodel-compose" }
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "androidx-navigation-compose" }
 
 # Kotlin / coroutines / serialization
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }

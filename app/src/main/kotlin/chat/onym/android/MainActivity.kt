@@ -3,6 +3,7 @@ package chat.onym.android
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
 import androidx.fragment.app.FragmentActivity
@@ -13,26 +14,27 @@ import chat.onym.android.identity.IdentitySecretStore
 import chat.onym.android.recovery.AndroidBiometricAuthenticator
 import chat.onym.android.recovery.AndroidClipboardWriter
 import chat.onym.android.recovery.AndroidStringProvider
-import chat.onym.android.recovery.RecoveryPhraseBackupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 
 /**
- * Sole entry point. Mounts [RecoveryPhraseBackupScreen] as the root —
- * for now the entire app IS the back-up flow; subsequent chunks add
- * a home screen and demote this to a nav destination.
+ * Sole entry point. Mounts [RootScreen] as the content; the recovery-
+ * phrase backup flow is reachable via the Settings tab → Backup row.
  *
  * Extends [FragmentActivity] (not [ComponentActivity][androidx.activity.ComponentActivity])
  * because [androidx.biometric.BiometricPrompt] attaches its dialog
  * fragment to a `FragmentActivity` host.
  *
  * Sets [WindowManager.LayoutParams.FLAG_SECURE] on the window before
- * `super.onCreate` so:
- *   - screenshots / screen recording are blocked across the whole app
- *   - the recents thumbnail is rendered as a blank surface
+ * `super.onCreate` so screenshots / screen recording are blocked
+ * across the whole app and the recents thumbnail is rendered as a
+ * blank surface — stronger than iOS's scene-phase obscure overlay
+ * (which only blanks the recents preview on backgrounding).
  *
- * That's a stronger guarantee than iOS's scene-phase obscure overlay
- * (which only blanks the recents preview on backgrounding) — covers
- * both screenshot suppression and recents-card redaction in one flag.
+ * Calls [enableEdgeToEdge] so the app draws under the system bars on
+ * Android 14 and earlier (Android 15+ does this by default at
+ * `targetSdkVersion 35+`). Compose [androidx.compose.material3.Scaffold]
+ * downstream applies the matching `WindowInsets` padding so content
+ * never sits under the status / navigation bars.
  */
 class MainActivity : FragmentActivity() {
 
@@ -42,7 +44,7 @@ class MainActivity : FragmentActivity() {
         )
     }
 
-    private val viewModel: RecoveryPhraseBackupViewModel by viewModels {
+    private val recoveryViewModel: RecoveryPhraseBackupViewModel by viewModels {
         object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
@@ -63,6 +65,7 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE,
@@ -70,7 +73,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                RecoveryPhraseBackupScreen(viewModel = viewModel)
+                RootScreen(recoveryViewModel = recoveryViewModel)
             }
         }
     }
