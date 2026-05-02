@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
@@ -100,7 +101,12 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
             OnymGroupAvatar(size = 92.dp, accent = accent)
             Spacer(Modifier.height(18.dp))
 
-            // Name field
+            // Name field — pre-filled with the generated placeholder
+            // (e.g. "Maple Garden") so the user can hit Create
+            // immediately. First focus clears the field via
+            // `nameFieldFocused()`; the empty placeholder text below
+            // shows the same generated name dimmed so the user
+            // remembers what would be submitted.
             OnymCard {
                 BasicTextField(
                     value = state.name,
@@ -115,7 +121,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                         Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                             if (state.name.isEmpty()) {
                                 Text(
-                                    text = "Group name",
+                                    text = state.generatedName.ifEmpty { "Group name" },
                                     color = OnymTokens.Text3,
                                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Medium),
                                 )
@@ -123,7 +129,11 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                             inner()
                         }
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused) viewModel.nameFieldFocused()
+                        },
                 )
             }
             Text(
@@ -237,7 +247,11 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
         // Sticky footer
         FlowFooter {
             OnymPrimaryButton(
-                title = if (state.canAdvanceToStep2) "Next · Add people" else "Name your group to continue",
+                // The button is always enabled when the governance
+                // type is wired (Tyranny only in PR-C); name has a
+                // random placeholder default so there's no "fill in
+                // the blank" gating step.
+                title = "Next · Add people",
                 accent = accent,
                 enabled = state.canAdvanceToStep2,
                 onClick = viewModel::tappedNext,
@@ -636,18 +650,35 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(12.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(OnymTokens.Surface2)
-                            .clickable(onClick = viewModel::tappedDismissError)
-                            .padding(horizontal = 18.dp, vertical = 8.dp),
-                    ) {
-                        Text(
-                            text = "Try again",
-                            color = accent,
-                            style = TextStyle(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Cancel — closes the whole flow. Mirrors the
+                        // PR-C-followup error-banner change in iOS PR #27.
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(OnymTokens.Surface3)
+                                .clickable(onClick = viewModel::cancelFromError)
+                                .padding(horizontal = 18.dp, vertical = 8.dp),
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                color = OnymTokens.Text2,
+                                style = TextStyle(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(OnymTokens.Surface2)
+                                .clickable(onClick = viewModel::tappedDismissError)
+                                .padding(horizontal = 18.dp, vertical = 8.dp),
+                        ) {
+                            Text(
+                                text = "Try again",
+                                color = accent,
+                                style = TextStyle(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
+                            )
+                        }
                     }
                 }
             }

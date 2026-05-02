@@ -17,11 +17,15 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [PersistedGroup::class],
-    version = 1,
+    // v2 (PR-C follow-up, mirrors onym-ios PR #27): groupTypeRaw
+    // column flipped Int → String to match the relayer + contract
+    // wire spelling. The OnymApplication builder uses
+    // `fallbackToDestructiveMigrationFrom(1)` since PR-C only just
+    // shipped and there's no production data to preserve — pre-PR-C
+    // dev installs lose any local groups on next app launch.
+    version = 2,
     // Schema export is for cross-version diffing during migration
-    // authoring; nothing to diff at v1 and KSP warns loudly about
-    // the missing `room.schemaLocation` directory otherwise. Flip
-    // to true and add the apt arg when version 2 lands.
+    // authoring; nothing to diff at v2 with destructive migration.
     exportSchema = false,
 )
 abstract class GroupDatabase : RoomDatabase() {

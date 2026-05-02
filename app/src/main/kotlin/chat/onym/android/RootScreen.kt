@@ -12,6 +12,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -108,11 +111,27 @@ fun RootScreen(dependencies: AppDependencies) {
             modifier = androidx.compose.ui.Modifier.padding(padding),
         ) {
             composable(Tab.Settings.route) {
+                val networkFlow = remember(dependencies) {
+                    dependencies.networkPreferenceProvider.flow
+                }
+                val networkPref by networkFlow.collectAsStateWithLifecycle(
+                    initialValue = dependencies.networkPreferenceProvider.current(),
+                )
+                val coroutineScope = rememberCoroutineScope()
                 SettingsScreen(
                     onBackupClick = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
                     onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
                     onCreateGroupClick = { navController.navigate(ROUTE_CREATE_GROUP) },
+                    useMainnet = networkPref == chat.onym.android.chain.AppNetwork.Mainnet,
+                    onToggleMainnet = { on ->
+                        coroutineScope.launch {
+                            dependencies.networkPreferenceProvider.set(
+                                if (on) chat.onym.android.chain.AppNetwork.Mainnet
+                                else chat.onym.android.chain.AppNetwork.Testnet,
+                            )
+                        }
+                    },
                 )
             }
             composable(ROUTE_CREATE_GROUP) {

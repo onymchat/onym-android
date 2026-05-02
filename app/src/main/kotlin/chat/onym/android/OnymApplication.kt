@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.fragment.app.FragmentActivity
 import androidx.room.Room
 import chat.onym.android.chain.ContractsRepository
+import chat.onym.android.chain.DataStoreNetworkPreferenceProvider
 import chat.onym.android.chain.DataStorePreferencesAnchorSelectionStore
 import chat.onym.android.chain.DataStorePreferencesRelayerSelectionStore
 import chat.onym.android.chain.GitHubReleasesContractsManifestFetcher
@@ -63,6 +64,16 @@ private val Context.relayerDataStore: DataStore<Preferences> by preferencesDataS
  */
 private val Context.contractsDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "chat.onym.android.contracts_prefs",
+)
+
+/**
+ * DataStore Preferences for app-wide network selection
+ * (`onym.useMainnet` boolean — same key iOS uses via
+ * `@AppStorage("onym.useMainnet")`). Separate file so the Settings
+ * toggle doesn't touch the contracts cache or the relayer list.
+ */
+private val Context.networkPreferenceDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "chat.onym.android.network_prefs",
 )
 
 /**
@@ -217,7 +228,15 @@ class OnymApplication : Application() {
                 applicationContext,
                 GroupDatabase::class.java,
                 "chat.onym.android.groups",
-            ).build()
+            )
+                // PR-C follow-up bumped the schema from v1 → v2
+                // (groupTypeRaw Int → String). PR-C only just shipped,
+                // so any pre-followup install is a dev install with
+                // no production data to preserve — drop the table on
+                // the version mismatch instead of authoring a one-shot
+                // CASE migration.
+                .fallbackToDestructiveMigration()
+                .build()
         } catch (e: Throwable) {
             Room.inMemoryDatabaseBuilder(applicationContext, GroupDatabase::class.java).build()
         }
@@ -231,6 +250,15 @@ class OnymApplication : Application() {
         // CreateGroupInteractor.create blocks on `send` (which
         // connects on first use via `NostrInboxTransport`).
         val inboxTransport = NostrInboxTransport(signerProvider = nostrSignerProvider)
+
+        // App-wide network preference (PR-C follow-up). Defaults to
+        // testnet; the Settings → Network → "Use Mainnet" Switch
+        // flips it. CreateGroupInteractor reads `current()` per call
+        // for both the contract-binding lookup and the wire payload's
+        // top-level `network` field.
+        val networkPreference = DataStoreNetworkPreferenceProvider(
+            dataStore = applicationContext.networkPreferenceDataStore,
+        )
 
         return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
@@ -250,12 +278,14 @@ class OnymApplication : Application() {
             makeAnchorsPickerViewModel = {
                 AnchorsPickerViewModel(repository = contractsRepository)
             },
+            networkPreferenceProvider = networkPreference,
             makeCreateGroupViewModel = {
                 val interactor = CreateGroupInteractor(
                     identity = identityRepository,
                     relayers = relayerRepository,
                     contracts = contractsRepository,
                     groups = groupRepository,
+                    networkPreference = networkPreference,
                     inboxTransport = inboxTransport,
                 )
                 CreateGroupViewModel(

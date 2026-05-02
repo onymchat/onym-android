@@ -31,29 +31,35 @@ class CreateGroupViewModelTest {
     @After fun tearDown() { Dispatchers.resetMain() }
 
     // ─── Step 1 → Step 2 ──────────────────────────────────────────
+    //
+    // PR-C follow-up: the name field is no longer required — submit
+    // falls back to the generated placeholder if the user leaves it
+    // blank. canAdvanceToStep2 only gates on governance availability.
 
     @Test
-    fun canAdvanceToStep2_requiresNonEmptyNameAndAvailableGovernance() = runTest {
+    fun canAdvanceToStep2_isTrueOnFreshInit_withTyrannyGovernance() = runTest {
         val vm = makeViewModel()
-        assertTrue(!vm.state.value.canAdvanceToStep2)  // empty name blocks
-        vm.setName("  ")
-        assertTrue("whitespace-only name blocks advance", !vm.state.value.canAdvanceToStep2)
-        vm.setName("Friends")
+        // Default governance is Tyranny → can advance immediately,
+        // regardless of name (which is the placeholder until first
+        // focus).
         assertTrue(vm.state.value.canAdvanceToStep2)
     }
 
     @Test
-    fun unavailableGovernance_blocksAdvance() = runTest {
+    fun canAdvanceToStep2_remainsTrue_evenWithBlankName() = runTest {
         val vm = makeViewModel()
-        vm.setName("Friends")
+        vm.setName("")
+        assertTrue(vm.state.value.canAdvanceToStep2)
+        vm.setName("   ")
+        assertTrue(vm.state.value.canAdvanceToStep2)
+    }
+
+    @Test
+    fun unavailableGovernance_isNotSelectable() = runTest {
+        val vm = makeViewModel()
         // setGovernance silently no-ops on unavailable types — the
         // VM-level invariant guards even if the screen forgets to
-        // disable the card. Force it via copy-as-if-from-screen-bug
-        // path: just check Tyranny is what's selectable.
-        assertTrue(OnymUIGovernance.Tyranny.isAvailable)
-        assertTrue(!OnymUIGovernance.Anarchy.isAvailable)
-        // Calling setGovernance(Anarchy) is a no-op, so canAdvance
-        // stays true with default Tyranny + name.
+        // disable the card.
         vm.setGovernance(OnymUIGovernance.Anarchy)
         assertEquals(OnymUIGovernance.Tyranny, vm.state.value.governance)
         assertTrue(vm.state.value.canAdvanceToStep2)
@@ -62,16 +68,76 @@ class CreateGroupViewModelTest {
     @Test
     fun tappedNext_advancesToStep2() = runTest {
         val vm = makeViewModel()
-        vm.setName("Friends")
         vm.tappedNext()
         assertEquals(CreateGroupRoute.Step2, vm.state.value.route)
     }
 
+    // ─── Placeholder name (PR-C follow-up) ────────────────────────
+
     @Test
-    fun tappedNext_isNoOpWhenInvalid() = runTest {
+    fun init_prePopulatesNameWithGeneratedPlaceholder() = runTest {
         val vm = makeViewModel()
-        vm.tappedNext()  // empty name
-        assertEquals(CreateGroupRoute.Step1, vm.state.value.route)
+        val state = vm.state.value
+        assertTrue("generatedName is non-empty", state.generatedName.isNotEmpty())
+        // The bound TextField value mirrors the generated placeholder
+        // until the user focuses + types.
+        assertEquals(state.generatedName, state.name)
+        assertTrue("placeholder follows 'Adjective Noun' shape",
+            state.generatedName.contains(" "))
+    }
+
+    @Test
+    fun firstFocus_clearsPlaceholder() = runTest {
+        val vm = makeViewModel()
+        val placeholder = vm.state.value.generatedName
+
+        vm.nameFieldFocused()
+
+        val state = vm.state.value
+        assertEquals("", state.name)
+        assertEquals(placeholder, state.generatedName)
+        assertTrue(state.nameFieldHasBeenFocused)
+    }
+
+    @Test
+    fun secondFocus_doesNotClearUserInput() = runTest {
+        val vm = makeViewModel()
+        vm.nameFieldFocused()  // first focus clears
+        vm.setName("Family Trip")
+
+        vm.nameFieldFocused()  // second focus must NOT stomp
+
+        assertEquals("Family Trip", vm.state.value.name)
+    }
+
+    @Test
+    fun focus_doesNotStomp_ifNameAlreadyEdited() = runTest {
+        val vm = makeViewModel()
+        // The user types BEFORE the field receives focus (rare but
+        // possible; e.g. paste from clipboard intent). The first
+        // focus event must not blow away their input.
+        vm.setName("Already Typed")
+        vm.nameFieldFocused()
+        assertEquals("Already Typed", vm.state.value.name)
+        assertTrue(vm.state.value.nameFieldHasBeenFocused)
+    }
+
+    @Test
+    fun effectiveName_fallsBackToPlaceholder_whenEmpty() = runTest {
+        val vm = makeViewModel()
+        vm.nameFieldFocused()
+        // Field is now empty; effectiveName should resolve to the
+        // placeholder so submit has something to send.
+        assertEquals("", vm.state.value.name)
+        assertEquals(vm.state.value.generatedName, vm.state.value.effectiveName)
+    }
+
+    @Test
+    fun effectiveName_returnsTrimmedNameWhenSet() = runTest {
+        val vm = makeViewModel()
+        vm.nameFieldFocused()
+        vm.setName("  Spaced Name  ")
+        assertEquals("Spaced Name", vm.state.value.effectiveName)
     }
 
     // ─── InviteByKey ──────────────────────────────────────────────
@@ -192,18 +258,37 @@ class CreateGroupViewModelTest {
         var closedCount = 0
         vm.onClose = { closedCount++ }
         // Dirty the state.
+        vm.nameFieldFocused()
         vm.setName("stale")
         vm.setInviteeInput("aa".repeat(32))
         vm.tappedAddInvitee()
-        // Synthesise a Success-screen state via tappedCreate would
-        // require the interactor; just walk the flow far enough.
+
         vm.tappedDone()
 
         assertEquals(1, closedCount)
         val state = vm.state.value
         assertEquals(CreateGroupRoute.Step1, state.route)
-        assertEquals("", state.name)
         assertTrue(state.invitees.isEmpty())
+        // After reset the name is back to a fresh placeholder
+        // (re-rolled), and `nameFieldHasBeenFocused` is cleared.
+        assertEquals(state.generatedName, state.name)
+        assertTrue("reset clears the focus flag", !state.nameFieldHasBeenFocused)
+    }
+
+    @Test
+    fun cancelFromError_closesAndResets() = runTest {
+        val vm = makeViewModel()
+        var closedCount = 0
+        vm.onClose = { closedCount++ }
+        vm.nameFieldFocused()
+        vm.setName("soon-to-be-discarded")
+
+        vm.cancelFromError()
+
+        assertEquals(1, closedCount)
+        val state = vm.state.value
+        assertEquals(CreateGroupRoute.Step1, state.route)
+        assertEquals(state.generatedName, state.name)
     }
 
     @Test

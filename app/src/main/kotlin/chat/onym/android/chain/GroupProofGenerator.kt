@@ -1,7 +1,6 @@
 package chat.onym.android.chain
 
 import chat.onym.android.group.GovernanceMember
-import chat.onym.sdk.Common
 import chat.onym.sdk.Tyranny
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,30 +9,55 @@ import kotlinx.coroutines.withContext
  * Output of [GroupProofGenerator.proveCreate]. The relayer / contract
  * expect:
  *
- *  - [proof] — 1568 bytes, the [Common.parsePlonkProof]-trimmed form
- *    of the raw 1601-byte SDK output (strips four `len()` u64 prefixes
- *    + the trailing `plookup_proof: None` byte). The unparsed shape
- *    is rejected on-chain.
- *  - [publicInputs] — the `(commitment, epoch)` pair the
- *    [SepCreateGroupV2Request] carries. For create the SDK's per-type
- *    PI bundle (`commitment(32) || Fr(0)(32) || admin_pubkey_commitment(32) || group_id_fr(32)`)
- *    is sliced to its first 32 bytes for the commitment; epoch is
- *    always 0 for create.
+ *  - [proof] — the **raw 1601-byte PLONK proof** (the relayer's
+ *    `decode_wire_bytes(_, _, Some(1601))` rejects anything else; the
+ *    `parsePlonkProof` trim happens on the contract side, not on the
+ *    wire).
+ *  - [publicInputs] — the SDK's full per-type PI bundle, split into
+ *    32-byte chunks. Tyranny create returns 4 chunks
+ *    (`commitment || Fr(0) || admin_pubkey_commitment || group_id_fr`)
+ *    which the relayer forwards as the contract's `Vec<BytesN<32>>`
+ *    public-inputs argument.
+ *  - [commitment] / [adminPubkeyCommitment] are convenience accessors
+ *    so callers don't have to re-slice the bundle.
  *
- * Mirrors `GroupCreateProof` from onym-ios PR #25.
+ * Mirrors `GroupCreateProof` from onym-ios PR #27 (rewritten in the
+ * follow-up to drop `parsePlonkProof` + flip to a 4-chunk PI vector).
  */
 data class GroupCreateProof(
+    /** Raw 1601-byte PLONK proof (relayer's
+     *  `decode_wire_bytes(_, _, Some(1601))` rejects anything else;
+     *  the `parsePlonkProof` trim happens on the contract side, not
+     *  on the wire). */
     val proof: ByteArray,
-    val publicInputs: SepPublicInputs,
+    /** SDK's full per-type PI bundle, split into 32-byte chunks.
+     *  Tyranny create returns 4:
+     *  `commitment || Fr(0) || admin_pubkey_commitment || group_id_fr`. */
+    val publicInputs: List<ByteArray>,
 ) {
+    /** First 32 bytes of the PI bundle — the new commitment the
+     *  contract will store. */
+    val commitment: ByteArray get() = publicInputs[0]
+
+    /** Bytes 64..96 of the PI bundle (Tyranny only) — the Poseidon
+     *  commitment to the admin's BLS pubkey, surfaced separately
+     *  because the relayer needs it both as a top-level CLI arg and
+     *  as `publicInputs[2]`. */
+    val adminPubkeyCommitment: ByteArray get() = publicInputs[2]
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is GroupCreateProof) return false
-        return proof.contentEquals(other.proof) && publicInputs == other.publicInputs
+        return proof.contentEquals(other.proof) &&
+            publicInputs.size == other.publicInputs.size &&
+            publicInputs.zip(other.publicInputs).all { (a, b) -> a.contentEquals(b) }
     }
 
-    override fun hashCode(): Int =
-        31 * proof.contentHashCode() + publicInputs.hashCode()
+    override fun hashCode(): Int {
+        var h = proof.contentHashCode()
+        for (p in publicInputs) h = 31 * h + p.contentHashCode()
+        return h
+    }
 }
 
 /**
@@ -162,20 +186,26 @@ class OnymGroupProofGenerator : GroupProofGenerator {
             } catch (e: Throwable) {
                 throw GroupProofGeneratorError.SdkFailure(e.message ?: e.toString())
             }
-            val parsed = try {
-                Common.parsePlonkProof(raw.proof)
-            } catch (e: Throwable) {
-                throw GroupProofGeneratorError.SdkFailure(e.message ?: e.toString())
-            }
-            // PI bundle layout (Tyranny.CreateProof):
+            // SDK returns the raw 1601-byte proof. Don't
+            // parsePlonkProof — the relayer's
+            // `decode_wire_bytes(_, _, Some(1601))` rejects the
+            // trimmed form (the 1568-byte parse happens on the
+            // contract side, not on the wire).
+            //
+            // PI bundle layout (`Tyranny.CreateProof.publicInputs`, 128 B):
             //   commitment(32) || Fr(0)(32) || admin_pubkey_commitment(32) || group_id_fr(32)
-            // Only the first 32 bytes (commitment) cross the wire; the
-            // contract rederives the latter three from the proof itself.
-            val commitment = raw.publicInputs.copyOfRange(0, 32)
-            GroupCreateProof(
-                proof = parsed,
-                publicInputs = SepPublicInputs(commitment = commitment, epoch = 0uL),
-            )
+            // Each 32-byte chunk maps to one `BytesN<32>` in the
+            // contract's `Vec<BytesN<32>>` public-inputs argument.
+            val bundle = raw.publicInputs
+            if (bundle.size != 128) {
+                throw GroupProofGeneratorError.SdkFailure(
+                    "expected 128-byte PI bundle, got ${bundle.size}",
+                )
+            }
+            val chunks = (0 until 128 step 32).map { offset ->
+                bundle.copyOfRange(offset, offset + 32)
+            }
+            GroupCreateProof(proof = raw.proof, publicInputs = chunks)
         }
     }
 }

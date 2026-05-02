@@ -1,14 +1,15 @@
 package chat.onym.android.chain
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -17,157 +18,180 @@ import org.junit.Test
 import java.util.Base64
 
 /**
- * Wire-format pin for the chain JSON payloads. Each request/response
- * struct round-trips losslessly AND emits the snake_case keys the
- * iOS twin (`SEPContractTypes.swift`) writes — both are load-bearing
- * for cross-platform interop with the relayer.
+ * Wire-format pin for the relayer JSON payloads. Every key tested
+ * here matches `RelayerRequest` / `ContractType` / `Network` in
+ * `onym-relayer/src/handler.rs` + `src/config.rs` byte-for-byte.
  *
- * Mirrors the Codable round-trip + JSON-shape assertions inlined
- * across `SEPContractClientTests.swift` from onym-ios PR #24.
+ * Mirrors the `SEPContractTypes` round-trip cases from onym-ios
+ * PR #27 (the rewrite that flipped the wire shape from the PR-A
+ * baseline).
  */
 class SepContractTypesTest {
 
     private val json = Json { encodeDefaults = true }
 
-    // ─── enum ─────────────────────────────────────────────────────
+    // ─── enums ────────────────────────────────────────────────────
 
     @Test
-    fun sepGroupType_serializesAsRawUInt32() {
-        val tyrannyJson = json.encodeToString(SepGroupType.serializer(), SepGroupType.TYRANNY)
-        assertEquals("4", tyrannyJson)
-        val anarchyJson = json.encodeToString(SepGroupType.serializer(), SepGroupType.ANARCHY)
-        assertEquals("0", anarchyJson)
-    }
-
-    @Test
-    fun sepGroupType_decodesFromRawInt() {
-        assertEquals(SepGroupType.TYRANNY, json.decodeFromString(SepGroupType.serializer(), "4"))
-        assertEquals(SepGroupType.OLIGARCHY, json.decodeFromString(SepGroupType.serializer(), "3"))
-    }
-
-    // ─── public-input bundles ─────────────────────────────────────
-
-    @Test
-    fun sepPublicInputs_roundtripPreservesFields() {
-        val original = SepPublicInputs(
-            commitment = ByteArray(32) { 0xAB.toByte() },
-            epoch = 7uL,
+    fun sepGroupType_serializesAsLowercaseString() {
+        assertEquals(
+            "\"tyranny\"",
+            json.encodeToString(SepGroupType.serializer(), SepGroupType.TYRANNY),
         )
-        val encoded = json.encodeToString(SepPublicInputs.serializer(), original)
-        val decoded = json.decodeFromString(SepPublicInputs.serializer(), encoded)
-        assertEquals(original, decoded)
-    }
-
-    @Test
-    fun sepUpdatePublicInputs_emitsSnakeCaseKeys() {
-        val payload = SepUpdatePublicInputs(
-            cOld = ByteArray(32) { 0x01 },
-            epochOld = 1uL,
-            cNew = ByteArray(32) { 0x02 },
+        assertEquals(
+            "\"oneonone\"",
+            json.encodeToString(SepGroupType.serializer(), SepGroupType.ONE_ON_ONE),
         )
-        val obj = json.parseToJsonElement(
-            json.encodeToString(SepUpdatePublicInputs.serializer(), payload)
-        ).jsonObject
-        assertNotNull("c_old key required", obj["c_old"])
-        assertNotNull("c_new key required", obj["c_new"])
-        assertEquals(1L, obj["epoch_old"]!!.jsonPrimitive.long)
-        assertNull("plain `cOld` must NOT appear", obj["cOld"])
-        assertNull("plain `cNew` must NOT appear", obj["cNew"])
     }
 
-    // ─── create_group_v2 payload ──────────────────────────────────
-
     @Test
-    fun createGroupV2Request_roundtripPreservesAllFields() {
-        val original = SepCreateGroupV2Request(
-            caller = "GBABCDEF",
-            groupId = ByteArray(32) { 0xAB.toByte() },
-            commitment = ByteArray(32) { 0xCD.toByte() },
-            tier = 0u,
-            groupType = SepGroupType.TYRANNY,
-            memberCount = 1u,
-            proof = ByteArray(64) { 0xEE.toByte() },
-            publicInputs = SepPublicInputs(
-                commitment = ByteArray(32) { 0xCD.toByte() },
-                epoch = 0uL,
-            ),
+    fun sepGroupType_decodesFromLowercaseString() {
+        assertEquals(
+            SepGroupType.TYRANNY,
+            json.decodeFromString(SepGroupType.serializer(), "\"tyranny\""),
         )
-        val encoded = json.encodeToString(SepCreateGroupV2Request.serializer(), original)
-        val decoded = json.decodeFromString(SepCreateGroupV2Request.serializer(), encoded)
-        assertEquals(original, decoded)
+        assertEquals(
+            SepGroupType.OLIGARCHY,
+            json.decodeFromString(SepGroupType.serializer(), "\"oligarchy\""),
+        )
     }
 
     @Test
-    fun createGroupV2Request_emitsSnakeCaseKeys() {
-        val request = SepCreateGroupV2Request(
-            caller = "GBABCDEF",
-            groupId = ByteArray(32) { 0xAB.toByte() },
-            commitment = ByteArray(32) { 0xCD.toByte() },
-            tier = 0u,
-            groupType = SepGroupType.TYRANNY,
-            memberCount = 3u,
-            proof = ByteArray(8) { 0xEE.toByte() },
-            publicInputs = SepPublicInputs(
-                commitment = ByteArray(32) { 0xCD.toByte() },
-                epoch = 0uL,
-            ),
+    fun sepNetwork_mainnetSerializesAsPublic() {
+        assertEquals(
+            "\"public\"",
+            json.encodeToString(SepNetwork.serializer(), SepNetwork.PUBLIC_NET),
+        )
+        assertEquals(
+            "\"testnet\"",
+            json.encodeToString(SepNetwork.serializer(), SepNetwork.TESTNET),
+        )
+    }
+
+    // ─── invocation envelope ──────────────────────────────────────
+
+    @Test
+    fun invocationEnvelope_topLevelKeysAreCamelCase() {
+        val invocation = SepContractInvocation(
+            contractID = "C12345",
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            function = "create_group",
+            payload = JsonPrimitive("payload-stub"),
         )
         val obj = json.parseToJsonElement(
-            json.encodeToString(SepCreateGroupV2Request.serializer(), request)
+            json.encodeToString(SepContractInvocation.serializer(JsonPrimitive.serializer()), invocation),
+        ).jsonObject
+        assertEquals("C12345", obj["contractID"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("tyranny", obj["contractType"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("testnet", obj["network"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("create_group", obj["function"]!!.jsonPrimitive.contentOrNull)
+        assertNotNull(obj["payload"])
+        // No leftover snake_case keys from the previous shape.
+        assertNull(obj["contract_id"])
+        assertNull(obj["contract_type"])
+    }
+
+    @Test
+    fun invocationEnvelope_mainnetSerializesPublicOnTheWire() {
+        val invocation = SepContractInvocation(
+            contractID = "C99999",
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.PUBLIC_NET,
+            function = "create_group",
+            payload = JsonPrimitive("p"),
+        )
+        val obj = json.parseToJsonElement(
+            json.encodeToString(SepContractInvocation.serializer(JsonPrimitive.serializer()), invocation),
+        ).jsonObject
+        assertEquals("public", obj["network"]!!.jsonPrimitive.contentOrNull)
+    }
+
+    // ─── TyrannyCreateGroupPayload ────────────────────────────────
+
+    @Test
+    fun tyrannyCreateGroupPayload_emitsExpectedKeys() {
+        val payload = TyrannyCreateGroupPayload(
+            groupId = ByteArray(32) { 0xAB.toByte() },
+            commitment = ByteArray(32) { 0xCD.toByte() },
+            tier = 0,
+            adminPubkeyCommitment = ByteArray(32) { 0xEE.toByte() },
+            proof = ByteArray(1601) { 0x01 },
+            publicInputs = listOf(
+                ByteArray(32) { 0xCD.toByte() },
+                ByteArray(32),
+                ByteArray(32) { 0xEE.toByte() },
+                ByteArray(32) { 0xFF.toByte() },
+            ),
+        )
+        val obj = json.parseToJsonElement(
+            json.encodeToString(TyrannyCreateGroupPayload.serializer(), payload),
         ).jsonObject
 
-        // Snake-case key checks — iOS emits these via explicit
-        // CodingKeys. Drift here breaks the relayer.
         assertNotNull("group_id required", obj["group_id"])
+        assertNotNull("commitment required", obj["commitment"])
         assertEquals(0, obj["tier"]!!.jsonPrimitive.int)
-        assertEquals(4, obj["group_type"]!!.jsonPrimitive.int)
-        assertEquals(3, obj["member_count"]!!.jsonPrimitive.int)
-        assertNotNull("public_inputs required", obj["public_inputs"])
-        assertNull("plain `groupId` must NOT appear", obj["groupId"])
-        assertNull("plain `groupType` must NOT appear", obj["groupType"])
-        assertNull("plain `memberCount` must NOT appear", obj["memberCount"])
+        assertNotNull("admin_pubkey_commitment required", obj["admin_pubkey_commitment"])
+        assertNotNull("proof required", obj["proof"])
+        // PR #27 keeps publicInputs camelCase (matches iOS so the
+        // field name lines up with the swift property).
+        val pi = obj["publicInputs"] as JsonArray
+        assertEquals(4, pi.size)
+        for (element in pi) {
+            val raw = Base64.getDecoder().decode(element.jsonPrimitive.content)
+            assertEquals(32, raw.size)
+        }
 
-        // ByteArray fields encode as base64 strings — pin one to lock
-        // the wire shape against accidental "JSON int array" drift.
-        val groupIdEncoded = obj["group_id"]!!.jsonPrimitive.contentOrNull
-        assertNotNull(groupIdEncoded)
-        assertTrue(
-            "group_id must round-trip as base64 of the original bytes",
-            Base64.getDecoder().decode(groupIdEncoded!!).contentEquals(request.groupId),
-        )
+        // Round-trip preserves the proof bytes exactly.
+        val proofBytes = Base64.getDecoder().decode(obj["proof"]!!.jsonPrimitive.content)
+        assertEquals(1601, proofBytes.size)
+        assertArrayEquals(payload.proof, proofBytes)
     }
 
-    // ─── update_commitment payload ────────────────────────────────
-
     @Test
-    fun updateCommitmentRequest_roundtripPreservesAllFields() {
-        val original = SepUpdateCommitmentRequest(
-            groupId = ByteArray(32) { 0x01 },
-            proof = ByteArray(32) { 0x02 },
-            publicInputs = SepUpdatePublicInputs(
-                cOld = ByteArray(32) { 0x03 },
-                epochOld = 1uL,
-                cNew = ByteArray(32) { 0x04 },
-            ),
+    fun tyrannyCreateGroupPayload_roundtripPreservesAllFields() {
+        val original = TyrannyCreateGroupPayload(
+            groupId = ByteArray(32) { 0x11 },
+            commitment = ByteArray(32) { 0x22 },
+            tier = 1,
+            adminPubkeyCommitment = ByteArray(32) { 0x33 },
+            proof = ByteArray(1601) { 0x44 },
+            publicInputs = (0 until 4).map { ByteArray(32) { (it + 1).toByte() } },
         )
-        val encoded = json.encodeToString(SepUpdateCommitmentRequest.serializer(), original)
-        val decoded = json.decodeFromString(SepUpdateCommitmentRequest.serializer(), encoded)
+        val encoded = json.encodeToString(TyrannyCreateGroupPayload.serializer(), original)
+        val decoded = json.decodeFromString(TyrannyCreateGroupPayload.serializer(), encoded)
         assertEquals(original, decoded)
     }
 
-    // ─── get_state ────────────────────────────────────────────────
+    // ─── TyrannyUpdateCommitmentPayload ───────────────────────────
 
     @Test
-    fun getStateRequest_emitsGroupIdSnakeCase() {
+    fun tyrannyUpdateCommitmentPayload_roundtripPreservesAllFields() {
+        val original = TyrannyUpdateCommitmentPayload(
+            groupId = ByteArray(32) { 0x01 },
+            proof = ByteArray(1601) { 0x02 },
+            publicInputs = (0 until 5).map { ByteArray(32) { (it + 10).toByte() } },
+        )
+        val encoded = json.encodeToString(TyrannyUpdateCommitmentPayload.serializer(), original)
+        val decoded = json.decodeFromString(TyrannyUpdateCommitmentPayload.serializer(), encoded)
+        assertEquals(original, decoded)
+    }
+
+    // ─── GetCommitmentPayload ─────────────────────────────────────
+
+    @Test
+    fun getCommitmentPayload_emitsGroupIdSnakeCase() {
         val obj = json.parseToJsonElement(
             json.encodeToString(
-                SepGetStateRequest.serializer(),
-                SepGetStateRequest(groupId = ByteArray(32) { 0x55 }),
-            )
+                GetCommitmentPayload.serializer(),
+                GetCommitmentPayload(groupId = ByteArray(32) { 0x55 }),
+            ),
         ).jsonObject
         assertNotNull("group_id required", obj["group_id"])
         assertNull(obj["groupId"])
     }
+
+    // ─── responses ────────────────────────────────────────────────
 
     @Test
     fun commitmentEntry_roundtripPreservesAllFields() {
@@ -183,21 +207,15 @@ class SepContractTypesTest {
         assertEquals(original, decoded)
     }
 
-    // ─── submission response ──────────────────────────────────────
-
     @Test
     fun submissionResponse_keepsCamelCaseTransactionHashKey() {
-        // **Load-bearing quirk**: iOS doesn't override the CodingKey
-        // for `transactionHash`, so the JSON key stays camelCase
-        // (NOT `transaction_hash`). Pin the Android side to the same
-        // shape — relayer parsing depends on it.
         val payload = SepSubmissionResponse(
             accepted = true,
             transactionHash = "abc123",
             message = "ok",
         )
         val obj = json.parseToJsonElement(
-            json.encodeToString(SepSubmissionResponse.serializer(), payload)
+            json.encodeToString(SepSubmissionResponse.serializer(), payload),
         ).jsonObject
         assertEquals("abc123", obj["transactionHash"]!!.jsonPrimitive.contentOrNull)
         assertNull("snake-case `transaction_hash` must NOT appear", obj["transaction_hash"])
@@ -212,26 +230,6 @@ class SepContractTypesTest {
         assertNull(decoded.message)
     }
 
-    // ─── invocation envelope ──────────────────────────────────────
-
-    @Test
-    fun invocationEnvelope_topLevelKeysAreContractIdFunctionPayload() {
-        val invocation = SepContractInvocation(
-            contractId = "C12345",
-            function = "create_group_v2",
-            payload = JsonPrimitive("payload-stub"),
-        )
-        val obj = json.parseToJsonElement(
-            json.encodeToString(SepContractInvocation.serializer(JsonPrimitive.serializer()), invocation)
-        ).jsonObject
-        assertEquals("C12345", obj["contract_id"]!!.jsonPrimitive.contentOrNull)
-        assertEquals("create_group_v2", obj["function"]!!.jsonPrimitive.contentOrNull)
-        assertNotNull(obj["payload"])
-        assertNull("plain `contractId` must NOT appear", obj["contractId"])
-    }
-
-    // ─── helper assertion ────────────────────────────────────────
-
     @Suppress("unused")
-    private fun JsonObject.boolField(key: String): Boolean = this[key]!!.jsonPrimitive.boolean
+    private fun JsonObject.longField(key: String): Long = this[key]!!.jsonPrimitive.long
 }

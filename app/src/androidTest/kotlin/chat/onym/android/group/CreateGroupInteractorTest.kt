@@ -141,7 +141,7 @@ class CreateGroupInteractorTest {
         // Chain anchor was POSTed exactly once.
         val invocations = contractTransport.invocations()
         assertEquals(1, invocations.size)
-        assertEquals("create_group_v2", invocations.single().function)
+        assertEquals("create_group", invocations.single().function)
     }
 
     @Test
@@ -208,6 +208,9 @@ class CreateGroupInteractorTest {
             relayers = emptyRelayers,
             contracts = contracts,
             groups = groups,
+            networkPreference = chat.onym.android.chain.StaticNetworkPreferenceProvider(
+                chat.onym.android.chain.AppNetwork.Testnet,
+            ),
             proofGenerator = StubGroupProofGenerator(),
             inboxTransport = inboxTransport,
             makeContractTransport = { contractTransport },
@@ -237,6 +240,9 @@ class CreateGroupInteractorTest {
             relayers = relayers,
             contracts = contractsNoTyranny,
             groups = groups,
+            networkPreference = chat.onym.android.chain.StaticNetworkPreferenceProvider(
+                chat.onym.android.chain.AppNetwork.Testnet,
+            ),
             proofGenerator = StubGroupProofGenerator(),
             inboxTransport = inboxTransport,
             makeContractTransport = { contractTransport },
@@ -244,6 +250,25 @@ class CreateGroupInteractorTest {
 
         try {
             interactor.create(name = "G", invitees = emptyList())
+            error("expected NoContractBinding")
+        } catch (e: CreateGroupError.NoContractBinding) {
+            assertEquals(GovernanceType.Tyranny, e.type)
+        }
+    }
+
+    @Test
+    fun create_mainnetSelected_withNoMainnetBinding_throwsNoContractBinding() = runBlocking {
+        // The shared `contracts` only has a Testnet binding; selecting
+        // Mainnet via the network preference must fall through to
+        // NoContractBinding(Tyranny).
+        val mainnetPref = chat.onym.android.chain.StaticNetworkPreferenceProvider(
+            chat.onym.android.chain.AppNetwork.Mainnet,
+        )
+        try {
+            makeInteractor(networkPreference = mainnetPref).create(
+                name = "G",
+                invitees = emptyList(),
+            )
             error("expected NoContractBinding")
         } catch (e: CreateGroupError.NoContractBinding) {
             assertEquals(GovernanceType.Tyranny, e.type)
@@ -302,11 +327,17 @@ class CreateGroupInteractorTest {
 
     // ─── helpers ──────────────────────────────────────────────────
 
-    private fun makeInteractor() = CreateGroupInteractor(
+    private fun makeInteractor(
+        networkPreference: chat.onym.android.chain.NetworkPreferenceProvider =
+            chat.onym.android.chain.StaticNetworkPreferenceProvider(
+                chat.onym.android.chain.AppNetwork.Testnet,
+            ),
+    ) = CreateGroupInteractor(
         identity = identity,
         relayers = relayers,
         contracts = contracts,
         groups = groups,
+        networkPreference = networkPreference,
         proofGenerator = StubGroupProofGenerator(),
         inboxTransport = inboxTransport,
         makeContractTransport = { contractTransport },

@@ -12,15 +12,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
@@ -62,6 +65,10 @@ fun SettingsScreen(
     onRelayerClick: () -> Unit,
     onAnchorsClick: () -> Unit,
     onCreateGroupClick: () -> Unit,
+    /** App-wide network preference. Bound to the Settings → Network
+     *  → "Use Mainnet" Switch. */
+    useMainnet: Boolean,
+    onToggleMainnet: (Boolean) -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
         rememberTopAppBarState()
@@ -210,9 +217,38 @@ fun SettingsScreen(
                         .testTag("settings.anchors_row"),
                 )
             }
+            // Use Mainnet toggle (PR-C follow-up). Persisted in
+            // DataStore under `onym.useMainnet`; flipping here changes
+            // the network the next Create Group flow will use.
+            // Existing groups keep whatever network they were created on.
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.settings_use_mainnet)) },
+                    leadingContent = {
+                        SettingsIconBox(
+                            icon = if (useMainnet) Icons.Filled.Public else Icons.Filled.Build,
+                            background = if (useMainnet) Color(0xFF34C759) else Color(0xFF8E8E93),
+                        )
+                    },
+                    trailingContent = {
+                        Switch(checked = useMainnet, onCheckedChange = onToggleMainnet)
+                    },
+                    colors = ListItemDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onToggleMainnet(!useMainnet) }
+                        .testTag("settings.use_mainnet_toggle"),
+                )
+            }
             item {
                 Text(
-                    stringResource(R.string.settings_network_footer),
+                    stringResource(
+                        if (useMainnet) R.string.settings_use_mainnet_on_footer
+                        else R.string.settings_use_mainnet_off_footer,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),

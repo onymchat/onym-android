@@ -1,70 +1,70 @@
 package chat.onym.android.chain
 
 import chat.onym.android.identity.Base64ByteArraySerializer
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.descriptors.PrimitiveKind
-import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
-import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
 
 /**
  * Wire-format pin for the relayer JSON payloads. **Field names are
- * load-bearing** — they must match `SEPContractTypes.swift` from
- * onym-ios PR #24 byte-for-byte (snake_case via [SerialName]).
+ * load-bearing** — every key here matches `RelayerRequest` /
+ * `ContractType` / `Network` in `onym-relayer/src/handler.rs` +
+ * `src/config.rs` byte-for-byte.
  *
- * `ByteArray` fields are encoded as base64 strings via
- * [Base64ByteArraySerializer] (matches Foundation's default
- * `Data` Codable shape on iOS).
+ * `ByteArray` fields encode as base64 strings via
+ * [Base64ByteArraySerializer] (the relayer's `decode_wire_bytes`
+ * accepts both base64 and hex; we always emit base64 to match
+ * Foundation's default `Data` Codable shape on iOS).
  *
- * UInt32 / UInt64 are serialised as JSON numbers via the experimental
- * unsigned support — kotlinx.serialization 1.6+ writes them as
- * positive integers, matching iOS Codable's UInt32 / UInt64 emission.
- *
- * Mirrors `SEPContractTypes.swift` from onym-ios PR #24.
+ * Mirrors `SEPContractTypes.swift` from onym-ios PR #27.
  */
 
 // ─── enums ────────────────────────────────────────────────────────
 
 /**
- * Mirrors `SEPGroupType` from swift-mls plus the post-v0.0.3
- * [TYRANNY] case (group_type=4). Persisted as the `group_type` u32 in
- * the contract's `CommitmentEntryV2`.
+ * On-chain governance flavour. The relayer
+ * (`onym-relayer/src/config.rs`, `enum ContractType`) accepts the
+ * lowercase string spelling on the wire — these `wireValue`s are
+ * pinned to match. ONE_ON_ONE serializes as `"oneonone"` (no
+ * separator) per the Rust enum's `label()`.
+ *
+ * The previous PR-A shipped this as a `UInt32` raw with a custom
+ * serializer; PR #27 flips both wire + persistence to the string
+ * shape — the iOS twin made the same hop. Older invitation payloads
+ * that used the integer raw need the [intRawValue] convenience to
+ * round-trip; new code uses the string everywhere.
  */
-@Serializable(with = SepGroupTypeSerializer::class)
-enum class SepGroupType(val rawValue: UInt) {
-    ANARCHY(0u),
-    ONE_ON_ONE(1u),
-    DEMOCRACY(2u),
-    OLIGARCHY(3u),
-    TYRANNY(4u),
+@Serializable
+enum class SepGroupType(val wireValue: String) {
+    @SerialName("anarchy") ANARCHY("anarchy"),
+    @SerialName("oneonone") ONE_ON_ONE("oneonone"),
+    @SerialName("democracy") DEMOCRACY("democracy"),
+    @SerialName("oligarchy") OLIGARCHY("oligarchy"),
+    @SerialName("tyranny") TYRANNY("tyranny"),
     ;
 
+    /** Stable u32 identifier kept for older invitation-payload
+     *  decoders that haven't been migrated to the string shape yet
+     *  (the `groupTypeRaw` `UInt` field on PR-C's
+     *  [chat.onym.android.group.GroupInvitationPayload] before the
+     *  PR #27 flip). New persistence + wire code should NOT use this. */
+    val intRawValue: UInt
+        get() = when (this) {
+            ANARCHY -> 0u
+            ONE_ON_ONE -> 1u
+            DEMOCRACY -> 2u
+            OLIGARCHY -> 3u
+            TYRANNY -> 4u
+        }
+
     companion object {
-        fun fromRaw(raw: UInt): SepGroupType =
-            entries.firstOrNull { it.rawValue == raw }
-                ?: throw IllegalArgumentException("unknown SepGroupType raw=$raw")
+        fun fromWire(value: String): SepGroupType? =
+            entries.firstOrNull { it.wireValue == value }
     }
-}
-
-internal object SepGroupTypeSerializer : KSerializer<SepGroupType> {
-    override val descriptor: SerialDescriptor =
-        PrimitiveSerialDescriptor("SepGroupType", PrimitiveKind.INT)
-
-    override fun serialize(encoder: Encoder, value: SepGroupType) {
-        encoder.encodeInt(value.rawValue.toInt())
-    }
-
-    override fun deserialize(decoder: Decoder): SepGroupType =
-        SepGroupType.fromRaw(decoder.decodeInt().toUInt())
 }
 
 /**
- * Tier sizing for the Merkle tree. Values pinned to match the VK
- * ceremonies. iOS uses Int rawValue but exposes derived
- * `maxMembers` / `depth`; we mirror.
+ * Tier sizing for the Merkle tree. Wire-encoded as the raw [Int] for
+ * the `--tier` CLI arg the relayer forwards to the contract.
  */
 enum class SepTier(val rawValue: Int, val maxMembers: Int, val depth: Int) {
     SMALL(0, 32, 5),
@@ -72,157 +72,158 @@ enum class SepTier(val rawValue: Int, val maxMembers: Int, val depth: Int) {
     LARGE(2, 2048, 11),
 }
 
-// ─── public-input bundles ─────────────────────────────────────────
-
-/** Public-input bundle for the create circuit: commitment + epoch. */
-@Serializable
-data class SepPublicInputs(
-    @Serializable(with = Base64ByteArraySerializer::class)
-    val commitment: ByteArray,
-    val epoch: ULong,
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is SepPublicInputs) return false
-        return commitment.contentEquals(other.commitment) && epoch == other.epoch
-    }
-
-    override fun hashCode(): Int =
-        31 * commitment.contentHashCode() + epoch.hashCode()
-}
-
 /**
- * Public-input bundle for the update circuit (sep-mls #59 fix). The
- * contract rederives `c_new` from the proof itself, so the relayer no
- * longer trusts a client-supplied "new commitment".
+ * Stellar network the relayer should target. Wire-encoded as the
+ * lowercase label (`testnet` or `public`) — `mainnet` is also
+ * accepted by the relayer as an alias for `public`, but we always
+ * send `public`.
+ *
+ * Mirrors `SEPNetwork` from onym-ios PR #27.
  */
 @Serializable
-data class SepUpdatePublicInputs(
-    @SerialName("c_old")
-    @Serializable(with = Base64ByteArraySerializer::class)
-    val cOld: ByteArray,
-    @SerialName("epoch_old")
-    val epochOld: ULong,
-    @SerialName("c_new")
-    @Serializable(with = Base64ByteArraySerializer::class)
-    val cNew: ByteArray,
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is SepUpdatePublicInputs) return false
-        return cOld.contentEquals(other.cOld) &&
-            epochOld == other.epochOld &&
-            cNew.contentEquals(other.cNew)
-    }
-
-    override fun hashCode(): Int {
-        var h = cOld.contentHashCode()
-        h = 31 * h + epochOld.hashCode()
-        h = 31 * h + cNew.contentHashCode()
-        return h
-    }
+enum class SepNetwork(val wireValue: String) {
+    @SerialName("testnet") TESTNET("testnet"),
+    @SerialName("public") PUBLIC_NET("public"),
 }
 
-// ─── request payloads ─────────────────────────────────────────────
+// ─── invocation envelope ──────────────────────────────────────────
 
 /**
- * Payload for `create_group_v2`. Used by Anarchy, OneOnOne, Democracy,
- * AND Tyranny. Oligarchy uses its own dedicated request shape because
- * it seeds an extra admin root (out of scope for PR-A).
+ * Generic envelope the relayer expects on `POST /`. Top-level shape
+ * (mirrors `RelayerRequest` in `onym-relayer/src/handler.rs`):
+ *
+ * ```json
+ * {
+ *   "contractID":   "C…",
+ *   "contractType": "tyranny",
+ *   "network":      "testnet",
+ *   "function":     "create_group",
+ *   "payload":      { …function-specific… }
+ * }
+ * ```
+ *
+ * **camelCase top-level keys** — the relayer's `serde(rename_all =
+ * "camelCase")` accepts `contractID` (with snake_case aliases for
+ * back-compat). We always send the camelCase form; iOS does the same.
  */
 @Serializable
-data class SepCreateGroupV2Request(
-    val caller: String,
+data class SepContractInvocation<P>(
+    @SerialName("contractID") val contractID: String,
+    @SerialName("contractType") val contractType: SepGroupType,
+    val network: SepNetwork,
+    val function: String,
+    val payload: P,
+)
+
+// ─── per-function payloads ────────────────────────────────────────
+
+/**
+ * `create_group` payload for the Tyranny contract. Differs from the
+ * Anarchy / 1-on-1 / Democracy shape — Tyranny needs the Poseidon
+ * `admin_pubkey_commitment` (32 B) as a separate CLI arg AND in the
+ * 4-element public-inputs vector that the contract verifies.
+ *
+ * The PI vector is sent as 4 ByteArrays (each 32 bytes,
+ * JSON-encoded as base64 strings):
+ * `[commitment, fr_zero (= 32 zero bytes), admin_pubkey_commitment, group_id_fr]`
+ * — the SDK's 128-byte `Tyranny.CreateProof.publicInputs` blob split
+ * into 4 chunks. Relayer handler:
+ * `build_public_inputs_from_object` → `ContractType::Tyranny` arm.
+ *
+ * Mirrors `TyrannyCreateGroupPayload` from onym-ios PR #27.
+ */
+@Serializable
+data class TyrannyCreateGroupPayload(
     @SerialName("group_id")
     @Serializable(with = Base64ByteArraySerializer::class)
     val groupId: ByteArray,
     @Serializable(with = Base64ByteArraySerializer::class)
     val commitment: ByteArray,
-    val tier: UInt,
-    @SerialName("group_type")
-    val groupType: SepGroupType,
-    @SerialName("member_count")
-    val memberCount: UInt,
+    val tier: Int,
+    @SerialName("admin_pubkey_commitment")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val adminPubkeyCommitment: ByteArray,
+    /** 1601-byte raw PLONK proof — the relayer's
+     *  `decode_wire_bytes(_, _, Some(1601))` rejects anything else. */
     @Serializable(with = Base64ByteArraySerializer::class)
     val proof: ByteArray,
-    @SerialName("public_inputs")
-    val publicInputs: SepPublicInputs,
+    /** 4 elements × 32 bytes — see comment above. */
+    val publicInputs: List<@Serializable(with = Base64ByteArraySerializer::class) ByteArray>,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (other !is SepCreateGroupV2Request) return false
-        return caller == other.caller &&
-            groupId.contentEquals(other.groupId) &&
+        if (other !is TyrannyCreateGroupPayload) return false
+        return groupId.contentEquals(other.groupId) &&
             commitment.contentEquals(other.commitment) &&
             tier == other.tier &&
-            groupType == other.groupType &&
-            memberCount == other.memberCount &&
+            adminPubkeyCommitment.contentEquals(other.adminPubkeyCommitment) &&
             proof.contentEquals(other.proof) &&
-            publicInputs == other.publicInputs
+            publicInputs.size == other.publicInputs.size &&
+            publicInputs.zip(other.publicInputs).all { (a, b) -> a.contentEquals(b) }
     }
 
     override fun hashCode(): Int {
-        var h = caller.hashCode()
-        h = 31 * h + groupId.contentHashCode()
+        var h = groupId.contentHashCode()
         h = 31 * h + commitment.contentHashCode()
-        h = 31 * h + tier.hashCode()
-        h = 31 * h + groupType.hashCode()
-        h = 31 * h + memberCount.hashCode()
+        h = 31 * h + tier
+        h = 31 * h + adminPubkeyCommitment.contentHashCode()
         h = 31 * h + proof.contentHashCode()
-        h = 31 * h + publicInputs.hashCode()
+        for (p in publicInputs) h = 31 * h + p.contentHashCode()
         return h
     }
 }
 
-/** Payload for `update_commitment` (member-add / member-remove). */
+/**
+ * `update_commitment` payload — Tyranny variant. The SDK's
+ * `Tyranny.UpdateProof.publicInputs` is 160 bytes = 5 × 32B
+ * (`c_old || epoch_old || c_new || admin_pubkey_commitment || group_id_fr`).
+ * Not used in PR-C; lives here so the chain seam is complete.
+ */
 @Serializable
-data class SepUpdateCommitmentRequest(
+data class TyrannyUpdateCommitmentPayload(
     @SerialName("group_id")
     @Serializable(with = Base64ByteArraySerializer::class)
     val groupId: ByteArray,
     @Serializable(with = Base64ByteArraySerializer::class)
     val proof: ByteArray,
-    @SerialName("public_inputs")
-    val publicInputs: SepUpdatePublicInputs,
+    val publicInputs: List<@Serializable(with = Base64ByteArraySerializer::class) ByteArray>,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (other !is SepUpdateCommitmentRequest) return false
+        if (other !is TyrannyUpdateCommitmentPayload) return false
         return groupId.contentEquals(other.groupId) &&
             proof.contentEquals(other.proof) &&
-            publicInputs == other.publicInputs
+            publicInputs.size == other.publicInputs.size &&
+            publicInputs.zip(other.publicInputs).all { (a, b) -> a.contentEquals(b) }
     }
 
     override fun hashCode(): Int {
         var h = groupId.contentHashCode()
         h = 31 * h + proof.contentHashCode()
-        h = 31 * h + publicInputs.hashCode()
+        for (p in publicInputs) h = 31 * h + p.contentHashCode()
         return h
     }
 }
 
-/** Payload for `get_state` / `get_state_v2` / `get_admin_root`. */
+/** Payload for `get_commitment`. */
 @Serializable
-data class SepGetStateRequest(
+data class GetCommitmentPayload(
     @SerialName("group_id")
     @Serializable(with = Base64ByteArraySerializer::class)
     val groupId: ByteArray,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (other !is SepGetStateRequest) return false
+        if (other !is GetCommitmentPayload) return false
         return groupId.contentEquals(other.groupId)
     }
 
     override fun hashCode(): Int = groupId.contentHashCode()
 }
 
-// ─── response payloads ────────────────────────────────────────────
+// ─── responses ────────────────────────────────────────────────────
 
-/**
- * On-chain state returned by `get_state`. V1 entries (no group_type
- * metadata).
- */
+/** On-chain state returned by `get_commitment`. */
 @Serializable
 data class SepCommitmentEntry(
     @Serializable(with = Base64ByteArraySerializer::class)
@@ -253,40 +254,13 @@ data class SepCommitmentEntry(
 }
 
 /**
- * Relayer's response to a contract-invocation POST. `accepted`
- * reflects the contract's verification result; [transactionHash] is
- * set when a Soroban tx was actually submitted.
- *
- * **Note:** iOS `SEPSubmissionResponse` doesn't override CodingKeys,
- * so [transactionHash] is encoded as the verbatim camelCase field
- * (NOT snake_case `transaction_hash`). We mirror that exactly.
+ * Relayer's response to a contract-invocation POST. Mirrors
+ * `RelayerResponse` in `onym-relayer/src/handler.rs` — top-level
+ * camelCase with optional `transactionHash` and `message`.
  */
 @Serializable
 data class SepSubmissionResponse(
     val accepted: Boolean,
     val transactionHash: String? = null,
     val message: String? = null,
-)
-
-// ─── invocation envelope ──────────────────────────────────────────
-
-/**
- * Generic envelope wrapping a contract-function invocation. Mirrors
- * `swift-mls`'s `SEPContractInvocation` so the relayer wire format
- * stays in sync — the relayer reads `contract_id`, `function`, and
- * `payload` out of the JSON top-level.
- *
- * Stellar Soroban SDK is intentionally not pulled in: relayers handle
- * tx assembly + signing, this client just posts the function call.
- *
- * Generic over the payload type so each call site keeps its compile-
- * time payload shape; serialised through
- * [SepContractClient.invokeRaw].
- */
-@Serializable
-data class SepContractInvocation<P>(
-    @SerialName("contract_id")
-    val contractId: String,
-    val function: String,
-    val payload: P,
 )

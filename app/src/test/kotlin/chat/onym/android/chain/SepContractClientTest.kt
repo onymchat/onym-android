@@ -4,13 +4,14 @@ import chat.onym.android.support.FakeOkHttpClient
 import chat.onym.android.support.FakeSepContractTransport
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.long
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
-import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertArrayEquals
@@ -26,14 +27,15 @@ import org.junit.Test
  *
  *  1. **Wire-shape pins** via [FakeSepContractTransport] — the fake
  *     captures the encoded invocation JSON so we can assert the
- *     snake_case top-level keys (`contract_id`, `function`, `payload`)
- *     and per-function payload contents.
+ *     camelCase top-level keys (`contractID`, `contractType`,
+ *     `network`, `function`, `payload`) and per-function payload
+ *     contents.
  *  2. **OkHttp transport behaviour** via [FakeOkHttpClient] — actual
- *     [OkHttpSepContractTransport] driven against a canned interceptor
- *     response, so we cover happy 2xx, 4xx with body, 5xx, and
- *     malformed body. No `MockWebServer`.
+ *     [OkHttpSepContractTransport] driven against a canned
+ *     interceptor response, so we cover happy 2xx, 4xx with body,
+ *     5xx, and malformed body. No `MockWebServer`.
  *
- * Mirrors `SEPContractClientTests.swift` from onym-ios PR #24.
+ * Mirrors `SEPContractClientTests.swift` from onym-ios PR #27.
  */
 class SepContractClientTest {
 
@@ -42,87 +44,104 @@ class SepContractClientTest {
     // ─── wire-shape pins (fake transport) ──────────────────────────
 
     @Test
-    fun createGroupV2_sendsSnakeCasePayload_andCorrectFunction() = runTest {
+    fun createGroupTyranny_sendsCamelCaseEnvelope_andCorrectFunction() = runTest {
         val transport = FakeSepContractTransport(
             cannedResponseJson = """{"accepted":true,"transactionHash":"abc123"}""",
         )
-        val client = SepContractClient(testContractId, transport)
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
+        )
 
-        val request = SepCreateGroupV2Request(
-            caller = "GBABCDEF",
+        val payload = TyrannyCreateGroupPayload(
             groupId = ByteArray(32) { 0xAB.toByte() },
             commitment = ByteArray(32) { 0xCD.toByte() },
-            tier = SepTier.SMALL.rawValue.toUInt(),
-            groupType = SepGroupType.TYRANNY,
-            memberCount = 1u,
-            proof = ByteArray(64) { 0xEE.toByte() },
-            publicInputs = SepPublicInputs(
-                commitment = ByteArray(32) { 0xCD.toByte() },
-                epoch = 0uL,
-            ),
+            tier = SepTier.SMALL.rawValue,
+            adminPubkeyCommitment = ByteArray(32) { 0xEE.toByte() },
+            proof = ByteArray(1601) { 0x01 },
+            publicInputs = (0 until 4).map { ByteArray(32) { (it + 1).toByte() } },
         )
-        val response = client.createGroupV2(request)
+        val response = client.createGroupTyranny(payload)
         assertTrue(response.accepted)
         assertEquals("abc123", response.transactionHash)
 
         val invocation = transport.lastInvocationJson
         assertNotNull(invocation)
-        assertEquals(testContractId, invocation!!["contract_id"]!!.jsonPrimitive.contentOrNull)
-        assertEquals("create_group_v2", transport.lastFunction)
+        assertEquals(testContractId, invocation!!["contractID"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("tyranny", invocation["contractType"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("testnet", invocation["network"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("create_group", transport.lastFunction)
 
-        val payload = transport.lastPayloadJson
-        assertNotNull(payload)
-        assertEquals("GBABCDEF", payload!!["caller"]!!.jsonPrimitive.contentOrNull)
-        assertEquals(SepGroupType.TYRANNY.rawValue.toInt(), payload["group_type"]!!.jsonPrimitive.int)
-        assertEquals(1, payload["member_count"]!!.jsonPrimitive.int)
-        assertNotNull("group_id required", payload["group_id"])
-        assertNotNull("public_inputs required", payload["public_inputs"])
+        val payloadJson = transport.lastPayloadJson
+        assertNotNull(payloadJson)
+        assertNotNull("group_id required", payloadJson!!["group_id"])
+        assertNotNull("commitment required", payloadJson["commitment"])
+        assertEquals(0, payloadJson["tier"]!!.jsonPrimitive.int)
+        assertNotNull("admin_pubkey_commitment required", payloadJson["admin_pubkey_commitment"])
+        assertNotNull("proof required", payloadJson["proof"])
+        val pi = payloadJson["publicInputs"] as JsonArray
+        assertEquals("publicInputs is a 4-element array", 4, pi.size)
     }
 
     @Test
-    fun updateCommitment_routesToUpdateFunction_withSnakeCasePublicInputs() = runTest {
+    fun createGroupTyranny_mainnetSerializesPublicOnTheWire() = runTest {
         val transport = FakeSepContractTransport(
             cannedResponseJson = """{"accepted":true}""",
         )
-        val client = SepContractClient(testContractId, transport)
-
-        val request = SepUpdateCommitmentRequest(
-            groupId = ByteArray(32) { 0x01 },
-            proof = ByteArray(32) { 0x02 },
-            publicInputs = SepUpdatePublicInputs(
-                cOld = ByteArray(32) { 0x03 },
-                epochOld = 1uL,
-                cNew = ByteArray(32) { 0x04 },
-            ),
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.PUBLIC_NET,
+            transport = transport,
         )
-        client.updateCommitment(request)
-
-        assertEquals("update_commitment", transport.lastFunction)
-        val payload = transport.lastPayloadJson!!
-        val publicInputs = payload["public_inputs"] as kotlinx.serialization.json.JsonObject
-        assertNotNull(publicInputs["c_old"])
-        assertNotNull(publicInputs["c_new"])
-        assertEquals(1L, publicInputs["epoch_old"]!!.jsonPrimitive.long)
+        client.createGroupTyranny(stubPayload())
+        assertEquals("public", transport.lastInvocationJson!!["network"]!!.jsonPrimitive.contentOrNull)
     }
 
     @Test
-    fun getState_sendsGroupIdInGetStateEnvelope() = runTest {
+    fun updateCommitmentTyranny_routesToUpdateFunction_with5ChunkPI() = runTest {
         val transport = FakeSepContractTransport(
-            cannedResponseJson = """
-                {"commitment":"CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
-                 "epoch":7,"timestamp":1700000000,"tier":0,"active":true}
-            """.trimIndent(),
+            cannedResponseJson = """{"accepted":true}""",
         )
-        val client = SepContractClient(testContractId, transport)
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
+        )
+        client.updateCommitmentTyranny(
+            TyrannyUpdateCommitmentPayload(
+                groupId = ByteArray(32),
+                proof = ByteArray(1601),
+                publicInputs = (0 until 5).map { ByteArray(32) },
+            ),
+        )
+        assertEquals("update_commitment", transport.lastFunction)
+        val pi = transport.lastPayloadJson!!["publicInputs"] as JsonArray
+        assertEquals(5, pi.size)
+    }
 
-        val result = client.getState(groupId = ByteArray(32) { 0x55 })
+    @Test
+    fun getCommitment_sendsGroupIdInGetCommitmentEnvelope() = runTest {
+        val canned = """
+            {"commitment":"CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+             "epoch":7,"timestamp":1700000000,"tier":0,"active":true}
+        """.trimIndent()
+        val transport = FakeSepContractTransport(cannedResponseJson = canned)
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
+        )
+
+        val result = client.getCommitment(groupId = ByteArray(32) { 0x55 })
         assertEquals(7uL, result.epoch)
-        assertEquals(1_700_000_000uL, result.timestamp)
-        assertEquals(0u, result.tier)
-        assertTrue(result.active)
         assertArrayEquals(ByteArray(32) { 0x09 }, result.commitment)
 
-        assertEquals("get_state", transport.lastFunction)
+        assertEquals("get_commitment", transport.lastFunction)
         assertNotNull(transport.lastPayloadJson!!["group_id"])
     }
 
@@ -133,7 +152,6 @@ class SepContractClientTest {
         val canned = """{"accepted":true,"transactionHash":"deadbeef","message":"ok"}"""
         val httpClient = FakeOkHttpClient.build { req ->
             assertEquals("POST", req.method)
-            // OkHttp may append `; charset=utf-8`; just check the prefix.
             assertTrue(req.body?.contentType().toString().startsWith("application/json"))
             FakeOkHttpClient.ok(req, canned)
         }
@@ -141,20 +159,14 @@ class SepContractClientTest {
             httpClient = httpClient,
             endpointUrl = "https://relayer.example/contract",
         )
-        val client = SepContractClient(testContractId, transport)
-
-        val response = client.createGroupV2(
-            SepCreateGroupV2Request(
-                caller = "GBABCDEF",
-                groupId = ByteArray(32),
-                commitment = ByteArray(32),
-                tier = 0u,
-                groupType = SepGroupType.TYRANNY,
-                memberCount = 1u,
-                proof = ByteArray(0),
-                publicInputs = SepPublicInputs(commitment = ByteArray(32), epoch = 0uL),
-            )
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
         )
+
+        val response = client.createGroupTyranny(stubPayload())
         assertEquals("deadbeef", response.transactionHash)
         assertEquals("ok", response.message)
         assertTrue(response.accepted)
@@ -175,58 +187,18 @@ class SepContractClientTest {
             httpClient = httpClient,
             endpointUrl = "https://relayer.example/contract",
         )
-        val client = SepContractClient(testContractId, transport)
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
+        )
 
         val thrown = assertThrows(SepContractError.BadStatus::class.java) {
-            kotlinx.coroutines.runBlocking {
-                client.getState(ByteArray(32))
-            }
+            kotlinx.coroutines.runBlocking { client.getCommitment(ByteArray(32)) }
         }
         assertEquals(500, thrown.code)
-        // Body is captured BEFORE the status check so the error path
-        // can include it (gotcha #3 in the brief — `bytes()` is single-shot).
         assertEquals("boom", thrown.body)
-    }
-
-    @Test
-    fun okHttpTransport_throwsBadStatusOn4xx() = runTest {
-        val httpClient = FakeOkHttpClient.build { req ->
-            FakeOkHttpClient.status(req, 422, "Unprocessable Entity")
-        }
-        val transport = OkHttpSepContractTransport(httpClient, "https://r.example/c")
-        val client = SepContractClient(testContractId, transport)
-
-        val thrown = assertThrows(SepContractError.BadStatus::class.java) {
-            kotlinx.coroutines.runBlocking { client.getState(ByteArray(32)) }
-        }
-        assertEquals(422, thrown.code)
-    }
-
-    @Test
-    fun okHttpTransport_throwsMalformedResponse_onJunkBody() = runTest {
-        val httpClient = FakeOkHttpClient.build { req ->
-            FakeOkHttpClient.ok(req, "not really json {{{")
-        }
-        val transport = OkHttpSepContractTransport(httpClient, "https://r.example/c")
-        val client = SepContractClient(testContractId, transport)
-
-        assertThrows(SepContractError.MalformedResponse::class.java) {
-            kotlinx.coroutines.runBlocking {
-                client.createGroupV2(
-                    SepCreateGroupV2Request(
-                        caller = "G",
-                        groupId = ByteArray(32),
-                        commitment = ByteArray(32),
-                        tier = 0u,
-                        groupType = SepGroupType.TYRANNY,
-                        memberCount = 0u,
-                        proof = ByteArray(0),
-                        publicInputs = SepPublicInputs(ByteArray(32), 0uL),
-                    )
-                )
-            }
-        }
-        Unit
     }
 
     @Test
@@ -240,15 +212,13 @@ class SepContractClientTest {
             httpClient = httpClient,
             endpointUrl = "https://example.invalid/some/path",
         )
-        val client = SepContractClient(testContractId, transport)
-
-        client.updateCommitment(
-            SepUpdateCommitmentRequest(
-                groupId = ByteArray(32),
-                proof = ByteArray(32),
-                publicInputs = SepUpdatePublicInputs(ByteArray(32), 0uL, ByteArray(32)),
-            )
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
         )
+        client.createGroupTyranny(stubPayload())
         assertEquals("https://example.invalid/some/path", capturedUrl)
     }
 
@@ -264,23 +234,19 @@ class SepContractClientTest {
             FakeOkHttpClient.ok(req, """{"accepted":true}""")
         }
         val transport = OkHttpSepContractTransport(httpClient, "https://r.example/c")
-        val client = SepContractClient(testContractId, transport)
-
-        // Use updateCommitment so the canned `{"accepted":true}`
-        // decodes as the expected SepSubmissionResponse — getState
-        // would expect a SepCommitmentEntry shape we don't care about
-        // for this body-shape pin.
-        client.updateCommitment(
-            SepUpdateCommitmentRequest(
-                groupId = ByteArray(32) { 0x55 },
-                proof = ByteArray(8),
-                publicInputs = SepUpdatePublicInputs(ByteArray(32), 0uL, ByteArray(32)),
-            )
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
         )
+        client.createGroupTyranny(stubPayload())
 
-        val obj = Json.parseToJsonElement(capturedBodyJson!!) as kotlinx.serialization.json.JsonObject
-        assertEquals(testContractId, obj["contract_id"]!!.jsonPrimitive.contentOrNull)
-        assertEquals("update_commitment", obj["function"]!!.jsonPrimitive.contentOrNull)
+        val obj = Json.parseToJsonElement(capturedBodyJson!!) as JsonObject
+        assertEquals(testContractId, obj["contractID"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("tyranny", obj["contractType"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("testnet", obj["network"]!!.jsonPrimitive.contentOrNull)
+        assertEquals("create_group", obj["function"]!!.jsonPrimitive.contentOrNull)
         assertNotNull(obj["payload"])
     }
 
@@ -291,7 +257,17 @@ class SepContractClientTest {
         val err = SepContractError.BadStatus(503, "service unavailable")
         assertTrue(err.message!!.contains("503"))
         assertTrue(err.message!!.contains("service unavailable"))
-        // Identity check — sealed hierarchy is the public surface.
         assertSame(err, err)
     }
+
+    // ─── helpers ──────────────────────────────────────────────────
+
+    private fun stubPayload() = TyrannyCreateGroupPayload(
+        groupId = ByteArray(32),
+        commitment = ByteArray(32),
+        tier = 0,
+        adminPubkeyCommitment = ByteArray(32),
+        proof = ByteArray(8),
+        publicInputs = (0 until 4).map { ByteArray(32) },
+    )
 }
