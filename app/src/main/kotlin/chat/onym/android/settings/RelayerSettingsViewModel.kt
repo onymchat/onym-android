@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.onym.android.chain.RelayerConfiguration
 import chat.onym.android.chain.RelayerEndpoint
+import chat.onym.android.chain.RelayerFetchStatus
 import chat.onym.android.chain.RelayerRepository
 import chat.onym.android.chain.RelayerStrategy
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,11 +35,17 @@ class RelayerSettingsViewModel(
     /** Snapshot the screen renders. */
     data class State(
         val configuration: RelayerConfiguration,
-        /** Subset of `repository.snapshots.value.knownRelayers`
-         *  filtered to remove URLs already in [configuration]
-         *  endpoints — the "Add from Published List" section
-         *  shouldn't ghost an add as a no-op. */
+        /** Full published list as last seen on snapshot — exposed so
+         *  the screen can show counts / empty-state copy independently
+         *  of the unconfigured-subset gate. */
+        val knownList: List<RelayerEndpoint>,
+        /** Subset of [knownList] filtered to remove URLs already in
+         *  [configuration] endpoints — the "Add from Published List"
+         *  section shouldn't ghost an add as a no-op. */
         val unconfiguredKnownList: List<RelayerEndpoint>,
+        /** Drives the 4-way gate on the screen
+         *  (Idle / Fetching / Success / Failed). */
+        val fetchStatus: RelayerFetchStatus,
         val customDraft: String,
         val customDraftError: String?,
     )
@@ -46,7 +53,9 @@ class RelayerSettingsViewModel(
     private val _state = MutableStateFlow(
         State(
             configuration = RelayerConfiguration(),
+            knownList = emptyList(),
             unconfiguredKnownList = emptyList(),
+            fetchStatus = RelayerFetchStatus.Idle,
             customDraft = "",
             customDraftError = null,
         )
@@ -59,8 +68,10 @@ class RelayerSettingsViewModel(
                 val configuredUrls = snapshot.configuration.endpoints.map { it.url }.toSet()
                 _state.value = _state.value.copy(
                     configuration = snapshot.configuration,
+                    knownList = snapshot.knownRelayers,
                     unconfiguredKnownList = snapshot.knownRelayers
                         .filterNot { it.url in configuredUrls },
+                    fetchStatus = snapshot.fetchStatus,
                 )
             }
         }
@@ -106,6 +117,15 @@ class RelayerSettingsViewModel(
 
     fun setStrategy(strategy: RelayerStrategy) {
         viewModelScope.launch { repository.setStrategy(strategy) }
+    }
+
+    /** "Try Again" tap on the [RelayerFetchStatus.Failed] gate. The
+     *  repository republishes Fetching → Success/Failed, which the
+     *  screen reflects via the snapshot collector. We swallow the
+     *  rethrow here — the user-visible error already lives on the
+     *  next snapshot. */
+    fun tappedRetryFetch() {
+        viewModelScope.launch { runCatching { repository.refresh() } }
     }
 
     sealed class ValidationResult {

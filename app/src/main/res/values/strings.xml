@@ -98,6 +98,12 @@
     <string name="relayer_row_primary_label">Primary endpoint</string>
     <string name="relayer_row_mark_primary">Mark as primary</string>
     <string name="relayer_row_delete">Delete</string>
+    <!-- Fetch error / empty / retry copy (PR #23) -->
+    <string name="relayer_fetch_failed_status">Couldn\'t reach the published list (status %1$d).</string>
+    <string name="relayer_fetch_failed_malformed">Published list is in an unexpected format.</string>
+    <string name="relayer_fetch_failed_offline">Couldn\'t reach the published list.</string>
+    <string name="relayer_fetch_no_published_yet">No published relayers yet.</string>
+    <string name="relayer_fetch_retry">Try Again</string>
 
     <!-- ─── Settings → Anchors screen ────────────────────────────── -->
     <string name="anchors_title">Anchors</string>

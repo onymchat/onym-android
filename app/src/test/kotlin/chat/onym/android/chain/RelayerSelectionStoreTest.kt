@@ -37,7 +37,7 @@ class RelayerSelectionStoreTest {
     private lateinit var dataStore: DataStore<Preferences>
     private lateinit var store: DataStorePreferencesRelayerSelectionStore
 
-    private val testnet = RelayerEndpoint("Onym Testnet", "https://relayer-testnet.onym.chat", "testnet")
+    private val testnet = RelayerEndpoint("Onym Testnet", "https://relayer-testnet.onym.chat", listOf("testnet"))
 
     @Before
     fun setUp() {
@@ -117,7 +117,7 @@ class RelayerSelectionStoreTest {
         val migrated = store.loadConfiguration()
         assertEquals(1, migrated.endpoints.size)
         val ep = migrated.endpoints.single()
-        assertEquals("custom", ep.network)
+        assertEquals(listOf("custom"), ep.networks)
         assertEquals("https://localhost:8080", ep.url)
         assertEquals("localhost", ep.name)
         assertEquals(ep.url, migrated.primaryUrl)

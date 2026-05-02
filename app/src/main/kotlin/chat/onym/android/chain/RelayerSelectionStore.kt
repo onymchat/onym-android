@@ -129,7 +129,9 @@ class DataStorePreferencesRelayerSelectionStore(
                 "known" -> {
                     val n = record.name; val net = record.network
                     if (n != null && net != null) {
-                        RelayerEndpoint(name = n, url = record.url, network = net)
+                        // PR #23 schema change: singular `network`
+                        // becomes a one-element [networks] list.
+                        RelayerEndpoint(name = n, url = record.url, networks = listOf(net))
                     } else null
                 }
                 "custom" -> RelayerEndpoint.custom(record.url)
