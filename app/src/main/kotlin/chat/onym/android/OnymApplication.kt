@@ -8,7 +8,10 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.fragment.app.FragmentActivity
+import chat.onym.android.chain.ContractsRepository
+import chat.onym.android.chain.DataStorePreferencesAnchorSelectionStore
 import chat.onym.android.chain.DataStorePreferencesRelayerSelectionStore
+import chat.onym.android.chain.GitHubReleasesContractsManifestFetcher
 import chat.onym.android.chain.GitHubReleasesKnownRelayersFetcher
 import chat.onym.android.chain.RelayerRepository
 import chat.onym.android.identity.IdentityRepository
@@ -18,6 +21,7 @@ import chat.onym.android.recovery.AndroidBiometricAuthenticator
 import chat.onym.android.recovery.AndroidClipboardWriter
 import chat.onym.android.recovery.AndroidStringProvider
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
+import chat.onym.android.settings.AnchorsPickerViewModel
 import chat.onym.android.settings.RelayerPickerViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,17 +33,27 @@ import java.lang.ref.WeakReference
 import java.security.Security
 
 /**
- * Single DataStore Preferences instance for non-secret app config
- * (today: relayer URL selection + cached known list). The
- * `preferencesDataStore` delegate guarantees one instance per
- * `Context` per filename across the process — safe to call from
- * anywhere; we only read it from [OnymApplication.onCreate].
+ * DataStore Preferences for the relayer URL selection + cached
+ * known-relayer list. The `preferencesDataStore` delegate
+ * guarantees one instance per `Context` per filename across the
+ * process — safe to call from anywhere; we only read it from
+ * [OnymApplication.onCreate].
  *
  * Identity material continues to live in EncryptedSharedPreferences
  * via [IdentitySecretStore]; URLs aren't secret so DataStore is fine.
  */
 private val Context.relayerDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "chat.onym.android.relayer_prefs",
+)
+
+/**
+ * DataStore Preferences for the anchor (contract version)
+ * selections + cached `contracts-manifest.json`. Separate file from
+ * [relayerDataStore] so each domain's storage layer has its own
+ * blob — easier to reason about + selectively wipe in tests.
+ */
+private val Context.contractsDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "chat.onym.android.contracts_prefs",
 )
 
 /**
@@ -106,14 +120,14 @@ class OnymApplication : Application() {
         val clipboard = AndroidClipboardWriter(applicationContext)
         val strings = AndroidStringProvider(applicationContext)
 
-        // Relayer wiring — DataStore-backed selection + GitHub-Releases
-        // fetcher. Bootstrap (load cached + selection from disk) runs
-        // synchronously off the IO dispatcher; start() (network fetch)
-        // is fire-and-forget so app launch never blocks on the network.
+        val httpClient = OkHttpClient()
+
+        // Relayer wiring (PR #17). Bootstrap loads cached + selection
+        // from disk; start() fires the network fetch. Both run on the
+        // application scope so launch never blocks on the network.
         val relayerStore = DataStorePreferencesRelayerSelectionStore(
             dataStore = applicationContext.relayerDataStore,
         )
-        val httpClient = OkHttpClient()
         val relayerFetcher = GitHubReleasesKnownRelayersFetcher(httpClient = httpClient)
         val relayerRepository = RelayerRepository(
             store = relayerStore,
@@ -122,6 +136,22 @@ class OnymApplication : Application() {
         applicationScope.launch {
             relayerRepository.bootstrap()
             relayerRepository.start()
+        }
+
+        // Contracts/anchors wiring — same shape as the relayer block.
+        // Separate DataStore file so the two domains' storage layers
+        // are independent (one less coupling at audit time).
+        val contractsStore = DataStorePreferencesAnchorSelectionStore(
+            dataStore = applicationContext.contractsDataStore,
+        )
+        val contractsFetcher = GitHubReleasesContractsManifestFetcher(httpClient = httpClient)
+        val contractsRepository = ContractsRepository(
+            store = contractsStore,
+            fetcher = contractsFetcher,
+        )
+        applicationScope.launch {
+            contractsRepository.bootstrap()
+            contractsRepository.start()
         }
 
         dependencies = AppDependencies(
@@ -138,6 +168,9 @@ class OnymApplication : Application() {
             },
             makeRelayerPickerViewModel = {
                 RelayerPickerViewModel(repository = relayerRepository)
+            },
+            makeAnchorsPickerViewModel = {
+                AnchorsPickerViewModel(repository = contractsRepository)
             },
         )
     }
