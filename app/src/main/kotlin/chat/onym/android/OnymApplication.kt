@@ -9,8 +9,10 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.fragment.app.FragmentActivity
 import androidx.room.Room
+import chat.onym.android.chain.BearerAuthInterceptor
 import chat.onym.android.chain.ContractsRepository
 import chat.onym.android.chain.DataStoreNetworkPreferenceProvider
+import chat.onym.android.chain.OkHttpSepContractTransport
 import chat.onym.android.chain.DataStorePreferencesAnchorSelectionStore
 import chat.onym.android.chain.DataStorePreferencesRelayerSelectionStore
 import chat.onym.android.chain.GitHubReleasesContractsManifestFetcher
@@ -157,11 +159,37 @@ class OnymApplication : Application() {
         val identityRepository = IdentityRepository(
             store = IdentitySecretStore(applicationContext),
         )
+        // Eager bootstrap (PR-28 follow-up). Without this, the first
+        // Create Group attempt on a fresh install fails with
+        // `MissingIdentity` because the identity is loaded lazily by
+        // whichever flow asks for it first — typically the Backup
+        // screen, but the user can hit Create Group before opening
+        // Backup. Idempotent: a second `bootstrap()` is a no-op.
+        // Failure is silent — the next operation that needs identity
+        // surfaces a clean error (`IdentityNotLoaded`).
+        applicationScope.launch {
+            runCatching { identityRepository.bootstrap() }
+        }
         val nostrSignerProvider = OnymNostrSignerProvider()
         val clipboard = AndroidClipboardWriter(applicationContext)
         val strings = AndroidStringProvider(applicationContext)
 
-        val httpClient = OkHttpClient()
+        // Single OkHttpClient with the relayer Bearer auth
+        // interceptor installed once. The relayer's `validate_auth`
+        // requires the header on every contract-call POST; the
+        // interceptor adds it transparently so callers (relayer
+        // fetcher, contracts manifest fetcher, SEP contract client)
+        // don't have to know about the token.
+        //
+        // `takeIf { isNotBlank() }` keeps the dev experience honest:
+        // if `local.properties` is missing the token, no header is
+        // added (relayer 401s with a clear message) instead of
+        // `Authorization: Bearer ""` (also 401, but more confusing).
+        val httpClient = OkHttpClient.Builder()
+            .addInterceptor(BearerAuthInterceptor(
+                token = BuildConfig.RELAYER_AUTH_TOKEN.takeIf { it.isNotBlank() },
+            ))
+            .build()
 
         // Relayer wiring (PR #17). Bootstrap loads cached + selection
         // from disk; start() fires the network fetch. Both run on the
@@ -286,6 +314,18 @@ class OnymApplication : Application() {
                     contracts = contractsRepository,
                     groups = groupRepository,
                     networkPreference = networkPreference,
+                    // Use the shared httpClient (with the
+                    // BearerAuthInterceptor installed) so the
+                    // create-group call carries the token. Without
+                    // this override the interactor's default builds a
+                    // fresh OkHttpClient() per call with no auth
+                    // wired in — relayer 401s every request.
+                    makeContractTransport = { url ->
+                        OkHttpSepContractTransport(
+                            httpClient = httpClient,
+                            endpointUrl = url,
+                        )
+                    },
                     inboxTransport = inboxTransport,
                 )
                 CreateGroupViewModel(

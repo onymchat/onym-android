@@ -250,6 +250,80 @@ class SepContractClientTest {
         assertNotNull(obj["payload"])
     }
 
+    // ─── BearerAuthInterceptor wiring (PR-28 follow-up) ────────────
+
+    @Test
+    fun bearerAuth_addsAuthorizationHeader_whenTokenSet() = runTest {
+        var capturedAuthHeader: String? = null
+        val httpClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor(BearerAuthInterceptor(token = "deadbeefcafef00d"))
+            .addInterceptor { chain ->
+                capturedAuthHeader = chain.request().header("Authorization")
+                FakeOkHttpClient.ok(chain.request(), """{"accepted":true}""")
+            }
+            .build()
+        val transport = OkHttpSepContractTransport(httpClient, "https://r.example/c")
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
+        )
+
+        client.createGroupTyranny(stubPayload())
+
+        assertEquals("Bearer deadbeefcafef00d", capturedAuthHeader)
+    }
+
+    @Test
+    fun bearerAuth_omitsAuthorizationHeader_whenTokenNullOrBlank() = runTest {
+        var capturedAuthHeader: String? = "<unset-sentinel>"
+        val httpClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor(BearerAuthInterceptor(token = null))
+            .addInterceptor { chain ->
+                capturedAuthHeader = chain.request().header("Authorization")
+                FakeOkHttpClient.ok(chain.request(), """{"accepted":true}""")
+            }
+            .build()
+        val transport = OkHttpSepContractTransport(httpClient, "https://r.example/c")
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
+        )
+
+        client.createGroupTyranny(stubPayload())
+
+        // No Authorization header — relayer 401s with a clear "missing
+        // bearer" message rather than `Bearer ""` (also 401, more
+        // confusing).
+        org.junit.Assert.assertNull(capturedAuthHeader)
+    }
+
+    @Test
+    fun bearerAuth_omitsAuthorizationHeader_whenTokenIsBlank() = runTest {
+        var capturedAuthHeader: String? = "<unset-sentinel>"
+        val httpClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor(BearerAuthInterceptor(token = "   "))
+            .addInterceptor { chain ->
+                capturedAuthHeader = chain.request().header("Authorization")
+                FakeOkHttpClient.ok(chain.request(), """{"accepted":true}""")
+            }
+            .build()
+        val transport = OkHttpSepContractTransport(httpClient, "https://r.example/c")
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.TYRANNY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
+        )
+
+        client.createGroupTyranny(stubPayload())
+
+        org.junit.Assert.assertNull(capturedAuthHeader)
+    }
+
     // ─── error sentinel sanity ─────────────────────────────────────
 
     @Test

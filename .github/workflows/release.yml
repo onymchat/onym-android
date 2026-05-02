@@ -17,6 +17,18 @@ name: Release
 #   ANDROID_KEYSTORE_PASSWORD  — keystore password
 #   ANDROID_KEY_ALIAS          — alias inside the keystore
 #   ANDROID_KEY_PASSWORD       — password for that alias
+#   RELAYER_AUTH_TOKEN         — Bearer token the relayer's
+#                                 `validate_auth` requires on every
+#                                 contract-call POST. Inlined into
+#                                 `BuildConfig.RELAYER_AUTH_TOKEN` at
+#                                 assembleRelease and consumed at
+#                                 runtime by `BearerAuthInterceptor`.
+#                                 Without this secret, release builds
+#                                 still compile but every relayer call
+#                                 401s with "missing bearer" (the
+#                                 interceptor skips the header on a
+#                                 blank token rather than sending
+#                                 `Bearer ""`).
 
 on:
   workflow_dispatch:
@@ -210,6 +222,15 @@ jobs:
         # Produces app/build/outputs/apk/release/app-release-unsigned.apk
         # (no signingConfig is declared on the release buildType, so
         # AGP emits an unsigned APK rather than failing the build).
+        #
+        # RELAYER_AUTH_TOKEN is consumed by `relayerAuthToken()` in
+        # `app/build.gradle.kts` and inlined into BuildConfig at
+        # compile time; runtime `BearerAuthInterceptor` reads it from
+        # `BuildConfig.RELAYER_AUTH_TOKEN`. Required new repo secret
+        # — without it, release builds compile and ship but every
+        # relayer call 401s with "missing bearer".
+        env:
+          RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
         run: ./gradlew :app:assembleRelease --no-daemon
 
       - name: Locate + rename APK

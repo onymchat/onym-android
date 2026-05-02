@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -28,6 +30,19 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         }
+
+        // Bearer token the relayer's `validate_auth` requires on every
+        // POST. Sourced from (in order):
+        //   1. ENV `RELAYER_AUTH_TOKEN` — release CI passes the GitHub
+        //      Actions secret here.
+        //   2. `local.properties` `relayer.authToken=…` — local dev
+        //      (gitignored).
+        //   3. Empty string — build still succeeds; the relayer 401s
+        //      every call with a clear message, surfacing the missing
+        //      config to the dev rather than failing silently.
+        // See `OnymApplication.buildDependencies` for the OkHttp
+        // interceptor that consumes this.
+        buildConfigField("String", "RELAYER_AUTH_TOKEN", "\"${relayerAuthToken()}\"")
     }
 
     buildTypes {
@@ -50,6 +65,9 @@ android {
 
     buildFeatures {
         compose = true
+        // AGP 8 disabled BuildConfig generation by default — we
+        // re-enable it to surface RELAYER_AUTH_TOKEN to runtime.
+        buildConfig = true
     }
 
     // Lint hard-gates the build on missing localizations: every string
@@ -181,4 +199,32 @@ dependencies {
     // without a real Activity from main code. Required by Compose UI
     // tests that don't use `createAndroidComposeRule<MyActivity>`.
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+/**
+ * Resolves the relayer Bearer token at configuration time.
+ *
+ * Resolution order:
+ *  1. Environment variable `RELAYER_AUTH_TOKEN` (release CI passes
+ *     `${{ secrets.RELAYER_AUTH_TOKEN }}` through this).
+ *  2. `local.properties` `relayer.authToken=…` (local dev — the file
+ *     is gitignored so the token never gets committed).
+ *  3. Empty string — the build still succeeds, but every relayer
+ *     call 401s with a clear message. The
+ *     `BearerAuthInterceptor.takeIf { it.isNotBlank() }` guard skips
+ *     the `Authorization` header entirely on empty so the failure is
+ *     "no header" (relayer's `validate_auth` says so) rather than
+ *     `Bearer ""` (more confusing).
+ *
+ * Mirrors the iOS `RelayerSecrets` resolution flow from PR #28 —
+ * different storage primitives (UserDefaults / Info.plist over there;
+ * `BuildConfig` here) but same precedence + fallback story.
+ */
+fun relayerAuthToken(): String {
+    System.getenv("RELAYER_AUTH_TOKEN")?.takeIf { it.isNotBlank() }?.let { return it }
+    val props = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    return props.getProperty("relayer.authToken").orEmpty()
 }
