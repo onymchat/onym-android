@@ -371,6 +371,87 @@ Inject short delays in the test fixture
 (`clipboardClearDelay = 50ms`, `verifyAdvanceDelay = 20ms`) so the
 suite runs in well under a second.
 
+## Localization
+
+Strings live in [`app/src/main/res/values/strings.xml`](app/src/main/res/values/strings.xml)
+(English source) and [`app/src/main/res/values-ru/strings.xml`](app/src/main/res/values-ru/strings.xml)
+(Russian). Mirrors `Resources/Localizable.xcstrings` from onym-ios PR #5
+1:1 — same 27 strings + 1 plural, same wording, same Russian translations.
+
+### Compose access
+
+```kotlin
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+
+Text(stringResource(R.string.your_identity_in_12_words))
+Text(pluralStringResource(R.plurals.write_down_words_in_order, count = words.size, words.size))
+```
+
+### Outside Composables: `StringProvider`
+
+[`RecoveryPhraseBackupViewModel`](app/src/main/kotlin/chat/onym/android/recovery/RecoveryPhraseBackupViewModel.kt)
+holds no `Context` reference. The two strings it needs to resolve at
+runtime — the [`BiometricPrompt`](https://developer.android.com/reference/androidx/biometric/BiometricPrompt)
+title shown deep inside `authenticate()`, and the localized "recovery
+phrase unavailable" error — go through a small
+[`StringProvider`](app/src/main/kotlin/chat/onym/android/recovery/StringProvider.kt)
+seam:
+
+```kotlin
+interface StringProvider { operator fun get(@StringRes resId: Int): String }
+class AndroidStringProvider(context: Context) : StringProvider { … }
+```
+
+`MainActivity` injects the production impl backed by the application
+context. Tests provide `FakeStringProvider` returning
+`"string:$resId"` — assertions stay locale-independent.
+
+### Plurals
+
+Russian CLDR has four cardinal quantities: `one` (1, 21, 31; not 11),
+`few` (2-4, 22-24; not 12-14), `many` (0, 5-20, 25-30; the form `12`
+maps to → "12 слов"), and `other` (fractions like "1.5 слова").
+English has just `one` and `other`. The `MissingQuantity` lint check
+catches a translator who omits a CLDR-required form.
+
+### Lint gate
+
+[`lint { abortOnError = true }`](app/build.gradle.kts) +
+`MissingTranslation` (default-on) means a string added to
+`values/strings.xml` without a parallel `values-ru/` entry fails the
+build at `./gradlew :app:lintDebug`. Equivalent to iOS String Catalog's
+`state: new` warnings, but a hard gate.
+
+`app_name` is marked `translatable="false"` because "Onym" is a proper
+noun — keeps translators from inventing transliterations.
+
+### Adding a new language
+
+```sh
+mkdir -p app/src/main/res/values-fr
+cp app/src/main/res/values-ru/strings.xml app/src/main/res/values-fr/
+# … translate every <string> + <plurals> body
+./gradlew :app:lintDebug    # asserts complete coverage
+```
+
+Common BCP-47 region tags: `values-fr`, `values-de`, `values-es`,
+`values-zh-rCN`, `values-pt-rBR`.
+
+### Per-app language preference
+
+Android 13+ supports per-app language settings (Settings → System →
+Languages). When an in-app picker lands, wire it via
+[`AppCompatDelegate.setApplicationLocales`](https://developer.android.com/reference/androidx/appcompat/app/AppCompatDelegate#setApplicationLocales(androidx.core.os.LocaleListCompat)).
+For now the app honours the device language.
+
+To smoke-test Russian without changing the device language:
+
+```sh
+adb shell am start -n chat.onym.android/.MainActivity \
+  --es android.intent.extra.LOCALE ru-RU
+```
+
 ## Out of scope (future chunks)
 
 - `repo.stellarSign(_)` / `repo.decryptInvitation(_)` methods —
