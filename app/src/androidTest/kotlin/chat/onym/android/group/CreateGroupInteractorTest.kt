@@ -325,6 +325,111 @@ class CreateGroupInteractorTest {
         }
     }
 
+    // ─── OneOnOne ─────────────────────────────────────────────────
+
+    @Test
+    fun create_oneOnOne_zeroInvitees_throwsExactCountError() = runBlocking {
+        // Manifest needs a OneOnOne entry for the binding lookup to
+        // get past `NoContractBinding` — but the validation fails
+        // before that anyway. Re-seed contracts with both bindings
+        // so the test stays focused on the count check.
+        val contractsBoth = ContractsRepository(
+            store = InMemoryAnchorSelectionStore(),
+            fetcher = FakeContractsManifestFetcher(
+                FakeContractsManifestFetcher.Mode.Succeeds(makeManifest(includeTyranny = true, includeOneOnOne = true)),
+            ),
+        )
+        contractsBoth.bootstrap()
+        contractsBoth.refresh()
+        val interactor = makeInteractor(contracts = contractsBoth)
+        try {
+            interactor.create(
+                name = "1v1",
+                invitees = emptyList(),
+                groupType = chat.onym.android.chain.SepGroupType.ONE_ON_ONE,
+            )
+            error("expected OneOnOneRequiresExactlyOneInvitee")
+        } catch (e: CreateGroupError.OneOnOneRequiresExactlyOneInvitee) {
+            assertEquals(0, e.actual)
+        }
+    }
+
+    @Test
+    fun create_oneOnOne_twoInvitees_throwsExactCountError() = runBlocking {
+        val contractsBoth = ContractsRepository(
+            store = InMemoryAnchorSelectionStore(),
+            fetcher = FakeContractsManifestFetcher(
+                FakeContractsManifestFetcher.Mode.Succeeds(makeManifest(includeTyranny = true, includeOneOnOne = true)),
+            ),
+        )
+        contractsBoth.bootstrap()
+        contractsBoth.refresh()
+        val interactor = makeInteractor(contracts = contractsBoth)
+        try {
+            interactor.create(
+                name = "1v1",
+                invitees = listOf(ByteArray(32), ByteArray(32) { 0xAA.toByte() }),
+                groupType = chat.onym.android.chain.SepGroupType.ONE_ON_ONE,
+            )
+            error("expected OneOnOneRequiresExactlyOneInvitee")
+        } catch (e: CreateGroupError.OneOnOneRequiresExactlyOneInvitee) {
+            assertEquals(2, e.actual)
+        }
+    }
+
+    @Test
+    fun create_oneOnOne_oneInvitee_anchorsViaOneOnOnePayload_andShipsInviteeBlsSecret() = runBlocking {
+        val contractsBoth = ContractsRepository(
+            store = InMemoryAnchorSelectionStore(),
+            fetcher = FakeContractsManifestFetcher(
+                FakeContractsManifestFetcher.Mode.Succeeds(makeManifest(includeTyranny = true, includeOneOnOne = true)),
+            ),
+        )
+        contractsBoth.bootstrap()
+        contractsBoth.refresh()
+        val interactor = makeInteractor(contracts = contractsBoth)
+
+        val invitee = ByteArray(32) { 0xCC.toByte() }
+        val group = interactor.create(
+            name = "Talk",
+            invitees = listOf(invitee),
+            groupType = chat.onym.android.chain.SepGroupType.ONE_ON_ONE,
+        )
+
+        assertEquals(chat.onym.android.chain.SepGroupType.ONE_ON_ONE, group.groupType)
+        assertTrue(group.isPublishedOnChain)
+        // OneOnOne has no admin role.
+        assertEquals(null, group.adminPubkeyHex)
+
+        // The invocation went out as a OneOnOne payload (no `tier`,
+        // no `admin_pubkey_commitment`, 2-element PI).
+        val invocations = contractTransport.invocations()
+        assertEquals(1, invocations.size)
+        assertEquals("create_group", invocations.single().function)
+
+        // Exactly one invitation envelope was sealed + sent.
+        val sends = inboxTransport.sends()
+        assertEquals(1, sends.size)
+    }
+
+    @Test
+    fun create_oneOnOne_noOneOnOneBinding_throwsNoContractBinding() = runBlocking {
+        // Default contracts only has Tyranny — selecting OneOnOne
+        // must raise NoContractBinding(OneOnOne), not silently fall
+        // through to the Tyranny binding.
+        val interactor = makeInteractor()
+        try {
+            interactor.create(
+                name = "1v1",
+                invitees = listOf(ByteArray(32) { 0xCC.toByte() }),
+                groupType = chat.onym.android.chain.SepGroupType.ONE_ON_ONE,
+            )
+            error("expected NoContractBinding(OneOnOne)")
+        } catch (e: CreateGroupError.NoContractBinding) {
+            assertEquals(GovernanceType.OneOnOne, e.type)
+        }
+    }
+
     // ─── helpers ──────────────────────────────────────────────────
 
     private fun makeInteractor(
@@ -332,6 +437,7 @@ class CreateGroupInteractorTest {
             chat.onym.android.chain.StaticNetworkPreferenceProvider(
                 chat.onym.android.chain.AppNetwork.Testnet,
             ),
+        contracts: ContractsRepository = this.contracts,
     ) = CreateGroupInteractor(
         identity = identity,
         relayers = relayers,
@@ -343,14 +449,26 @@ class CreateGroupInteractorTest {
         makeContractTransport = { contractTransport },
     )
 
-    private fun makeManifest(includeTyranny: Boolean): ContractsManifest {
-        val entries: List<ContractEntry> = if (includeTyranny) {
-            listOf(ContractEntry(
-                network = ContractNetwork.Testnet,
-                type = GovernanceType.Tyranny,
-                id = "CTYRANNYTEST00000000000000000000000000000000000000000000",
-            ))
-        } else emptyList()
+    private fun makeManifest(
+        includeTyranny: Boolean,
+        includeOneOnOne: Boolean = false,
+    ): ContractsManifest {
+        val entries = buildList<ContractEntry> {
+            if (includeTyranny) {
+                add(ContractEntry(
+                    network = ContractNetwork.Testnet,
+                    type = GovernanceType.Tyranny,
+                    id = "CTYRANNYTEST00000000000000000000000000000000000000000000",
+                ))
+            }
+            if (includeOneOnOne) {
+                add(ContractEntry(
+                    network = ContractNetwork.Testnet,
+                    type = GovernanceType.OneOnOne,
+                    id = "CONEONONETEST0000000000000000000000000000000000000000000",
+                ))
+            }
+        }
         return ContractsManifest(
             version = 1,
             releases = listOf(

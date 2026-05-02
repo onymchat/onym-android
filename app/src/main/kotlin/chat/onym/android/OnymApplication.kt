@@ -329,8 +329,13 @@ class OnymApplication : Application() {
                     inboxTransport = inboxTransport,
                 )
                 CreateGroupViewModel(
-                    createGroup = { name, invitees, onProgress ->
-                        interactor.create(name = name, invitees = invitees, onProgress = onProgress)
+                    createGroup = { name, invitees, groupType, onProgress ->
+                        interactor.create(
+                            name = name,
+                            invitees = invitees,
+                            groupType = groupType,
+                            onProgress = onProgress,
+                        )
                     },
                 )
             },
