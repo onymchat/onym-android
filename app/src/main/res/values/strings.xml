@@ -83,6 +83,11 @@
     <string name="settings_network">Network</string>
     <string name="settings_network_footer">Choose the relayer that submits transactions and which contract version anchors new chats. Existing chats keep the contract they were created with.</string>
 
+    <!-- ─── Settings → Network → Use Mainnet toggle (PR-C follow-up) -->
+    <string name="settings_use_mainnet">Use Mainnet</string>
+    <string name="settings_use_mainnet_on_footer">New groups will be anchored on Stellar mainnet. Contracts must be deployed and allowlisted on the relayer.</string>
+    <string name="settings_use_mainnet_off_footer">New groups will be anchored on Stellar testnet. Default while contracts are still being staged.</string>
+
     <!-- ─── Settings → Relayer screen ────────────────────────────── -->
     <string name="relayer_title">Relayer</string>
     <string name="relayer_strategy_label">Strategy</string>

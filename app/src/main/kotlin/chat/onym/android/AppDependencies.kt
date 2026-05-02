@@ -1,6 +1,7 @@
 package chat.onym.android
 
 import androidx.fragment.app.FragmentActivity
+import chat.onym.android.chain.NetworkPreferenceProvider
 import chat.onym.android.group.CreateGroupViewModel
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.settings.AnchorsPickerViewModel
@@ -36,5 +37,8 @@ class AppDependencies(
     val makeRecoveryPhraseBackupViewModel: (activityProvider: () -> FragmentActivity) -> RecoveryPhraseBackupViewModel,
     val makeRelayerSettingsViewModel: () -> RelayerSettingsViewModel,
     val makeAnchorsPickerViewModel: () -> AnchorsPickerViewModel,
+    /** App-wide testnet/mainnet preference. Settings exposes a Switch
+     *  bound to this; CreateGroupInteractor reads it per call. */
+    val networkPreferenceProvider: NetworkPreferenceProvider,
     val makeCreateGroupViewModel: () -> CreateGroupViewModel,
 )

@@ -79,6 +79,11 @@
     <string name="settings_network">Сеть</string>
     <string name="settings_network_footer">Выберите релеер, который отправляет транзакции, и версию контракта для якорения новых чатов. Существующие чаты сохраняют контракт, с которым были созданы.</string>
 
+    <!-- ─── Settings → Network → Use Mainnet toggle (PR-C follow-up) -->
+    <string name="settings_use_mainnet">Использовать Mainnet</string>
+    <string name="settings_use_mainnet_on_footer">Новые группы будут закрепляться в Stellar mainnet. Контракты должны быть развёрнуты и разрешены на релеере.</string>
+    <string name="settings_use_mainnet_off_footer">Новые группы будут закрепляться в Stellar testnet. По умолчанию, пока контракты ещё разворачиваются.</string>
+
     <!-- ─── Settings → Relayer screen ────────────────────────────── -->
     <string name="relayer_title">Релеер</string>
     <string name="relayer_strategy_label">Стратегия</string>

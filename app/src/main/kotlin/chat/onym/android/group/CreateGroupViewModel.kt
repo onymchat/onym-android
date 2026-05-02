@@ -62,6 +62,16 @@ data class OnymInvitee(
  */
 data class CreateGroupState(
     val name: String = "",
+    /** Friendly placeholder generated on init / reset (e.g. "Maple
+     *  Garden"). The TextField pre-fills with this so the user can
+     *  hit Create immediately without typing. First focus on the
+     *  field clears it; submit also falls back to this if the user
+     *  emptied the field and didn't retype. */
+    val generatedName: String = "",
+    /** Goes true on the first focus event of the name field. Used
+     *  to distinguish "user accepted the placeholder" from "user
+     *  wants to type their own". */
+    val nameFieldHasBeenFocused: Boolean = false,
     val accent: OnymAccent = OnymAccent.Blue,
     /** Always [OnymUIGovernance.Tyranny] in PR-C — the picker
      *  disables the others. */
@@ -81,10 +91,16 @@ data class CreateGroupState(
      *  screen content. */
     val createdGroup: ChatGroup? = null,
 ) {
-    /** True when the name is non-empty AND the selected governance
-     *  type is wired (Tyranny only in PR-C). */
+    /** True when the selected governance type is wired (Tyranny only
+     *  in PR-C). The name no longer gates advance — submit falls back
+     *  to [generatedName] when the field is empty. */
     val canAdvanceToStep2: Boolean
-        get() = name.trim().isNotEmpty() && governance.isAvailable
+        get() = governance.isAvailable
+
+    /** What the interactor receives: the user's typed name if
+     *  non-blank, else the placeholder we generated for them. */
+    val effectiveName: String
+        get() = name.trim().ifEmpty { generatedName }
 
     /** Label for the primary "Create" CTA on Step2. */
     val createCtaLabel: String
@@ -136,12 +152,32 @@ class CreateGroupViewModel(
     private val createGroup: GroupCreator,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(CreateGroupState())
+    private val _state = MutableStateFlow(freshState())
     val state: StateFlow<CreateGroupState> = _state.asStateFlow()
 
     /** Tapped Cancel/Done from any screen — host (Dialog presenter)
      *  dismisses. */
     var onClose: () -> Unit = {}
+
+    /**
+     * Called by the Step1 view when the name TextField gets focus.
+     * On the *first* focus we clear the field so the user can type a
+     * fresh name without manually deleting the placeholder. After
+     * that, focus is a no-op — the user is in charge of the field.
+     *
+     * Mirrors `tappedNameFieldFocused` from onym-ios PR #27.
+     */
+    fun nameFieldFocused() {
+        val s = _state.value
+        if (s.nameFieldHasBeenFocused) return
+        _state.value = s.copy(
+            nameFieldHasBeenFocused = true,
+            // Only clear if the user hasn't already replaced the
+            // placeholder with something else (defensive — onFocusChanged
+            // can fire before onValueChange in some Compose builds).
+            name = if (s.name == s.generatedName) "" else s.name,
+        )
+    }
 
     // ─── Step 1 → Step 2 ──────────────────────────────────────────
 
@@ -255,7 +291,7 @@ class CreateGroupViewModel(
 
         try {
             val group = createGroup(
-                current.name,
+                current.effectiveName,
                 current.invitees.map { it.inboxPublicKey },
             ) { p -> _state.value = _state.value.copy(progress = p) }
             _state.value = _state.value.copy(
@@ -286,10 +322,55 @@ class CreateGroupViewModel(
         _state.value = _state.value.copy(error = null, route = CreateGroupRoute.Step2)
     }
 
-    private fun reset() {
-        _state.value = CreateGroupState()
+    /**
+     * User chose to cancel out of the flow from the error state on
+     * the Creating screen. The group may already be saved on disk
+     * (the interactor saves before sending invitations) — leaving
+     * it intact is fine; a future "retry invites" UI can pick it
+     * up. Just close the modal and reset.
+     *
+     * Mirrors `tappedCancelFromError` from onym-ios PR #27.
+     */
+    fun cancelFromError() {
+        reset()
+        onClose()
     }
 
+    private fun reset() {
+        _state.value = freshState()
+    }
+
+    private companion object {
+        /** Build a fresh "Adjective Noun" placeholder + a fresh
+         *  initial state. Called at construction + every reset so a
+         *  new flow session starts with a different default name. */
+        fun freshState(): CreateGroupState {
+            val placeholder = generatePlaceholderName()
+            return CreateGroupState(
+                name = placeholder,
+                generatedName = placeholder,
+                nameFieldHasBeenFocused = false,
+            )
+        }
+
+        /** Mirrors `CreateGroupFlow.generatePlaceholderName` from
+         *  onym-ios PR #27. Same lexicon, same "Adjective Noun"
+         *  shape — keeps the user-facing default consistent across
+         *  platforms. */
+        fun generatePlaceholderName(): String =
+            "${ADJECTIVES.random()} ${NOUNS.random()}"
+
+        private val ADJECTIVES = listOf(
+            "Maple", "Quiet", "Sunny", "Brave", "Crimson",
+            "Velvet", "Northern", "Golden", "Ember", "Wild",
+            "Distant", "Tidal", "Silver", "Twilight", "Amber",
+        )
+        private val NOUNS = listOf(
+            "Garden", "Forest", "Harbor", "Meadow", "Atlas",
+            "River", "Cottage", "Lantern", "Compass", "Orchard",
+            "Mountain", "Lighthouse", "Plateau", "Valley", "Bay",
+        )
+    }
 }
 
 /**

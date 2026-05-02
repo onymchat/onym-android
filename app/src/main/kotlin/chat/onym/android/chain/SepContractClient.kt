@@ -13,52 +13,48 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
 /**
- * Pins a `(contractId, transport)` pair and exposes the three
- * contract entrypoints PR-A needs:
+ * Pins a `(contractID, contractType, network, transport)` tuple and
+ * exposes the per-function entrypoints PR-C needs:
  *
- *  - `create_group_v2` — Anarchy / OneOnOne / Democracy / Tyranny
- *    creation. Per-type Oligarchy creation lives outside PR-A scope.
+ *  - `create_group` — Tyranny only at this slice; Anarchy / 1-on-1 /
+ *    Democracy ship in their own follow-up.
  *  - `update_commitment` — Tyranny member-add (used by PR-B+).
- *  - `get_state` — post-create read-back used by the E2E test (PR-D).
+ *  - `get_commitment` — post-create read-back used by the E2E test (PR-D).
  *
- * Stellar Soroban SDK is intentionally not pulled in: the relayer
- * handles tx assembly + signing, this client just POSTs the function
- * call in the [SepContractInvocation] envelope shape.
+ * Top-level fields are stamped onto every invocation so the relayer
+ * can route + allowlist-check (`onym-relayer/src/handler.rs`,
+ * `RelayerRequest`).
  *
- * Mirrors `SEPContractClient` from onym-ios PR #24.
- *
- * @param contractId Soroban contract ID the relayer will route the
- *   call to. Comes from `ContractsRepository` selection.
- * @param transport The HTTP-leg seam — production uses
- *   [OkHttpSepContractTransport], tests substitute [FakeSepContractTransport]
- *   (or build an [OkHttpClient] via `FakeOkHttpClient` and wrap).
+ * Mirrors `SEPContractClient` from onym-ios PR #27.
  */
 class SepContractClient(
-    val contractId: String,
+    val contractID: String,
+    val contractType: SepGroupType,
+    val network: SepNetwork,
     private val transport: SepContractTransport,
 ) {
 
-    suspend fun createGroupV2(request: SepCreateGroupV2Request): SepSubmissionResponse =
+    suspend fun createGroupTyranny(payload: TyrannyCreateGroupPayload): SepSubmissionResponse =
         invoke(
-            function = "create_group_v2",
-            payload = request,
-            payloadSerializer = SepCreateGroupV2Request.serializer(),
+            function = "create_group",
+            payload = payload,
+            payloadSerializer = TyrannyCreateGroupPayload.serializer(),
             responseSerializer = SepSubmissionResponse.serializer(),
         )
 
-    suspend fun updateCommitment(request: SepUpdateCommitmentRequest): SepSubmissionResponse =
+    suspend fun updateCommitmentTyranny(payload: TyrannyUpdateCommitmentPayload): SepSubmissionResponse =
         invoke(
             function = "update_commitment",
-            payload = request,
-            payloadSerializer = SepUpdateCommitmentRequest.serializer(),
+            payload = payload,
+            payloadSerializer = TyrannyUpdateCommitmentPayload.serializer(),
             responseSerializer = SepSubmissionResponse.serializer(),
         )
 
-    suspend fun getState(groupId: ByteArray): SepCommitmentEntry =
+    suspend fun getCommitment(groupId: ByteArray): SepCommitmentEntry =
         invoke(
-            function = "get_state",
-            payload = SepGetStateRequest(groupId = groupId),
-            payloadSerializer = SepGetStateRequest.serializer(),
+            function = "get_commitment",
+            payload = GetCommitmentPayload(groupId = groupId),
+            payloadSerializer = GetCommitmentPayload.serializer(),
             responseSerializer = SepCommitmentEntry.serializer(),
         )
 
@@ -69,7 +65,9 @@ class SepContractClient(
         responseSerializer: KSerializer<R>,
     ): R {
         val invocation = SepContractInvocation(
-            contractId = contractId,
+            contractID = contractID,
+            contractType = contractType,
+            network = network,
             function = function,
             payload = payload,
         )

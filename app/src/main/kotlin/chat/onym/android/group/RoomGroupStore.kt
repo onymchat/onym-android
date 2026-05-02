@@ -76,7 +76,7 @@ class RoomGroupStore(
             // domain layer does the inverse via toULong() when reading.
             epoch = group.epoch.toLong(),
             tierRaw = group.tier.rawValue,
-            groupTypeRaw = group.groupType.rawValue.toInt(),
+            groupTypeRaw = group.groupType.wireValue,
             isPublishedOnChain = group.isPublishedOnChain,
             encryptedName = encryption.encrypt(group.name),
             encryptedGroupSecret = encryption.encrypt(group.groupSecret),
@@ -105,11 +105,7 @@ class RoomGroupStore(
         }
         val salt = tryDecrypt(row.encryptedSalt) ?: return null
         val tier = SepTier.entries.firstOrNull { it.rawValue == row.tierRaw } ?: return null
-        val groupType = try {
-            SepGroupType.fromRaw(row.groupTypeRaw.toUInt())
-        } catch (_: IllegalArgumentException) {
-            return null
-        }
+        val groupType = SepGroupType.fromWire(row.groupTypeRaw) ?: return null
         val commitment = row.encryptedCommitment?.let { tryDecrypt(it) }
         val adminPubkeyHex = row.encryptedAdminPubkeyHex?.let { tryDecryptString(it) }
 

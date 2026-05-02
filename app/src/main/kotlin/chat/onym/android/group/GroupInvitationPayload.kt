@@ -45,8 +45,14 @@ data class GroupInvitationPayload(
     val commitment: ByteArray? = null,
     @SerialName("tier_raw")
     val tierRaw: Int,
+    /** Lowercase governance label — `tyranny`, `anarchy`, etc.
+     *  Receiver decodes via [chat.onym.android.chain.SepGroupType.fromWire].
+     *  String spelling matches the relayer + contract wire format so a
+     *  single `group_type_raw` field is unambiguous across iOS, Android,
+     *  and the Stellar contract. Type changed from `UInt` → `String` in
+     *  the PR-C follow-up to mirror onym-ios PR #27. */
     @SerialName("group_type_raw")
-    val groupTypeRaw: UInt,
+    val groupTypeRaw: String,
     /** Lowercase hex (96 chars) BLS pubkey of the Tyranny admin.
      *  `null` for ANARCHY / ONE_ON_ONE. */
     @SerialName("admin_pubkey_hex")

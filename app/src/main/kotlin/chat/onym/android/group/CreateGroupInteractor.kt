@@ -1,23 +1,22 @@
 package chat.onym.android.group
 
 import chat.onym.android.chain.AnchorSelectionKey
-import chat.onym.android.chain.ContractNetwork
 import chat.onym.android.chain.ContractsRepository
 import chat.onym.android.chain.GovernanceType
 import chat.onym.android.chain.GroupCreateProof
 import chat.onym.android.chain.GroupProofCreateInput
 import chat.onym.android.chain.GroupProofGenerator
 import chat.onym.android.chain.GroupProofGeneratorError
+import chat.onym.android.chain.NetworkPreferenceProvider
 import chat.onym.android.chain.OkHttpSepContractTransport
 import chat.onym.android.chain.OnymGroupProofGenerator
 import chat.onym.android.chain.RelayerRepository
 import chat.onym.android.chain.SepContractClient
 import chat.onym.android.chain.SepContractError
 import chat.onym.android.chain.SepContractTransport
-import chat.onym.android.chain.SepCreateGroupV2Request
 import chat.onym.android.chain.SepGroupType
-import chat.onym.android.chain.SepPublicInputs
 import chat.onym.android.chain.SepTier
+import chat.onym.android.chain.TyrannyCreateGroupPayload
 import chat.onym.android.identity.IdentityRepository
 import chat.onym.android.transport.InboxTransport
 import chat.onym.android.transport.TransportInboxId
@@ -64,6 +63,7 @@ open class CreateGroupInteractor(
     private val relayers: RelayerRepository,
     private val contracts: ContractsRepository,
     private val groups: GroupRepository,
+    private val networkPreference: NetworkPreferenceProvider,
     private val proofGenerator: GroupProofGenerator = OnymGroupProofGenerator(),
     private val inboxTransport: InboxTransport,
     /** Builds a [SepContractTransport] from the relayer URL chosen
@@ -98,7 +98,14 @@ open class CreateGroupInteractor(
 
         // 2. Resolve relayer + contract binding
         val relayerUrl = relayers.selectUrl() ?: throw CreateGroupError.NoActiveRelayer
-        val key = AnchorSelectionKey(network = ContractNetwork.Testnet, type = GovernanceType.Tyranny)
+        // Resolve the contract binding for whichever network the
+        // user has selected — same key is reused for the wire
+        // payload's top-level `network` field below.
+        val activeNetwork = networkPreference.current()
+        val key = AnchorSelectionKey(
+            network = activeNetwork.contractNetwork,
+            type = GovernanceType.Tyranny,
+        )
         val binding = contracts.snapshots.value.binding(key)
             ?: throw CreateGroupError.NoContractBinding(GovernanceType.Tyranny)
 
@@ -155,19 +162,22 @@ open class CreateGroupInteractor(
         // 6. Anchor on chain
         onProgress(CreateGroupProgress.Anchoring)
         val transport = makeContractTransport(relayerUrl)
-        val client = SepContractClient(contractId = binding.contractId, transport = transport)
-        val request = SepCreateGroupV2Request(
-            caller = identitySnapshot.stellarAccountID,
+        val client = SepContractClient(
+            contractID = binding.contractId,
+            contractType = SepGroupType.TYRANNY,
+            network = activeNetwork.sepNetwork,
+            transport = transport,
+        )
+        val payload = TyrannyCreateGroupPayload(
             groupId = groupId,
-            commitment = proof.publicInputs.commitment,
-            tier = tier.rawValue.toUInt(),
-            groupType = SepGroupType.TYRANNY,
-            memberCount = members.size.toUInt(),
+            commitment = proof.commitment,
+            tier = tier.rawValue,
+            adminPubkeyCommitment = proof.adminPubkeyCommitment,
             proof = proof.proof,
             publicInputs = proof.publicInputs,
         )
         val response = try {
-            client.createGroupV2(request)
+            client.createGroupTyranny(payload)
         } catch (e: SepContractError) {
             throw CreateGroupError.AnchorTransport(e.message ?: "transport error")
         } catch (e: Throwable) {
@@ -188,21 +198,21 @@ open class CreateGroupInteractor(
             members = members,
             epoch = 0uL,
             salt = salt,
-            commitment = proof.publicInputs.commitment,
+            commitment = proof.commitment,
             tier = tier,
             groupType = SepGroupType.TYRANNY,
             adminPubkeyHex = adminPubkeyHex,
             isPublishedOnChain = false,
         )
         groups.insert(group)
-        groups.markPublished(group.id, proof.publicInputs.commitment)
+        groups.markPublished(group.id, proof.commitment)
 
         // 8. Send invitations (group is already on disk; failures
         //    throw but a future "retry invites" UI can pick up the
         //    half-delivered state).
         if (invitees.isNotEmpty()) {
             onProgress(CreateGroupProgress.SendingInvitations(invitees.size))
-            val payload = GroupInvitationPayload(
+            val invitePayload = GroupInvitationPayload(
                 version = 1,
                 groupId = groupId,
                 groupSecret = groupSecret,
@@ -210,13 +220,13 @@ open class CreateGroupInteractor(
                 members = members,
                 epoch = 0uL,
                 salt = salt,
-                commitment = proof.publicInputs.commitment,
+                commitment = proof.commitment,
                 tierRaw = tier.rawValue,
-                groupTypeRaw = SepGroupType.TYRANNY.rawValue,
+                groupTypeRaw = SepGroupType.TYRANNY.wireValue,
                 adminPubkeyHex = adminPubkeyHex,
             )
             val payloadBytes = try {
-                jsonFormat.encodeToString(GroupInvitationPayload.serializer(), payload)
+                jsonFormat.encodeToString(GroupInvitationPayload.serializer(), invitePayload)
                     .toByteArray(Charsets.UTF_8)
             } catch (_: Throwable) {
                 throw CreateGroupError.InvitationEncodingFailed

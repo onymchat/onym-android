@@ -42,7 +42,13 @@ data class PersistedGroup(
     val createdAt: Long,
     val epoch: Long,
     val tierRaw: Int,
-    val groupTypeRaw: Int,
+    /** Lowercase governance label — `tyranny`, `anarchy`, etc.
+     *  Type changed from `Int` to `String` in PR #27 (Android twin)
+     *  to match the relayer + contract wire spelling. Schema version
+     *  bumped from 1 to 2; the migration uses
+     *  `fallbackToDestructiveMigration` (no production data, PR-C
+     *  only just shipped). */
+    val groupTypeRaw: String,
     val isPublishedOnChain: Boolean,
 
     val encryptedName: ByteArray,
@@ -74,7 +80,7 @@ data class PersistedGroup(
         h = 31 * h + createdAt.hashCode()
         h = 31 * h + epoch.hashCode()
         h = 31 * h + tierRaw
-        h = 31 * h + groupTypeRaw
+        h = 31 * h + groupTypeRaw.hashCode()
         h = 31 * h + isPublishedOnChain.hashCode()
         h = 31 * h + encryptedName.contentHashCode()
         h = 31 * h + encryptedGroupSecret.contentHashCode()

@@ -52,12 +52,17 @@ class GroupProofGeneratorFfiTest {
 
         val result = OnymGroupProofGenerator().proveCreate(input)
         assertEquals(
-            "Common.parsePlonkProof trims the 1601-byte raw output to 1568 bytes",
-            1568,
+            "PR-C follow-up: relayer rejects parsed-1568; we ship the raw 1601-byte proof",
+            1601,
             result.proof.size,
         )
-        assertEquals(32, result.publicInputs.commitment.size)
-        assertEquals("create-group is always epoch 0", 0uL, result.publicInputs.epoch)
+        assertEquals("4-chunk PI bundle (commitment, Fr(0), admin_pubkey_commitment, group_id_fr)",
+            4, result.publicInputs.size)
+        for (chunk in result.publicInputs) {
+            assertEquals("each PI chunk is 32 bytes", 32, chunk.size)
+        }
+        assertEquals(32, result.commitment.size)
+        assertEquals(32, result.adminPubkeyCommitment.size)
     }
 
     /** 32-byte big-endian encoding of a small u64 — copied from the
