@@ -220,6 +220,42 @@ If any constant in the derivation chain drifts, one of these tests
 breaks loudly. **Do not change a salt / info / algorithm without
 coordinating with iOS and stellar-mls.**
 
+## Static lint — no off-repo secret reads
+
+`scripts/lint-secrets.py` is a default-deny check that any field-access
+read of `.nostrSecretKey`, `.blsSecretKey`, `.recoveryPhrase`, or
+`.entropy` outside an explicit allowlist fails the build. Wired into
+`.github/workflows/ci.yml` as the first hard gate — JVM unit tests
+won't even run if the linter trips.
+
+The allowlist (in the script itself; adding to it requires
+justification in code review):
+
+```
+app/src/main/kotlin/chat/onym/android/identity/IdentityRepository.kt
+app/src/main/kotlin/chat/onym/android/identity/StoredSnapshot.kt
+app/src/main/kotlin/chat/onym/android/identity/Identity.kt
+app/src/androidTest/kotlin/chat/onym/android/identity/IdentityRepositoryTest.kt
+```
+
+Note `IdentitySecretStore.kt` is **not** allowlisted — kotlinx.serialization
+generates the field-access code into `build/generated/`, which the
+linter skips, so the source file itself never reads these fields with
+`.fieldName` syntax.
+
+To allow a specific read, annotate the line itself or any `//`
+comment line in the contiguous block directly above with
+`// onym:allow-secret-read`. The one current suppression
+(`IdentityBootstrapScreen.kt`) cites the surrounding context.
+
+The linter also catches Kotlin destructuring with secret-named
+bindings (`val (entropy, …) = snapshot`) — the only way besides
+`.fieldName` to read the secrets in idiomatic Kotlin. Reflection-
+based reads are a known hole; flag in code review if you see one.
+
+To run locally: `python3 scripts/lint-secrets.py`. Exits 0 on
+success, 1 on any unsuppressed violation.
+
 ## Out of scope (future chunks)
 
 - `repo.stellarSign(_)` / `repo.decryptInvitation(_)` methods —
