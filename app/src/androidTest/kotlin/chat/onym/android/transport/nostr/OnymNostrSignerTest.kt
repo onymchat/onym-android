@@ -3,12 +3,12 @@ package chat.onym.android.transport.nostr
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import chat.onym.android.identity.OnymNostrSigner
 import chat.onym.sdk.Common
-import chat.onym.sdk.OnymException
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -97,9 +97,16 @@ class OnymNostrSignerTest {
         val pub = signer.publicKey()
         val eventId = ByteArray(32) { 0xAA.toByte() }
         val sig = signer.signEventId(eventId)
-        // Common.nostrVerifyEventSignature throws OnymException on
-        // verification failure; not throwing = success.
-        Common.nostrVerifyEventSignature(pub, eventId, sig)
+        // Android's Common.nostrVerifyEventSignature returns Boolean
+        // — the underlying FFI conflates "verify failed" with "input
+        // malformed" into a single `bool` (see the wrapper KDoc in
+        // onym-sdk-kotlin). iOS's binding throws on failure instead.
+        // Inputs here are well-formed and the sig is freshly produced,
+        // so the result must be true.
+        assertTrue(
+            "schnorr verify of own signature must return true",
+            Common.nostrVerifyEventSignature(pub, eventId, sig),
+        )
     }
 
     @Test
@@ -109,9 +116,10 @@ class OnymNostrSignerTest {
         val signedId = ByteArray(32) { 0xAA.toByte() }
         val otherId = ByteArray(32) { 0xBB.toByte() }
         val sig = signer.signEventId(signedId)
-        assertThrows(OnymException::class.java) {
-            Common.nostrVerifyEventSignature(pub, otherId, sig)
-        }
+        assertFalse(
+            "verify with a different eventId must return false",
+            Common.nostrVerifyEventSignature(pub, otherId, sig),
+        )
     }
 
     // ─── ephemeral ────────────────────────────────────────────────
@@ -138,6 +146,9 @@ class OnymNostrSignerTest {
         val pub = signer.publicKey()
         val eventId = ByteArray(32) { 0x55 }
         val sig = signer.signEventId(eventId)
-        Common.nostrVerifyEventSignature(pub, eventId, sig)
+        assertTrue(
+            "ephemeral signer roundtrip must verify",
+            Common.nostrVerifyEventSignature(pub, eventId, sig),
+        )
     }
 }
