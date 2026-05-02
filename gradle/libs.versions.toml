@@ -36,10 +36,25 @@ onym-sdk = "0.0.2"
 # Crypto
 bouncycastle = "1.78.1"
 
+# Room — Kotlin-coroutines DAO (`suspend` queries) + KSP-generated
+# bindings. 2.6.1 is the newest stable that pairs cleanly with AGP
+# 8.7 and Kotlin 2.0.21 KSP without dragging in 2.7's KMP refactor.
+androidx-room = "2.6.1"
+
+# KSP plugin — must match the Kotlin version exactly (the X.Y.Z-N
+# suffix is the KSP toolchain rev). Required for Room's annotation
+# processor (`androidx.room:room-compiler`).
+ksp = "2.0.21-1.0.27"
+
 # Test
 junit = "4.13.2"
 androidx-test-ext-junit = "1.2.1"
 androidx-test-runner = "1.6.2"
+
+# Robolectric — drives Room (which needs an Android `Context`) from
+# the JVM unit-test runner. Used only for `RoomInvitationStoreTest`;
+# everything else is plain JUnit.
+robolectric = "4.14.1"
 # Espresso 3.7.0 — first version with the InputManager.getInstance()
 # reflection fix for Android 15+/16+. Compose UI tests use Espresso
 # under the hood for `onIdle()` synchronisation, and on newer API
@@ -81,6 +96,11 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 # OnymSDK
 onym-sdk = { module = "chat.onym:onym-sdk", version.ref = "onym-sdk" }
 
+# Room
+androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "androidx-room" }
+androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "androidx-room" }
+androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "androidx-room" }
+
 # BouncyCastle — Curve25519 (Ed25519 + X25519) raw-key APIs not in the JDK
 bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 
@@ -89,9 +109,11 @@ junit = { module = "junit:junit", version.ref = "junit" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-test-ext-junit" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
