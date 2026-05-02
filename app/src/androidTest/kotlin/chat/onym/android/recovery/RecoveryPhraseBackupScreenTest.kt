@@ -142,12 +142,16 @@ class RecoveryPhraseBackupScreenTest {
         runBlocking { advanceToReveal() }
         composeRule.onNodeWithText(string(R.string.tap_to_reveal)).performClick()
 
-        // Tap-to-reveal overlay disappears + at least the first + last
-        // word are now visible to the user.
+        // Tap-to-reveal overlay disappears + at least one early + late
+        // word is now visible to the user. The test mnemonic repeats
+        // "legal" / "winner" / "thank" by design (BIP39 spec vector),
+        // so the assertion targets the first / last positions that are
+        // unique in the phrase — `onNodeWithText` (singular) requires
+        // a unique match.
         composeRule.onNodeWithText(string(R.string.tap_to_reveal))
             .assertIsNotDisplayed()
-        composeRule.onNodeWithText(testWords.first(), substring = true).assertExists()
-        composeRule.onNodeWithText(testWords.last(), substring = true).assertExists()
+        composeRule.onNodeWithText(testWords[3], substring = true).assertExists()  // "year"
+        composeRule.onNodeWithText(testWords.last(), substring = true).assertExists()  // "yellow"
 
         // Actions enabled.
         composeRule.onNodeWithText(string(R.string.ive_written_it_down))

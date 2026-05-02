@@ -42,6 +42,10 @@ import java.util.Base64
  * adapter does exactly: ship opaque bytes in/out.
  */
 class NostrMessageTransport(
+    /** Per-event signer factory. Constructor-injected so this file
+     *  doesn't import `chat.onym.sdk.*` — the FFI stays inside the
+     *  identity layer. */
+    private val signerProvider: NostrEphemeralSignerProvider,
     /** Scope for relay reconnect loops + per-subscription fan-out. */
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) : MessageTransport {
@@ -57,7 +61,7 @@ class NostrMessageTransport(
     }
 
     override suspend fun publish(payload: ByteArray, topic: TransportTopic): PublishReceipt {
-        val event = buildPublishEvent(payload, topic, OnymNostrSigner.ephemeral())
+        val event = buildPublishEvent(payload, topic, signerProvider.ephemeral())
         val accepted = state.publish(event)
         return PublishReceipt(messageId = event.id, acceptedBy = accepted)
     }

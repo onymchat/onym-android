@@ -1,6 +1,7 @@
 package chat.onym.android.transport.nostr
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import chat.onym.android.identity.OnymNostrSigner
 import chat.onym.sdk.Common
 import chat.onym.sdk.OnymException
 import org.junit.Assert.assertArrayEquals

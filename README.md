@@ -27,28 +27,144 @@ is the only requirement.
 
 ## Architecture
 
-Three rules, enforced by package layout:
+Four layers, each isolated from the others by an explicit seam.
+Solid boxes exist today; dashed boxes are planned.
 
-- **Repositories own all I/O** — EncryptedSharedPreferences, network,
-  on-device state. Pure references; no UI concerns.
-- **Unidirectional reactive flow to views** — repositories publish
-  state via `StateFlow`; views observe with
-  `collectAsStateWithLifecycle()` and render; user actions flow back as
-  intents that mutate repository state via `suspend` mutators. No
-  bidirectional bindings, no shared mutable state across views.
-- **OnymSDK is internal-only** — repositories wrap it; views never
-  call it directly.
+```
+                                          ┌────────────────────────────────────┐
+                                          │ Composables (Jetpack Compose)      │
+                                          │ stateless · pure render            │
+                                          │ RootScreen · SettingsScreen ·      │
+                                          │ RecoveryPhraseBackupScreen         │
+                                          └──────────┬──────────────▲──────────┘
+                                                     │ intent       │ snapshot
+                                                     ▼              │
+                                          ┌──────────────────────────────────┐
+                                          │ ViewModels (StateFlow exposed)   │
+                                          │ owns flow state, not domain      │
+                                          │ state · no I/O · no persistence  │
+                                          │ RecoveryPhraseBackupViewModel    │
+                                          │ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶     │
+                                          │ ╎ planned: ChatViewModel ·     ╎ │
+                                          │ ╎          InviteViewModel     ╎ │
+                                          │ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶     │
+                                          └──────────┬──────────────▲────────┘
+                                                     │ command      │ snapshot
+                                                     ▼              │
+                                          ┌──────────────────────────────────┐
+                                          │ Repositories (Mutex + StateFlow) │
+                                          │ stateful · own ALL I/O ·         │
+                                          │ StateFlow<T> reactive surface    │
+                                          │                                  │
+                                          │   IdentityRepository  ◄── ROOT   │
+                                          │ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶     │
+                                          │ ╎ planned: ChatRepository      ╎ │
+                                          │ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶     │
+                                          └──┬────────────────────────────┬──┘
+                                             │                            │
+                        ┌────────────────────┘                            └───────────────────┐
+                        ▼                                                                     ▼
+          ╔═══════════════════════╗                                       ╔══════════════════════════════╗
+          ║ Persistence (seam)    ║                                       ║ Transport (seam)             ║
+          ║ IdentitySecretStore   ║                                       ║ MessageTransport             ║
+          ║ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶   ║                                       ║ InboxTransport               ║
+          ║ ╎ planned: SQLite ╎   ║                                       ║                              ║
+          ║ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶   ║                                       ║                              ║
+          ╚══════════╤════════════╝                                       ╚══════════╤═══════════════════╝
+                     │                                                               │
+                     ▼                                                               ▼
+          ┌──────────────────────────┐                          ┌────────────────────┬───────────────────────┐
+          │ EncryptedSharedPrefs     │                          │ Nostr (today)      │ ╎ planned: Tor       ╎│
+          │ + Android Keystore       │                          │ NostrRelayConn ·   │ ╎ HiddenServiceConn  ╎│
+          │ AES256_GCM               │                          │ NostrEvent · NIP-01│ ╎ (drop-in adapter)  ╎│
+          └──────────────────────────┘                          └────────────────────┴───────────────────────┘
+                                          ╔════════════════════════════════════════╗
+                                          ║ OnymSDK (FFI primitives)               ║
+                                          ║ Common · Anarchy · OneOnOne ·          ║
+                                          ║ Tyranny — Plonk · Poseidon · BLS ·     ║
+                                          ║ BIP340 Nostr signing                   ║
+                                          ║ called ONLY from inside repositories   ║
+                                          ║ or from repository-owned signer        ║
+                                          ║ providers                              ║
+                                          ╚════════════════════════════════════════╝
+```
 
-The first repository — `IdentityRepository` — owns the on-device
-identity. Mutations are serialised by a `Mutex`; observers watch
-`snapshots: StateFlow<Identity?>`. A `Compose` screen drives the
-initial `bootstrap()` from a `LaunchedEffect` and re-renders whenever
-a fresh snapshot lands; it never sees secret material, never calls
-OnymSDK, never touches EncryptedSharedPreferences.
+### Touch-surface rules
+
+What each layer is allowed to call. Statically enforced where possible
+(access modifiers, `scripts/lint-secrets.py`); load-bearing in code
+review where it isn't.
+
+| Layer | May call | Forbidden |
+|---|---|---|
+| **Composable** | its own ViewModel (intents in, snapshots out) | repository directly · `OnymSDK` · `EncryptedSharedPreferences` · transport · `OkHttp` · another ViewModel |
+| **ViewModel** | repositories (commands + snapshots) · ViewModel-local I/O affordances (`ClipboardWriter`, `BiometricAuthenticator`, `StringProvider`) | `OnymSDK` · `EncryptedSharedPreferences` · transport · disk · network · another ViewModel's internals |
+| **Repository** | persistence seam · transport seam · `OnymSDK` | another repository's internals · composables · ViewModels |
+| **Persistence / Transport seam** | the one concrete backend it implements | repositories · `OnymSDK` · the other seam |
+| **OnymSDK** | itself | everything above |
+
+Three extra invariants that cut across the layers:
+
+- **Secret material never leaves its owning repository.** No outside
+  caller reads `nostrSecretKey` / `blsSecretKey` / `entropy` /
+  `recoveryPhrase` off `Identity` or any other value type. Enforced by
+  `scripts/lint-secrets.py` (default-deny diff check; see *Static
+  lint*).
+- **Reactive flow is unidirectional.** Repositories publish via
+  `StateFlow<T>`; ViewModels observe and command; composables observe
+  and intent. No bidirectional bindings, no shared mutable state
+  across composables, no composable-side mutation.
+- **ViewModel-local I/O affordances are interfaces, not concrete
+  Android types.** `BiometricAuthenticator`, `ClipboardWriter`,
+  `StringProvider` are Kotlin `interface`s defined alongside the
+  ViewModel; the production `Android*` impls are wired via
+  `AppDependencies` at the composition root. Tests substitute fakes
+  without dragging in `LocalContext` / `BiometricPrompt` /
+  `ClipboardManager`.
+
+### Why this beats the reference impl in `stellar-mls/clients/android`
+
+- **Transport is a seam, not a class.** `MessageTransport` /
+  `InboxTransport` are Kotlin interfaces; the Nostr implementation is
+  one of several possible adapters. A future Tor / hidden-service /
+  `wss://` mesh / mock transport drops in without touching any caller
+  above the seam. In the reference impl, `NostrMessageTransport.kt`
+  and `InvitationTransport.kt` co-mingle chat semantics (`GroupCrypto`,
+  BLS attestation, member tracking) with relay framing in the same
+  files, which is why a transport swap there is a refactor, not a
+  substitution.
+- **Persistence is a seam too.** `IdentityRepository` talks to an
+  `IdentitySecretStore` reference — swapping in a SQLite-backed or
+  in-memory store for a different deployment / test environment is a
+  constructor change, not a rewrite.
+- **ViewModels own only flow state.** The reference impl threads
+  identity / chat state through ad-hoc Activity-scoped state-holders
+  that double as orchestrators. We split orchestration per-flow
+  (`RecoveryPhraseBackupViewModel` today, `ChatViewModel` /
+  `InviteViewModel` later); each owns its own state machine and
+  *only* its state machine. Repository state stays in the repository.
+- **Composables never close over a repository.** Compose composables
+  observe a ViewModel's `StateFlow` and dispatch intents; the
+  ViewModel is the only thing that holds a reference to a repository.
+  A composable written against this layering can be redesigned (or
+  A/B-tested, or skinned for a Wear OS surface) without changing
+  anything below it.
+
+### Why `IdentityRepository` is the root
+
+Identity is the only repository that doesn't depend on another
+repository — it bootstraps from `IdentitySecretStore` alone. Every
+other repository needs it: chat needs the BLS keypair to attest
+membership; transport needs the inbox identifier to subscribe. That
+makes it the dependency root: nothing else can come up before it
+does. `OnymApplication.onCreate` constructs `IdentityRepository`
+first, captures it inside the `AppDependencies` factory closures,
+then injects those closures into every ViewModel that needs
+identity-derived state.
 
 ### Why `StateFlow` instead of `actor + AsyncStream`
 
-iOS Chunk 2 uses Swift `actor` + `AsyncStream` because SwiftUI's
+iOS uses Swift `actor` + `AsyncStream` because SwiftUI's
 `@Observable` macro doesn't auto-subscribe to streams — every view
 needs an explicit `.task { for await … }` loop.
 
@@ -75,17 +191,22 @@ mutation, multi-subscriber safe) with less ceremony.
 │   │   ├── res/values/strings.xml
 │   │   ├── resources/bip39-english.txt              ← 2048-word English wordlist (load via classpath)
 │   │   └── kotlin/chat/onym/android/
-│   │       ├── OnymApplication.kt                   ← BouncyCastle provider registration
-│   │       ├── MainActivity.kt                      ← @main, owns the repo
-│   │       └── identity/
-│   │           ├── Identity.kt                      ← snapshot value type the views see
-│   │           ├── IdentityRepository.kt            ← StateFlow + Mutex + derivation
-│   │           ├── IdentitySecretStore.kt           ← EncryptedSharedPreferences wrapper
-│   │           ├── StoredSnapshot.kt                ← @Serializable JSON blob (Base64 ByteArrays)
-│   │           ├── IdentityError.kt                 ← single error type
-│   │           ├── Bip39.kt                         ← BIP39 wordlist + PBKDF2 + HKDF
-│   │           ├── StellarStrKey.kt                 ← Ed25519 → G… account ID encoder
-│   │           └── IdentityBootstrapScreen.kt       ← collectAsStateWithLifecycle drains snapshots
+│   │       ├── OnymApplication.kt                   ← BC provider + AppDependencies wiring
+│   │       ├── AppDependencies.kt                   ← composition-root handle (factory closures)
+│   │       ├── MainActivity.kt                      ← FragmentActivity host; reads AppDependencies
+│   │       ├── RootScreen.kt                        ← Scaffold + NavigationBar + NavHost
+│   │       ├── identity/
+│   │       │   ├── Identity.kt                      ← snapshot value type the views see
+│   │       │   ├── IdentityRepository.kt            ← StateFlow + Mutex + derivation
+│   │       │   ├── IdentitySecretStore.kt           ← EncryptedSharedPreferences wrapper
+│   │       │   ├── StoredSnapshot.kt                ← @Serializable JSON blob (Base64 ByteArrays)
+│   │       │   ├── IdentityError.kt                 ← single error type
+│   │       │   ├── Bip39.kt                         ← BIP39 wordlist + PBKDF2 + HKDF
+│   │       │   ├── StellarStrKey.kt                 ← Ed25519 → G… account ID encoder
+│   │       │   └── OnymNostrSigner.kt               ← BIP340 signer + EphemeralSignerProvider
+│   │       └── transport/
+│   │           ├── Transport.kt                     ← MessageTransport / InboxTransport interfaces
+│   │           └── nostr/                           ← Nostr adapter (NIP-01 framing, OkHttp WS)
 │   ├── src/test/kotlin/chat/onym/android/identity/
 │   │   ├── CrossPlatformFixtureTest.kt              ← derivation locks (no FFI needed)
 │   │   ├── Bip39Test.kt                             ← wordlist SHA-256 + round-trip + edge cases
@@ -245,8 +366,9 @@ linter skips, so the source file itself never reads these fields with
 
 To allow a specific read, annotate the line itself or any `//`
 comment line in the contiguous block directly above with
-`// onym:allow-secret-read`. The one current suppression
-(`IdentityBootstrapScreen.kt`) cites the surrounding context.
+`// onym:allow-secret-read`. Existing suppressions cite the
+surrounding context (e.g., the recovery-phrase reveal step in
+`RecoveryPhraseBackupViewModel.kt`).
 
 The linter also catches Kotlin destructuring with secret-named
 bindings (`val (entropy, …) = snapshot`) — the only way besides

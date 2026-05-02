@@ -76,7 +76,7 @@ data class NostrEvent(
          * tag, compute the canonical id, sign it with [signer]. The
          * signer's [NostrSigner.publicKey] becomes the event
          * `pubkey` — pass an ephemeral signer (see
-         * [OnymNostrSigner.ephemeral]) for metadata-hiding (kinds
+         * [NostrEphemeralSignerProvider]) for metadata-hiding (kinds
          * 44114 / 34113 in this codebase) so the outer pubkey can't
          * be used to cluster related events.
          */
