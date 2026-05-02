@@ -99,6 +99,11 @@ dependencies {
 
     implementation(libs.androidx.security.crypto)
 
+    // OkHttp WebSocket — NostrRelayConnection uses it for the relay
+    // connection. Built-in pingInterval handles heartbeat; no need
+    // for the iOS CFNetwork-pong workaround.
+    implementation(libs.okhttp)
+
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
