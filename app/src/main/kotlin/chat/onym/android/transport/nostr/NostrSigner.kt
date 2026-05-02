@@ -27,7 +27,13 @@ interface NostrSigner {
  * from the secret rather than caching, so the secret is the only
  * thing pinned in memory.
  */
-class OnymNostrSigner(private val secretKey: ByteArray) : NostrSigner {
+class OnymNostrSigner(
+    /** `internal` (not `private`) so tests can assert ephemeral
+     *  signers produce distinct secrets — the metadata-hiding
+     *  invariant. Production code should never read this directly;
+     *  go through [signEventId] / [publicKey] instead. */
+    internal val secretKey: ByteArray,
+) : NostrSigner {
 
     init {
         require(secretKey.size == 32) {
