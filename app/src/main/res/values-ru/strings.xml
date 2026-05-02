@@ -70,10 +70,14 @@
     <string name="security_footer_view_recovery_phrase">Просмотрите свою фразу восстановления из 12 слов. Она понадобится для восстановления личности на новом устройстве.</string>
     <string name="search_placeholder_body">Поиск появится в одном из следующих обновлений.</string>
 
-    <!-- ─── Settings → Groups section (PR-C of Create Group) ─────── -->
-    <string name="settings_groups">Группы</string>
-    <string name="settings_create_group">Создать группу</string>
-    <string name="settings_groups_footer">Создайте сквозно зашифрованную группу, закреплённую на тестнете Stellar. Сейчас доступна только Тирания.</string>
+    <!-- ─── Chats tab (PR-30) ─────────────────────────────────────── -->
+    <string name="chats_tab">Чаты</string>
+    <string name="chats_title">Чаты</string>
+    <string name="chats_create_group">Создать группу</string>
+    <string name="chats_empty_title">Чатов пока нет</string>
+    <string name="chats_empty_body">Создайте сквозно зашифрованную группу, закреплённую на Stellar.</string>
+    <string name="chats_unnamed_group">(Без названия)</string>
+    <string name="chats_published_on_chain">Опубликовано в блокчейне</string>
 
     <!-- ─── Settings → Network section (umbrella) ────────────────── -->
     <string name="settings_network">Сеть</string>

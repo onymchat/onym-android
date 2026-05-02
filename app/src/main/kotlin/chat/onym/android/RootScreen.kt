@@ -2,6 +2,7 @@ package chat.onym.android
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -27,6 +28,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import chat.onym.android.chain.ContractNetwork
 import chat.onym.android.chain.GovernanceType
+import chat.onym.android.chats.ChatsScreen
+import chat.onym.android.chats.ChatsViewModel
 import chat.onym.android.group.CreateGroupViewModel
 import chat.onym.android.group.creategroup.CreateGroupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupScreen
@@ -107,9 +110,20 @@ fun RootScreen(dependencies: AppDependencies) {
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = Tab.Settings.route,
+            startDestination = Tab.Chats.route,
             modifier = androidx.compose.ui.Modifier.padding(padding),
         ) {
+            composable(Tab.Chats.route) {
+                val vm: ChatsViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeChatsViewModel() }
+                    },
+                )
+                ChatsScreen(
+                    viewModel = vm,
+                    onCreateGroup = { navController.navigate(ROUTE_CREATE_GROUP) },
+                )
+            }
             composable(Tab.Settings.route) {
                 val networkFlow = remember(dependencies) {
                     dependencies.networkPreferenceProvider.flow
@@ -122,7 +136,6 @@ fun RootScreen(dependencies: AppDependencies) {
                     onBackupClick = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
                     onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
-                    onCreateGroupClick = { navController.navigate(ROUTE_CREATE_GROUP) },
                     useMainnet = networkPref == chat.onym.android.chain.AppNetwork.Mainnet,
                     onToggleMainnet = { on ->
                         coroutineScope.launch {
@@ -230,11 +243,14 @@ fun RootScreen(dependencies: AppDependencies) {
 }
 
 private enum class Tab(val route: String, val labelRes: Int) {
+    // Chats is the leftmost + default tab post-PR-30.
+    Chats("chats", R.string.chats_tab),
     Settings("settings", R.string.settings),
     Search("search", R.string.search);
 
     @Composable
     fun icon() = when (this) {
+        Chats -> Icons.Filled.Forum
         Settings -> Icons.Filled.Settings
         Search -> Icons.Filled.Search
     }
@@ -244,4 +260,4 @@ private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
-private val TAB_ROUTES = setOf(Tab.Settings.route, Tab.Search.route)
+private val TAB_ROUTES = setOf(Tab.Chats.route, Tab.Settings.route, Tab.Search.route)

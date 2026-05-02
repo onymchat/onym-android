@@ -14,7 +14,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.Icon
@@ -64,7 +63,6 @@ fun SettingsScreen(
     onBackupClick: () -> Unit,
     onRelayerClick: () -> Unit,
     onAnchorsClick: () -> Unit,
-    onCreateGroupClick: () -> Unit,
     /** App-wide network preference. Bound to the Settings → Network
      *  → "Use Mainnet" Switch. */
     useMainnet: Boolean,
@@ -84,44 +82,8 @@ fun SettingsScreen(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) { padding ->
         LazyColumn(contentPadding = padding) {
-            // Groups section — Create Group flow entry point. Mirrors
-            // the iOS PR #26 ordering (Groups first, above Security).
-            item { SectionHeader(stringResource(R.string.settings_groups)) }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.settings_create_group)) },
-                    leadingContent = {
-                        SettingsIconBox(
-                            icon = Icons.Filled.Group,
-                            background = Color(0xFF34C759),
-                        )
-                    },
-                    trailingContent = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        )
-                    },
-                    colors = ListItemDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onCreateGroupClick)
-                        .testTag("settings.create_group_row"),
-                )
-            }
-            item {
-                Text(
-                    stringResource(R.string.settings_groups_footer),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
-                )
-            }
-
+            // Groups section moved to the Chats tab (PR-30) — Settings
+            // now opens straight to the Security section.
             item {
                 SectionHeader(stringResource(R.string.security))
             }
