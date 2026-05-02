@@ -24,6 +24,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import chat.onym.android.chain.ContractNetwork
 import chat.onym.android.chain.GovernanceType
+import chat.onym.android.group.CreateGroupViewModel
+import chat.onym.android.group.creategroup.CreateGroupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.search.SearchScreen
@@ -110,7 +112,17 @@ fun RootScreen(dependencies: AppDependencies) {
                     onBackupClick = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
                     onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
+                    onCreateGroupClick = { navController.navigate(ROUTE_CREATE_GROUP) },
                 )
+            }
+            composable(ROUTE_CREATE_GROUP) {
+                val vm: CreateGroupViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeCreateGroupViewModel() }
+                    },
+                )
+                vm.onClose = { navController.popBackStack() }
+                CreateGroupScreen(viewModel = vm)
             }
             composable(Tab.Search.route) {
                 SearchScreen()
@@ -212,4 +224,5 @@ private enum class Tab(val route: String, val labelRes: Int) {
 private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
+private const val ROUTE_CREATE_GROUP = "create_group"
 private val TAB_ROUTES = setOf(Tab.Settings.route, Tab.Search.route)

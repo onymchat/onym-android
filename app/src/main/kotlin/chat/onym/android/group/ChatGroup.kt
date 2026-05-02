@@ -124,13 +124,3 @@ data class ChatGroup(
         }
     }
 }
-
-/** Stub for the chain-anchor binding metadata that PR-B will
- *  populate (txHash / ledger / network). Held here so [ChatGroup]
- *  has a slot to embed it once PR-B lands; PR-A leaves it `null`. */
-@Serializable
-data class AnchorBinding(
-    @SerialName("transaction_hash")
-    val transactionHash: String,
-    val network: String,
-)

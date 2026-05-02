@@ -86,15 +86,6 @@ class ChatGroupTest {
         assertEquals(cold, decoded)
     }
 
-    @Test
-    fun anchorBinding_codableRoundtrips() {
-        val original = AnchorBinding(transactionHash = "deadbeef", network = "testnet")
-        val encoded = json.encodeToString(AnchorBinding.serializer(), original)
-        val decoded = json.decodeFromString(AnchorBinding.serializer(), encoded)
-        assertEquals(original, decoded)
-        assertNotNull(encoded)
-    }
-
     private fun makeGroup(id: String): ChatGroup = ChatGroup(
         id = id,
         name = "test",
