@@ -36,6 +36,14 @@ bouncycastle = "1.78.1"
 junit = "4.13.2"
 androidx-test-ext-junit = "1.2.1"
 androidx-test-runner = "1.6.2"
+# Espresso 3.7.0 — first version with the InputManager.getInstance()
+# reflection fix for Android 15+/16+. Compose UI tests use Espresso
+# under the hood for `onIdle()` synchronisation, and on newer API
+# levels the older transitive espresso-core (~3.6.1) crashes with
+# `NoSuchMethodException: android.hardware.input.InputManager.getInstance []`
+# at the first compose action. Pinned explicitly to override the
+# transitive version pulled in by ui-test-junit4.
+androidx-test-espresso-core = "3.7.0"
 
 [libraries]
 # AndroidX
@@ -59,6 +67,7 @@ androidx-navigation-compose = { module = "androidx.navigation:navigation-compose
 # Compose UI test (versions managed by androidx-compose-bom)
 androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
 androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
+androidx-test-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "androidx-test-espresso-core" }
 
 # Kotlin / coroutines / serialization
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
