@@ -22,9 +22,15 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import chat.onym.android.chain.ContractNetwork
+import chat.onym.android.chain.GovernanceType
 import chat.onym.android.recovery.RecoveryPhraseBackupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.search.SearchScreen
+import chat.onym.android.settings.AnchorsNetworkScreen
+import chat.onym.android.settings.AnchorsPickerViewModel
+import chat.onym.android.settings.AnchorsRootScreen
+import chat.onym.android.settings.AnchorsVersionScreen
 import chat.onym.android.settings.RelayerPickerScreen
 import chat.onym.android.settings.RelayerPickerViewModel
 import chat.onym.android.settings.SettingsScreen
@@ -103,6 +109,7 @@ fun RootScreen(dependencies: AppDependencies) {
                 SettingsScreen(
                     onBackupClick = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_PICKER) },
+                    onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
                 )
             }
             composable(Tab.Search.route) {
@@ -116,6 +123,54 @@ fun RootScreen(dependencies: AppDependencies) {
                 )
                 RelayerPickerScreen(
                     viewModel = vm,
+                    onBackClick = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_ANCHORS_ROOT) {
+                val vm: AnchorsPickerViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeAnchorsPickerViewModel() }
+                    },
+                )
+                AnchorsRootScreen(
+                    viewModel = vm,
+                    onNetworkClick = { net ->
+                        navController.navigate("anchors_network/${net.wireValue}")
+                    },
+                    onBackClick = { navController.popBackStack() },
+                )
+            }
+            composable("anchors_network/{network}") { entry ->
+                val networkArg = entry.arguments?.getString("network") ?: return@composable
+                val network = ContractNetwork.fromWire(networkArg) ?: return@composable
+                val vm: AnchorsPickerViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeAnchorsPickerViewModel() }
+                    },
+                )
+                AnchorsNetworkScreen(
+                    viewModel = vm,
+                    network = network,
+                    onTypeClick = { type ->
+                        navController.navigate("anchors_version/${network.wireValue}/${type.wireValue}")
+                    },
+                    onBackClick = { navController.popBackStack() },
+                )
+            }
+            composable("anchors_version/{network}/{type}") { entry ->
+                val networkArg = entry.arguments?.getString("network") ?: return@composable
+                val typeArg = entry.arguments?.getString("type") ?: return@composable
+                val network = ContractNetwork.fromWire(networkArg) ?: return@composable
+                val type = GovernanceType.fromWire(typeArg) ?: return@composable
+                val vm: AnchorsPickerViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeAnchorsPickerViewModel() }
+                    },
+                )
+                AnchorsVersionScreen(
+                    viewModel = vm,
+                    network = network,
+                    type = type,
                     onBackClick = { navController.popBackStack() },
                 )
             }
@@ -156,4 +211,5 @@ private enum class Tab(val route: String, val labelRes: Int) {
 
 private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
 private const val ROUTE_RELAYER_PICKER = "relayer_picker"
+private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private val TAB_ROUTES = setOf(Tab.Settings.route, Tab.Search.route)
