@@ -7,13 +7,21 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,40 +40,139 @@ import kotlin.math.sin
 // ─── Tokens ──────────────────────────────────────────────────────
 
 /**
- * Dark-theme design tokens for the Create Group flow. Mirrors
- * `OnymTokens` in `OnymBrand.swift` from onym-ios PR #26. Light
- * theme will land later; PR-C ships dark only.
+ * Per-theme design-token bundle for the Create Group flow. Two
+ * pre-built variants live in the companion ([Light] / [Dark]); the
+ * active set is provided at the root by [OnymTheme] and read by
+ * descendant Composables via `LocalOnymTokens.current.X`.
+ *
+ * Lifted from the design's `app.jsx` `THEMES.{light,dark}` block —
+ * same source iOS used. Mirrors `OnymTokens` in `OnymBrand.swift`
+ * from onym-ios PR #31 (the rewrite that flipped from a static
+ * dark-only palette to the dual data class).
  */
-object OnymTokens {
-    val Bg = Color(0xFF000000)
-    val Surface = Color(0xFF0E0E10)
-    val Surface2 = Color(0xFF17171A)
-    val Surface3 = Color(0xFF1F1F23)
-    val Text = Color(0xFFF2F2F4)
-    val Text2 = Color(0xFFF2F2F4).copy(alpha = 0.62f)
-    val Text3 = Color(0xFFF2F2F4).copy(alpha = 0.40f)
-    val Hairline = Color.White.copy(alpha = 0.07f)
-    val HairlineStrong = Color.White.copy(alpha = 0.12f)
-    val Green = Color(0xFF34C759)
-    val Red = Color(0xFFFF453A)
+@Immutable
+data class OnymTokens(
+    val bg: Color,
+    val surface: Color,
+    val surface2: Color,
+    val surface3: Color,
+    val text: Color,
+    val text2: Color,
+    val text3: Color,
+    val hairline: Color,
+    val hairlineStrong: Color,
+    val green: Color,
+    val red: Color,
+    /** Reads on accent fills (button labels, the tyranny crown's
+     *  centre pip, etc.). White on light, black on dark. */
+    val onAccent: Color,
+) {
+    companion object {
+        val Light: OnymTokens = OnymTokens(
+            bg              = Color(0xFFFFFFFF),
+            surface         = Color(0xFFF5F5F7),
+            surface2        = Color(0xFFFFFFFF),
+            surface3        = Color(0xFFEBEBEF),
+            text            = Color(0xFF0A0A0C),
+            text2           = Color(0xFF0A0A0C).copy(alpha = 0.62f),
+            text3           = Color(0xFF0A0A0C).copy(alpha = 0.42f),
+            hairline        = Color.Black.copy(alpha = 0.06f),
+            hairlineStrong  = Color.Black.copy(alpha = 0.12f),
+            green           = Color(0xFF1FA84A),
+            red             = Color(0xFFE5392E),
+            onAccent        = Color.White,
+        )
 
-    /** Reads on accent fills (button labels, etc.). */
-    val OnAccent: Color = Color.Black
+        val Dark: OnymTokens = OnymTokens(
+            bg              = Color(0xFF000000),
+            surface         = Color(0xFF0E0E10),
+            surface2        = Color(0xFF17171A),
+            surface3        = Color(0xFF1F1F23),
+            text            = Color(0xFFF2F2F4),
+            text2           = Color(0xFFF2F2F4).copy(alpha = 0.62f),
+            text3           = Color(0xFFF2F2F4).copy(alpha = 0.40f),
+            hairline        = Color.White.copy(alpha = 0.07f),
+            hairlineStrong  = Color.White.copy(alpha = 0.12f),
+            green           = Color(0xFF34C759),
+            red             = Color(0xFFFF453A),
+            onAccent        = Color.Black,
+        )
+    }
 }
+
+/**
+ * CompositionLocal carrying the active [OnymTokens] set. Defaults
+ * to [OnymTokens.Dark] so any descendant rendered outside an
+ * [OnymTheme] scope still has a sensible value (and matches the
+ * pre-PR-31 dark-only behaviour).
+ *
+ * `staticCompositionLocalOf` (rather than `compositionLocalOf`) is
+ * correct here — the swap on theme change happens via the root
+ * [OnymTheme]'s `CompositionLocalProvider` re-providing, not via
+ * fine-grained recomposition tracking.
+ */
+val LocalOnymTokens = staticCompositionLocalOf { OnymTokens.Dark }
 
 // ─── Accent palette ──────────────────────────────────────────────
 
 /**
- * The six accent colours the Step1 picker offers. Mirrors
- * `OnymAccent` from onym-ios PR #26.
+ * The six accent colours the Step1 picker offers. Each carries both
+ * a [light] (darker, desaturated for legibility on white surfaces)
+ * and [dark] (saturated, bright for dark surfaces) variant; the
+ * active variant is resolved per-call by [color] based on the
+ * provided [LocalOnymTokens] (so a forced theme override propagates
+ * the same way a system theme change does).
+ *
+ * Light/dark hex values lifted from the design's `app.jsx`
+ * `THEMES.{light,dark}.accents` blocks. Mirrors `OnymAccent` from
+ * onym-ios PR #31.
  */
-enum class OnymAccent(val color: Color) {
-    Orange(Color(0xFFFF7A45)),
-    Blue(Color(0xFF3FA8FF)),
-    Green(Color(0xFF3DD66E)),
-    Purple(Color(0xFFB278FF)),
-    Pink(Color(0xFFFF4D6D)),
-    Yellow(Color(0xFFFFC93C)),
+enum class OnymAccent(private val light: Color, private val dark: Color) {
+    Orange(Color(0xFFE85F2A), Color(0xFFFF7A45)),
+    Blue  (Color(0xFF1F86E0), Color(0xFF3FA8FF)),
+    Green (Color(0xFF1FA84A), Color(0xFF3DD66E)),
+    Purple(Color(0xFF8B4DEB), Color(0xFFB278FF)),
+    Pink  (Color(0xFFE03253), Color(0xFFFF4D6D)),
+    Yellow(Color(0xFFD9A400), Color(0xFFFFC93C)),
+    ;
+
+    /** Resolve the active variant against the current
+     *  [LocalOnymTokens]. Identity-checking against
+     *  [OnymTokens.Dark] (rather than [isSystemInDarkTheme]) lets a
+     *  forced-theme override (Settings toggle, Compose preview)
+     *  propagate without an extra branch. */
+    @Composable
+    @ReadOnlyComposable
+    fun color(): Color =
+        if (LocalOnymTokens.current === OnymTokens.Dark) dark else light
+}
+
+// ─── Theme scope ─────────────────────────────────────────────────
+
+/**
+ * Root scope for the Create Group flow. Provides [LocalOnymTokens]
+ * and a matching Material3 `colorScheme` so any nested
+ * `MaterialTheme`-aware widget (TextField cursor, ripple, etc) also
+ * reads the right surface family.
+ *
+ * Wrap the create-group nav route in this; Chats / Settings tabs
+ * already adapt via Material/system colours and don't need it.
+ *
+ * Mirrors the SwiftUI `.preferredColorScheme(_:)` plumbing that iOS
+ * PR #31 added at the `CreateGroupView` root.
+ */
+@Composable
+fun OnymTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit,
+) {
+    val tokens = if (darkTheme) OnymTokens.Dark else OnymTokens.Light
+    CompositionLocalProvider(LocalOnymTokens provides tokens) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) darkColorScheme() else lightColorScheme(),
+            content = content,
+        )
+    }
 }
 
 // ─── OnymMark — broken-ring brand logo ───────────────────────────
@@ -84,7 +191,7 @@ enum class OnymAccent(val color: Color) {
 @Composable
 fun OnymMark(
     size: Dp,
-    color: Color = OnymTokens.Text,
+    color: Color = LocalOnymTokens.current.text,
     strokeRatio: Float = 0.16f,
     spinning: Boolean = false,
     fillOpacity: Float = 0.92f,
@@ -143,7 +250,7 @@ fun OnymMark(
 @Composable
 fun OnymGroupAvatar(
     size: Dp,
-    accent: Color = OnymAccent.Blue.color,
+    accent: Color = OnymAccent.Blue.color(),
     spinning: Boolean = false,
     /** When `true` the mark renders in the accent colour rather than
      *  the neutral text colour — used on the Creating screen. */
@@ -155,7 +262,7 @@ fun OnymGroupAvatar(
     ) {
         OnymMark(
             size = size,
-            color = if (brand) accent else OnymTokens.Text,
+            color = if (brand) accent else LocalOnymTokens.current.text,
             spinning = spinning,
             fillOpacity = if (brand) 1.0f else 0.92f,
         )
@@ -179,7 +286,12 @@ fun OnymGovIcon(
     size: Dp = 44.dp,
     dimmed: Boolean = false,
 ) {
-    val strokeColor = if (dimmed) OnymTokens.Text3 else accent
+    // Resolve theme-dependent colours in the @Composable parent so
+    // the DrawScope helpers below stay pure (no @Composable scope
+    // inside Canvas's draw block).
+    val tokens = LocalOnymTokens.current
+    val strokeColor = if (dimmed) tokens.text3 else accent
+    val pipColor = if (dimmed) tokens.text3 else tokens.onAccent
     Box(
         modifier = Modifier
             .size(size)
@@ -190,7 +302,7 @@ fun OnymGovIcon(
         Canvas(modifier = Modifier.size(size)) {
             val s = this.size.minDimension
             when (type) {
-                OnymUIGovernance.Tyranny -> drawTyrannyMark(s, strokeColor, dimmed)
+                OnymUIGovernance.Tyranny -> drawTyrannyMark(s, strokeColor, pipColor)
                 OnymUIGovernance.OneOnOne -> drawDialogMark(s, strokeColor)
                 OnymUIGovernance.Anarchy -> drawAnarchyMark(s, strokeColor)
             }
@@ -201,7 +313,7 @@ fun OnymGovIcon(
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTyrannyMark(
     s: Float,
     color: Color,
-    dimmed: Boolean,
+    pipColor: Color,
 ) {
     // Crown polygon points — same proportions as iOS (each /44 of
     // canvas), reframed against the `s × s` Compose canvas.
@@ -223,9 +335,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTyrannyMark(
         size = Size(s * 18f / 44f, s * 3f / 44f),
         cornerRadius = androidx.compose.ui.geometry.CornerRadius(s * 0.8f / 44f),
     )
-    // Center dot.
+    // Center dot — themed via [pipColor] (onAccent in normal state,
+    // text3 when dimmed). Was hardcoded `Color.White` pre-PR-31.
     drawCircle(
-        color = if (dimmed) OnymTokens.Text3 else Color.White,
+        color = pipColor,
         radius = s * 1.2f / 44f,
         center = Offset(s * 22f / 44f, s * 20f / 44f),
     )

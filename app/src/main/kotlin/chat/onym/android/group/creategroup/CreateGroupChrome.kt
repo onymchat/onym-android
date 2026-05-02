@@ -21,7 +21,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import chat.onym.android.group.OnymTokens
+import chat.onym.android.group.LocalOnymTokens
 
 /**
  * Centered title block used at the top of every screen
@@ -39,14 +39,14 @@ internal fun OnymNavTitle(title: String, subtitle: String? = null) {
     ) {
         Text(
             text = title,
-            color = OnymTokens.Text,
+            color = LocalOnymTokens.current.text,
             style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
         )
         if (subtitle != null) {
             Spacer(Modifier.height(1.dp))
             Text(
                 text = subtitle,
-                color = OnymTokens.Text3,
+                color = LocalOnymTokens.current.text3,
                 style = TextStyle(fontSize = 11.sp),
             )
         }
@@ -58,7 +58,7 @@ internal fun OnymNavTitle(title: String, subtitle: String? = null) {
 internal fun OnymSectionLabel(text: String) {
     Text(
         text = text.uppercase(),
-        color = OnymTokens.Text3,
+        color = LocalOnymTokens.current.text3,
         style = TextStyle(
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
@@ -82,8 +82,8 @@ internal fun OnymPrimaryButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    val bg = if (enabled) accent else OnymTokens.Surface3
-    val fg = if (enabled) OnymTokens.OnAccent else OnymTokens.Text3
+    val bg = if (enabled) accent else LocalOnymTokens.current.surface3
+    val fg = if (enabled) LocalOnymTokens.current.onAccent else LocalOnymTokens.current.text3
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -121,7 +121,7 @@ internal fun OnymQuietButton(
     ) {
         Text(
             text = title,
-            color = OnymTokens.Text2,
+            color = LocalOnymTokens.current.text2,
             style = TextStyle(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
         )
     }
@@ -132,8 +132,8 @@ internal fun OnymQuietButton(
 @Composable
 internal fun OnymCard(
     radius: Int = 14,
-    fill: Color = OnymTokens.Surface2,
-    borderColor: Color = OnymTokens.Hairline,
+    fill: Color = LocalOnymTokens.current.surface2,
+    borderColor: Color = LocalOnymTokens.current.hairline,
     content: @Composable () -> Unit,
 ) {
     Box(

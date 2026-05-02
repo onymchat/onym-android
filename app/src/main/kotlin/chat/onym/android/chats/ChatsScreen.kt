@@ -188,7 +188,7 @@ private fun ChatsRow(
         // same identity the user saw on the Create Group hero. Once
         // group avatars / uploads ship, this becomes the
         // image-or-mark fallback.
-        OnymGroupAvatar(size = 44.dp, accent = OnymAccent.Blue.color)
+        OnymGroupAvatar(size = 44.dp, accent = OnymAccent.Blue.color())
 
         Column(modifier = Modifier.weight(1f)) {
             Text(

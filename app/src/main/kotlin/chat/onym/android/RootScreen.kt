@@ -154,7 +154,14 @@ fun RootScreen(dependencies: AppDependencies) {
                     },
                 )
                 vm.onClose = { navController.popBackStack() }
-                CreateGroupScreen(viewModel = vm)
+                // OnymTheme provides LocalOnymTokens (light or dark
+                // bundle picked off `isSystemInDarkTheme()`) so every
+                // CreateGroup* screen reads the right surface family.
+                // Chats / Settings tabs already adapt via Material's
+                // colorScheme and don't need this wrapper.
+                chat.onym.android.group.OnymTheme {
+                    CreateGroupScreen(viewModel = vm)
+                }
             }
             composable(Tab.Search.route) {
                 SearchScreen()
