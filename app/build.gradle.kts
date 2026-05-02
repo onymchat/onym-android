@@ -51,6 +51,19 @@ android {
         compose = true
     }
 
+    // Lint hard-gates the build on missing localizations: every string
+    // added to `res/values/strings.xml` must have a parallel entry in
+    // every `res/values-<lang>/strings.xml`, otherwise the lint
+    // `MissingTranslation` check fails. Equivalent to iOS String
+    // Catalog's `state: new` warnings, but enforced as a hard gate.
+    lint {
+        checkReleaseBuilds = true
+        abortOnError = true
+        // MissingTranslation is enabled by default; explicit re-enable
+        // below in case it gets suppressed in a future config sweep.
+        disable.remove("MissingTranslation")
+    }
+
     packaging {
         resources {
             // BouncyCastle ships duplicate META-INF entries that AGP

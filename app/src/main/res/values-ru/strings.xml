@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Russian translations. Match en-source strings in `values/strings.xml`
+    1:1 by key. Pre-translated and verified against
+    `Resources/Localizable.xcstrings` `ru` localizations on iOS.
+
+    Russian plural quantities: `one` (e.g. 1, 21, 31; not 11),
+    `few` (e.g. 2-4, 22-24; not 12-14), `other` (everything else).
+-->
+<resources>
+
+    <!-- ─── Top-bar / nav titles ─────────────────────────────────── -->
+    <string name="back_up_keys">Резервная копия ключей</string>
+    <string name="recovery_phrase_title">Фраза восстановления</string>
+    <string name="verify">Проверка</string>
+
+    <!-- ─── Auth failure dialog ──────────────────────────────────── -->
+    <string name="authentication_failed">Не удалось аутентифицироваться</string>
+    <string name="try_again">Повторить</string>
+    <string name="cancel">Отмена</string>
+
+    <!-- ─── Intro screen ─────────────────────────────────────────── -->
+    <string name="your_identity_in_12_words">Ваша личность в 12 словах</string>
+    <string name="recovery_phrase_intro_subtitle">Запишите их. Храните офлайн. Эта фраза восстанавливает ваши ключи Nostr, Stellar и BLS на любом устройстве.</string>
+    <string name="before_you_start">Перед началом</string>
+    <string name="rule_never_share">Никому не показывайте и не фотографируйте</string>
+    <string name="rule_store_offline">Храните офлайн (бумага или металл)</string>
+    <string name="rule_anyone_can_read">Любой обладатель сможет читать ваши чаты</string>
+    <string name="continue_with_biometrics">Продолжить с биометрией</string>
+
+    <!-- ─── Reveal screen ────────────────────────────────────────── -->
+    <!-- Russian CLDR plurals: `one` for 1/21/31/… (not 11), `few` for
+         2-4/22-24/… (not 12-14), `many` for 0/5-20/25-30/… (this is
+         the form 12 maps to → "12 слов"), `other` for fractions
+         like "1.5 слова". -->
+    <plurals name="write_down_words_in_order">
+        <item quantity="one">Запишите %1$d слово по порядку. На следующем экране нужно будет подтвердить три из них.</item>
+        <item quantity="few">Запишите %1$d слова по порядку. На следующем экране нужно будет подтвердить три из них.</item>
+        <item quantity="many">Запишите %1$d слов по порядку. На следующем экране нужно будет подтвердить три из них.</item>
+        <item quantity="other">Запишите %1$d слова по порядку. На следующем экране нужно будет подтвердить три из них.</item>
+    </plurals>
+    <string name="copy">Копировать</string>
+    <string name="ive_written_it_down">Я записал(а)</string>
+    <string name="phrase_local_disclaimer">Фраза создаётся на устройстве и никогда его не покидает.</string>
+    <string name="copied">Скопировано</string>
+    <string name="ok">ОК</string>
+    <string name="recovery_phrase_copied_message">Фраза восстановления скопирована. Через 60 секунд она будет удалена из буфера обмена. Сохраните её сейчас в надёжном месте.</string>
+    <string name="tap_to_reveal">Нажмите, чтобы показать</string>
+
+    <!-- ─── Verify screen ────────────────────────────────────────── -->
+    <string name="select_word_number">Выберите слово номер</string>
+    <string name="not_the_right_word">Это не то слово. Проверьте фразу и повторите попытку.</string>
+
+    <!-- ─── Done screen ──────────────────────────────────────────── -->
+    <string name="backup_verified">Резервная копия подтверждена</string>
+    <string name="backup_verified_subtitle">Ваша фраза восстановления подтверждена. Храните её в безопасном месте — она понадобится только при потере устройства.</string>
+    <string name="done">Готово</string>
+    <string name="backed_up_footer">Резервное копирование: %1$s · BIP-39 (англ.)</string>
+
+    <!-- ─── ViewModel-resolved strings (no Composable available) ── -->
+    <string name="authenticate_to_reveal_recovery_phrase">Подтвердите личность, чтобы увидеть фразу восстановления</string>
+    <string name="recovery_phrase_unavailable">Фраза восстановления недоступна. Возможно, ваша личность не привязана к BIP-39.</string>
+
+</resources>

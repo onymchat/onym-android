@@ -75,6 +75,9 @@ class RecoveryPhraseBackupViewModelTest {
             repository = repository,
             authenticator = authenticator,
             clipboard = clipboard,
+            // FakeStringProvider returns the resource id stringified —
+            // tests assert on Step shape + behaviour, not on locale.
+            strings = FakeStringProvider,
             // Short delays so the suite runs in well under a second.
             // iOS runs in ~800 ms; matching that order of magnitude.
             clipboardClearDelay = 50.milliseconds,
@@ -329,5 +332,11 @@ class RecoveryPhraseBackupViewModelTest {
         override fun clearIfStill(value: String) {
             if (lastWritten == value) didClear = true
         }
+    }
+
+    /** Returns the resource id stringified, so tests assert on
+     *  Step shape + behaviour rather than locale-specific copy. */
+    private object FakeStringProvider : StringProvider {
+        override fun get(resId: Int): String = "string:$resId"
     }
 }
