@@ -303,6 +303,13 @@ class RelayerRepositoryTest {
     fun selectUrl_respectsPrimaryStrategy() = runTest {
         val (repo, _) = makeRepo()
         repo.addEndpoint(a); repo.addEndpoint(b)
+        // PR #20 flipped the default strategy to RANDOM. This test
+        // covers the PRIMARY-strategy resolution path, so promote
+        // explicitly — without it the assertion races RANDOM's
+        // uniform draw and fails ~50% of CI runs (flake caught on
+        // the merged-main run for PR #20:
+        // https://github.com/onymchat/onym-android/actions/runs/25258709184).
+        repo.setStrategy(RelayerStrategy.PRIMARY)
         repo.setPrimary(b.url)
 
         assertEquals(b.url, repo.selectUrl())
