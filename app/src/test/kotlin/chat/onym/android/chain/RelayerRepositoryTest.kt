@@ -4,6 +4,7 @@ import chat.onym.android.support.FakeKnownRelayersFetcher
 import chat.onym.android.support.InMemoryRelayerSelectionStore
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -70,6 +71,106 @@ class RelayerRepositoryTest {
         repo.start()  // must not throw
 
         assertEquals(listOf(a), repo.snapshots.value.knownRelayers)
+    }
+
+    // ─── PR #22: auto-populate on first launch ────────────────────
+
+    @Test
+    fun start_autoPopulates_whenColdConfigAndFetchedListNonEmpty() = runTest {
+        // Cold-fresh install: no saved configuration. start() must
+        // fan the published list into endpoints, sticking
+        // hasUserInteracted=true so subsequent fetches don't churn.
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a, b)))
+        val (repo, store) = makeRepo(fetcher = fetcher)
+        repo.bootstrap()  // loads RelayerConfiguration() from empty store
+
+        repo.start()
+
+        val cfg = repo.snapshots.value.configuration
+        assertEquals(listOf(a, b), cfg.endpoints)
+        assertNull(cfg.primaryUrl)
+        assertEquals(RelayerStrategy.RANDOM, cfg.strategy)
+        assertTrue("auto-populate must mark the configuration as user-touched", cfg.hasUserInteracted)
+        // Persisted to disk too.
+        assertEquals(listOf(a, b), store.loadConfiguration().endpoints)
+    }
+
+    @Test
+    fun start_doesNotAutoPopulate_whenUserHasAlreadyInteracted() = runTest {
+        // Pre-existing PR #20-era configuration with the user's
+        // custom endpoint. start() loads the published list but
+        // must NOT touch the configured endpoints.
+        val store = InMemoryRelayerSelectionStore().apply {
+            saveConfiguration(
+                RelayerConfiguration(
+                    endpoints = listOf(custom),
+                    strategy = RelayerStrategy.PRIMARY,
+                    primaryUrl = custom.url,
+                    hasUserInteracted = true,
+                )
+            )
+        }
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a, b)))
+        val (repo, _) = makeRepo(store, fetcher)
+        repo.bootstrap()
+
+        repo.start()
+
+        val cfg = repo.snapshots.value.configuration
+        assertEquals(listOf(custom), cfg.endpoints)
+        assertEquals(custom.url, cfg.primaryUrl)
+        assertEquals(RelayerStrategy.PRIMARY, cfg.strategy)
+    }
+
+    @Test
+    fun start_doesNotAutoPopulate_whenFetchedListIsEmpty() = runTest {
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(emptyList()))
+        val (repo, _) = makeRepo(fetcher = fetcher)
+        repo.bootstrap()
+
+        repo.start()
+
+        val cfg = repo.snapshots.value.configuration
+        assertTrue(cfg.endpoints.isEmpty())
+        assertFalse(
+            "no fetched list → no auto-populate → flag stays false (next refresh can still populate)",
+            cfg.hasUserInteracted,
+        )
+    }
+
+    @Test
+    fun refresh_runsAutoPopulateWhenFlagStillFalse() = runTest {
+        // Boot fetch failed (offline at launch); user opens the
+        // picker and hits a refresh — the same auto-populate path
+        // fires.
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Failing(IOException("offline")))
+        val (repo, _) = makeRepo(fetcher = fetcher)
+        repo.bootstrap()
+        repo.start()  // failed silently; flag still false
+
+        // Now point the fetcher at a successful response and refresh.
+        fetcher.mode = FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a, b))
+        repo.refresh()
+
+        val cfg = repo.snapshots.value.configuration
+        assertEquals(listOf(a, b), cfg.endpoints)
+        assertTrue(cfg.hasUserInteracted)
+    }
+
+    @Test
+    fun mutators_promoteHasUserInteractedFromFalseToTrue() = runTest {
+        // Cold config (hasUserInteracted = false). Each list-shaped
+        // mutator must flip the flag — guards against a stale future
+        // refresh fanning the published list back over the user's
+        // explicit edits.
+        val (repo, store) = makeRepo()
+        repo.bootstrap()
+        assertFalse(repo.snapshots.value.configuration.hasUserInteracted)
+
+        repo.addEndpoint(custom)
+
+        assertTrue(repo.snapshots.value.configuration.hasUserInteracted)
+        assertTrue(store.loadConfiguration().hasUserInteracted)
     }
 
     // ─── addEndpoint ──────────────────────────────────────────────
@@ -229,6 +330,11 @@ class RelayerRepositoryTest {
     fun selectUrl_primary_fallsBackToFirstWhenPrimaryStaleOrUnset() = runTest {
         val (repo, _) = makeRepo()
         repo.addEndpoint(a); repo.addEndpoint(b)
+        // Default strategy flipped to RANDOM in PR #22 — explicitly
+        // set PRIMARY so this test still exercises the fall-back-to-
+        // first path. (User-flow-wise: hits this when the user toggles
+        // back to Primary after the default-random fan-in.)
+        repo.setStrategy(RelayerStrategy.PRIMARY)
         // No setPrimary call → primaryUrl is null → fall through to first.
         assertEquals(a.url, repo.selectUrl())
     }

@@ -70,4 +70,55 @@
     <string name="security_footer_view_recovery_phrase">Просмотрите свою фразу восстановления из 12 слов. Она понадобится для восстановления личности на новом устройстве.</string>
     <string name="search_placeholder_body">Поиск появится в одном из следующих обновлений.</string>
 
+    <!-- ─── Settings → Network section (umbrella) ────────────────── -->
+    <string name="settings_network">Сеть</string>
+    <string name="settings_network_footer">Выберите релеер, который отправляет транзакции, и версию контракта для якорения новых чатов. Существующие чаты сохраняют контракт, с которым были созданы.</string>
+
+    <!-- ─── Settings → Relayer screen ────────────────────────────── -->
+    <string name="relayer_title">Релеер</string>
+    <string name="relayer_strategy_label">Стратегия</string>
+    <string name="relayer_strategy_primary">Основной</string>
+    <string name="relayer_strategy_random">Случайный</string>
+    <string name="relayer_strategy_footer_primary">Всегда использовать основной релеер. Если основной не выбран, используется первый из настроенных.</string>
+    <string name="relayer_strategy_footer_random">Выбирать случайный релеер для каждого запроса. Полезно для распределения нагрузки между резервными деплоями.</string>
+    <string name="relayer_section_configured">Настроенные</string>
+    <string name="relayer_section_add_known">Добавить из опубликованного списка</string>
+    <string name="relayer_section_add_custom">Добавить свой URL</string>
+    <string name="relayer_empty_configured">Релееры не настроены. Добавьте ниже.</string>
+    <string name="relayer_known_all_added">Все опубликованные релееры добавлены.</string>
+    <string name="relayer_known_fetching">Загружаю список…</string>
+    <string name="relayer_known_footer">Публикуется проектом onym-relayer. Нажмите, чтобы добавить.</string>
+    <string name="relayer_custom_footer">Используйте свой деплой, localhost или любой релеер, отсутствующий в опубликованном списке.</string>
+    <string name="relayer_custom_invalid">Введите корректный URL вида https://</string>
+    <string name="relayer_custom_add">Добавить</string>
+    <string name="relayer_row_primary_label">Основной релеер</string>
+    <string name="relayer_row_mark_primary">Сделать основным</string>
+    <string name="relayer_row_delete">Удалить</string>
+
+    <!-- ─── Settings → Anchors screen ────────────────────────────── -->
+    <string name="anchors_title">Якоря</string>
+    <string name="anchors_footer">Выберите версию контракта для якорения состояния группы в блокчейне. Выбор для каждой пары (сеть, тип) применяется к новым чатам; существующие чаты сохраняют контракт, с которым были созданы.</string>
+    <string name="anchors_no_contracts_yet">Контрактов пока нет</string>
+    <string name="anchors_no_contract_for_type">Нет контракта</string>
+    <string name="anchors_reset_to_default">Сбросить к значению по умолчанию (последняя версия)</string>
+    <string name="anchors_section_network">Сеть</string>
+    <string name="anchors_section_governance_type">Тип управления</string>
+    <string name="anchors_section_releases">Версии</string>
+    <string name="anchors_section_reset">Сброс</string>
+    <string name="anchors_subtitle_selected">%1$s (выбрано)</string>
+    <string name="anchors_subtitle_latest">%1$s (последняя)</string>
+    <string name="anchors_network_footer">Каждый тип управления использует отдельный контракт. Тег версии в скобках — это версия, к которой будет привязан новый чат.</string>
+    <string name="anchors_reset_footer">Сброс очищает явный выбор — новые чаты используют последнюю опубликованную версию.</string>
+
+    <!-- ─── ContractNetwork.displayName ──────────────────────────── -->
+    <string name="network_testnet">Тестовая сеть</string>
+    <string name="network_public">Основная сеть</string>
+
+    <!-- ─── GovernanceType.displayName ───────────────────────────── -->
+    <string name="governance_anarchy">Анархия</string>
+    <string name="governance_democracy">Демократия</string>
+    <string name="governance_oligarchy">Олигархия</string>
+    <string name="governance_oneonone">Один на один</string>
+    <string name="governance_tyranny">Тирания</string>
+
 </resources>

@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import chat.onym.android.R
@@ -113,13 +114,13 @@ fun SettingsScreen(
                 )
             }
 
-            // Network section — relayer URL config. English-only for
-            // now per the iOS twin (PR #18); lift into res/values/
-            // when a translation pass for Settings lands.
-            item { SectionHeader("NETWORK") }
+            // Network section — relayer URL config + anchor contract
+            // versions. Localized via res/values/ + values-ru/ per
+            // PR #21's catalog work.
+            item { SectionHeader(stringResource(R.string.settings_network)) }
             item {
                 ListItem(
-                    headlineContent = { Text("Relayer") },
+                    headlineContent = { Text(stringResource(R.string.relayer_title)) },
                     leadingContent = {
                         SettingsIconBox(
                             icon = Icons.Filled.Cloud,
@@ -139,20 +140,13 @@ fun SettingsScreen(
                     modifier = Modifier
                         .padding(horizontal = 16.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onRelayerClick),
-                )
-            }
-            item {
-                Text(
-                    "Where chain operations are submitted. Discovered from GitHub Releases of onymchat/onym-relayer; can be overridden with a custom URL.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+                        .clickable(onClick = onRelayerClick)
+                        .testTag("settings.relayer_row"),
                 )
             }
             item {
                 ListItem(
-                    headlineContent = { Text("Anchors") },
+                    headlineContent = { Text(stringResource(R.string.anchors_title)) },
                     leadingContent = {
                         SettingsIconBox(
                             icon = Icons.Filled.Anchor,
@@ -172,12 +166,13 @@ fun SettingsScreen(
                     modifier = Modifier
                         .padding(horizontal = 16.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onAnchorsClick),
+                        .clickable(onClick = onAnchorsClick)
+                        .testTag("settings.anchors_row"),
                 )
             }
             item {
                 Text(
-                    "Smart-contract version each new chat is anchored to. Picks per (network, governance type); existing chats stay on whatever they were created with.",
+                    stringResource(R.string.settings_network_footer),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),

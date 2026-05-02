@@ -2,6 +2,7 @@ package chat.onym.android.chain
 
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -152,5 +153,69 @@ class RelayerConfigurationTest {
         assertEquals("custom", ep.network)
         assertEquals("relayer.example.com", ep.name)
         assertEquals("https://relayer.example.com:9443/path", ep.url)
+    }
+
+    // ─── PR #22 defaults + hasUserInteracted backward-compat ──────
+
+    @Test
+    fun empty_factory_returnsRandomStrategyAndUntouchedFlag() {
+        val empty = RelayerConfiguration.empty
+        assertTrue(empty.endpoints.isEmpty())
+        assertNull(empty.primaryUrl)
+        assertEquals(RelayerStrategy.RANDOM, empty.strategy)
+        assertFalse(
+            "fresh-install state must not be flagged as user-touched (would suppress auto-populate)",
+            empty.hasUserInteracted,
+        )
+    }
+
+    @Test
+    fun defaultStrategy_isRandom_forCold_constructed_configuration() {
+        // The data class default flipped from PRIMARY → RANDOM in
+        // PR #22 to match the auto-populate behaviour: a fresh
+        // install with the published list spread across endpoints
+        // wants Random by default.
+        val cfg = RelayerConfiguration()
+        assertEquals(RelayerStrategy.RANDOM, cfg.strategy)
+    }
+
+    @Test
+    fun serialization_roundtripPreservesHasUserInteracted() {
+        val touched = RelayerConfiguration(
+            endpoints = listOf(a),
+            strategy = RelayerStrategy.PRIMARY,
+            hasUserInteracted = true,
+        )
+        val untouched = RelayerConfiguration.empty
+
+        val json = Json { encodeDefaults = true }
+        for (original in listOf(touched, untouched)) {
+            val encoded = json.encodeToString(RelayerConfiguration.serializer(), original)
+            val decoded = json.decodeFromString(RelayerConfiguration.serializer(), encoded)
+            assertEquals(original, decoded)
+            assertEquals(original.hasUserInteracted, decoded.hasUserInteracted)
+        }
+    }
+
+    @Test
+    fun serialization_decodingPR20WireShape_yieldsHasUserInteractedTrue() {
+        // PR #20 saved configurations without `hasUserInteracted`.
+        // Backward-compat default is `true` so already-configured
+        // users don't lose their custom URLs to auto-populate.
+        val pr20Json = """
+            {
+              "endpoints": [
+                { "name": "Onym Testnet", "url": "https://relayer-testnet.onym.chat", "network": "testnet" }
+              ],
+              "primaryUrl": "https://relayer-testnet.onym.chat",
+              "strategy": "PRIMARY"
+            }
+        """.trimIndent()
+        val decoded = Json { ignoreUnknownKeys = true }
+            .decodeFromString(RelayerConfiguration.serializer(), pr20Json)
+        assertTrue(
+            "PR #20 saves must decode as `hasUserInteracted = true` so refresh() doesn't blow them away",
+            decoded.hasUserInteracted,
+        )
     }
 }

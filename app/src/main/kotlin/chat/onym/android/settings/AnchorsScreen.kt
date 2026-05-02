@@ -28,10 +28,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.onym.android.R
 import chat.onym.android.chain.ContractNetwork
 import chat.onym.android.chain.GovernanceType
 
@@ -54,10 +57,13 @@ fun AnchorsRootScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Anchors") },
+                title = { Text(stringResource(R.string.anchors_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
                     }
                 },
             )
@@ -65,7 +71,7 @@ fun AnchorsRootScreen(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) { padding ->
         LazyColumn(contentPadding = padding) {
-            item { SectionHeader("NETWORK") }
+            item { SectionHeader(stringResource(R.string.anchors_section_network)) }
             items(ContractNetwork.entries) { network ->
                 val available = state.networkAvailability[network] == true
                 NetworkRootRow(
@@ -76,12 +82,7 @@ fun AnchorsRootScreen(
                     } else null,
                 )
             }
-            item {
-                Footer(
-                    "Pick the smart contract version each new chat is anchored to. " +
-                        "Existing chats stay on whatever version they were created with."
-                )
-            }
+            item { Footer(stringResource(R.string.anchors_footer)) }
         }
     }
 }
@@ -101,10 +102,13 @@ fun AnchorsNetworkScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(networkDisplayName(network)) },
+                title = { Text(stringResource(network.displayNameResId)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
                     }
                 },
             )
@@ -112,7 +116,7 @@ fun AnchorsNetworkScreen(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) { padding ->
         LazyColumn(contentPadding = padding) {
-            item { SectionHeader("GOVERNANCE TYPE") }
+            item { SectionHeader(stringResource(R.string.anchors_section_governance_type)) }
             items(rows, key = { it.type.wireValue }) { row ->
                 GovernanceTypeRow(
                     type = row.type,
@@ -123,12 +127,7 @@ fun AnchorsNetworkScreen(
                     } else null,
                 )
             }
-            item {
-                Footer(
-                    "Each governance type uses a separate contract. The release tag in " +
-                        "parentheses is the version a brand-new chat would be anchored to."
-                )
-            }
+            item { Footer(stringResource(R.string.anchors_network_footer)) }
         }
     }
 }
@@ -146,10 +145,13 @@ fun AnchorsVersionScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(governanceDisplayName(type)) },
+                title = { Text(stringResource(type.displayNameResId)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
                     }
                 },
             )
@@ -157,7 +159,7 @@ fun AnchorsVersionScreen(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) { padding ->
         LazyColumn(contentPadding = padding) {
-            item { SectionHeader("RELEASES") }
+            item { SectionHeader(stringResource(R.string.anchors_section_releases)) }
             items(rows, key = { it.release.release }) { row ->
                 VersionRow(
                     label = row.release.release,
@@ -169,7 +171,7 @@ fun AnchorsVersionScreen(
                     },
                 )
             }
-            item { SectionHeader("RESET") }
+            item { SectionHeader(stringResource(R.string.anchors_section_reset)) }
             item {
                 ResetRow(
                     onClick = {
@@ -178,11 +180,7 @@ fun AnchorsVersionScreen(
                     },
                 )
             }
-            item {
-                Footer(
-                    "Reset clears the explicit pick — new chats fall back to the latest published release."
-                )
-            }
+            item { Footer(stringResource(R.string.anchors_reset_footer)) }
         }
     }
 }
@@ -204,15 +202,16 @@ private fun NetworkRootRow(
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .let { if (onClick != null) it.clickable(onClick = onClick) else it }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag("anchors.network.${network.wireValue}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(networkDisplayName(network),
+            Text(stringResource(network.displayNameResId),
                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                 color = titleColor)
             if (!available) {
-                Text("No contracts yet",
+                Text(stringResource(R.string.anchors_no_contracts_yet),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -241,16 +240,17 @@ private fun GovernanceTypeRow(
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .let { if (onClick != null) it.clickable(onClick = onClick) else it }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag("anchors.type.${type.wireValue}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(governanceDisplayName(type),
+            Text(stringResource(type.displayNameResId),
                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
             val subtitle = when {
-                resolvedRelease == null -> "No contract"
-                isExplicit -> "$resolvedRelease (selected)"
-                else -> "$resolvedRelease (latest)"
+                resolvedRelease == null -> stringResource(R.string.anchors_no_contract_for_type)
+                isExplicit -> stringResource(R.string.anchors_subtitle_selected, resolvedRelease)
+                else -> stringResource(R.string.anchors_subtitle_latest, resolvedRelease)
             }
             Text(subtitle,
                 style = MaterialTheme.typography.bodySmall,
@@ -280,7 +280,8 @@ private fun VersionRow(
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag("anchors.version.$label"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -300,7 +301,7 @@ private fun VersionRow(
             ) {
                 Icon(
                     Icons.Filled.Check,
-                    contentDescription = "Selected",
+                    contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(14.dp),
                 )
@@ -318,11 +319,12 @@ private fun ResetRow(onClick: () -> Unit) {
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag("anchors.version.reset"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        Text("Reset to default",
+        Text(stringResource(R.string.anchors_reset_to_default),
             style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
             color = MaterialTheme.colorScheme.primary)
     }
@@ -349,17 +351,4 @@ private fun Footer(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
     )
-}
-
-private fun networkDisplayName(network: ContractNetwork): String = when (network) {
-    ContractNetwork.Testnet -> "Testnet"
-    ContractNetwork.Public -> "Mainnet"
-}
-
-private fun governanceDisplayName(type: GovernanceType): String = when (type) {
-    GovernanceType.Anarchy -> "Anarchy"
-    GovernanceType.Democracy -> "Democracy"
-    GovernanceType.Oligarchy -> "Oligarchy"
-    GovernanceType.OneOnOne -> "One-on-one"
-    GovernanceType.Tyranny -> "Tyranny"
 }

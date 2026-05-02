@@ -33,7 +33,12 @@ class RelayerRepository(
     private val _snapshots = MutableStateFlow(
         RelayerState(
             knownRelayers = emptyList(),
-            configuration = RelayerConfiguration(),
+            // Cold-fresh in-memory state until bootstrap() reads disk.
+            // `empty` has hasUserInteracted = false so a first-launch
+            // refresh() seeds the published list. Once disk is loaded
+            // (legacy migration paths set it to true), the snapshot
+            // reflects whatever the user already had.
+            configuration = RelayerConfiguration.empty,
         )
     )
 
@@ -50,13 +55,17 @@ class RelayerRepository(
         _snapshots.value = RelayerState(knownRelayers = cached, configuration = config)
     }
 
-    /** Fire-and-forget the GitHub-Releases fetch. Idempotent. */
+    /** Fire-and-forget the GitHub-Releases fetch. Idempotent.
+     *  Errors swallowed (app launch must not crash on a network
+     *  blip). On success, [autoPopulateIfFreshLocked] seeds the
+     *  configured list with the published entries when the user
+     *  hasn't yet interacted with the picker. */
     suspend fun start() = mutex.withLock {
         if (startInvoked) return@withLock
         startInvoked = true
         runCatching { fetcher.fetch() }.onSuccess { fresh ->
             store.saveCachedKnownRelayers(fresh)
-            _snapshots.value = _snapshots.value.copy(knownRelayers = fresh)
+            applyKnownListAndAutoPopulateLocked(fresh)
         }
     }
 
@@ -65,8 +74,37 @@ class RelayerRepository(
         val fresh = fetcher.fetch()
         mutex.withLock {
             store.saveCachedKnownRelayers(fresh)
-            _snapshots.value = _snapshots.value.copy(knownRelayers = fresh)
+            applyKnownListAndAutoPopulateLocked(fresh)
         }
+    }
+
+    /** Common path for [start] + [refresh]: stash the fetched list,
+     *  and if the user hasn't yet interacted with the picker,
+     *  fan it into the configured endpoints (RANDOM strategy, no
+     *  primary). Once `hasUserInteracted` flips, future fetches
+     *  only update the cached known list — never the configuration. */
+    private suspend fun applyKnownListAndAutoPopulateLocked(fresh: List<RelayerEndpoint>) {
+        val current = _snapshots.value.configuration
+        val updatedConfig = if (!current.hasUserInteracted && fresh.isNotEmpty()) {
+            RelayerConfiguration(
+                endpoints = fresh,
+                primaryUrl = null,
+                strategy = RelayerStrategy.RANDOM,
+                // Sticky — auto-populate runs once per install. From
+                // here on, the user owns the list; subsequent
+                // refreshes only refresh the cached published list.
+                hasUserInteracted = true,
+            )
+        } else {
+            current
+        }
+        if (updatedConfig != current) {
+            store.saveConfiguration(updatedConfig)
+        }
+        _snapshots.value = RelayerState(
+            knownRelayers = fresh,
+            configuration = updatedConfig,
+        )
     }
 
     // ─── list-shaped mutators ─────────────────────────────────────
@@ -129,8 +167,14 @@ class RelayerRepository(
     fun selectUrl(random: Random = Random.Default): String? =
         _snapshots.value.configuration.selectUrl(random)
 
+    /** Common path for every list-shaped mutator. Promotes
+     *  [RelayerConfiguration.hasUserInteracted] to `true` so a
+     *  subsequent [refresh] doesn't blow away the user's choices
+     *  via auto-populate. */
     private suspend fun applyConfigurationLocked(updated: RelayerConfiguration) {
-        store.saveConfiguration(updated)
-        _snapshots.value = _snapshots.value.copy(configuration = updated)
+        val withFlag = if (updated.hasUserInteracted) updated
+                       else updated.copy(hasUserInteracted = true)
+        store.saveConfiguration(withFlag)
+        _snapshots.value = _snapshots.value.copy(configuration = withFlag)
     }
 }
