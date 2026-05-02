@@ -10,9 +10,20 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import org.bouncycastle.crypto.agreement.X25519Agreement
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
+import org.bouncycastle.crypto.params.X25519PublicKeyParameters
+import org.bouncycastle.crypto.signers.Ed25519Signer
 import java.security.MessageDigest
+import javax.crypto.AEADBadTagException
+import javax.crypto.Cipher
+import javax.crypto.IllegalBlockSizeException
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Owns the on-device identity. All EncryptedSharedPreferences I/O,
@@ -50,7 +61,7 @@ import java.security.MessageDigest
 class IdentityRepository(
     private val store: IdentitySecretStore,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) {
+) : InvitationEnvelopeDecrypter {
     private val mutex = Mutex()
     private val _snapshots = MutableStateFlow<Identity?>(null)
 
@@ -116,6 +127,96 @@ class IdentityRepository(
         withContext(ioDispatcher) {
             store.wipe()
             _snapshots.value = null
+        }
+    }
+
+    // ─── InvitationEnvelopeDecrypter ────────────────────────────────
+
+    /**
+     * Open an X25519+AES-GCM-sealed invitation envelope addressed to
+     * this identity's inbox keypair. The X25519 private key is
+     * recomputed from the persisted nostr secret on every call and
+     * never assigned to a stored property — so the only persistent
+     * footprint of this method on the recipient's machine is the
+     * already-encrypted SharedPreferences blob.
+     *
+     * Throws [InvitationDecryptError]; never raw `javax.crypto` /
+     * `kotlinx.serialization` exceptions. See [InvitationDecryptError]
+     * for the failure-mode taxonomy.
+     */
+    override suspend fun decryptInvitation(envelopeBytes: ByteArray): ByteArray =
+        withContext(ioDispatcher) {
+            // Snapshot read happens off the mutex — `store.load()` is a
+            // single atomic SharedPreferences read; concurrent `wipe()`
+            // either observes the pre-wipe blob or post-wipe null,
+            // both internally consistent.
+            val snapshot = store.load() ?: throw InvitationDecryptError.IdentityNotLoaded
+            decryptInvitationLocked(snapshot, envelopeBytes)
+        }
+
+    private fun decryptInvitationLocked(
+        snapshot: StoredSnapshot,
+        envelopeBytes: ByteArray,
+    ): ByteArray {
+        val envelope = try {
+            envelopeJsonFormat.decodeFromString<SealedEnvelope>(envelopeBytes.toString(Charsets.UTF_8))
+        } catch (e: SerializationException) {
+            throw InvitationDecryptError.MalformedEnvelope("invalid JSON: ${e.message}", e)
+        } catch (e: IllegalArgumentException) {
+            // base64 decode failure inside the field serializer
+            throw InvitationDecryptError.MalformedEnvelope("invalid base64: ${e.message}", e)
+        }
+        if (envelope.scheme != INVITATION_SCHEME) {
+            throw InvitationDecryptError.UnsupportedScheme(envelope.scheme)
+        }
+        val ephemeralPub = envelope.ephemeralPublicKey
+            ?: throw InvitationDecryptError.MissingEphemeralKey
+
+        // M-5: verify Ed25519 signature on the ephemeral pubkey if
+        // the envelope provides one. Prevents MITM substitution of
+        // the ephemeral key. Mirrors `GroupCrypto.decryptInvitation`
+        // in stellar-mls.
+        if (envelope.ephemeralKeySignature != null) {
+            val senderPubkey = envelope.senderEd25519PublicKey
+                ?: throw InvitationDecryptError.MalformedEnvelope(
+                    "ephemeral_key_signature present without sender_ed25519_public_key"
+                )
+            val verifier = Ed25519Signer().apply {
+                init(false, Ed25519PublicKeyParameters(senderPubkey, 0))
+            }
+            verifier.update(ephemeralPub, 0, ephemeralPub.size)
+            if (!verifier.verifySignature(envelope.ephemeralKeySignature)) {
+                throw InvitationDecryptError.SignatureFailed
+            }
+        }
+
+        // ECDH against the recipient's X25519 private (recomputed
+        // from nostrSecret per call; not stashed on `this`).
+        val recipientPrivate = inboxKeyAgreementPrivateKey(snapshot.nostrSecretKey)
+        val agreement = X25519Agreement().apply { init(recipientPrivate) }
+        val sharedSecret = ByteArray(agreement.agreementSize)
+        agreement.calculateAgreement(X25519PublicKeyParameters(ephemeralPub, 0), sharedSecret, 0)
+
+        // HKDF salt + info MUST match stellar-mls exactly — interop
+        // with iOS senders + Android stellar-mls senders rides on
+        // these constants.
+        val aesKey = Bip39.hkdfSha256(
+            ikm = sharedSecret,
+            salt = "sep-invitation-v1".toByteArray(Charsets.UTF_8),
+            info = "aes-256-gcm".toByteArray(Charsets.UTF_8),
+            length = 32,
+        )
+
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.DECRYPT_MODE, SecretKeySpec(aesKey, "AES"), GCMParameterSpec(128, envelope.nonce))
+        }
+        return try {
+            // GCM expects ciphertext + tag concatenated.
+            cipher.doFinal(envelope.ciphertext + envelope.authenticationTag)
+        } catch (e: AEADBadTagException) {
+            throw InvitationDecryptError.DecryptionFailed(e)
+        } catch (e: IllegalBlockSizeException) {
+            throw InvitationDecryptError.DecryptionFailed(e)
         }
     }
 
@@ -207,15 +308,35 @@ class IdentityRepository(
          *
          * See `stellarPublicKey` for the salt-quirk note.
          */
-        internal fun inboxPublicKey(nostrSecret: ByteArray): ByteArray {
+        internal fun inboxPublicKey(nostrSecret: ByteArray): ByteArray =
+            inboxKeyAgreementPrivateKey(nostrSecret).generatePublicKey().encoded
+
+        /**
+         * X25519 private-key parameters for the recipient's inbox
+         * keypair. Internal because it returns secret material —
+         * intentional only callers are [IdentityRepository] (for
+         * decryption) and [inboxPublicKey] (for the public half).
+         * Production callers MUST discard the returned object after
+         * a single use; never assign to a stored property.
+         */
+        internal fun inboxKeyAgreementPrivateKey(nostrSecret: ByteArray): X25519PrivateKeyParameters {
             val seed = Bip39.hkdfSha256(
                 ikm = nostrSecret,
                 salt = "chat.onym.ios".toByteArray(Charsets.UTF_8),
                 info = "x25519-key-agreement-v1".toByteArray(Charsets.UTF_8),
                 length = 32,
             )
-            val sk = X25519PrivateKeyParameters(seed, 0)
-            return sk.generatePublicKey().encoded
+            return X25519PrivateKeyParameters(seed, 0)
+        }
+
+        /** Cross-platform interop scheme tag for invitations. Anything
+         *  else triggers [InvitationDecryptError.UnsupportedScheme]. */
+        private const val INVITATION_SCHEME = "x25519-aes-256-gcm-v1"
+
+        /** Permissive JSON for envelope decoding — extra fields the
+         *  sender adds in a future schema version don't break us. */
+        private val envelopeJsonFormat = Json {
+            ignoreUnknownKeys = true
         }
 
         /**

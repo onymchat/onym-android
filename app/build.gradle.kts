@@ -73,6 +73,20 @@ android {
             excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
     }
+
+    // Shared test source set — fakes / fixtures / encryptors that
+    // both `test/` (JVM unit) and `androidTest/` (instrumented) can
+    // consume from the same `chat.onym.android.support` package.
+    // Mirrors the iOS pattern of a single `Tests/OnymIOSTests/Support/`
+    // directory available to every XCTest target.
+    sourceSets {
+        getByName("test") {
+            java.srcDirs("src/test/kotlin", "src/sharedTest/kotlin")
+        }
+        getByName("androidTest") {
+            java.srcDirs("src/androidTest/kotlin", "src/sharedTest/kotlin")
+        }
+    }
 }
 
 dependencies {
