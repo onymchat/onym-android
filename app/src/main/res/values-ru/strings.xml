@@ -70,6 +70,11 @@
     <string name="security_footer_view_recovery_phrase">Просмотрите свою фразу восстановления из 12 слов. Она понадобится для восстановления личности на новом устройстве.</string>
     <string name="search_placeholder_body">Поиск появится в одном из следующих обновлений.</string>
 
+    <!-- ─── Settings → Groups section (PR-C of Create Group) ─────── -->
+    <string name="settings_groups">Группы</string>
+    <string name="settings_create_group">Создать группу</string>
+    <string name="settings_groups_footer">Создайте сквозно зашифрованную группу, закреплённую на тестнете Stellar. Сейчас доступна только Тирания.</string>
+
     <!-- ─── Settings → Network section (umbrella) ────────────────── -->
     <string name="settings_network">Сеть</string>
     <string name="settings_network_footer">Выберите релеер, который отправляет транзакции, и версию контракта для якорения новых чатов. Существующие чаты сохраняют контракт, с которым были созданы.</string>

@@ -28,6 +28,14 @@ sealed class IdentityError(message: String, cause: Throwable? = null) :
         private fun readResolve(): Any = InvalidMnemonic
     }
 
+    /** Caller asked for material that requires `bootstrap()` /
+     *  `restore()` to have run, but no identity is loaded. Mirrors
+     *  `IdentityError.identityNotLoaded` from onym-ios PR #26. */
+    object IdentityNotLoaded :
+        IdentityError("No identity is loaded — bootstrap or restore first") {
+        private fun readResolve(): Any = IdentityNotLoaded
+    }
+
     class SdkFailure(message: String, cause: Throwable? = null) :
         IdentityError("OnymSDK call failed: $message", cause)
 }

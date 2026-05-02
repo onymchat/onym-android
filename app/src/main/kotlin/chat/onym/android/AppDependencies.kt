@@ -1,6 +1,7 @@
 package chat.onym.android
 
 import androidx.fragment.app.FragmentActivity
+import chat.onym.android.group.CreateGroupViewModel
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.settings.AnchorsPickerViewModel
 import chat.onym.android.settings.RelayerSettingsViewModel
@@ -35,4 +36,5 @@ class AppDependencies(
     val makeRecoveryPhraseBackupViewModel: (activityProvider: () -> FragmentActivity) -> RecoveryPhraseBackupViewModel,
     val makeRelayerSettingsViewModel: () -> RelayerSettingsViewModel,
     val makeAnchorsPickerViewModel: () -> AnchorsPickerViewModel,
+    val makeCreateGroupViewModel: () -> CreateGroupViewModel,
 )

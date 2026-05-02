@@ -75,6 +75,22 @@ class IdentityRepository(
     fun currentIdentity(): Identity? = _snapshots.value
 
     /**
+     * One-shot accessor for the device's 32-byte BLS Fr scalar. Used
+     * by the chain layer (`OnymGroupProofGenerator`) to call
+     * `Tyranny.proveCreate`. Loads from [store] on every call (no
+     * in-memory cache); callers MUST NOT retain the returned bytes
+     * beyond the immediate proof-generation hop.
+     *
+     * @throws IdentityError.IdentityNotLoaded if [bootstrap] /
+     *         [restore] hasn't been called or [wipe] was called.
+     *
+     * Mirrors `IdentityRepository.blsSecretKey` from onym-ios PR #26.
+     */
+    suspend fun blsSecretKey(): ByteArray = withContext(ioDispatcher) {
+        store.load()?.blsSecretKey ?: throw IdentityError.IdentityNotLoaded
+    }
+
+    /**
      * Load the persisted identity, or generate a fresh BIP39-backed
      * one if none exists. Idempotent: a second call after success
      * returns the same identity without re-reading the store.
