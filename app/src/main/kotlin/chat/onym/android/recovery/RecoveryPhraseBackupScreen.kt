@@ -42,12 +42,15 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.onym.android.R
 import java.text.DateFormat
 import java.util.Date
 
@@ -81,9 +84,9 @@ fun RecoveryPhraseBackupScreen(
 
     val title = when (step) {
         is RecoveryPhraseBackupViewModel.Step.Intro,
-        is RecoveryPhraseBackupViewModel.Step.AuthFailed -> "Back up keys"
-        is RecoveryPhraseBackupViewModel.Step.Reveal    -> "Recovery phrase"
-        is RecoveryPhraseBackupViewModel.Step.Verify    -> "Verify"
+        is RecoveryPhraseBackupViewModel.Step.AuthFailed -> stringResource(R.string.back_up_keys)
+        is RecoveryPhraseBackupViewModel.Step.Reveal    -> stringResource(R.string.recovery_phrase_title)
+        is RecoveryPhraseBackupViewModel.Step.Verify    -> stringResource(R.string.verify)
         is RecoveryPhraseBackupViewModel.Step.Done      -> ""
     }
 
@@ -137,13 +140,17 @@ fun RecoveryPhraseBackupScreen(
     if (authFailed != null) {
         AlertDialog(
             onDismissRequest = viewModel::dismissedAuthError,
-            title = { Text("Authentication Failed") },
+            title = { Text(stringResource(R.string.authentication_failed)) },
             text = { Text(authFailed.reason) },
             confirmButton = {
-                TextButton(onClick = viewModel::tappedContinueFromIntro) { Text("Try Again") }
+                TextButton(onClick = viewModel::tappedContinueFromIntro) {
+                    Text(stringResource(R.string.try_again))
+                }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::dismissedAuthError) { Text("Cancel") }
+                TextButton(onClick = viewModel::dismissedAuthError) {
+                    Text(stringResource(R.string.cancel))
+                }
             },
         )
     }
@@ -165,7 +172,7 @@ private fun IntroScreen(isReady: Boolean, onContinue: () -> Unit) {
                 .padding(top = 4.dp, bottom = 18.dp),
         )
 
-        SectionHeader("Before you start")
+        SectionHeader(stringResource(R.string.before_you_start))
         Column(
             modifier = Modifier
                 .padding(horizontal = 16.dp)
@@ -175,19 +182,19 @@ private fun IntroScreen(isReady: Boolean, onContinue: () -> Unit) {
             IntroRow(
                 icon = Icons.Filled.Warning,
                 iconBg = Color(0xFFFF9800),
-                title = "Never share or photograph",
+                title = stringResource(R.string.rule_never_share),
                 separator = true,
             )
             IntroRow(
                 icon = Icons.Filled.Shield,
                 iconBg = Color(0xFF4CAF50),
-                title = "Store offline (paper or metal)",
+                title = stringResource(R.string.rule_store_offline),
                 separator = true,
             )
             IntroRow(
                 icon = Icons.Filled.Lock,
                 iconBg = Color(0xFF8E8E93),
-                title = "Anyone with it can read your chats",
+                title = stringResource(R.string.rule_anyone_can_read),
                 separator = false,
             )
         }
@@ -204,7 +211,10 @@ private fun IntroScreen(isReady: Boolean, onContinue: () -> Unit) {
         ) {
             Icon(Icons.Filled.Fingerprint, contentDescription = null)
             Spacer(Modifier.width(8.dp))
-            Text("Continue with biometrics", fontWeight = FontWeight.SemiBold)
+            Text(
+                stringResource(R.string.continue_with_biometrics),
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }
@@ -238,13 +248,12 @@ private fun HeroCard(modifier: Modifier = Modifier) {
             )
         }
         Text(
-            "Your identity, in 12 words",
+            stringResource(R.string.your_identity_in_12_words),
             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
             textAlign = TextAlign.Center,
         )
         Text(
-            "Write them down. Keep them offline. This phrase restores your Nostr, " +
-                    "Stellar, and BLS keys on any device.",
+            stringResource(R.string.recovery_phrase_intro_subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -322,7 +331,11 @@ private fun RevealScreen(
             .padding(bottom = 28.dp),
     ) {
         Text(
-            "Write down these ${words.size} words in order. You'll confirm three of them on the next screen.",
+            pluralStringResource(
+                R.plurals.write_down_words_in_order,
+                count = words.size,
+                words.size,
+            ),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
@@ -363,7 +376,7 @@ private fun RevealScreen(
             ) {
                 Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Copy", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.copy), fontWeight = FontWeight.SemiBold)
             }
         }
 
@@ -377,12 +390,11 @@ private fun RevealScreen(
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(vertical = 14.dp),
         ) {
-            Text("I've written it down", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.ive_written_it_down), fontWeight = FontWeight.SemiBold)
         }
 
         Text(
-            "The phrase is generated on-device and never sent off the device. " +
-                "Screenshots are blocked on this screen.",
+            stringResource(R.string.phrase_local_disclaimer),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
@@ -395,10 +407,12 @@ private fun RevealScreen(
     if (copyConfirmShown) {
         AlertDialog(
             onDismissRequest = { copyConfirmShown = false },
-            title = { Text("Copied") },
-            text = { Text("Recovery phrase copied. It will be cleared from clipboard in 60 seconds. Store it securely now.") },
+            title = { Text(stringResource(R.string.copied)) },
+            text = { Text(stringResource(R.string.recovery_phrase_copied_message)) },
             confirmButton = {
-                TextButton(onClick = { copyConfirmShown = false }) { Text("OK") }
+                TextButton(onClick = { copyConfirmShown = false }) {
+                    Text(stringResource(R.string.ok))
+                }
             },
         )
     }
@@ -484,7 +498,7 @@ private fun PhraseCard(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Tap to reveal",
+                    stringResource(R.string.tap_to_reveal),
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 )
             }
@@ -529,7 +543,7 @@ private fun VerifyScreen(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                "Select word number",
+                stringResource(R.string.select_word_number),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -567,7 +581,7 @@ private fun VerifyScreen(
 
         if (state is RecoveryPhraseBackupViewModel.VerifyState.Wrong) {
             Text(
-                "Not the right word. Check your phrase and try again.",
+                stringResource(R.string.not_the_right_word),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.error,
                 textAlign = TextAlign.Center,
@@ -692,15 +706,14 @@ private fun DoneScreen(onDone: () -> Unit) {
         Spacer(Modifier.height(24.dp))
 
         Text(
-            "Backup verified",
+            stringResource(R.string.backup_verified),
             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
         )
 
         Spacer(Modifier.height(10.dp))
 
         Text(
-            "Your recovery phrase is confirmed. Store it somewhere safe — " +
-                    "you'll only need it if you lose this device.",
+            stringResource(R.string.backup_verified_subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -717,13 +730,13 @@ private fun DoneScreen(onDone: () -> Unit) {
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(vertical = 14.dp),
         ) {
-            Text("Done", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.done), fontWeight = FontWeight.SemiBold)
         }
 
         Spacer(Modifier.weight(1f))
 
         Text(
-            "Backed up ${dateString()} · BIP-39 English",
+            stringResource(R.string.backed_up_footer, dateString()),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,

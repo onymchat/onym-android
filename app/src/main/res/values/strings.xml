@@ -1,4 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    English source strings for the recovery-phrase backup flow.
+    Mirror of `Resources/Localizable.xcstrings` in onym-ios PR #5
+    (commit 36bd1c4) — same 27 strings + 1 plural, same wording.
+
+    See `values-ru/strings.xml` for the Russian translations. The
+    `MissingTranslation` lint check (enabled in app/build.gradle.kts)
+    fails the build if a string lands here without a parallel
+    `values-<lang>/strings.xml` entry.
+
+    Keys are snake_case per Android convention. Apostrophes inside
+    `<string>` and `<item>` content are escaped as `\'`.
+-->
 <resources>
-    <string name="app_name">Onym</string>
+
+    <!-- App identity. Proper noun — `translatable="false"` so per-locale
+         strings.xml files don't have to (and shouldn't) translate it. -->
+    <string name="app_name" translatable="false">Onym</string>
+
+    <!-- ─── Top-bar / nav titles ─────────────────────────────────── -->
+    <string name="back_up_keys">Back up keys</string>
+    <string name="recovery_phrase_title">Recovery phrase</string>
+    <string name="verify">Verify</string>
+
+    <!-- ─── Auth failure dialog ──────────────────────────────────── -->
+    <string name="authentication_failed">Authentication Failed</string>
+    <string name="try_again">Try Again</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- ─── Intro screen ─────────────────────────────────────────── -->
+    <string name="your_identity_in_12_words">Your identity, in 12 words</string>
+    <string name="recovery_phrase_intro_subtitle">Write them down. Keep them offline. This phrase restores your Nostr, Stellar, and BLS keys on any device.</string>
+    <string name="before_you_start">Before you start</string>
+    <string name="rule_never_share">Never share or photograph</string>
+    <string name="rule_store_offline">Store offline (paper or metal)</string>
+    <string name="rule_anyone_can_read">Anyone with it can read your chats</string>
+    <string name="continue_with_biometrics">Continue with biometrics</string>
+
+    <!-- ─── Reveal screen ────────────────────────────────────────── -->
+    <plurals name="write_down_words_in_order">
+        <item quantity="one">Write down this %1$d word in order. You\'ll confirm three of them on the next screen.</item>
+        <item quantity="other">Write down these %1$d words in order. You\'ll confirm three of them on the next screen.</item>
+    </plurals>
+    <string name="copy">Copy</string>
+    <string name="ive_written_it_down">I\'ve written it down</string>
+    <string name="phrase_local_disclaimer">The phrase is generated on-device and never sent off the device. Screenshots are blocked on this screen.</string>
+    <string name="copied">Copied</string>
+    <string name="ok">OK</string>
+    <string name="recovery_phrase_copied_message">Recovery phrase copied. It will be cleared from clipboard in 60 seconds. Store it securely now.</string>
+    <string name="tap_to_reveal">Tap to reveal</string>
+
+    <!-- ─── Verify screen ────────────────────────────────────────── -->
+    <string name="select_word_number">Select word number</string>
+    <string name="not_the_right_word">Not the right word. Check your phrase and try again.</string>
+
+    <!-- ─── Done screen ──────────────────────────────────────────── -->
+    <string name="backup_verified">Backup verified</string>
+    <string name="backup_verified_subtitle">Your recovery phrase is confirmed. Store it somewhere safe — you\'ll only need it if you lose this device.</string>
+    <string name="done">Done</string>
+    <string name="backed_up_footer">Backed up %1$s · BIP-39 English</string>
+
+    <!-- ─── ViewModel-resolved strings (no Composable available) ── -->
+    <string name="authenticate_to_reveal_recovery_phrase">Authenticate to reveal your recovery phrase</string>
+    <string name="recovery_phrase_unavailable">Recovery phrase unavailable. Your identity may not be BIP39-backed.</string>
+
 </resources>

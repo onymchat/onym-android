@@ -12,6 +12,7 @@ import chat.onym.android.identity.IdentityRepository
 import chat.onym.android.identity.IdentitySecretStore
 import chat.onym.android.recovery.AndroidBiometricAuthenticator
 import chat.onym.android.recovery.AndroidClipboardWriter
+import chat.onym.android.recovery.AndroidStringProvider
 import chat.onym.android.recovery.RecoveryPhraseBackupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 
@@ -55,6 +56,7 @@ class MainActivity : FragmentActivity() {
                         activityProvider = { this@MainActivity },
                     ),
                     clipboard = AndroidClipboardWriter(applicationContext),
+                    strings = AndroidStringProvider(applicationContext),
                 ) as T
             }
         }

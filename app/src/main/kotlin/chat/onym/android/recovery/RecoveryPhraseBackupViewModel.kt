@@ -2,6 +2,7 @@ package chat.onym.android.recovery
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import chat.onym.android.R
 import chat.onym.android.identity.Identity
 import chat.onym.android.identity.IdentityRepository
 import kotlinx.coroutines.Job
@@ -40,6 +41,7 @@ class RecoveryPhraseBackupViewModel(
     private val repository: IdentityRepository,
     private val authenticator: BiometricAuthenticator,
     private val clipboard: ClipboardWriter,
+    private val strings: StringProvider,
     private val clipboardClearDelay: Duration = 60.seconds,
     private val verifyAdvanceDelay: Duration = 450.milliseconds,
 ) : ViewModel() {
@@ -218,10 +220,14 @@ class RecoveryPhraseBackupViewModel(
     internal suspend fun authenticate() {
         try {
             authenticator.authenticate(
-                title = "Authenticate to reveal your recovery phrase",
+                title = strings[R.string.authenticate_to_reveal_recovery_phrase],
             )
         } catch (t: Throwable) {
-            _step.value = Step.AuthFailed(reason = t.message ?: t::class.qualifiedName ?: "Authentication failed")
+            _step.value = Step.AuthFailed(
+                reason = t.message
+                    ?: t::class.qualifiedName
+                    ?: strings[R.string.authentication_failed],
+            )
             return
         }
         // onym:allow-secret-read: revealing the recovery phrase to the user
@@ -231,7 +237,7 @@ class RecoveryPhraseBackupViewModel(
         val phrase = currentIdentity?.recoveryPhrase
         if (phrase == null) {
             _step.value = Step.AuthFailed(
-                reason = "Recovery phrase unavailable. Your identity may not be BIP39-backed.",
+                reason = strings[R.string.recovery_phrase_unavailable],
             )
             return
         }
