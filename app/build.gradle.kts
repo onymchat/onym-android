@@ -119,6 +119,12 @@ dependencies {
     androidTestImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    // Override the older transitive espresso-core (~3.6.1) pulled in
+    // by ui-test-junit4. 3.7.0 is the first version with the
+    // InputManager.getInstance() reflection fix for Android 15+/16+;
+    // older versions crash at the first compose action with
+    // `NoSuchMethodException: android.hardware.input.InputManager.getInstance []`.
+    androidTestImplementation(libs.androidx.test.espresso.core)
 
     // ui-test-manifest registers the test-only ComponentActivity in
     // the debug manifest so `createComposeRule()` can host content
