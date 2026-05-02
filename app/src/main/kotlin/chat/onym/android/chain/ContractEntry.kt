@@ -1,5 +1,7 @@
 package chat.onym.android.chain
 
+import androidx.annotation.StringRes
+import chat.onym.android.R
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
@@ -12,9 +14,12 @@ import java.time.format.DateTimeParseException
  * (forwards-compatibility — a future `"futurenet"` we don't know
  * about doesn't break the picker for the networks we do).
  */
-enum class ContractNetwork(val wireValue: String) {
-    Testnet("testnet"),
-    Public("public");
+enum class ContractNetwork(
+    val wireValue: String,
+    @StringRes val displayNameResId: Int,
+) {
+    Testnet("testnet", R.string.network_testnet),
+    Public("public", R.string.network_public);
 
     companion object {
         fun fromWire(value: String): ContractNetwork? =
@@ -30,12 +35,15 @@ enum class ContractNetwork(val wireValue: String) {
  * dropping unknowns at the boundary is correct — the picker
  * couldn't show it anyway.
  */
-enum class GovernanceType(val wireValue: String) {
-    Anarchy("anarchy"),
-    Democracy("democracy"),
-    Oligarchy("oligarchy"),
-    OneOnOne("oneonone"),
-    Tyranny("tyranny");
+enum class GovernanceType(
+    val wireValue: String,
+    @StringRes val displayNameResId: Int,
+) {
+    Anarchy("anarchy", R.string.governance_anarchy),
+    Democracy("democracy", R.string.governance_democracy),
+    Oligarchy("oligarchy", R.string.governance_oligarchy),
+    OneOnOne("oneonone", R.string.governance_oneonone),
+    Tyranny("tyranny", R.string.governance_tyranny);
 
     companion object {
         fun fromWire(value: String): GovernanceType? =

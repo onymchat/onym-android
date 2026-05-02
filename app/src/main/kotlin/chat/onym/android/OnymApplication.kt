@@ -73,10 +73,24 @@ private val Context.contractsDataStore: DataStore<Preferences> by preferencesDat
  */
 class OnymApplication : Application() {
 
-    /** Built once in [onCreate]. Read by [MainActivity] via
-     *  `(application as OnymApplication).dependencies`. */
-    lateinit var dependencies: AppDependencies
-        private set
+    /** Lazy-built so instrumented tests can swap [UITestRegistry]
+     *  fakes in BEFORE the first read (Application.onCreate runs
+     *  once at process start, well before any JUnit `@Rule` body
+     *  executes — building deps eagerly there reads an empty
+     *  registry on every test). MainActivity is the first reader. */
+    @Volatile
+    private var depsLazy: Lazy<AppDependencies> = lazy { buildDependencies() }
+
+    val dependencies: AppDependencies get() = depsLazy.value
+
+    /** Test-only — invalidate the cached [AppDependencies] so the
+     *  next [dependencies] read rebuilds from the current
+     *  [UITestRegistry] state. Called by the registry-setup rule
+     *  in instrumented tests; never used in production. */
+    @androidx.annotation.VisibleForTesting
+    internal fun rebuildDependenciesForTest() {
+        depsLazy = lazy { buildDependencies() }
+    }
 
     /** The currently-resumed Activity, used to host the AndroidX
      *  `BiometricPrompt` dialog fragment. `WeakReference` so a
@@ -112,7 +126,14 @@ class OnymApplication : Application() {
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {}
         })
+        // Dependency wiring happens lazily on first `dependencies`
+        // read (typically MainActivity.onCreate). Bootstrap + start
+        // are kicked off as part of `buildDependencies` so each
+        // rebuild — including instrumented-test rebuilds — fans
+        // bootstrap onto the new repository instances.
+    }
 
+    private fun buildDependencies(): AppDependencies {
         val identityRepository = IdentityRepository(
             store = IdentitySecretStore(applicationContext),
         )
@@ -125,10 +146,23 @@ class OnymApplication : Application() {
         // Relayer wiring (PR #17). Bootstrap loads cached + selection
         // from disk; start() fires the network fetch. Both run on the
         // application scope so launch never blocks on the network.
-        val relayerStore = DataStorePreferencesRelayerSelectionStore(
-            dataStore = applicationContext.relayerDataStore,
-        )
-        val relayerFetcher = GitHubReleasesKnownRelayersFetcher(httpClient = httpClient)
+        // UI-test mode (set by `OnymTestRunner` from androidTest/)
+        // swaps in in-memory fakes seeded by the page-object harness;
+        // production reads from DataStore + OkHttp.
+        val relayerStore = if (UITestRegistry.enabled) {
+            UITestRegistry.relayerStore
+                ?: error("UITestRegistry.enabled but relayerStore not set")
+        } else {
+            DataStorePreferencesRelayerSelectionStore(
+                dataStore = applicationContext.relayerDataStore,
+            )
+        }
+        val relayerFetcher = if (UITestRegistry.enabled) {
+            UITestRegistry.relayerFetcher
+                ?: error("UITestRegistry.enabled but relayerFetcher not set")
+        } else {
+            GitHubReleasesKnownRelayersFetcher(httpClient = httpClient)
+        }
         val relayerRepository = RelayerRepository(
             store = relayerStore,
             fetcher = relayerFetcher,
@@ -141,10 +175,20 @@ class OnymApplication : Application() {
         // Contracts/anchors wiring — same shape as the relayer block.
         // Separate DataStore file so the two domains' storage layers
         // are independent (one less coupling at audit time).
-        val contractsStore = DataStorePreferencesAnchorSelectionStore(
-            dataStore = applicationContext.contractsDataStore,
-        )
-        val contractsFetcher = GitHubReleasesContractsManifestFetcher(httpClient = httpClient)
+        val contractsStore = if (UITestRegistry.enabled) {
+            UITestRegistry.contractsStore
+                ?: error("UITestRegistry.enabled but contractsStore not set")
+        } else {
+            DataStorePreferencesAnchorSelectionStore(
+                dataStore = applicationContext.contractsDataStore,
+            )
+        }
+        val contractsFetcher = if (UITestRegistry.enabled) {
+            UITestRegistry.contractsFetcher
+                ?: error("UITestRegistry.enabled but contractsFetcher not set")
+        } else {
+            GitHubReleasesContractsManifestFetcher(httpClient = httpClient)
+        }
         val contractsRepository = ContractsRepository(
             store = contractsStore,
             fetcher = contractsFetcher,
@@ -154,7 +198,7 @@ class OnymApplication : Application() {
             contractsRepository.start()
         }
 
-        dependencies = AppDependencies(
+        return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
                 RecoveryPhraseBackupViewModel(

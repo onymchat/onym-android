@@ -42,11 +42,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.onym.android.R
 import chat.onym.android.chain.RelayerEndpoint
 import chat.onym.android.chain.RelayerStrategy
 
@@ -70,10 +73,13 @@ fun RelayerSettingsScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Relayer") },
+                title = { Text(stringResource(R.string.relayer_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
                     }
                 },
             )
@@ -83,7 +89,7 @@ fun RelayerSettingsScreen(
         LazyColumn(contentPadding = padding) {
 
             // ─── Strategy ────────────────────────────────────────
-            item { SectionHeader("STRATEGY") }
+            item { SectionHeader(stringResource(R.string.relayer_strategy_label)) }
             item {
                 StrategySelector(
                     strategy = state.configuration.strategy,
@@ -92,20 +98,21 @@ fun RelayerSettingsScreen(
             }
             item {
                 Footer(
-                    when (state.configuration.strategy) {
-                        RelayerStrategy.PRIMARY -> "Always use the primary endpoint. Falls back to the first " +
-                            "configured endpoint if no primary is set or the primary was removed."
-                        RelayerStrategy.RANDOM -> "Pick a random endpoint per request. Distributes load evenly."
-                    }
+                    stringResource(
+                        when (state.configuration.strategy) {
+                            RelayerStrategy.PRIMARY -> R.string.relayer_strategy_footer_primary
+                            RelayerStrategy.RANDOM -> R.string.relayer_strategy_footer_random
+                        }
+                    )
                 )
             }
 
             // ─── Configured ──────────────────────────────────────
-            item { SectionHeader("CONFIGURED") }
+            item { SectionHeader(stringResource(R.string.relayer_section_configured)) }
             if (state.configuration.endpoints.isEmpty()) {
                 item {
                     Text(
-                        "No endpoints configured. Add one below.",
+                        stringResource(R.string.relayer_empty_configured),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 32.dp, vertical = 12.dp),
@@ -129,12 +136,14 @@ fun RelayerSettingsScreen(
             }
 
             // ─── Add from Published List ─────────────────────────
-            item { SectionHeader("ADD FROM PUBLISHED LIST") }
+            item { SectionHeader(stringResource(R.string.relayer_section_add_known)) }
             if (state.unconfiguredKnownList.isEmpty()) {
                 item {
                     Text(
-                        if (state.configuration.endpoints.isEmpty()) "Fetching list…"
-                        else "All published relayers are already configured.",
+                        stringResource(
+                            if (state.configuration.endpoints.isEmpty()) R.string.relayer_known_fetching
+                            else R.string.relayer_known_all_added
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 32.dp, vertical = 12.dp),
@@ -150,7 +159,7 @@ fun RelayerSettingsScreen(
             }
 
             // ─── Add Custom URL ──────────────────────────────────
-            item { SectionHeader("ADD CUSTOM URL") }
+            item { SectionHeader(stringResource(R.string.relayer_section_add_custom)) }
             item {
                 CustomAddRow(
                     draft = state.customDraft,
@@ -159,12 +168,7 @@ fun RelayerSettingsScreen(
                     onAdd = viewModel::tappedAddCustom,
                 )
             }
-            item {
-                Footer(
-                    "For private deployments, localhost development, or sideloaded networks. " +
-                        "URL must use http or https."
-                )
-            }
+            item { Footer(stringResource(R.string.relayer_custom_footer)) }
         }
     }
 }
@@ -180,7 +184,8 @@ private fun StrategySelector(
     SingleChoiceSegmentedButtonRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .testTag(TAG_STRATEGY_PICKER),
     ) {
         val options = listOf(RelayerStrategy.PRIMARY, RelayerStrategy.RANDOM)
         options.forEachIndexed { index, opt ->
@@ -188,13 +193,9 @@ private fun StrategySelector(
                 selected = opt == strategy,
                 onClick = { onChange(opt) },
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                modifier = Modifier.testTag("relayer.strategy.${opt.name.lowercase()}"),
             ) {
-                Text(
-                    when (opt) {
-                        RelayerStrategy.PRIMARY -> "Primary"
-                        RelayerStrategy.RANDOM -> "Random"
-                    }
-                )
+                Text(stringResource(opt.displayNameResId))
             }
         }
     }
@@ -233,7 +234,8 @@ private fun SwipeableEndpointRow(
         enableDismissFromStartToEnd = false,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .testTag("relayer.configured.${endpoint.url}"),
     ) {
         EndpointRow(endpoint = endpoint, isPrimary = isPrimary, onTogglePrimary = onTogglePrimary)
     }
@@ -251,7 +253,7 @@ private fun DeleteBackground() {
     ) {
         Icon(
             Icons.Filled.Delete,
-            contentDescription = "Delete",
+            contentDescription = stringResource(R.string.relayer_row_delete),
             tint = MaterialTheme.colorScheme.onErrorContainer,
         )
     }
@@ -272,10 +274,16 @@ private fun EndpointRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        IconButton(onClick = onTogglePrimary) {
+        IconButton(
+            onClick = onTogglePrimary,
+            modifier = Modifier.testTag("relayer.configured.${endpoint.url}.primary_button"),
+        ) {
             Icon(
                 imageVector = if (isPrimary) Icons.Filled.Star else Icons.Outlined.StarOutline,
-                contentDescription = if (isPrimary) "Primary endpoint" else "Mark as primary",
+                contentDescription = stringResource(
+                    if (isPrimary) R.string.relayer_row_primary_label
+                    else R.string.relayer_row_mark_primary
+                ),
                 tint = if (isPrimary) Color(0xFFFF9500)
                        else MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -324,14 +332,15 @@ private fun KnownRelayerAddRow(endpoint: RelayerEndpoint, onClick: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .testTag("relayer.add.known.${endpoint.url}"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         IconButton(onClick = onClick) {
             Icon(
                 Icons.Filled.Add,
-                contentDescription = "Add",
+                contentDescription = stringResource(R.string.relayer_custom_add),
                 tint = MaterialTheme.colorScheme.primary,
             )
         }
@@ -373,7 +382,9 @@ private fun CustomAddRow(
             singleLine = true,
             isError = error != null,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(TAG_CUSTOM_FIELD),
         )
         if (error != null) {
             Text(
@@ -385,14 +396,23 @@ private fun CustomAddRow(
         Button(
             onClick = onAdd,
             enabled = draft.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(TAG_CUSTOM_BUTTON),
             shape = RoundedCornerShape(10.dp),
             contentPadding = PaddingValues(vertical = 12.dp),
         ) {
-            Text("Add", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.relayer_custom_add), fontWeight = FontWeight.SemiBold)
         }
     }
 }
+
+// Test tags exposed for instrumented UI tests under
+// app/src/androidTest/.../uitests. Stable across releases — UI test
+// fakes pin against these strings.
+const val TAG_STRATEGY_PICKER = "relayer.strategy.picker"
+const val TAG_CUSTOM_FIELD = "relayer.add.custom.field"
+const val TAG_CUSTOM_BUTTON = "relayer.add.custom.button"
 
 @Composable
 private fun SectionHeader(text: String) {

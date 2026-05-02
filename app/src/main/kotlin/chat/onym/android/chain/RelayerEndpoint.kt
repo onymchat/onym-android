@@ -1,5 +1,7 @@
 package chat.onym.android.chain
 
+import androidx.annotation.StringRes
+import chat.onym.android.R
 import kotlinx.serialization.Serializable
 import java.net.URI
 import java.net.URISyntaxException
@@ -61,15 +63,15 @@ data class KnownRelayersDocument(
  *
  * Mirrors `RelayerStrategy` from onym-ios PR #20.
  */
-enum class RelayerStrategy {
+enum class RelayerStrategy(@StringRes val displayNameResId: Int) {
     /** Always use [RelayerConfiguration.primaryUrl] when set; fall
      *  back to the first endpoint when the primary marker is unset
      *  or stale. */
-    PRIMARY,
+    PRIMARY(R.string.relayer_strategy_primary),
 
     /** Uniformly random per request. [RelayerConfiguration.primaryUrl]
      *  is irrelevant in this mode. */
-    RANDOM,
+    RANDOM(R.string.relayer_strategy_random),
 }
 
 /**
@@ -93,7 +95,29 @@ data class RelayerConfiguration(
      *  yet) or stale (primary endpoint was removed but caller
      *  forgot to clear the marker — [selectUrl] tolerates this). */
     val primaryUrl: String? = null,
-    val strategy: RelayerStrategy = RelayerStrategy.PRIMARY,
+    /** Default flipped to [RelayerStrategy.RANDOM] in PR #22 — for
+     *  a fresh install with the auto-populated published list, the
+     *  random strategy spreads requests evenly across the deployed
+     *  relayers. Users who want a single endpoint just delete the
+     *  rest + flip to PRIMARY. */
+    val strategy: RelayerStrategy = RelayerStrategy.RANDOM,
+    /**
+     * `true` once the user has explicitly added/removed an endpoint,
+     * marked a primary, or switched the strategy. Distinguishes
+     * "the user has never touched this" (auto-populate eligible on
+     * the next [chat.onym.android.chain.RelayerRepository.refresh])
+     * from "the user explicitly cleared the list" (don't auto-
+     * repopulate).
+     *
+     * **Backward-compat with PR #20 saves**: kotlinx.serialization
+     * fills missing fields with the default. The default below is
+     * `true` so a PR #20 wire shape (no `hasUserInteracted` field)
+     * decodes as "interacted" — old users with custom URLs don't
+     * get them blown away by re-population from the manifest.
+     * Cold-fresh installs explicitly construct
+     * [RelayerConfiguration.empty] which sets `false`.
+     */
+    val hasUserInteracted: Boolean = true,
 ) {
     /**
      * Resolve the URL for a single chain request. Pure function;
@@ -125,6 +149,19 @@ data class RelayerConfiguration(
             }
             RelayerStrategy.RANDOM -> endpoints.random(random).url
         }
+    }
+
+    companion object {
+        /** Cold-install starting state: no endpoints, no primary,
+         *  RANDOM strategy, **`hasUserInteracted = false`** so the
+         *  next [chat.onym.android.chain.RelayerRepository.refresh]
+         *  fans the published list into [endpoints]. */
+        val empty: RelayerConfiguration = RelayerConfiguration(
+            endpoints = emptyList(),
+            primaryUrl = null,
+            strategy = RelayerStrategy.RANDOM,
+            hasUserInteracted = false,
+        )
     }
 }
 

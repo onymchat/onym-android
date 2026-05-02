@@ -21,7 +21,7 @@ class InMemoryRelayerSelectionStore : RelayerSelectionStore {
     private var cached: List<RelayerEndpoint> = emptyList()
 
     override suspend fun loadConfiguration(): RelayerConfiguration =
-        mutex.withLock { configuration ?: RelayerConfiguration() }
+        mutex.withLock { configuration ?: RelayerConfiguration.empty }
 
     override suspend fun saveConfiguration(configuration: RelayerConfiguration) {
         mutex.withLock { this.configuration = configuration }

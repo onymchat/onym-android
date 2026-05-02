@@ -56,7 +56,10 @@ class RelayerSelectionStoreTest {
 
     @Test
     fun loadConfiguration_returnsEmptyOnFreshStore() = runTest {
-        assertEquals(RelayerConfiguration(), store.loadConfiguration())
+        // Cold-fresh store returns RelayerConfiguration.empty
+        // (hasUserInteracted=false) so the next refresh seeds the
+        // published list. PR #22 default.
+        assertEquals(RelayerConfiguration.empty, store.loadConfiguration())
     }
 
     @Test
@@ -78,7 +81,7 @@ class RelayerSelectionStoreTest {
         store.saveConfiguration(
             RelayerConfiguration(endpoints = listOf(testnet), primaryUrl = testnet.url)
         )
-        val updated = RelayerConfiguration()
+        val updated = RelayerConfiguration(endpoints = listOf(testnet))
         store.saveConfiguration(updated)
         assertEquals(updated, store.loadConfiguration())
     }
@@ -125,10 +128,25 @@ class RelayerSelectionStoreTest {
         writeLegacy("not really json {{")
 
         val migrated = store.loadConfiguration()
-        assertEquals(RelayerConfiguration(), migrated)
+        // Corrupt blob → fall back to .empty so the next refresh
+        // can auto-populate (the user lost their PR #17 pick to
+        // data corruption; auto-populate is a reasonable recovery).
+        assertEquals(RelayerConfiguration.empty, migrated)
         // Legacy key cleared so subsequent loads don't keep retrying.
         val prefs = dataStore.data.first()
         assertNull(prefs[stringPreferencesKey("relayer_selection")])
+    }
+
+    @Test
+    fun migration_legacyKnown_setsHasUserInteractedTrue() = runTest {
+        // PR #17 user explicitly picked the endpoint — migrating
+        // them as `hasUserInteracted = true` preserves their pick
+        // against a refresh that would otherwise auto-populate the
+        // published list.
+        writeLegacy("""{"kind":"known","url":"https://relayer-testnet.onym.chat","name":"Onym Testnet","network":"testnet"}""")
+
+        val migrated = store.loadConfiguration()
+        assertTrue("legacy migration must set hasUserInteracted=true", migrated.hasUserInteracted)
     }
 
     @Test

@@ -67,15 +67,20 @@ class DataStorePreferencesRelayerSelectionStore(
         if (raw != null) {
             // New-key path. Once migration has run we never look at
             // the legacy key again — migrated installs end up here.
+            // Corrupt blob → fall back to .empty so the next refresh
+            // can auto-populate (the user lost their prior config to
+            // data corruption; auto-populate is a reasonable recovery).
             return try {
                 jsonFormat.decodeFromString(RelayerConfiguration.serializer(), raw)
             } catch (_: SerializationException) {
-                RelayerConfiguration()
+                RelayerConfiguration.empty
             }
         }
         // Cold install OR pre-migration. Try the legacy key once.
+        // `.empty` (hasUserInteracted=false) for a truly cold start
+        // so the first refresh() seeds the published list.
         val legacy = prefs[LEGACY_KEY_SELECTION]
-            ?: return RelayerConfiguration()  // truly cold; no writes
+            ?: return RelayerConfiguration.empty
         return migrateLegacySelection(legacy)
     }
 
@@ -131,16 +136,26 @@ class DataStorePreferencesRelayerSelectionStore(
                 else -> null
             }
             if (endpoint != null) {
+                // PR #17 → PR #22: the user explicitly picked this
+                // endpoint, so flag it as user-interacted (the data
+                // class default already covers this — explicit pass
+                // for clarity). Strategy stays PRIMARY for the
+                // single-endpoint case the user picked.
                 RelayerConfiguration(
                     endpoints = listOf(endpoint),
                     primaryUrl = endpoint.url,
                     strategy = RelayerStrategy.PRIMARY,
+                    hasUserInteracted = true,
                 )
             } else {
-                RelayerConfiguration()  // unknown kind; drop
+                // Unknown kind / corrupt blob → fall back to .empty
+                // so the next refresh seeds the published list (the
+                // user lost their pick to data corruption; auto-
+                // populate is a reasonable recovery).
+                RelayerConfiguration.empty
             }
         } catch (_: SerializationException) {
-            RelayerConfiguration()  // corrupt blob; drop
+            RelayerConfiguration.empty
         }
         // Persist the migrated configuration AND remove the legacy
         // key in a single atomic edit so a subsequent crash + relaunch

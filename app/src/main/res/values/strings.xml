@@ -73,4 +73,56 @@
     <string name="security_footer_view_recovery_phrase">View your 12-word recovery phrase. You will need it to restore your identity on a new device.</string>
     <string name="search_placeholder_body">Search lands in a later chunk.</string>
 
+    <!-- ─── Settings → Network section (umbrella) ────────────────── -->
+    <!-- Mirrors the chain-UI catalog from onym-ios PR #21. -->
+    <string name="settings_network">Network</string>
+    <string name="settings_network_footer">Choose the relayer that submits transactions and which contract version anchors new chats. Existing chats keep the contract they were created with.</string>
+
+    <!-- ─── Settings → Relayer screen ────────────────────────────── -->
+    <string name="relayer_title">Relayer</string>
+    <string name="relayer_strategy_label">Strategy</string>
+    <string name="relayer_strategy_primary">Primary</string>
+    <string name="relayer_strategy_random">Random</string>
+    <string name="relayer_strategy_footer_primary">Always use the primary relayer. If no primary is set, the first configured relayer is used.</string>
+    <string name="relayer_strategy_footer_random">Pick a random relayer for each request. Useful for spreading load across redundant deployments.</string>
+    <string name="relayer_section_configured">Configured</string>
+    <string name="relayer_section_add_known">Add from Published List</string>
+    <string name="relayer_section_add_custom">Add Custom URL</string>
+    <string name="relayer_empty_configured">No relayers configured. Add one below.</string>
+    <string name="relayer_known_all_added">All published relayers added.</string>
+    <string name="relayer_known_fetching">Fetching list…</string>
+    <string name="relayer_known_footer">Published by the onym-relayer project. Tap to add.</string>
+    <string name="relayer_custom_footer">Use a private deployment, localhost, or any relayer not in the published list.</string>
+    <string name="relayer_custom_invalid">Enter a valid https:// URL</string>
+    <string name="relayer_custom_add">Add</string>
+    <string name="relayer_row_primary_label">Primary endpoint</string>
+    <string name="relayer_row_mark_primary">Mark as primary</string>
+    <string name="relayer_row_delete">Delete</string>
+
+    <!-- ─── Settings → Anchors screen ────────────────────────────── -->
+    <string name="anchors_title">Anchors</string>
+    <string name="anchors_footer">Choose the contract version used to anchor on-chain group state. Selection per (network, governance type) pins to new chats; existing chats keep the contract they were created with.</string>
+    <string name="anchors_no_contracts_yet">No contracts yet</string>
+    <string name="anchors_no_contract_for_type">No contract</string>
+    <string name="anchors_reset_to_default">Reset to Default (latest)</string>
+    <string name="anchors_section_network">Network</string>
+    <string name="anchors_section_governance_type">Governance type</string>
+    <string name="anchors_section_releases">Releases</string>
+    <string name="anchors_section_reset">Reset</string>
+    <string name="anchors_subtitle_selected">%1$s (selected)</string>
+    <string name="anchors_subtitle_latest">%1$s (latest)</string>
+    <string name="anchors_network_footer">Each governance type uses a separate contract. The release tag in parentheses is the version a brand-new chat would be anchored to.</string>
+    <string name="anchors_reset_footer">Reset clears the explicit pick — new chats fall back to the latest published release.</string>
+
+    <!-- ─── ContractNetwork.displayName ──────────────────────────── -->
+    <string name="network_testnet">Testnet</string>
+    <string name="network_public">Mainnet</string>
+
+    <!-- ─── GovernanceType.displayName ───────────────────────────── -->
+    <string name="governance_anarchy">Anarchy</string>
+    <string name="governance_democracy">Democracy</string>
+    <string name="governance_oligarchy">Oligarchy</string>
+    <string name="governance_oneonone">One-on-one</string>
+    <string name="governance_tyranny">Tyranny</string>
+
 </resources>
