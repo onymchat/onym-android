@@ -73,10 +73,14 @@
     <string name="security_footer_view_recovery_phrase">View your 12-word recovery phrase. You will need it to restore your identity on a new device.</string>
     <string name="search_placeholder_body">Search lands in a later chunk.</string>
 
-    <!-- ─── Settings → Groups section (PR-C of Create Group) ─────── -->
-    <string name="settings_groups">Groups</string>
-    <string name="settings_create_group">Create Group</string>
-    <string name="settings_groups_footer">Create an end-to-end encrypted group anchored on Stellar testnet. Only Tyranny is available right now.</string>
+    <!-- ─── Chats tab (PR-30) ─────────────────────────────────────── -->
+    <string name="chats_tab">Chats</string>
+    <string name="chats_title">Chats</string>
+    <string name="chats_create_group">Create Group</string>
+    <string name="chats_empty_title">No chats yet</string>
+    <string name="chats_empty_body">Create an end-to-end encrypted group anchored on Stellar.</string>
+    <string name="chats_unnamed_group">(Unnamed)</string>
+    <string name="chats_published_on_chain">Published on chain</string>
 
     <!-- ─── Settings → Network section (umbrella) ────────────────── -->
     <!-- Mirrors the chain-UI catalog from onym-ios PR #21. -->

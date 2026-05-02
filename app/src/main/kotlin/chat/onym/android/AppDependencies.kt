@@ -2,6 +2,7 @@ package chat.onym.android
 
 import androidx.fragment.app.FragmentActivity
 import chat.onym.android.chain.NetworkPreferenceProvider
+import chat.onym.android.chats.ChatsViewModel
 import chat.onym.android.group.CreateGroupViewModel
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.settings.AnchorsPickerViewModel
@@ -41,4 +42,7 @@ class AppDependencies(
      *  bound to this; CreateGroupInteractor reads it per call. */
     val networkPreferenceProvider: NetworkPreferenceProvider,
     val makeCreateGroupViewModel: () -> CreateGroupViewModel,
+    /** Chats tab — read-only view over [chat.onym.android.group.GroupRepository.snapshots].
+     *  Mirrors `makeChatsFlow` from onym-ios PR #30. */
+    val makeChatsViewModel: () -> ChatsViewModel,
 )
