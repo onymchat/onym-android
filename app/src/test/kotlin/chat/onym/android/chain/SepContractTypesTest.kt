@@ -163,6 +163,59 @@ class SepContractTypesTest {
         assertEquals(original, decoded)
     }
 
+    // ─── OneOnOneCreateGroupPayload ───────────────────────────────
+
+    @Test
+    fun oneOnOneCreateGroupPayload_emitsExpectedKeys() {
+        val payload = OneOnOneCreateGroupPayload(
+            groupId = ByteArray(32) { 0xAB.toByte() },
+            commitment = ByteArray(32) { 0xCD.toByte() },
+            proof = ByteArray(1601) { 0x01 },
+            publicInputs = listOf(
+                ByteArray(32) { 0xCD.toByte() },
+                ByteArray(32),
+            ),
+        )
+        val obj = json.parseToJsonElement(
+            json.encodeToString(OneOnOneCreateGroupPayload.serializer(), payload),
+        ).jsonObject
+
+        assertNotNull("group_id required", obj["group_id"])
+        assertNotNull("commitment required", obj["commitment"])
+        assertNotNull("proof required", obj["proof"])
+        // No `tier` and no `admin_pubkey_commitment` — OneOnOne is
+        // depth-5 hardcoded with no admin role.
+        assertNull("tier must NOT appear", obj["tier"])
+        assertNull("admin_pubkey_commitment must NOT appear", obj["admin_pubkey_commitment"])
+
+        val pi = obj["publicInputs"] as JsonArray
+        assertEquals("OneOnOne PI is 2 × 32B (commitment, fr_zero)", 2, pi.size)
+        for (element in pi) {
+            val raw = Base64.getDecoder().decode(element.jsonPrimitive.content)
+            assertEquals(32, raw.size)
+        }
+
+        val proofBytes = Base64.getDecoder().decode(obj["proof"]!!.jsonPrimitive.content)
+        assertEquals(1601, proofBytes.size)
+        assertArrayEquals(payload.proof, proofBytes)
+    }
+
+    @Test
+    fun oneOnOneCreateGroupPayload_roundtripPreservesAllFields() {
+        val original = OneOnOneCreateGroupPayload(
+            groupId = ByteArray(32) { 0x11 },
+            commitment = ByteArray(32) { 0x22 },
+            proof = ByteArray(1601) { 0x33 },
+            publicInputs = listOf(
+                ByteArray(32) { 0x22 },
+                ByteArray(32),
+            ),
+        )
+        val encoded = json.encodeToString(OneOnOneCreateGroupPayload.serializer(), original)
+        val decoded = json.decodeFromString(OneOnOneCreateGroupPayload.serializer(), encoded)
+        assertEquals(original, decoded)
+    }
+
     // ─── TyrannyUpdateCommitmentPayload ───────────────────────────
 
     @Test

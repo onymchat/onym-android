@@ -174,6 +174,53 @@ data class TyrannyCreateGroupPayload(
 }
 
 /**
+ * `create_group` payload for the OneOnOne (1v1) contract. Layout
+ * mirrors `add_create_group_args` in `onym-relayer/src/handler.rs`,
+ * `ContractType::OneOnOne` arm — the relayer extracts `caller` from
+ * its config and `group_id` / `commitment` from this payload's
+ * top-level keys, then forwards `--proof` + `--public-inputs` to the
+ * `sep-oneonone` Soroban contract.
+ *
+ * No `tier` (depth=5 is hardcoded in the OneOnOne circuit) and no
+ * `admin_pubkey_commitment` (1v1 has no admin role). The PI vector is
+ * 2 × 32B chunks: `[commitment, fr_zero]` — `fr_zero` is the symmetric
+ * second-element placeholder the OneOnOne contract validates.
+ *
+ * Mirrors `OneOnOneCreateGroupPayload` from onym-ios PR #36.
+ */
+@Serializable
+data class OneOnOneCreateGroupPayload(
+    @SerialName("group_id")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val groupId: ByteArray,
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val commitment: ByteArray,
+    /** 1601-byte raw PLONK proof — same wire constraint as Tyranny. */
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val proof: ByteArray,
+    /** 2 elements × 32 bytes — `[commitment, fr_zero]`. */
+    val publicInputs: List<@Serializable(with = Base64ByteArraySerializer::class) ByteArray>,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is OneOnOneCreateGroupPayload) return false
+        return groupId.contentEquals(other.groupId) &&
+            commitment.contentEquals(other.commitment) &&
+            proof.contentEquals(other.proof) &&
+            publicInputs.size == other.publicInputs.size &&
+            publicInputs.zip(other.publicInputs).all { (a, b) -> a.contentEquals(b) }
+    }
+
+    override fun hashCode(): Int {
+        var h = groupId.contentHashCode()
+        h = 31 * h + commitment.contentHashCode()
+        h = 31 * h + proof.contentHashCode()
+        for (p in publicInputs) h = 31 * h + p.contentHashCode()
+        return h
+    }
+}
+
+/**
  * `update_commitment` payload — Tyranny variant. The SDK's
  * `Tyranny.UpdateProof.publicInputs` is 160 bytes = 5 × 32B
  * (`c_old || epoch_old || c_new || admin_pubkey_commitment || group_id_fr`).
