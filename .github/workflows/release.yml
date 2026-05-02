@@ -19,16 +19,22 @@ name: Release
 #   ANDROID_KEY_PASSWORD       — password for that alias
 #   RELAYER_AUTH_TOKEN         — Bearer token the relayer's
 #                                 `validate_auth` requires on every
-#                                 contract-call POST. Inlined into
+#                                 contract-call POST. Two consumers:
+#                                 (1) `android-test` job — passed as
+#                                 the `ONYM_RELAYER_AUTH_TOKEN`
+#                                 instrumentation arg so
+#                                 `CreateGroupTyrannyE2ETest` can
+#                                 anchor a real group on testnet
+#                                 against the deployed relayer.
+#                                 (2) `build` job — inlined into
 #                                 `BuildConfig.RELAYER_AUTH_TOKEN` at
 #                                 assembleRelease and consumed at
 #                                 runtime by `BearerAuthInterceptor`.
-#                                 Without this secret, release builds
-#                                 still compile but every relayer call
-#                                 401s with "missing bearer" (the
-#                                 interceptor skips the header on a
-#                                 blank token rather than sending
-#                                 `Bearer ""`).
+#                                 Without this secret, the E2E test
+#                                 401s and the release APK ships with
+#                                 a blank token (the interceptor
+#                                 skips the header on blank rather
+#                                 than sending `Bearer ""`).
 
 on:
   workflow_dispatch:
@@ -124,6 +130,14 @@ jobs:
           script: echo "AVD warm snapshot created"
 
       - name: Run instrumented tests on emulator
+        # `ONYM_INTEGRATION=1` opts the gated E2E test
+        # (`CreateGroupTyrannyE2ETest`) into running. Without it, the
+        # @Before `Assume.assumeTrue` skips it cleanly, but on release
+        # builds we want the real-testnet anchor to verify.
+        # `ONYM_RELAYER_AUTH_TOKEN` is the same secret assembleRelease
+        # uses (PR #28 documented it).
+        env:
+          RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
         uses: reactivecircus/android-emulator-runner@70f4dee990796918b78d040e3278474bdbd348a7  # v2.37.0
         with:
           api-level: 34
@@ -132,7 +146,11 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon
+          script: |
+            ./gradlew :app:connectedDebugAndroidTest --no-daemon \
+              -Pandroid.testInstrumentationRunnerArguments.ONYM_INTEGRATION=1 \
+              -Pandroid.testInstrumentationRunnerArguments.ONYM_RELAYER_URL=https://relayer.onym.chat \
+              -Pandroid.testInstrumentationRunnerArguments.ONYM_RELAYER_AUTH_TOKEN="$RELAYER_AUTH_TOKEN"
 
       - name: Upload androidTest report on failure
         if: failure()
