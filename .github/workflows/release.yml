@@ -146,11 +146,13 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            ./gradlew :app:connectedDebugAndroidTest --no-daemon \
-              -Pandroid.testInstrumentationRunnerArguments.ONYM_INTEGRATION=1 \
-              -Pandroid.testInstrumentationRunnerArguments.ONYM_RELAYER_URL=https://relayer.onym.chat \
-              -Pandroid.testInstrumentationRunnerArguments.ONYM_RELAYER_AUTH_TOKEN="$RELAYER_AUTH_TOKEN"
+          # One line on purpose: `reactivecircus/android-emulator-runner`
+          # invokes the script via `sh -c <script>` without quoting,
+          # so YAML-block backslash continuations (`\<newline>`) get
+          # split into separate sh arguments and gradle sees a literal
+          # `\` task name. Run #25262842752 failed exactly that way;
+          # keep the gradle invocation single-line to dodge the issue.
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.ONYM_INTEGRATION=1 -Pandroid.testInstrumentationRunnerArguments.ONYM_RELAYER_URL=https://relayer.onym.chat -Pandroid.testInstrumentationRunnerArguments.ONYM_RELAYER_AUTH_TOKEN="$RELAYER_AUTH_TOKEN"
 
       - name: Upload androidTest report on failure
         if: failure()
