@@ -92,6 +92,13 @@ private fun IdentitySection(identity: Identity) {
     Labelled("Inbox tag (Nostr filter)") {
         Text(identity.inboxTag, style = monospace())
     }
+    // First-launch reveal of the freshly-generated mnemonic so the user
+    // can write it down before doing anything else with the app. Real
+    // onboarding / settings UI in a later chunk will gate this behind
+    // BiometricPrompt + an explicit "show recovery phrase" action; for
+    // now it shows on every app launch because there's nothing else for
+    // this scaffold screen to do.
+    // onym:allow-secret-read
     identity.recoveryPhrase?.let { phrase ->
         Labelled("Recovery phrase (BIP39, 12 words)") {
             Text(phrase, style = monospace())
