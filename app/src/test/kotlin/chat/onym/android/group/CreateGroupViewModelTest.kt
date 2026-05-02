@@ -319,7 +319,7 @@ class CreateGroupViewModelTest {
      *  lambda just throws if reached — the screen flow is still fully
      *  exercised via intent dispatch. */
     private fun makeViewModel(): CreateGroupViewModel = CreateGroupViewModel(
-        createGroup = { _, _, _ ->
+        createGroup = { _, _, _, _ ->
             error("createGroup must not be invoked from VM tests")
         },
     )
