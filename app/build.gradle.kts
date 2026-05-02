@@ -116,6 +116,11 @@ dependencies {
     // goes in androidTest.
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Android unit tests stub `org.json` (every method throws "not
+    // mocked"). The transport layer's NostrEvent / subscriptionFilters
+    // use JSONObject + JSONArray for canonical JSON, so tests need a
+    // real impl on the classpath.
+    testImplementation("org.json:json:20240303")
 
     // Instrumented tests. Real EncryptedSharedPreferences against the
     // emulator's hardware-backed Keystore.

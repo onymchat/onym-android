@@ -57,13 +57,7 @@ class NostrMessageTransport(
     }
 
     override suspend fun publish(payload: ByteArray, topic: TransportTopic): PublishReceipt {
-        val signer = OnymNostrSigner.ephemeral()
-        val event = NostrEvent.build(
-            kind = PRIMARY_KIND,
-            tags = listOf(listOf("t", topic.rawValue)),
-            content = Base64.getEncoder().encodeToString(payload),
-            signer = signer,
-        )
+        val event = buildPublishEvent(payload, topic, OnymNostrSigner.ephemeral())
         val accepted = state.publish(event)
         return PublishReceipt(messageId = event.id, acceptedBy = accepted)
     }
@@ -205,5 +199,24 @@ class NostrMessageTransport(
         private const val DEFAULT_CATCH_UP_SECONDS = 300L
         /** Tolerance applied to `since` to handle clock skew across relays. */
         private const val SINCE_SLACK_SECONDS = 60L
+
+        /**
+         * Pure event-construction path. Extracted from [publish] so
+         * tests can pin the wire format (kind, tags, base64-encoded
+         * payload) without standing up a WebSocket relay.
+         *
+         * `internal` because this is a transport-implementation detail
+         * — callers should only see [MessageTransport.publish].
+         */
+        internal fun buildPublishEvent(
+            payload: ByteArray,
+            topic: TransportTopic,
+            signer: NostrSigner,
+        ): NostrEvent = NostrEvent.build(
+            kind = PRIMARY_KIND,
+            tags = listOf(listOf("t", topic.rawValue)),
+            content = Base64.getEncoder().encodeToString(payload),
+            signer = signer,
+        )
     }
 }

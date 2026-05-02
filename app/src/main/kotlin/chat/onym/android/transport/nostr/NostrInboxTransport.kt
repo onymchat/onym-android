@@ -56,22 +56,7 @@ class NostrInboxTransport(
     }
 
     override suspend fun send(payload: ByteArray, inbox: TransportInboxId): PublishReceipt {
-        val signer = OnymNostrSigner.ephemeral()
-        // Outbound tag set preserved verbatim from iOS / stellar-mls.
-        // Each tag carries the inbox under a different key so a
-        // subscriber on any of the three filter shapes catches it.
-        val tags = listOf(
-            listOf("d", INBOX_TAG_PREFIX + inbox.rawValue),
-            listOf("t", inbox.rawValue),
-            listOf("sep_inbox", inbox.rawValue),
-            listOf("sep_version", "1"),
-        )
-        val event = NostrEvent.build(
-            kind = PRIMARY_KIND,
-            tags = tags,
-            content = Base64.getEncoder().encodeToString(payload),
-            signer = signer,
-        )
+        val event = buildSendEvent(payload, inbox, OnymNostrSigner.ephemeral())
         val accepted = state.send(event)
         return PublishReceipt(messageId = event.id, acceptedBy = accepted)
     }
@@ -90,26 +75,6 @@ class NostrInboxTransport(
         state.unsubscribe(inbox)
     }
 
-    /**
-     * Triple filter shape preserved verbatim — `#d` primary with the
-     * `sep-inbox:` prefix is the canonical addressing scheme;
-     * `#t` secondary catches clients that drop `d`; the legacy kind
-     * 24113 keeps backward-compat with older senders.
-     */
-    private fun subscriptionFilters(inbox: String): List<JSONObject> = listOf(
-        JSONObject().apply {
-            put("kinds", JSONArray().put(PRIMARY_KIND))
-            put("#d", JSONArray().put(INBOX_TAG_PREFIX + inbox))
-        },
-        JSONObject().apply {
-            put("kinds", JSONArray().put(PRIMARY_KIND))
-            put("#t", JSONArray().put(inbox))
-        },
-        JSONObject().apply {
-            put("kinds", JSONArray().put(LEGACY_KIND))
-            put("#t", JSONArray().put(inbox))
-        },
-    )
 
     private inner class State(private val scope: CoroutineScope) {
         private val mutex = Mutex()
@@ -159,7 +124,7 @@ class NostrInboxTransport(
                 activeSubscriptions[inbox]?.cancel()
                 "inbox-${inbox.rawValue}" to connections.values.toList()
             }
-            val filters = subscriptionFilters(inbox.rawValue)
+            val filters = subscriptionFilters(inbox.rawValue)  // companion helper
             val job = scope.launch {
                 for (conn in conns) {
                     filters.forEachIndexed { index, filter ->
@@ -199,5 +164,59 @@ class NostrInboxTransport(
         private const val PRIMARY_KIND = 34113
         private const val LEGACY_KIND = 24113
         private const val INBOX_TAG_PREFIX = "sep-inbox:"
+
+        /**
+         * Pure event-construction path. Extracted from [send] so
+         * tests can pin the wire format (kind, full tag set, base64-
+         * encoded payload) without standing up a WebSocket relay.
+         *
+         * `internal` because this is a transport-implementation
+         * detail — callers should only see [InboxTransport.send].
+         */
+        internal fun buildSendEvent(
+            payload: ByteArray,
+            inbox: TransportInboxId,
+            signer: NostrSigner,
+        ): NostrEvent {
+            // Outbound tag set preserved verbatim from iOS / stellar-mls.
+            // Each tag carries the inbox under a different key so a
+            // subscriber on any of the three filter shapes catches it.
+            val tags = listOf(
+                listOf("d", INBOX_TAG_PREFIX + inbox.rawValue),
+                listOf("t", inbox.rawValue),
+                listOf("sep_inbox", inbox.rawValue),
+                listOf("sep_version", "1"),
+            )
+            return NostrEvent.build(
+                kind = PRIMARY_KIND,
+                tags = tags,
+                content = Base64.getEncoder().encodeToString(payload),
+                signer = signer,
+            )
+        }
+
+        /**
+         * Triple filter shape preserved verbatim — `#d` primary with
+         * the `sep-inbox:` prefix is the canonical addressing scheme;
+         * `#t` secondary catches clients that drop `d`; the legacy
+         * kind 24113 keeps backward-compat with older senders.
+         *
+         * `internal` so tests can assert the shape without going
+         * through `subscribe`.
+         */
+        internal fun subscriptionFilters(inbox: String): List<JSONObject> = listOf(
+            JSONObject().apply {
+                put("kinds", JSONArray().put(PRIMARY_KIND))
+                put("#d", JSONArray().put(INBOX_TAG_PREFIX + inbox))
+            },
+            JSONObject().apply {
+                put("kinds", JSONArray().put(PRIMARY_KIND))
+                put("#t", JSONArray().put(inbox))
+            },
+            JSONObject().apply {
+                put("kinds", JSONArray().put(LEGACY_KIND))
+                put("#t", JSONArray().put(inbox))
+            },
+        )
     }
 }
