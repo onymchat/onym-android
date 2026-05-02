@@ -108,8 +108,15 @@ open class CreateGroupInteractor(
         val salt = GroupCommitmentBuilder.generateSalt()
         val tier = SepTier.SMALL
 
-        // 4. Creator member
+        // 4. Creator member — the one BLS Fr scalar read outside
+        // IdentityRepository this layer needs. The bytes pass straight
+        // into Tyranny.proveCreate (via GroupProofGenerator) and into
+        // computeLeafHash, then fall out of scope at the end of this
+        // method. IdentityRepository pins the "do not retain" contract
+        // on the accessor; this is the proof-generation hop the
+        // contract authorises.
         val blsSecret = try {
+            // onym:allow-secret-read
             identity.blsSecretKey()
         } catch (_: Throwable) {
             throw CreateGroupError.MissingIdentity
