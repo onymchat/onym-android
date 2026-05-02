@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12+ data extraction rules — opt out of both cloud (Google
+    Drive) and device-to-device transfer for the EncryptedSharedPreferences
+    file holding the identity secrets.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="chat.onym.android.identity.xml" />
+        <exclude domain="sharedpref" path="_androidx_security_crypto_encrypted_keys.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="chat.onym.android.identity.xml" />
+        <exclude domain="sharedpref" path="_androidx_security_crypto_encrypted_keys.xml" />
+    </device-transfer>
+</data-extraction-rules>
