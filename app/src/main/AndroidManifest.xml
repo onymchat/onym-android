@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:name=".OnymApplication"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:supportsRtl="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:allowBackup="false"
+        tools:targetApi="34">
+
+        <!--
+            allowBackup="false": the EncryptedSharedPreferences blob holds
+            the user's nostr secp256k1 secret + BLS12-381 secret. Even
+            though they're encrypted at rest with a Keystore-bound master
+            key, Google Drive backups would migrate the encrypted blob
+            without the matching key — best to opt out entirely so users
+            don't end up with a "restored" device that has unrecoverable
+            ciphertext.
+        -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

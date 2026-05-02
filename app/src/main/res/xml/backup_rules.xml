@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Defense-in-depth on top of allowBackup="false". If a future change
+    flips allowBackup back to true, these rules still exclude the
+    EncryptedSharedPreferences file + the AndroidX security master-key
+    aliases from auto-backup.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="chat.onym.android.identity.xml" />
+    <exclude domain="sharedpref" path="_androidx_security_crypto_encrypted_keys.xml" />
+</full-backup-content>

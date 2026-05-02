@@ -1,0 +1,47 @@
+name: CI
+
+# Runs on every PR / push to main:
+#   - JVM unit tests (~3-5 min): Bip39, StellarStrKey, the cross-platform
+#     fixture for Bip39+HKDF+Curve25519+inbox-tag derivation. No emulator
+#     required.
+#
+# Instrumented tests (real EncryptedSharedPreferences + the OnymSDK FFI
+# loaded from the AAR's jniLibs) live in app/src/androidTest/ and are
+# run locally via `./gradlew connectedDebugAndroidTest` against an
+# emulator or attached device. Adding an emulator job here is a follow-
+# up — the cross-platform fixture's FFI half (nostr/BLS pubkey bytes)
+# is the only test that needs real-Android, and the JVM-unit half
+# already covers the project-specific derivation constants.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  jvm-unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle (with build cache)
+        uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
+
+      - name: ./gradlew :app:testDebugUnitTest
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: testDebugUnitTest-report
+          path: app/build/reports/tests/testDebugUnitTest/
