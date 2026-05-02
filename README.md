@@ -296,12 +296,87 @@ See [`keystore/README.md`](keystore/README.md) for keystore management
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
+## Recovery-phrase backup flow
+
+The app's only screen today is the
+[`RecoveryPhraseBackupScreen`](app/src/main/kotlin/chat/onym/android/recovery/RecoveryPhraseBackupScreen.kt)
+flow — Intro → Reveal → Verify → Done. Mirrors onym-ios PR #4 1:1
+in shape, ported to Compose + StateFlow + AndroidX BiometricPrompt.
+
+```
+.intro
+  │ tappedContinueFromIntro → authenticate()
+  ├─► .authFailed(reason) ── dismissedAuthError → .intro
+  └─► .reveal(phrase, revealed: false)
+        │ tappedReveal     → revealed: true
+        │ tappedCopyPhrase → clipboard write + 60s auto-clear
+        │ tappedContinueFromReveal
+        ▼
+      .verify(phrase, rounds: 3, index: 0, .idle)
+        │ picked(word):
+        │   correct → .correct, delay 450ms,
+        │             then advance index OR transition to .done
+        │   wrong   → .wrong(word), retry same round
+        ▼
+      .done
+        │ tappedDoneFromCompletion → .intro (single-screen app loop)
+```
+
+3 random verify rounds × 4 options each (one correct + three
+distractors from the same phrase). Wrong pick stays on the same
+round; second pick during the in-flight 450 ms advance is ignored.
+
+### Side-effect seams
+
+- **`BiometricAuthenticator`** — interface + `AndroidBiometricAuthenticator`
+  backed by [`BiometricPrompt`](https://developer.android.com/reference/androidx/biometric/BiometricPrompt).
+  Requires a [`FragmentActivity`](https://developer.android.com/reference/androidx/fragment/app/FragmentActivity)
+  host (so [`MainActivity`](app/src/main/kotlin/chat/onym/android/MainActivity.kt)
+  extends `FragmentActivity`, not `ComponentActivity`). Takes an
+  *activity provider thunk* rather than a captured Activity reference
+  so the long-lived [`RecoveryPhraseBackupViewModel`](app/src/main/kotlin/chat/onym/android/recovery/RecoveryPhraseBackupViewModel.kt)
+  doesn't pin an Activity past configuration change. If the device has
+  no enrolled biometric and no device credential, returns success
+  without prompting (matches iOS `canEvaluatePolicy == false`
+  fail-open).
+- **`ClipboardWriter`** — interface + `AndroidClipboardWriter` over
+  [`ClipboardManager`](https://developer.android.com/reference/android/content/ClipboardManager).
+  Sets the [`IS_SENSITIVE`](https://developer.android.com/about/versions/13/features#copy-paste)
+  extra on Android 13+, so the system's clipboard preview shows a
+  redacted "Sensitive" placeholder instead of the actual phrase.
+
+### Screenshot / recents protection
+
+`MainActivity` sets [`WindowManager.LayoutParams.FLAG_SECURE`](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#FLAG_SECURE)
+on the window before `super.onCreate`. This:
+
+- Blocks screenshots and screen recording across the entire app.
+- Renders the recents thumbnail as a blank surface.
+
+Stronger than iOS's scene-phase obscure overlay (which only blanks
+the recents preview on backgrounding) — Android's flag covers both.
+
+### Tests
+
+[`app/src/androidTest/.../RecoveryPhraseBackupViewModelTest.kt`](app/src/androidTest/kotlin/chat/onym/android/recovery/RecoveryPhraseBackupViewModelTest.kt)
+ports all 13 iOS XCTest cases against a real
+`IdentityRepository` (per-test unique prefs file), a fake
+`BiometricAuthenticator`, and a fake `ClipboardWriter`. Lives in
+`androidTest/` (not `test/`) because the real repository requires
+Android Keystore — Robolectric doesn't simulate it. Same rule as
+the identity-layer instrumented tests, same rationale as iOS's
+"real Keychain behaviour or it doesn't count".
+
+Inject short delays in the test fixture
+(`clipboardClearDelay = 50ms`, `verifyAdvanceDelay = 20ms`) so the
+suite runs in well under a second.
+
 ## Out of scope (future chunks)
 
 - `repo.stellarSign(_)` / `repo.decryptInvitation(_)` methods —
   no callers yet, lands when transport / invitation does.
-- Onboarding / recovery-reveal UI (the bootstrap screen exists only
-  to make the repo wiring exercisable end-to-end).
+- Onboarding (this is just the backup flow; new-identity choice
+  vs restore-from-mnemonic UI is a future chunk).
 - Promoting `Bip39` into `onym-sdk-kotlin` — wait for a third client
   to want the same derivation.
 - Emulator job in CI for instrumented tests.
