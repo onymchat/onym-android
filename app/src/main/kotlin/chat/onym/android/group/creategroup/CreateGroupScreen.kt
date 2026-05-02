@@ -17,7 +17,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -32,6 +34,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -643,12 +646,33 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
                     modifier = Modifier.padding(14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(
-                        text = state.error?.message ?: "Couldn't create the group",
-                        color = OnymTokens.Red,
-                        style = TextStyle(fontSize = 13.sp),
-                        textAlign = TextAlign.Center,
-                    )
+                    // Soroban diagnostic chains can be 500+ chars
+                    // (proof-verify failures spell out the contract
+                    // IDs + error codes + bytes payloads); cap the
+                    // banner height so the Cancel/Try again row stays
+                    // visible. Monospaced + left-aligned for hex
+                    // readability; SelectionContainer lets the user
+                    // long-press to copy into a bug report.
+                    // Mirrors onym-ios PR #29.
+                    SelectionContainer(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            text = state.error?.message ?: "Couldn't create the group",
+                            color = OnymTokens.Red,
+                            style = TextStyle(
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                            ),
+                            textAlign = TextAlign.Start,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                        )
+                    }
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         // Cancel — closes the whole flow. Mirrors the
