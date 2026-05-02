@@ -117,4 +117,12 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+
+    // ui-test-manifest registers the test-only ComponentActivity in
+    // the debug manifest so `createComposeRule()` can host content
+    // without a real Activity from main code. Required by Compose UI
+    // tests that don't use `createAndroidComposeRule<MyActivity>`.
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
