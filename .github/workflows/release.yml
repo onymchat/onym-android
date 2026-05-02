@@ -1,0 +1,205 @@
+name: Release
+
+# Cuts an onym-android release: lint → JVM unit tests → create
+# GitHub Release at the tag → assembleRelease → zipalign + apksigner
+# → upload signed universal APK to the GitHub Release.
+#
+# APK is the only artifact: no AAB, no Play Store, no F-Droid. Single
+# universal APK with all four ABIs (arm64-v8a, armeabi-v7a, x86_64,
+# x86) bundled, ~50-70 MB.
+#
+# Trigger:
+#   gh workflow run Release -f tag=v0.0.1
+#
+# Required repo secrets (see keystore/README.md for setup):
+#   ANDROID_KEYSTORE_BASE64    — base64-encoded JKS keystore
+#   ANDROID_KEYSTORE_PASSWORD  — keystore password
+#   ANDROID_KEY_ALIAS          — alias inside the keystore
+#   ANDROID_KEY_PASSWORD       — password for that alias
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.0.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # tag push + GitHub Release creation + asset upload
+
+jobs:
+  # ─── Hard gates ──────────────────────────────────────────────────
+  # Both run in parallel. `build` waits on both via `needs:` so a
+  # failure in either prevents an APK from ever being built or
+  # uploaded.
+
+  lint:
+    name: Lint (no off-repo secret reads)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - name: Static check — identity secrets
+        run: python3 scripts/lint-secrets.py
+
+  test:
+    name: JVM unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
+      - run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+  # ─── GitHub Release creation ─────────────────────────────────────
+
+  create-release:
+    name: Create GitHub Release at tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0   # need full history for the release-notes commit range
+
+      - name: Validate tag input
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "tag must look like vX.Y.Z (got: $TAG)" >&2
+            exit 1
+          fi
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "tag $TAG already exists locally" >&2
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
+            echo "tag $TAG already exists on origin" >&2
+            exit 1
+          fi
+
+      - name: Generate release notes
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${TAG}\$" | head -1 || true)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          {
+            echo "## What's Changed"
+            echo ""
+            git log "$RANGE" --pretty=format:"- %s" --no-merges
+            echo ""
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
+            fi
+          } > release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ github.sha }}
+          body_path: release_notes.md
+
+  # ─── APK build + sign + upload ───────────────────────────────────
+
+  build:
+    name: Build signed release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [lint, test, create-release]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
+
+      - name: assembleRelease
+        # Produces app/build/outputs/apk/release/app-release-unsigned.apk
+        # (no signingConfig is declared on the release buildType, so
+        # AGP emits an unsigned APK rather than failing the build).
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Locate + rename APK
+        id: apk
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          [ -f "$UNSIGNED" ] || {
+            echo "expected unsigned APK at $UNSIGNED" >&2
+            ls -la app/build/outputs/apk/release/ 2>&1 >&2 || true
+            exit 1
+          }
+          VERSION="${TAG#v}"
+          OUT="onym-android-${VERSION}.apk"
+          mv "$UNSIGNED" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Zipalign APK
+        # zipalign aligns uncompressed entries to 4-byte boundaries
+        # (the Android runtime mmap's resources directly off the APK).
+        # `-p` page-aligns shared libraries to 16 KB pages — required
+        # by Android 15+ on devices with 16 KB page sizes.
+        run: |
+          set -eu
+          ZIPALIGN=$(find "$ANDROID_HOME" -name zipalign 2>/dev/null | sort -V | tail -1)
+          [ -x "$ZIPALIGN" ] || { echo "zipalign not found in $ANDROID_HOME" >&2; exit 1; }
+          mv "${{ steps.apk.outputs.path }}" unaligned.apk
+          $ZIPALIGN -p -v 4 unaligned.apk "${{ steps.apk.outputs.path }}"
+          rm unaligned.apk
+
+      - name: Sign APK
+        env:
+          KEYSTORE_BASE64:   ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS:         ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD:      ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -eu
+          [ -n "$KEYSTORE_BASE64" ]   || { echo "secret ANDROID_KEYSTORE_BASE64 unset"   >&2; exit 1; }
+          [ -n "$KEYSTORE_PASSWORD" ] || { echo "secret ANDROID_KEYSTORE_PASSWORD unset" >&2; exit 1; }
+          [ -n "$KEY_ALIAS" ]         || { echo "secret ANDROID_KEY_ALIAS unset"         >&2; exit 1; }
+          [ -n "$KEY_PASSWORD" ]      || { echo "secret ANDROID_KEY_PASSWORD unset"      >&2; exit 1; }
+
+          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/keystore.jks
+          APKSIGNER=$(find "$ANDROID_HOME" -name apksigner 2>/dev/null | sort -V | tail -1)
+          [ -x "$APKSIGNER" ] || { echo "apksigner not found in $ANDROID_HOME" >&2; exit 1; }
+
+          $APKSIGNER sign \
+            --ks /tmp/keystore.jks \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            "${{ steps.apk.outputs.path }}"
+          rm /tmp/keystore.jks
+
+          # Verify the produced signature so a misconfigured secret
+          # surfaces as a build failure rather than a silently-broken
+          # APK in the GitHub Release.
+          $APKSIGNER verify --verbose "${{ steps.apk.outputs.path }}"
+
+      - name: Upload APK to GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: ${{ steps.apk.outputs.path }}

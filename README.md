@@ -256,6 +256,46 @@ based reads are a known hole; flag in code review if you see one.
 To run locally: `python3 scripts/lint-secrets.py`. Exits 0 on
 success, 1 on any unsuppressed violation.
 
+## Release pipeline
+
+`.github/workflows/release.yml` — manual `workflow_dispatch`, builds a
+signed universal APK and attaches it to a fresh GitHub Release.
+
+```sh
+gh workflow run Release -f tag=v0.0.1
+```
+
+Job graph:
+
+```
+       ┌─── lint ──────────────┐
+       │                       │
+       ├─── test ──────────────┤
+       │                       ▼
+trigger┤                     build  →  GitHub Release
+       │                       ▲       (signed APK attached)
+       └─── create-release ────┘
+            (notes + Release at the tag)
+```
+
+The build job runs `assembleRelease` (no `signingConfig` declared on
+the release buildType, so AGP emits an unsigned APK), `zipalign`s
+the result with `-p 4` for 16 KB page-aligned native libs (Android
+15+ requirement), then signs with `apksigner` using a keystore
+decoded from the `ANDROID_KEYSTORE_BASE64` repo secret. APK is then
+uploaded to the Release the previous job created.
+
+APK is the only artifact: no AAB, no Play Store, no F-Droid. Single
+universal APK, all four ABIs bundled (~29 MB at v0.0.1).
+
+See [`keystore/README.md`](keystore/README.md) for keystore management
++ secret rotation. Required repo secrets:
+
+- `ANDROID_KEYSTORE_BASE64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
 ## Out of scope (future chunks)
 
 - `repo.stellarSign(_)` / `repo.decryptInvitation(_)` methods —
