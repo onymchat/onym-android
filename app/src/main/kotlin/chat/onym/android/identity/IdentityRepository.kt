@@ -19,6 +19,7 @@ import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import java.security.MessageDigest
+import java.security.SecureRandom
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.IllegalBlockSizeException
@@ -61,7 +62,7 @@ import javax.crypto.spec.SecretKeySpec
 class IdentityRepository(
     private val store: IdentitySecretStore,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : InvitationEnvelopeDecrypter {
+) : InvitationEnvelopeDecrypter, InvitationEnvelopeSealer {
     private val mutex = Mutex()
     private val _snapshots = MutableStateFlow<Identity?>(null)
 
@@ -220,6 +221,117 @@ class IdentityRepository(
         }
     }
 
+    // ─── InvitationEnvelopeSealer ───────────────────────────────────
+
+    /**
+     * Sender-side mirror of [decryptInvitation]. Generates a fresh
+     * per-envelope X25519 keypair, derives the AES-GCM key from the
+     * ECDH shared secret with [recipientInboxPublicKey], encrypts the
+     * payload, signs the ephemeral pubkey with this device's Ed25519
+     * identity key (M-5), and returns the JSON-serialised
+     * [SealedEnvelope]. Secret material never escapes this method —
+     * only the resulting bytes do.
+     *
+     * The Ed25519 signing key is recomputed from the persisted nostr
+     * secret on every call and never assigned to a stored property,
+     * matching [decryptInvitation]'s posture for the recipient X25519
+     * private key.
+     *
+     * Mirrors `IdentityRepository.sealInvitation` from onym-ios PR #24.
+     */
+    override suspend fun sealInvitation(
+        payload: ByteArray,
+        recipientInboxPublicKey: ByteArray,
+    ): ByteArray = withContext(ioDispatcher) {
+        if (recipientInboxPublicKey.size != 32) {
+            throw InvitationSealError.InvalidRecipientPublicKey(
+                "expected 32 bytes, got ${recipientInboxPublicKey.size}"
+            )
+        }
+        val recipientPub = try {
+            X25519PublicKeyParameters(recipientInboxPublicKey, 0)
+        } catch (e: IllegalArgumentException) {
+            throw InvitationSealError.InvalidRecipientPublicKey(e.message ?: "parse failed")
+        }
+        val snapshot = store.load() ?: throw InvitationSealError.IdentityNotLoaded
+        sealInvitationLocked(snapshot, payload, recipientPub)
+    }
+
+    private fun sealInvitationLocked(
+        snapshot: StoredSnapshot,
+        payload: ByteArray,
+        recipientPub: X25519PublicKeyParameters,
+    ): ByteArray {
+        // Fresh per-envelope X25519 keypair. SecureRandom seed is the
+        // OS RNG; bouncycastle generates a clamped private scalar
+        // internally.
+        val ephemeralPrivate = X25519PrivateKeyParameters(SecureRandom())
+        val ephemeralPub = ephemeralPrivate.generatePublicKey().encoded
+
+        // ECDH against the recipient's X25519 inbox pubkey.
+        val agreement = X25519Agreement().apply { init(ephemeralPrivate) }
+        val sharedSecret = ByteArray(agreement.agreementSize)
+        agreement.calculateAgreement(recipientPub, sharedSecret, 0)
+
+        // HKDF salt + info MUST match decryptInvitation exactly —
+        // interop with iOS senders/receivers + stellar-mls senders
+        // rides on these constants.
+        val aesKey = Bip39.hkdfSha256(
+            ikm = sharedSecret,
+            salt = "sep-invitation-v1".toByteArray(Charsets.UTF_8),
+            info = "aes-256-gcm".toByteArray(Charsets.UTF_8),
+            length = 32,
+        )
+
+        // Random 12-byte AES-GCM nonce. Each call mints a fresh one;
+        // a duplicate would break GCM security against the same key.
+        val nonce = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        val (ciphertext, authTag) = try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.ENCRYPT_MODE, SecretKeySpec(aesKey, "AES"), GCMParameterSpec(128, nonce))
+            }
+            val combined = cipher.doFinal(payload)
+            // GCM emits ciphertext || tag as one buffer; split for the
+            // wire shape, which keeps them in separate base64 fields.
+            val tagLen = 16
+            combined.copyOfRange(0, combined.size - tagLen) to
+                combined.copyOfRange(combined.size - tagLen, combined.size)
+        } catch (e: Exception) {
+            throw InvitationSealError.EncryptionFailed(e)
+        }
+
+        // M-5: sign the ephemeral pubkey with the sender's long-term
+        // Ed25519 identity key. Recipient verifies in
+        // decryptInvitation against `senderEd25519PublicKey`.
+        val signingKey = stellarSigningPrivateKey(snapshot.nostrSecretKey)
+        val senderPubkey = signingKey.generatePublicKey().encoded
+        val ephSignature = try {
+            Ed25519Signer().apply {
+                init(true, signingKey)
+                update(ephemeralPub, 0, ephemeralPub.size)
+            }.generateSignature()
+        } catch (e: Exception) {
+            throw InvitationSealError.SigningFailed(e)
+        }
+
+        val envelope = SealedEnvelope(
+            version = 1,
+            scheme = "x25519-aes-256-gcm-v1",
+            ephemeralPublicKey = ephemeralPub,
+            ephemeralKeySignature = ephSignature,
+            senderEd25519PublicKey = senderPubkey,
+            nonce = nonce,
+            ciphertext = ciphertext,
+            authenticationTag = authTag,
+        )
+        return try {
+            envelopeJsonFormat.encodeToString(SealedEnvelope.serializer(), envelope)
+                .toByteArray(Charsets.UTF_8)
+        } catch (e: SerializationException) {
+            throw InvitationSealError.EncodingFailed(e)
+        }
+    }
+
     // ─── Private ─────────────────────────────────────────────────────
 
     private fun generateNewLocked(): Identity {
@@ -291,15 +403,25 @@ class IdentityRepository(
          * preserve for cross-platform interop. Do not change without
          * coordinating with iOS + stellar-mls.
          */
-        internal fun stellarPublicKey(nostrSecret: ByteArray): ByteArray {
+        internal fun stellarPublicKey(nostrSecret: ByteArray): ByteArray =
+            stellarSigningPrivateKey(nostrSecret).generatePublicKey().encoded
+
+        /**
+         * Sibling of [stellarPublicKey] that returns the Ed25519
+         * *private* key. Used by [sealInvitation] for the M-5
+         * attestation signature on per-envelope ephemeral pubkeys.
+         * Internal because it returns secret material; production
+         * callers MUST discard the returned object after a single use,
+         * never assign to a stored property.
+         */
+        internal fun stellarSigningPrivateKey(nostrSecret: ByteArray): Ed25519PrivateKeyParameters {
             val seed = Bip39.hkdfSha256(
                 ikm = nostrSecret,
                 salt = "chat.onym.ios".toByteArray(Charsets.UTF_8),
                 info = "stellar-ed25519-v1".toByteArray(Charsets.UTF_8),
                 length = 32,
             )
-            val sk = Ed25519PrivateKeyParameters(seed, 0)
-            return sk.generatePublicKey().encoded
+            return Ed25519PrivateKeyParameters(seed, 0)
         }
 
         /**
