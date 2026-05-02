@@ -1,8 +1,9 @@
 name: Release
 
-# Cuts an onym-android release: lint → JVM unit tests → create
-# GitHub Release at the tag → assembleRelease → zipalign + apksigner
-# → upload signed universal APK to the GitHub Release.
+# Cuts an onym-android release: lint + JVM unit tests + UI
+# instrumented tests on an emulator → create GitHub Release at
+# the tag → assembleRelease → zipalign + apksigner → upload
+# signed universal APK to the GitHub Release.
 #
 # APK is the only artifact: no AAB, no Play Store, no F-Droid. Single
 # universal APK with all four ABIs (arm64-v8a, armeabi-v7a, x86_64,
@@ -30,12 +31,12 @@ permissions:
 
 jobs:
   # ─── Hard gates ──────────────────────────────────────────────────
-  # Both run in parallel. `build` waits on both via `needs:` so a
-  # failure in either prevents an APK from ever being built or
-  # uploaded.
+  # All three run in parallel. `build` waits on all of them via
+  # `needs:` so a failure in any prevents an APK from ever being
+  # built or uploaded.
 
   lint:
-    name: Lint (no off-repo secret reads)
+    name: Lint (no off-repo secret reads + MissingTranslation)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -55,6 +56,80 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
       - run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+  android-test:
+    # Compose UI tests + instrumented IdentityRepository tests
+    # against a real emulator. Combined wall time ~10-12 min cold
+    # (~6 min for AVD boot + ~3 min for Gradle + ~2 min for the
+    # test suites themselves). AVD snapshot is cached between runs
+    # via reactivecircus/android-emulator-runner so warm runs are
+    # noticeably faster.
+    name: UI + instrumented tests on emulator
+    runs-on: ubuntu-latest
+    # KVM acceleration is required for tolerable emulator boot
+    # times — ubuntu-latest GitHub runners ship /dev/kvm enabled,
+    # but the udev rule needs broadening so the runner user can
+    # use it. Standard recipe from the action's README.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Enable KVM group permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
+
+      # AVD snapshot cache key includes the API level + system image
+      # type so a future bump to a different API invalidates cleanly.
+      - name: Cache AVD snapshot
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-api-34-google-apis-x86_64
+
+      - name: Create AVD + warm snapshot
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@70f4dee990796918b78d040e3278474bdbd348a7  # v2.37.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "AVD warm snapshot created"
+
+      - name: Run instrumented tests on emulator
+        uses: reactivecircus/android-emulator-runner@70f4dee990796918b78d040e3278474bdbd348a7  # v2.37.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon
+
+      - name: Upload androidTest report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: connectedAndroidTest-report
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
 
   # ─── GitHub Release creation ─────────────────────────────────────
 
@@ -120,7 +195,7 @@ jobs:
     name: Build signed release APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [lint, test, create-release]
+    needs: [lint, test, android-test, create-release]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
