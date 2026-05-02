@@ -11,7 +11,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -24,7 +29,7 @@ import chat.onym.android.settings.SettingsScreen
 
 /**
  * App shell. `Scaffold` + Material 3 [NavigationBar] across the bottom,
- * a [NavHost] for the content slot. Two tabs (Settings, Search) plus a
+ * a [androidx.navigation.compose.NavHost] for the content slot. Two tabs (Settings, Search) plus a
  * full-screen `recovery_backup` destination pushed from the Settings
  * row.
  *
@@ -44,9 +49,13 @@ import chat.onym.android.settings.SettingsScreen
  *   - Backup flow is a navigation destination (not a `ModalBottomSheet`).
  *     Android-idiomatic for a multi-step flow; supports system back
  *     gesture without ceremony.
+ *
+ * Receives [AppDependencies] (built once in [OnymApplication]) and
+ * uses its factory closures to construct per-flow ViewModels — no
+ * composable in this graph holds a reference to a repository.
  */
 @Composable
-fun RootScreen(recoveryViewModel: RecoveryPhraseBackupViewModel) {
+fun RootScreen(dependencies: AppDependencies) {
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
@@ -97,8 +106,22 @@ fun RootScreen(recoveryViewModel: RecoveryPhraseBackupViewModel) {
                 SearchScreen()
             }
             composable(ROUTE_RECOVERY_BACKUP) {
+                // Resolve the host Activity at render time. AppDependencies
+                // can't capture the Activity at app start (it doesn't exist
+                // yet), so the factory takes a thunk; OnymApplication
+                // tracks the currently-resumed Activity via lifecycle
+                // callbacks and hands it back here.
+                val app = LocalContext.current.applicationContext as OnymApplication
+                val activityProvider = remember(app) { { app.requireCurrentFragmentActivity() } }
+                val viewModel: RecoveryPhraseBackupViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer {
+                            dependencies.makeRecoveryPhraseBackupViewModel(activityProvider)
+                        }
+                    },
+                )
                 RecoveryPhraseBackupScreen(
-                    viewModel = recoveryViewModel,
+                    viewModel = viewModel,
                     onBackClick = { navController.popBackStack() },
                 )
             }
