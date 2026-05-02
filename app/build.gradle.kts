@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -111,6 +112,13 @@ dependencies {
 
     implementation(libs.onym.sdk)
 
+    // Room — `suspend` DAO + KSP-generated bindings. PersistenceStore
+    // for incoming invitations + (later) groups / messages / contact
+    // aliases / transport bundles.
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
     // JVM unit tests. Pure-logic only — Bip39, StellarStrKey, the
     // cross-platform fixture. Anything touching EncryptedSharedPreferences
     // goes in androidTest.
@@ -121,6 +129,12 @@ dependencies {
     // use JSONObject + JSONArray for canonical JSON, so tests need a
     // real impl on the classpath.
     testImplementation("org.json:json:20240303")
+    // Robolectric — drives Room (`Context.getApplicationContext()` is
+    // required to open the in-memory DB) from the JVM unit-test
+    // runner. Used by `RoomInvitationStoreTest` only; everything else
+    // in `app/src/test/` is plain JUnit and won't load Robolectric.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.ext.junit)
 
     // Instrumented tests. Real EncryptedSharedPreferences against the
     // emulator's hardware-backed Keystore.
