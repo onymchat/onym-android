@@ -3,7 +3,7 @@ package chat.onym.android
 import androidx.fragment.app.FragmentActivity
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.settings.AnchorsPickerViewModel
-import chat.onym.android.settings.RelayerPickerViewModel
+import chat.onym.android.settings.RelayerSettingsViewModel
 import chat.onym.android.transport.nostr.NostrEphemeralSignerProvider
 
 /**
@@ -33,6 +33,6 @@ class AppDependencies(
      *  into the app shell yet. */
     val nostrSignerProvider: NostrEphemeralSignerProvider,
     val makeRecoveryPhraseBackupViewModel: (activityProvider: () -> FragmentActivity) -> RecoveryPhraseBackupViewModel,
-    val makeRelayerPickerViewModel: () -> RelayerPickerViewModel,
+    val makeRelayerSettingsViewModel: () -> RelayerSettingsViewModel,
     val makeAnchorsPickerViewModel: () -> AnchorsPickerViewModel,
 )

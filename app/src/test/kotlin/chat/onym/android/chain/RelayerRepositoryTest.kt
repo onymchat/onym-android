@@ -5,202 +5,231 @@ import chat.onym.android.support.InMemoryRelayerSelectionStore
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import kotlin.random.Random
 
 /**
- * Repository contract against the in-memory fakes. Same shape as
- * [chat.onym.android.identity.IdentityRepository]'s test pattern —
- * Mutex + StateFlow emission discipline.
- *
- * Mirrors `RelayerRepositoryTests` from onym-ios PR #18.
+ * Repository contract for the multi-endpoint configuration shape.
+ * Mirrors the iOS PR #20 RelayerRepositoryTests.
  */
 class RelayerRepositoryTest {
 
-    private val testnet = RelayerEndpoint("Onym Testnet", "https://relayer-testnet.onym.chat", "testnet")
-    private val mainnet = RelayerEndpoint("Onym Mainnet", "https://relayer.onym.chat", "public")
+    private val a = RelayerEndpoint("A", "https://a.example", "testnet")
+    private val b = RelayerEndpoint("B", "https://b.example", "testnet")
+    private val custom = RelayerEndpoint.custom("https://localhost:8080")
+
+    private fun makeRepo(
+        store: InMemoryRelayerSelectionStore = InMemoryRelayerSelectionStore(),
+        fetcher: FakeKnownRelayersFetcher = FakeKnownRelayersFetcher(
+            FakeKnownRelayersFetcher.Mode.Succeeds(emptyList())
+        ),
+    ): Pair<RelayerRepository, InMemoryRelayerSelectionStore> {
+        val repo = RelayerRepository(store, fetcher)
+        return repo to store
+    }
 
     // ─── bootstrap ────────────────────────────────────────────────
 
     @Test
-    fun bootstrap_hydratesCachedAndSelectionFromStore() = runTest {
+    fun bootstrap_hydratesConfigurationAndCachedFromStore() = runTest {
         val store = InMemoryRelayerSelectionStore().apply {
-            saveCachedKnownRelayers(listOf(testnet, mainnet))
-            saveSelection(RelayerSelection.Known(testnet))
+            saveCachedKnownRelayers(listOf(a, b))
+            saveConfiguration(RelayerConfiguration(endpoints = listOf(a), primaryUrl = a.url))
         }
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Failing(IOException("offline")))
-        val repo = RelayerRepository(store, fetcher)
+        val (repo, _) = makeRepo(store)
 
         repo.bootstrap()
 
         val state = repo.snapshots.value
-        assertEquals(listOf(testnet, mainnet), state.knownRelayers)
-        assertEquals(RelayerSelection.Known(testnet), state.selection)
-        assertEquals(0, fetcher.fetchCallCount)
+        assertEquals(listOf(a, b), state.knownRelayers)
+        assertEquals(listOf(a), state.configuration.endpoints)
+        assertEquals(a.url, state.configuration.primaryUrl)
     }
 
     // ─── start ────────────────────────────────────────────────────
 
     @Test
-    fun start_persistsAndPushesFreshList() = runTest {
-        val store = InMemoryRelayerSelectionStore()
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(testnet, mainnet)))
-        val repo = RelayerRepository(store, fetcher)
-
-        repo.start()
-
-        assertEquals(listOf(testnet, mainnet), store.loadCachedKnownRelayers())
-        assertEquals(listOf(testnet, mainnet), repo.snapshots.value.knownRelayers)
-    }
-
-    @Test
     fun start_isIdempotent_acrossMultipleCalls() = runTest {
-        val store = InMemoryRelayerSelectionStore()
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(testnet)))
-        val repo = RelayerRepository(store, fetcher)
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a)))
+        val (repo, _) = makeRepo(fetcher = fetcher)
 
-        repo.start()
-        repo.start()
-        repo.start()
+        repo.start(); repo.start(); repo.start()
 
-        assertEquals(
-            "start() must only fetch once across multiple calls",
-            1,
-            fetcher.fetchCallCount,
-        )
+        assertEquals(1, fetcher.fetchCallCount)
     }
 
     @Test
-    fun start_swallowsNetworkErrorsSilently() = runTest {
-        val store = InMemoryRelayerSelectionStore().apply {
-            saveCachedKnownRelayers(listOf(testnet))
-        }
+    fun start_swallowsErrorsSilentlyAndKeepsCachedList() = runTest {
+        val store = InMemoryRelayerSelectionStore().apply { saveCachedKnownRelayers(listOf(a)) }
         val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Failing(IOException("offline")))
-        val repo = RelayerRepository(store, fetcher)
+        val (repo, _) = makeRepo(store, fetcher)
         repo.bootstrap()
 
-        // Must NOT throw — app launch can't crash on a network blip.
-        repo.start()
+        repo.start()  // must not throw
 
-        // Cached list survives the failed fetch.
-        assertEquals(listOf(testnet), repo.snapshots.value.knownRelayers)
-        assertEquals(listOf(testnet), store.loadCachedKnownRelayers())
+        assertEquals(listOf(a), repo.snapshots.value.knownRelayers)
+    }
+
+    // ─── addEndpoint ──────────────────────────────────────────────
+
+    @Test
+    fun addEndpoint_appendsNewEndpoint_inInsertionOrder() = runTest {
+        val (repo, store) = makeRepo()
+
+        repo.addEndpoint(a)
+        repo.addEndpoint(b)
+        repo.addEndpoint(custom)
+
+        assertEquals(listOf(a, b, custom), repo.snapshots.value.configuration.endpoints)
+        assertEquals(listOf(a, b, custom), store.loadConfiguration().endpoints)
     }
 
     @Test
-    fun start_failureLeavesCachedListIntact() = runTest {
-        val store = InMemoryRelayerSelectionStore().apply {
-            saveCachedKnownRelayers(listOf(mainnet))
-        }
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Failing(IOException("dns")))
-        val repo = RelayerRepository(store, fetcher)
-        repo.bootstrap()
+    fun addEndpoint_dedupesOnUrlAndUpdatesMetadataInPlace() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a)
+        repo.addEndpoint(b)
 
-        repo.start()
+        // Re-add `a`'s URL with new metadata (e.g. user typed it as
+        // custom first, then the published list landed).
+        val refreshedA = a.copy(name = "Onym A (refreshed)", network = "public")
+        repo.addEndpoint(refreshedA)
 
-        // Selection (none) and known list (cached mainnet) both
-        // unchanged after the failed fetch.
-        assertEquals(listOf(mainnet), repo.snapshots.value.knownRelayers)
-        assertNull(repo.snapshots.value.selection)
-    }
-
-    // ─── refresh ──────────────────────────────────────────────────
-
-    @Test
-    fun refresh_succeeds_persistsAndPushes() = runTest {
-        val store = InMemoryRelayerSelectionStore()
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(testnet)))
-        val repo = RelayerRepository(store, fetcher)
-
-        repo.refresh()
-
-        assertEquals(listOf(testnet), repo.snapshots.value.knownRelayers)
-        assertEquals(listOf(testnet), store.loadCachedKnownRelayers())
+        val endpoints = repo.snapshots.value.configuration.endpoints
+        assertEquals(2, endpoints.size)  // no duplicate row
+        assertEquals(refreshedA, endpoints[0])  // metadata updated in place
+        assertEquals(b, endpoints[1])  // ordering preserved
     }
 
     @Test
-    fun refresh_propagatesFailureToCaller() = runTest {
-        val store = InMemoryRelayerSelectionStore().apply {
-            saveCachedKnownRelayers(listOf(testnet))
-        }
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Failing(IOException("dns")))
-        val repo = RelayerRepository(store, fetcher)
-        repo.bootstrap()
+    fun addEndpoint_doesNotAutoMarkAsPrimary() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a)
+        repo.addEndpoint(b)
 
-        var thrown: Throwable? = null
-        try { repo.refresh() } catch (t: Throwable) { thrown = t }
-
-        assertTrue("refresh must propagate so pull-to-refresh UI can react", thrown is IOException)
-        // Cached list still intact.
-        assertEquals(listOf(testnet), repo.snapshots.value.knownRelayers)
+        // PRIMARY's fall-back path returns first-endpoint, but
+        // primaryUrl itself stays null until the user picks.
+        assertNull(repo.snapshots.value.configuration.primaryUrl)
     }
 
-    // ─── setSelection ─────────────────────────────────────────────
+    // ─── removeEndpoint ───────────────────────────────────────────
 
     @Test
-    fun setSelection_persistsAndPushes() = runTest {
-        val store = InMemoryRelayerSelectionStore()
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(emptyList()))
-        val repo = RelayerRepository(store, fetcher)
+    fun removeEndpoint_dropsRow() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a); repo.addEndpoint(b)
 
-        repo.setSelection(RelayerSelection.Custom("https://custom.example"))
+        repo.removeEndpoint(a.url)
 
-        assertEquals(
-            RelayerSelection.Custom("https://custom.example"),
-            repo.snapshots.value.selection,
-        )
-        assertEquals(
-            RelayerSelection.Custom("https://custom.example"),
-            store.loadSelection(),
-        )
+        assertEquals(listOf(b), repo.snapshots.value.configuration.endpoints)
     }
 
     @Test
-    fun setSelection_nullClears() = runTest {
-        val store = InMemoryRelayerSelectionStore()
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(emptyList()))
-        val repo = RelayerRepository(store, fetcher)
-        repo.setSelection(RelayerSelection.Custom("https://x.example"))
+    fun removeEndpoint_clearsPrimaryMarker_whenRemovingPrimary() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a); repo.addEndpoint(b)
+        repo.setPrimary(a.url)
 
-        repo.setSelection(null)
+        repo.removeEndpoint(a.url)
 
-        assertNull(repo.snapshots.value.selection)
-        assertNull(store.loadSelection())
-    }
-
-    // ─── StateFlow discipline ─────────────────────────────────────
-
-    @Test
-    fun snapshots_initialValue_isEmpty() {
-        val store = InMemoryRelayerSelectionStore()
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(emptyList()))
-        val repo = RelayerRepository(store, fetcher)
-
-        val s = repo.snapshots.value
-        assertTrue(s.knownRelayers.isEmpty())
-        assertNull(s.selection)
+        assertNull(repo.snapshots.value.configuration.primaryUrl)
+        // selectUrl now falls back to first-of-remaining.
+        assertEquals(b.url, repo.snapshots.value.selectUrl())
     }
 
     @Test
-    fun snapshots_emitsAfterEachSuccessfulMutation() = runTest {
-        val store = InMemoryRelayerSelectionStore()
-        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(testnet)))
-        val repo = RelayerRepository(store, fetcher)
+    fun removeEndpoint_doesNotClearPrimaryMarker_whenRemovingNonPrimary() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a); repo.addEndpoint(b)
+        repo.setPrimary(b.url)
 
-        val initial = repo.snapshots.value
-        repo.start()
-        val afterStart = repo.snapshots.value
-        repo.setSelection(RelayerSelection.Known(testnet))
-        val afterSelection = repo.snapshots.value
+        repo.removeEndpoint(a.url)
 
-        // Three distinct snapshots.
-        assertTrue("start() should change the knownRelayers list",
-            initial.knownRelayers != afterStart.knownRelayers)
-        assertTrue("setSelection() should change selection",
-            afterStart.selection != afterSelection.selection)
-        // Identity sanity.
-        assertSame(repo.snapshots, repo.snapshots)
+        assertEquals(b.url, repo.snapshots.value.configuration.primaryUrl)
+    }
+
+    @Test
+    fun removeEndpoint_unknownUrl_isNoOp() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a)
+
+        repo.removeEndpoint("https://no-such.example")
+
+        assertEquals(listOf(a), repo.snapshots.value.configuration.endpoints)
+    }
+
+    // ─── setPrimary ───────────────────────────────────────────────
+
+    @Test
+    fun setPrimary_persistsAndPushes() = runTest {
+        val (repo, store) = makeRepo()
+        repo.addEndpoint(a); repo.addEndpoint(b)
+
+        repo.setPrimary(b.url)
+
+        assertEquals(b.url, repo.snapshots.value.configuration.primaryUrl)
+        assertEquals(b.url, store.loadConfiguration().primaryUrl)
+    }
+
+    @Test
+    fun setPrimary_unknownUrl_isNoOp() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a)
+
+        repo.setPrimary("https://not-configured.example")
+
+        assertNull(repo.snapshots.value.configuration.primaryUrl)
+    }
+
+    // ─── setStrategy ──────────────────────────────────────────────
+
+    @Test
+    fun setStrategy_persistsAndPushes() = runTest {
+        val (repo, store) = makeRepo()
+        repo.addEndpoint(a)
+
+        repo.setStrategy(RelayerStrategy.RANDOM)
+
+        assertEquals(RelayerStrategy.RANDOM, repo.snapshots.value.configuration.strategy)
+        assertEquals(RelayerStrategy.RANDOM, store.loadConfiguration().strategy)
+    }
+
+    // ─── selectUrl integration ────────────────────────────────────
+
+    @Test
+    fun selectUrl_respectsPrimaryStrategy() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a); repo.addEndpoint(b)
+        repo.setPrimary(b.url)
+
+        assertEquals(b.url, repo.selectUrl())
+    }
+
+    @Test
+    fun selectUrl_respectsRandomStrategy() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a); repo.addEndpoint(b)
+        repo.setStrategy(RelayerStrategy.RANDOM)
+
+        val rng = Random(123)
+        val visited = (0 until 200).map { repo.selectUrl(rng) }.toSet()
+        assertTrue("RANDOM should visit both endpoints over many draws",
+            visited == setOf(a.url, b.url))
+    }
+
+    @Test
+    fun selectUrl_returnsNull_whenNoEndpoints() = runTest {
+        val (repo, _) = makeRepo()
+        assertNull(repo.selectUrl())
+    }
+
+    @Test
+    fun selectUrl_primary_fallsBackToFirstWhenPrimaryStaleOrUnset() = runTest {
+        val (repo, _) = makeRepo()
+        repo.addEndpoint(a); repo.addEndpoint(b)
+        // No setPrimary call → primaryUrl is null → fall through to first.
+        assertEquals(a.url, repo.selectUrl())
     }
 }

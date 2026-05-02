@@ -1,6 +1,9 @@
 package chat.onym.android.chain
 
 import kotlinx.serialization.Serializable
+import java.net.URI
+import java.net.URISyntaxException
+import kotlin.random.Random
 
 /**
  * One published relayer endpoint. Wire format pinned by
@@ -8,21 +11,43 @@ import kotlinx.serialization.Serializable
  * server-side `relayers.json` artifact rides on the JSON field
  * names being exactly `name` / `url` / `network`.
  *
- * Mirrors `RelayerEndpoint` from onym-ios PR #18.
+ * The `network` field is `"testnet"` / `"public"` for published
+ * relayers and `"custom"` for user-typed URLs (synthesised via
+ * [RelayerEndpoint.Companion.custom]).
+ *
+ * Mirrors `RelayerEndpoint` from onym-ios PR #18 / PR #20.
  */
 @Serializable
 data class RelayerEndpoint(
     val name: String,
     val url: String,
     val network: String,
-)
+) {
+    companion object {
+        /**
+         * Build a "custom" endpoint from a user-typed URL. Network
+         * tag is fixed at `"custom"`; name defaults to the URL host
+         * (or the raw URL if the host can't be parsed — defensive
+         * fallback; the ViewModel rejects malformed URLs upstream).
+         */
+        fun custom(url: String): RelayerEndpoint {
+            val host = try {
+                URI(url).host
+            } catch (_: URISyntaxException) {
+                null
+            }
+            return RelayerEndpoint(
+                name = host ?: url,
+                url = url,
+                network = "custom",
+            )
+        }
+    }
+}
 
 /**
  * Top-level shape of `relayers.json`, fetched from the latest
- * GitHub Release of `onymchat/onym-relayer`. `version = 1` today;
- * future schema changes bump the version and we'd add a converter
- * (forwards-compat is best-effort — `Json { ignoreUnknownKeys =
- * true }` already swallows extra fields).
+ * GitHub Release of `onymchat/onym-relayer`. `version = 1` today.
  */
 @Serializable
 data class KnownRelayersDocument(
@@ -31,28 +56,76 @@ data class KnownRelayersDocument(
 )
 
 /**
- * What the user picked. Two cases:
+ * How [RelayerConfiguration.selectUrl] picks one endpoint per
+ * request from a multi-endpoint configuration.
  *
- *  - [Known] — one of the published [RelayerEndpoint]s the fetcher
- *    discovered. The picker UI surfaces these as a list.
- *  - [Custom] — a user-typed URL. Used for private deployments,
- *    localhost dev, sideloaded networks. URL is opaque to us; we
- *    only validate that it parses + uses http/https + has a host
- *    (see `RelayerPickerViewModel.validate`).
- *
- * `null` selection means "user hasn't picked yet" — chain code
- * should refuse to publish until the user picks.
- *
- * Mirrors `RelayerSelection` from onym-ios PR #18.
+ * Mirrors `RelayerStrategy` from onym-ios PR #20.
  */
-sealed class RelayerSelection {
-    abstract val url: String
+enum class RelayerStrategy {
+    /** Always use [RelayerConfiguration.primaryUrl] when set; fall
+     *  back to the first endpoint when the primary marker is unset
+     *  or stale. */
+    PRIMARY,
 
-    data class Known(val endpoint: RelayerEndpoint) : RelayerSelection() {
-        override val url: String get() = endpoint.url
+    /** Uniformly random per request. [RelayerConfiguration.primaryUrl]
+     *  is irrelevant in this mode. */
+    RANDOM,
+}
+
+/**
+ * Multi-endpoint relayer configuration the chain client reads per
+ * request. The user adds endpoints (mix of known + custom),
+ * optionally marks one as primary, and picks a strategy. Selection
+ * happens entirely in [selectUrl] — pure function, no I/O,
+ * deterministic given the supplied [Random].
+ *
+ * Wire format is `@Serializable` so the persistence seam can
+ * round-trip the whole configuration as a single JSON blob (matches
+ * the iOS twin's UserDefaults blob).
+ *
+ * Mirrors `RelayerConfiguration` from onym-ios PR #20.
+ */
+@Serializable
+data class RelayerConfiguration(
+    val endpoints: List<RelayerEndpoint> = emptyList(),
+    /** URL of the primary endpoint when [strategy] is
+     *  [RelayerStrategy.PRIMARY]. May be `null` (no primary marked
+     *  yet) or stale (primary endpoint was removed but caller
+     *  forgot to clear the marker — [selectUrl] tolerates this). */
+    val primaryUrl: String? = null,
+    val strategy: RelayerStrategy = RelayerStrategy.PRIMARY,
+) {
+    /**
+     * Resolve the URL for a single chain request. Pure function;
+     * the three rules:
+     *
+     *  1. Empty endpoints → `null` regardless of strategy. The
+     *     chain client refuses to publish.
+     *  2. [RelayerStrategy.PRIMARY]:
+     *     - Return [primaryUrl] if set AND still in [endpoints].
+     *     - Otherwise fall back to `endpoints.first().url`. Tolerates
+     *       stale primary markers + lets a single-endpoint user
+     *       skip the "promote to primary" tap.
+     *  3. [RelayerStrategy.RANDOM]: uniform random over [endpoints]
+     *     using [random]. [primaryUrl] is irrelevant.
+     *
+     * @param random Injected so tests can pin behaviour with a
+     *        seeded [Random]. Production callers pass the default.
+     */
+    fun selectUrl(random: Random = Random.Default): String? {
+        if (endpoints.isEmpty()) return null
+        return when (strategy) {
+            RelayerStrategy.PRIMARY -> {
+                val primary = primaryUrl
+                if (primary != null && endpoints.any { it.url == primary }) {
+                    primary
+                } else {
+                    endpoints.first().url
+                }
+            }
+            RelayerStrategy.RANDOM -> endpoints.random(random).url
+        }
     }
-
-    data class Custom(override val url: String) : RelayerSelection()
 }
 
 /**
@@ -62,9 +135,12 @@ sealed class RelayerSelection {
  *  - [knownRelayers] — last successful fetch (or empty if never
  *    fetched / cleared). Cached to disk so the picker has something
  *    to show before the next start() / refresh() completes.
- *  - [selection] — user's current pick.
+ *  - [configuration] — the user's multi-endpoint config + strategy.
  */
 data class RelayerState(
     val knownRelayers: List<RelayerEndpoint>,
-    val selection: RelayerSelection?,
-)
+    val configuration: RelayerConfiguration,
+) {
+    /** Convenience pass-through to [RelayerConfiguration.selectUrl]. */
+    fun selectUrl(random: Random = Random.Default): String? = configuration.selectUrl(random)
+}

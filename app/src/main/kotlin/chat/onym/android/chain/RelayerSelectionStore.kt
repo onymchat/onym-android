@@ -9,23 +9,26 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
- * Persistence seam for the relayer URL selection + the cached
- * known-relayer list. URLs aren't secret material — DataStore
- * Preferences is plenty; encrypted storage stays for identity
- * bytes only.
+ * Persistence seam for the multi-endpoint relayer configuration +
+ * the cached known-relayer list. URLs aren't secret material —
+ * DataStore Preferences is plenty; identity bytes continue to live
+ * in EncryptedSharedPreferences.
  *
- * `suspend` everywhere — DataStore reads return [kotlinx.coroutines.flow.Flow]s
- * but we only ever care about the latest snapshot, so the impl
- * collapses every read to `flow.first()`.
+ * `loadConfiguration` runs migration from the PR #17 single-
+ * selection format on first call; the legacy preference is
+ * removed afterwards so subsequent calls just read the new key.
  *
- * Mirrors `RelayerSelectionStore` from onym-ios PR #18.
+ * Mirrors `RelayerSelectionStore` from onym-ios PR #20.
  */
 interface RelayerSelectionStore {
-    /** Returns `null` if no selection persisted yet. */
-    suspend fun loadSelection(): RelayerSelection?
+    /** Returns an empty configuration if nothing's been persisted
+     *  yet (cold start) or if the legacy blob was unreadable. */
+    suspend fun loadConfiguration(): RelayerConfiguration
 
-    /** Persist the user's pick. `null` clears it. */
-    suspend fun saveSelection(selection: RelayerSelection?)
+    /** Persist the configuration. Empty configurations are saved
+     *  as-is (the user can clear all endpoints; the chain client
+     *  refuses to publish until they re-add at least one). */
+    suspend fun saveConfiguration(configuration: RelayerConfiguration)
 
     /** Last successfully-fetched list, or `[]` if the fetcher has
      *  never succeeded on this install. */
@@ -39,39 +42,52 @@ interface RelayerSelectionStore {
 }
 
 /**
- * [DataStore]-backed [RelayerSelectionStore]. Stores both the
- * selection and the cached known list as JSON strings under
- * fixed Preferences keys. JSON encoding is permissive on
- * decoding so a future schema-evolution doesn't trip the read.
+ * [DataStore]-backed [RelayerSelectionStore]. Stores the
+ * configuration + cached list as JSON strings under fixed
+ * preference keys.
  *
- * Threading: DataStore handles serialised writes internally; this
- * class is safe to call from multiple coroutines without external
- * synchronisation.
+ * Migration: on the first [loadConfiguration] call after upgrading
+ * from PR #17, the legacy `relayer_selection` preference is read,
+ * mapped into a single-endpoint [RelayerConfiguration] (primary +
+ * the one endpoint), persisted under the new
+ * `relayer_configuration` key, and the legacy preference is
+ * removed. Subsequent calls just read the new key — migration
+ * runs once per install and the test pins this property.
+ *
+ * Threading: DataStore handles serialised writes internally; safe
+ * to call from multiple coroutines without external sync.
  */
 class DataStorePreferencesRelayerSelectionStore(
     private val dataStore: DataStore<Preferences>,
 ) : RelayerSelectionStore {
 
-    override suspend fun loadSelection(): RelayerSelection? {
+    override suspend fun loadConfiguration(): RelayerConfiguration {
         val prefs = dataStore.data.first()
-        val raw = prefs[KEY_SELECTION] ?: return null
-        return try {
-            jsonFormat.decodeFromString(SelectionRecord.serializer(), raw).toSelection()
-        } catch (_: SerializationException) {
-            null
+        val raw = prefs[KEY_CONFIGURATION]
+        if (raw != null) {
+            // New-key path. Once migration has run we never look at
+            // the legacy key again — migrated installs end up here.
+            return try {
+                jsonFormat.decodeFromString(RelayerConfiguration.serializer(), raw)
+            } catch (_: SerializationException) {
+                RelayerConfiguration()
+            }
         }
+        // Cold install OR pre-migration. Try the legacy key once.
+        val legacy = prefs[LEGACY_KEY_SELECTION]
+            ?: return RelayerConfiguration()  // truly cold; no writes
+        return migrateLegacySelection(legacy)
     }
 
-    override suspend fun saveSelection(selection: RelayerSelection?) {
+    override suspend fun saveConfiguration(configuration: RelayerConfiguration) {
         dataStore.edit { prefs ->
-            if (selection == null) {
-                prefs.remove(KEY_SELECTION)
-            } else {
-                prefs[KEY_SELECTION] = jsonFormat.encodeToString(
-                    SelectionRecord.serializer(),
-                    SelectionRecord.from(selection),
-                )
-            }
+            prefs[KEY_CONFIGURATION] = jsonFormat.encodeToString(
+                RelayerConfiguration.serializer(),
+                configuration,
+            )
+            // Defence in depth — if a save races a load that
+            // hadn't yet migrated, drop the legacy key here too.
+            prefs.remove(LEGACY_KEY_SELECTION)
         }
     }
 
@@ -98,48 +114,73 @@ class DataStorePreferencesRelayerSelectionStore(
         dataStore.edit { it.clear() }
     }
 
-    /** Persistence-only sum type for [RelayerSelection]. We don't
-     *  encode the sealed class directly because kotlinx.serialization's
-     *  default polymorphic encoding adds a `type` discriminator
-     *  that would couple the on-disk format to the Kotlin class
-     *  hierarchy — this hand-rolled record is simpler to evolve. */
-    @kotlinx.serialization.Serializable
-    private data class SelectionRecord(
-        val kind: String,           // "known" or "custom"
-        val url: String,
-        val name: String? = null,   // populated for known
-        val network: String? = null, // populated for known
-    ) {
-        fun toSelection(): RelayerSelection? = when (kind) {
-            "known" -> {
-                val n = name; val net = network
-                if (n != null && net != null) {
-                    RelayerSelection.Known(RelayerEndpoint(name = n, url = url, network = net))
-                } else null
+    /** Legacy `RelayerSelection` (PR #17) → multi-endpoint
+     *  configuration. Decode, build, persist under the new key,
+     *  drop the legacy key — all atomic in one `edit { }`. */
+    private suspend fun migrateLegacySelection(legacyRaw: String): RelayerConfiguration {
+        val migrated = try {
+            val record = jsonFormat.decodeFromString(LegacySelectionRecord.serializer(), legacyRaw)
+            val endpoint = when (record.kind) {
+                "known" -> {
+                    val n = record.name; val net = record.network
+                    if (n != null && net != null) {
+                        RelayerEndpoint(name = n, url = record.url, network = net)
+                    } else null
+                }
+                "custom" -> RelayerEndpoint.custom(record.url)
+                else -> null
             }
-            "custom" -> RelayerSelection.Custom(url)
-            else -> null
-        }
-
-        companion object {
-            fun from(selection: RelayerSelection): SelectionRecord = when (selection) {
-                is RelayerSelection.Known -> SelectionRecord(
-                    kind = "known",
-                    url = selection.endpoint.url,
-                    name = selection.endpoint.name,
-                    network = selection.endpoint.network,
+            if (endpoint != null) {
+                RelayerConfiguration(
+                    endpoints = listOf(endpoint),
+                    primaryUrl = endpoint.url,
+                    strategy = RelayerStrategy.PRIMARY,
                 )
-                is RelayerSelection.Custom -> SelectionRecord(
-                    kind = "custom",
-                    url = selection.url,
+            } else {
+                RelayerConfiguration()  // unknown kind; drop
+            }
+        } catch (_: SerializationException) {
+            RelayerConfiguration()  // corrupt blob; drop
+        }
+        // Persist the migrated configuration AND remove the legacy
+        // key in a single atomic edit so a subsequent crash + relaunch
+        // doesn't re-trigger the migration path.
+        dataStore.edit { prefs ->
+            // Only write the new key if migration produced something
+            // — but always drop the legacy key (corrupt blob also
+            // gets wiped so we don't keep retrying it).
+            if (migrated.endpoints.isNotEmpty()) {
+                prefs[KEY_CONFIGURATION] = jsonFormat.encodeToString(
+                    RelayerConfiguration.serializer(),
+                    migrated,
                 )
             }
+            prefs.remove(LEGACY_KEY_SELECTION)
         }
+        return migrated
     }
 
+    /** Mirrors the on-disk shape PR #17 wrote. Decoded + dropped
+     *  during one-time migration; never written by this version. */
+    @kotlinx.serialization.Serializable
+    private data class LegacySelectionRecord(
+        val kind: String,           // "known" or "custom"
+        val url: String,
+        val name: String? = null,
+        val network: String? = null,
+    )
+
     private companion object {
-        private val KEY_SELECTION = stringPreferencesKey("relayer_selection")
+        /** New PR #20 multi-endpoint key. */
+        private val KEY_CONFIGURATION = stringPreferencesKey("relayer_configuration")
+
+        /** Cached known-list key — unchanged across PR #17 → PR #20. */
         private val KEY_CACHED = stringPreferencesKey("relayer_cached_known")
+
+        /** PR #17 single-selection key. Read once during migration,
+         *  then removed. Never written by this version. */
+        private val LEGACY_KEY_SELECTION = stringPreferencesKey("relayer_selection")
+
         private val jsonFormat = Json { ignoreUnknownKeys = true }
     }
 }

@@ -22,7 +22,7 @@ import chat.onym.android.recovery.AndroidClipboardWriter
 import chat.onym.android.recovery.AndroidStringProvider
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.settings.AnchorsPickerViewModel
-import chat.onym.android.settings.RelayerPickerViewModel
+import chat.onym.android.settings.RelayerSettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -166,8 +166,8 @@ class OnymApplication : Application() {
                     strings = strings,
                 )
             },
-            makeRelayerPickerViewModel = {
-                RelayerPickerViewModel(repository = relayerRepository)
+            makeRelayerSettingsViewModel = {
+                RelayerSettingsViewModel(repository = relayerRepository)
             },
             makeAnchorsPickerViewModel = {
                 AnchorsPickerViewModel(repository = contractsRepository)
