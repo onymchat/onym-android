@@ -11,7 +11,11 @@ kotlinx-serialization = "1.7.3"
 androidx-core-ktx = "1.15.0"
 androidx-lifecycle = "2.8.7"
 androidx-activity-compose = "1.9.3"
-androidx-compose-bom = "2024.12.01"
+# Compose BOM 2025.01.01 — first stable BOM that pulls in
+# `androidx.graphics:graphics-path:1.0.1`, the version with 16-KB
+# ELF page alignment for libandroidx.graphics.path.so. Earlier BOMs
+# trip the Android 15+ "App Compatibility" warning at first launch.
+androidx-compose-bom = "2025.01.01"
 androidx-security-crypto = "1.1.0-alpha06"
 androidx-biometric = "1.2.0-alpha05"
 androidx-fragment = "1.8.5"
@@ -19,7 +23,10 @@ androidx-lifecycle-viewmodel-compose = "2.8.7"
 
 # OnymSDK — published to the static Maven repo at
 # raw.githubusercontent.com/onymchat/onym-sdk-kotlin/releases/
-onym-sdk = "0.0.1"
+# v0.0.2: 16-KB ELF page-aligned libonym_sdk_jni.so for Android 15+
+# (linker `-Wl,-z,max-page-size=16384`). v0.0.1 trips the "App
+# Compatibility" warning + will be Play-Store-rejected from Nov 2025.
+onym-sdk = "0.0.2"
 
 # Crypto
 bouncycastle = "1.78.1"
