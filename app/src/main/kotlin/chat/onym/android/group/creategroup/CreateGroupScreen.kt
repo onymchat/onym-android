@@ -46,7 +46,7 @@ import chat.onym.android.group.CreateGroupViewModel
 import chat.onym.android.group.OnymAccent
 import chat.onym.android.group.OnymGovIcon
 import chat.onym.android.group.OnymGroupAvatar
-import chat.onym.android.group.OnymTokens
+import chat.onym.android.group.LocalOnymTokens
 import chat.onym.android.group.OnymUIGovernance
 
 /**
@@ -67,7 +67,7 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(OnymTokens.Bg),
+            .background(LocalOnymTokens.current.bg),
     ) {
         AnimatedContent(
             targetState = state.route,
@@ -90,7 +90,7 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel) {
 @Composable
 private fun Step1Screen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color
+    val accent = state.accent.color()
     Column(modifier = Modifier.fillMaxSize()) {
         OnymNavTitle(title = "New Group", subtitle = "Step 1 of 2")
         Column(
@@ -115,7 +115,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     value = state.name,
                     onValueChange = viewModel::setName,
                     textStyle = TextStyle(
-                        color = OnymTokens.Text,
+                        color = LocalOnymTokens.current.text,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Medium,
                     ),
@@ -125,7 +125,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                             if (state.name.isEmpty()) {
                                 Text(
                                     text = state.generatedName.ifEmpty { "Group name" },
-                                    color = OnymTokens.Text3,
+                                    color = LocalOnymTokens.current.text3,
                                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Medium),
                                 )
                             }
@@ -141,7 +141,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
             }
             Text(
                 text = "Visible to members. You can change this anytime.",
-                color = OnymTokens.Text3,
+                color = LocalOnymTokens.current.text3,
                 style = TextStyle(fontSize = 11.5.sp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -160,10 +160,10 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                         modifier = Modifier
                             .size(34.dp)
                             .clip(CircleShape)
-                            .background(a.color)
+                            .background(a.color())
                             .then(
                                 if (state.accent == a) {
-                                    Modifier.border(2.dp, a.color, CircleShape)
+                                    Modifier.border(2.dp, a.color(), CircleShape)
                                 } else Modifier,
                             )
                             .clickable { viewModel.setAccent(a) },
@@ -199,7 +199,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
             // Selected explanation
             Spacer(Modifier.height(12.dp))
             OnymCard(
-                fill = OnymTokens.Surface2,
+                fill = LocalOnymTokens.current.surface2,
                 borderColor = accent.copy(alpha = 0.22f),
             ) {
                 Row(
@@ -218,7 +218,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     Column {
                         Text(
                             text = "${state.governance.sub}. ${state.governance.tooltip}",
-                            color = OnymTokens.Text2,
+                            color = LocalOnymTokens.current.text2,
                             style = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
                         )
                     }
@@ -227,19 +227,19 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
             Spacer(Modifier.height(18.dp))
 
             // Encrypted footer card
-            OnymCard(fill = OnymTokens.Surface) {
+            OnymCard(fill = LocalOnymTokens.current.surface) {
                 Row(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
                         text = "🔒",
-                        color = OnymTokens.Text2,
+                        color = LocalOnymTokens.current.text2,
                         style = TextStyle(fontSize = 14.sp),
                     )
                     Text(
                         text = "End-to-end encrypted · published on Stellar so anyone can verify it’s real.",
-                        color = OnymTokens.Text2,
+                        color = LocalOnymTokens.current.text2,
                         style = TextStyle(fontSize = 12.5.sp, lineHeight = 17.sp),
                     )
                 }
@@ -276,16 +276,16 @@ private fun GovernanceCard(
     val available = type.isAvailable
     val labelColor = when {
         selected -> accent
-        available -> OnymTokens.Text
-        else -> OnymTokens.Text2
+        available -> LocalOnymTokens.current.text
+        else -> LocalOnymTokens.current.text2
     }
-    val borderColor = if (selected) accent else OnymTokens.Hairline
+    val borderColor = if (selected) accent else LocalOnymTokens.current.hairline
     val bgTint = if (selected) accent.copy(alpha = 0.18f) else Color.Transparent
 
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
-            .background(OnymTokens.Surface2)
+            .background(LocalOnymTokens.current.surface2)
             .background(bgTint)
             .border(width = if (selected) 1.5.dp else 1.dp, color = borderColor, shape = RoundedCornerShape(18.dp))
             .clickable(enabled = available, onClick = onClick)
@@ -295,18 +295,18 @@ private fun GovernanceCard(
         Box(contentAlignment = Alignment.TopEnd) {
             OnymGovIcon(
                 type = type,
-                accent = if (selected) accent else OnymTokens.Text,
+                accent = if (selected) accent else LocalOnymTokens.current.text,
                 size = 42.dp,
                 dimmed = !selected || !available,
             )
             if (!available) {
                 Text(
                     text = "Soon",
-                    color = OnymTokens.Text3,
+                    color = LocalOnymTokens.current.text3,
                     style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp),
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(OnymTokens.Surface3)
+                        .background(LocalOnymTokens.current.surface3)
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
@@ -319,7 +319,7 @@ private fun GovernanceCard(
         )
         Text(
             text = type.sub,
-            color = OnymTokens.Text2,
+            color = LocalOnymTokens.current.text2,
             style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
         )
     }
@@ -330,7 +330,7 @@ private fun GovernanceCard(
 @Composable
 private fun Step2Screen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color
+    val accent = state.accent.color()
     Column(modifier = Modifier.fillMaxSize()) {
         OnymNavTitle(title = "Add People", subtitle = "Step 2 of 2")
         Column(
@@ -343,7 +343,7 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
             // Type banner
             OnymCard(
                 radius = 12,
-                fill = OnymTokens.Surface2,
+                fill = LocalOnymTokens.current.surface2,
                 borderColor = accent.copy(alpha = 0.20f),
             ) {
                 Row(
@@ -357,19 +357,19 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                     OnymGovIcon(type = state.governance, accent = accent, size = 28.dp)
                     Text(
                         text = "${state.governance.label}. You'll be the only admin.",
-                        color = OnymTokens.Text2,
+                        color = LocalOnymTokens.current.text2,
                         style = TextStyle(fontSize = 12.5.sp, lineHeight = 17.sp),
                         modifier = Modifier.weight(1f),
                     )
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(OnymTokens.Surface3)
+                            .background(LocalOnymTokens.current.surface3)
                             .padding(horizontal = 8.dp, vertical = 3.dp),
                     ) {
                         Text(
                             text = "${state.invitees.size}",
-                            color = OnymTokens.Text,
+                            color = LocalOnymTokens.current.text,
                             style = TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold),
                         )
                     }
@@ -385,13 +385,13 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                     Spacer(Modifier.height(28.dp))
                     Text(
                         text = "No invitees yet",
-                        color = OnymTokens.Text,
+                        color = LocalOnymTokens.current.text,
                         style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = "Use “Invite by inbox key” below to add someone.",
-                        color = OnymTokens.Text2,
+                        color = LocalOnymTokens.current.text2,
                         style = TextStyle(fontSize = 12.5.sp),
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 24.dp),
@@ -406,7 +406,7 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(1.dp)
-                                        .background(OnymTokens.Hairline),
+                                        .background(LocalOnymTokens.current.hairline),
                                 )
                             }
                             Row(
@@ -420,7 +420,7 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(CircleShape)
-                                        .background(OnymTokens.Surface3),
+                                        .background(LocalOnymTokens.current.surface3),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
@@ -432,12 +432,12 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "Inbox ${invitee.displayLabel}",
-                                        color = OnymTokens.Text,
+                                        color = LocalOnymTokens.current.text,
                                         style = TextStyle(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
                                     )
                                     Text(
                                         text = "Direct inbox key",
-                                        color = OnymTokens.Text2,
+                                        color = LocalOnymTokens.current.text2,
                                         style = TextStyle(fontSize = 12.sp),
                                     )
                                 }
@@ -449,7 +449,7 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                                 ) {
                                     Text(
                                         text = "✕",
-                                        color = OnymTokens.Text3,
+                                        color = LocalOnymTokens.current.text3,
                                         style = TextStyle(fontSize = 16.sp),
                                     )
                                 }
@@ -465,8 +465,8 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
             // Invite-by-key entry row
             OnymCard(
                 radius = 12,
-                fill = OnymTokens.Surface2,
-                borderColor = OnymTokens.HairlineStrong,
+                fill = LocalOnymTokens.current.surface2,
+                borderColor = LocalOnymTokens.current.hairlineStrong,
             ) {
                 Row(
                     modifier = Modifier
@@ -488,18 +488,18 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Invite by inbox key",
-                            color = OnymTokens.Text,
+                            color = LocalOnymTokens.current.text,
                             style = TextStyle(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold),
                         )
                         Text(
                             text = "Paste a 64-char key",
-                            color = OnymTokens.Text2,
+                            color = LocalOnymTokens.current.text2,
                             style = TextStyle(fontSize = 11.5.sp),
                         )
                     }
                     Text(
                         text = "›",
-                        color = OnymTokens.Text3,
+                        color = LocalOnymTokens.current.text3,
                         style = TextStyle(fontSize = 16.sp),
                     )
                 }
@@ -520,7 +520,7 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
 @Composable
 private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color
+    val accent = state.accent.color()
     Column(modifier = Modifier.fillMaxSize()) {
         OnymNavTitle(
             title = "Invite by Inbox Key",
@@ -538,7 +538,7 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
                     value = state.inviteeInput,
                     onValueChange = viewModel::setInviteeInput,
                     textStyle = TextStyle(
-                        color = OnymTokens.Text,
+                        color = LocalOnymTokens.current.text,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                     ),
@@ -548,7 +548,7 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
                             if (state.inviteeInput.isEmpty()) {
                                 Text(
                                     text = "Paste a 64-character hex key…",
-                                    color = OnymTokens.Text3,
+                                    color = LocalOnymTokens.current.text3,
                                     style = TextStyle(fontSize = 14.sp),
                                 )
                             }
@@ -565,13 +565,13 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
             ) {
                 Text(
                     text = "(${state.inviteeInputCleanedLength}/64)",
-                    color = if (state.inviteeInputIsValid) accent else OnymTokens.Text3,
+                    color = if (state.inviteeInputIsValid) accent else LocalOnymTokens.current.text3,
                     style = TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold),
                 )
                 if (state.inviteeError != null) {
                     Text(
                         text = state.inviteeError!!,
-                        color = OnymTokens.Red,
+                        color = LocalOnymTokens.current.red,
                         style = TextStyle(fontSize = 11.5.sp),
                     )
                 }
@@ -579,7 +579,7 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
             Spacer(Modifier.height(20.dp))
             Text(
                 text = "The recipient generates this key on their own device. They can find it in Settings → Identity → Inbox Key.",
-                color = OnymTokens.Text3,
+                color = LocalOnymTokens.current.text3,
                 style = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
             )
         }
@@ -601,7 +601,7 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
 @Composable
 private fun CreatingScreen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color
+    val accent = state.accent.color()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -611,7 +611,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
         Spacer(Modifier.height(20.dp))
         Text(
             text = "Creating ${state.name.ifEmpty { "Group" }}",
-            color = OnymTokens.Text,
+            color = LocalOnymTokens.current.text,
             style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
         )
         Spacer(Modifier.height(24.dp))
@@ -627,7 +627,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(1.dp)
-                                .background(OnymTokens.Hairline),
+                                .background(LocalOnymTokens.current.hairline),
                         )
                     }
                     val status = stepStatus(index, steps.size, state.progress, state.error != null)
@@ -639,8 +639,8 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
         if (state.error != null) {
             Spacer(Modifier.height(12.dp))
             OnymCard(
-                fill = OnymTokens.Red.copy(alpha = 0.10f),
-                borderColor = OnymTokens.Red.copy(alpha = 0.30f),
+                fill = LocalOnymTokens.current.red.copy(alpha = 0.10f),
+                borderColor = LocalOnymTokens.current.red.copy(alpha = 0.30f),
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
@@ -662,7 +662,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
                     ) {
                         Text(
                             text = state.error?.message ?: "Couldn't create the group",
-                            color = OnymTokens.Red,
+                            color = LocalOnymTokens.current.red,
                             style = TextStyle(
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace,
@@ -680,20 +680,20 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .background(OnymTokens.Surface3)
+                                .background(LocalOnymTokens.current.surface3)
                                 .clickable(onClick = viewModel::cancelFromError)
                                 .padding(horizontal = 18.dp, vertical = 8.dp),
                         ) {
                             Text(
                                 text = "Cancel",
-                                color = OnymTokens.Text2,
+                                color = LocalOnymTokens.current.text2,
                                 style = TextStyle(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
                             )
                         }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .background(OnymTokens.Surface2)
+                                .background(LocalOnymTokens.current.surface2)
                                 .clickable(onClick = viewModel::tappedDismissError)
                                 .padding(horizontal = 18.dp, vertical = 8.dp),
                         ) {
@@ -710,7 +710,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
             Spacer(Modifier.height(14.dp))
             Text(
                 text = "This usually takes a few seconds. It’s safe to close this — we’ll finish in the background.",
-                color = OnymTokens.Text3,
+                color = LocalOnymTokens.current.text3,
                 style = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -766,14 +766,14 @@ private fun StepRow(label: String, sub: String, status: StepStatus, accent: Colo
                 .clip(CircleShape)
                 .background(
                     when (status) {
-                        StepStatus.Done -> OnymTokens.Green
+                        StepStatus.Done -> LocalOnymTokens.current.green
                         StepStatus.Active -> accent.copy(alpha = 0.18f)
                         StepStatus.Pending -> Color.Transparent
                     },
                 )
                 .border(
                     width = if (status == StepStatus.Pending) 2.dp else 0.dp,
-                    color = OnymTokens.HairlineStrong,
+                    color = LocalOnymTokens.current.hairlineStrong,
                     shape = CircleShape,
                 ),
             contentAlignment = Alignment.Center,
@@ -795,12 +795,12 @@ private fun StepRow(label: String, sub: String, status: StepStatus, accent: Colo
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = label,
-                color = if (status == StepStatus.Pending) OnymTokens.Text2 else OnymTokens.Text,
+                color = if (status == StepStatus.Pending) LocalOnymTokens.current.text2 else LocalOnymTokens.current.text,
                 style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
             )
             Text(
                 text = sub,
-                color = OnymTokens.Text2,
+                color = LocalOnymTokens.current.text2,
                 style = TextStyle(fontSize = 12.sp),
             )
         }
@@ -812,7 +812,7 @@ private fun StepRow(label: String, sub: String, status: StepStatus, accent: Colo
 @Composable
 private fun SuccessScreen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color
+    val accent = state.accent.color()
     val group = state.createdGroup
     Column(
         modifier = Modifier
@@ -825,13 +825,13 @@ private fun SuccessScreen(viewModel: CreateGroupViewModel) {
         Spacer(Modifier.height(20.dp))
         Text(
             text = group?.name ?: state.name,
-            color = OnymTokens.Text,
+            color = LocalOnymTokens.current.text,
             style = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold),
         )
         Spacer(Modifier.height(6.dp))
         Text(
             text = "Anchored on Stellar testnet",
-            color = OnymTokens.Text2,
+            color = LocalOnymTokens.current.text2,
             style = TextStyle(fontSize = 13.sp),
         )
 
@@ -840,20 +840,20 @@ private fun SuccessScreen(viewModel: CreateGroupViewModel) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
                     text = "Members",
-                    color = OnymTokens.Text3,
+                    color = LocalOnymTokens.current.text3,
                     style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.88.sp),
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "${(group?.members?.size ?: 1)} member" + if ((group?.members?.size ?: 1) == 1) "" else "s",
-                    color = OnymTokens.Text,
+                    color = LocalOnymTokens.current.text,
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = "${state.invitees.size} invitation" +
                         (if (state.invitees.size == 1) "" else "s") + " sent",
-                    color = OnymTokens.Text2,
+                    color = LocalOnymTokens.current.text2,
                     style = TextStyle(fontSize = 12.5.sp),
                 )
             }
@@ -877,10 +877,10 @@ private fun FlowFooter(content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(OnymTokens.Bg)
+            .background(LocalOnymTokens.current.bg)
             .border(
                 width = 1.dp,
-                color = OnymTokens.Hairline,
+                color = LocalOnymTokens.current.hairline,
                 shape = RoundedCornerShape(0.dp),
             )
             .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 22.dp),
