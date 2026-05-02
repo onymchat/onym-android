@@ -61,4 +61,13 @@
     <string name="authenticate_to_reveal_recovery_phrase">Подтвердите личность, чтобы увидеть фразу восстановления</string>
     <string name="recovery_phrase_unavailable">Фраза восстановления недоступна. Возможно, ваша личность не привязана к BIP-39.</string>
 
+    <!-- ─── App shell (RootScreen + tabs) ────────────────────────── -->
+    <string name="back">Назад</string>
+    <string name="settings">Настройки</string>
+    <string name="search">Поиск</string>
+    <string name="security">Безопасность</string>
+    <string name="backup_recovery_phrase">Резервная копия фразы восстановления</string>
+    <string name="security_footer_view_recovery_phrase">Просмотрите свою фразу восстановления из 12 слов. Она понадобится для восстановления личности на новом устройстве.</string>
+    <string name="search_placeholder_body">Поиск появится в одном из следующих обновлений.</string>
+
 </resources>

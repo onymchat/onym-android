@@ -452,12 +452,59 @@ adb shell am start -n chat.onym.android/.MainActivity \
   --es android.intent.extra.LOCALE ru-RU
 ```
 
+## App shell
+
+Sole entry point: [`MainActivity`](app/src/main/kotlin/chat/onym/android/MainActivity.kt)
+mounts [`RootScreen`](app/src/main/kotlin/chat/onym/android/RootScreen.kt) —
+a `Scaffold` with Material 3 [`NavigationBar`](https://developer.android.com/reference/kotlin/androidx/compose/material3/package-summary#NavigationBar(androidx.compose.ui.Modifier,androidx.compose.ui.graphics.Color,androidx.compose.ui.graphics.Color,androidx.compose.ui.unit.Dp,androidx.compose.foundation.layout.WindowInsets,kotlin.Function1))
+across the bottom and a [`NavHost`](https://developer.android.com/reference/kotlin/androidx/navigation/compose/package-summary)
+for the content slot.
+
+```
+MainActivity (FragmentActivity, FLAG_SECURE, enableEdgeToEdge)
+    │
+    ▼
+RootScreen
+    │  Scaffold(bottomBar = NavigationBar { Settings | Search })
+    │
+    ├─► SettingsScreen           (route "settings")
+    │     └── Backup row → navigate("recovery_backup")
+    │                          ▼
+    │                    RecoveryPhraseBackupScreen  (route "recovery_backup",
+    │                                                 bottom bar hidden)
+    │
+    └─► SearchScreen             (route "search", placeholder)
+```
+
+### Divergences from iOS PR #6
+
+- **No `.search` role / floating-bottom-right tab.** Material 3 has
+  no equivalent and faking it would make the app feel un-native on
+  Android. Both items live in the same nav bar with equal weight —
+  same as Gmail / Calendar / Drive / Files.
+- **Backup flow as a navigation destination, not a `ModalBottomSheet`.**
+  Android-idiomatic for a multi-step flow (Intro → Reveal → Verify
+  → Done); supports the system back gesture without ceremony. iOS
+  uses `.sheet` for the same role.
+- **Bottom bar hidden on the `recovery_backup` destination.** The
+  flow gets full vertical real-estate; the `TopAppBar` back arrow +
+  system back gesture are the way out.
+
+### Edge-to-edge
+
+`enableEdgeToEdge()` in `MainActivity.onCreate` opts in for Android
+14 and earlier; Android 15+ does this by default at
+`targetSdkVersion 35+`. `Scaffold` downstream applies the matching
+[`WindowInsets`](https://developer.android.com/develop/ui/views/layout/edge-to-edge)
+padding so content never sits under the status / navigation bars.
+
 ## Out of scope (future chunks)
 
 - `repo.stellarSign(_)` / `repo.decryptInvitation(_)` methods —
   no callers yet, lands when transport / invitation does.
-- Onboarding (this is just the backup flow; new-identity choice
-  vs restore-from-mnemonic UI is a future chunk).
+- Onboarding (new-identity choice vs restore-from-mnemonic UI).
+- Real Search screen (placeholder for now).
+- More Settings sections (preferences, advanced, about).
 - Promoting `Bip39` into `onym-sdk-kotlin` — wait for a third client
   to want the same derivation.
 - Emulator job in CI for instrumented tests.
