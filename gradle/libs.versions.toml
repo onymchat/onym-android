@@ -24,7 +24,14 @@ androidx-navigation-compose = "2.8.5"
 # OkHttp WebSocket — used by NostrRelayConnection. Same library
 # stellar-mls/clients/android uses; built-in `pingInterval` covers
 # the heartbeat so we don't need the iOS CFNetwork-pong workaround.
+# Also used by GitHubReleasesKnownRelayersFetcher (HTTPS GET).
 okhttp = "4.12.0"
+
+# DataStore Preferences — flow-based reads + suspending writes for
+# the Relayer URL selection. Not used for secret material (the
+# encrypted store is `EncryptedSharedPreferences` via
+# `IdentitySecretStore`); URLs aren't secret.
+androidx-datastore = "1.1.1"
 
 # OnymSDK — published to the static Maven repo at
 # raw.githubusercontent.com/onymchat/onym-sdk-kotlin/releases/
@@ -83,6 +90,12 @@ androidx-fragment-ktx = { module = "androidx.fragment:fragment-ktx", version.ref
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidx-lifecycle-viewmodel-compose" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "androidx-navigation-compose" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+# OkHttp test scaffolding — `MockResponse` / `MockWebServer` not used
+# (too heavy for unit tests); we use a hand-rolled `Interceptor` in
+# `support/FakeOkHttpClient.kt` instead. No extra OkHttp test artifact
+# needed.
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "androidx-datastore" }
+androidx-datastore-preferences-core = { module = "androidx.datastore:datastore-preferences-core", version.ref = "androidx-datastore" }
 
 # Compose UI test (versions managed by androidx-compose-bom)
 androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }

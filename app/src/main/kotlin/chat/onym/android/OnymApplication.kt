@@ -2,8 +2,15 @@ package chat.onym.android
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
 import android.os.Bundle
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.fragment.app.FragmentActivity
+import chat.onym.android.chain.DataStorePreferencesRelayerSelectionStore
+import chat.onym.android.chain.GitHubReleasesKnownRelayersFetcher
+import chat.onym.android.chain.RelayerRepository
 import chat.onym.android.identity.IdentityRepository
 import chat.onym.android.identity.IdentitySecretStore
 import chat.onym.android.identity.OnymNostrSignerProvider
@@ -11,9 +18,29 @@ import chat.onym.android.recovery.AndroidBiometricAuthenticator
 import chat.onym.android.recovery.AndroidClipboardWriter
 import chat.onym.android.recovery.AndroidStringProvider
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
+import chat.onym.android.settings.RelayerPickerViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.lang.ref.WeakReference
 import java.security.Security
+
+/**
+ * Single DataStore Preferences instance for non-secret app config
+ * (today: relayer URL selection + cached known list). The
+ * `preferencesDataStore` delegate guarantees one instance per
+ * `Context` per filename across the process — safe to call from
+ * anywhere; we only read it from [OnymApplication.onCreate].
+ *
+ * Identity material continues to live in EncryptedSharedPreferences
+ * via [IdentitySecretStore]; URLs aren't secret so DataStore is fine.
+ */
+private val Context.relayerDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "chat.onym.android.relayer_prefs",
+)
 
 /**
  * Composition root. Two responsibilities:
@@ -41,6 +68,12 @@ class OnymApplication : Application() {
      *  `BiometricPrompt` dialog fragment. `WeakReference` so a
      *  background-and-finish doesn't pin the Activity. */
     private var resumedActivity: WeakReference<Activity>? = null
+
+    /** Application-scoped CoroutineScope for fire-and-forget jobs
+     *  that must outlive any Activity (e.g., the boot fetch of the
+     *  relayer list). [SupervisorJob] so a single failing child
+     *  doesn't cancel the rest. */
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -73,6 +106,24 @@ class OnymApplication : Application() {
         val clipboard = AndroidClipboardWriter(applicationContext)
         val strings = AndroidStringProvider(applicationContext)
 
+        // Relayer wiring — DataStore-backed selection + GitHub-Releases
+        // fetcher. Bootstrap (load cached + selection from disk) runs
+        // synchronously off the IO dispatcher; start() (network fetch)
+        // is fire-and-forget so app launch never blocks on the network.
+        val relayerStore = DataStorePreferencesRelayerSelectionStore(
+            dataStore = applicationContext.relayerDataStore,
+        )
+        val httpClient = OkHttpClient()
+        val relayerFetcher = GitHubReleasesKnownRelayersFetcher(httpClient = httpClient)
+        val relayerRepository = RelayerRepository(
+            store = relayerStore,
+            fetcher = relayerFetcher,
+        )
+        applicationScope.launch {
+            relayerRepository.bootstrap()
+            relayerRepository.start()
+        }
+
         dependencies = AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
@@ -84,6 +135,9 @@ class OnymApplication : Application() {
                     clipboard = clipboard,
                     strings = strings,
                 )
+            },
+            makeRelayerPickerViewModel = {
+                RelayerPickerViewModel(repository = relayerRepository)
             },
         )
     }

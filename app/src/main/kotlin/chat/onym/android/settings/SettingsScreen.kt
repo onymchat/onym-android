@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
@@ -53,7 +54,10 @@ import chat.onym.android.R
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBackupClick: () -> Unit) {
+fun SettingsScreen(
+    onBackupClick: () -> Unit,
+    onRelayerClick: () -> Unit,
+) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
         rememberTopAppBarState()
     )
@@ -101,6 +105,44 @@ fun SettingsScreen(onBackupClick: () -> Unit) {
             item {
                 Text(
                     stringResource(R.string.security_footer_view_recovery_phrase),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+                )
+            }
+
+            // Network section — relayer URL config. English-only for
+            // now per the iOS twin (PR #18); lift into res/values/
+            // when a translation pass for Settings lands.
+            item { SectionHeader("NETWORK") }
+            item {
+                ListItem(
+                    headlineContent = { Text("Relayer") },
+                    leadingContent = {
+                        SettingsIconBox(
+                            icon = Icons.Filled.Cloud,
+                            background = Color(0xFF34C759),
+                        )
+                    },
+                    trailingContent = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        )
+                    },
+                    colors = ListItemDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onRelayerClick),
+                )
+            }
+            item {
+                Text(
+                    "Where chain operations are submitted. Discovered from GitHub Releases of onymchat/onym-relayer; can be overridden with a custom URL.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),

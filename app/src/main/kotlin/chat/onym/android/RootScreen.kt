@@ -25,6 +25,8 @@ import androidx.navigation.compose.rememberNavController
 import chat.onym.android.recovery.RecoveryPhraseBackupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.search.SearchScreen
+import chat.onym.android.settings.RelayerPickerScreen
+import chat.onym.android.settings.RelayerPickerViewModel
 import chat.onym.android.settings.SettingsScreen
 
 /**
@@ -100,10 +102,22 @@ fun RootScreen(dependencies: AppDependencies) {
             composable(Tab.Settings.route) {
                 SettingsScreen(
                     onBackupClick = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
+                    onRelayerClick = { navController.navigate(ROUTE_RELAYER_PICKER) },
                 )
             }
             composable(Tab.Search.route) {
                 SearchScreen()
+            }
+            composable(ROUTE_RELAYER_PICKER) {
+                val vm: RelayerPickerViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeRelayerPickerViewModel() }
+                    },
+                )
+                RelayerPickerScreen(
+                    viewModel = vm,
+                    onBackClick = { navController.popBackStack() },
+                )
             }
             composable(ROUTE_RECOVERY_BACKUP) {
                 // Resolve the host Activity at render time. AppDependencies
@@ -141,4 +155,5 @@ private enum class Tab(val route: String, val labelRes: Int) {
 }
 
 private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
+private const val ROUTE_RELAYER_PICKER = "relayer_picker"
 private val TAB_ROUTES = setOf(Tab.Settings.route, Tab.Search.route)

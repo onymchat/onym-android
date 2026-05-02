@@ -116,8 +116,15 @@ dependencies {
 
     // OkHttp WebSocket — NostrRelayConnection uses it for the relay
     // connection. Built-in pingInterval handles heartbeat; no need
-    // for the iOS CFNetwork-pong workaround.
+    // for the iOS CFNetwork-pong workaround. Also used by
+    // GitHubReleasesKnownRelayersFetcher (HTTPS GET of relayers.json).
     implementation(libs.okhttp)
+
+    // DataStore Preferences — flow-based persistence for the relayer
+    // URL selection. URLs aren't secret material; identity bytes
+    // continue to live in EncryptedSharedPreferences via
+    // IdentitySecretStore.
+    implementation(libs.androidx.datastore.preferences)
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
@@ -149,6 +156,11 @@ dependencies {
     // in `app/src/test/` is plain JUnit and won't load Robolectric.
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.ext.junit)
+    // DataStore-Preferences `-core` artifact — JVM-only flavour with
+    // no Android dep. RelayerSelectionStoreTest opens a real
+    // PreferenceDataStoreFactory backed by a per-test temp file; no
+    // Robolectric / mocking required.
+    testImplementation(libs.androidx.datastore.preferences.core)
 
     // Instrumented tests. Real EncryptedSharedPreferences against the
     // emulator's hardware-backed Keystore.
