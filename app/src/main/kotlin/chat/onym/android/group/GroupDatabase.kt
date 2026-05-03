@@ -17,15 +17,12 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [PersistedGroup::class],
-    // v2 (PR-C follow-up, mirrors onym-ios PR #27): groupTypeRaw
-    // column flipped Int → String to match the relayer + contract
-    // wire spelling. The OnymApplication builder uses
-    // `fallbackToDestructiveMigrationFrom(1)` since PR-C only just
-    // shipped and there's no production data to preserve — pre-PR-C
-    // dev installs lose any local groups on next app launch.
-    version = 2,
-    // Schema export is for cross-version diffing during migration
-    // authoring; nothing to diff at v2 with destructive migration.
+    // v3 (multi-identity, PR-3): adds `ownerIdentityId` column so the
+    // per-identity chats filter can `WHERE ownerIdentityId = :id`.
+    // Greenfield licence per the multi-identity spec — the Application
+    // builder uses `fallbackToDestructiveMigrationFrom(1, 2)` so dev
+    // installs lose any local groups on next launch.
+    version = 3,
     exportSchema = false,
 )
 abstract class GroupDatabase : RoomDatabase() {

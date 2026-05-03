@@ -25,6 +25,12 @@ interface GroupDao {
     @Query("SELECT * FROM groups ORDER BY createdAt DESC")
     suspend fun list(): List<PersistedGroup>
 
+    /** Per-identity filter — drives `GroupRepository.snapshots`
+     *  after PR-3. Argument is the [chat.onym.android.identity.IdentityId.value]
+     *  string. */
+    @Query("SELECT * FROM groups WHERE ownerIdentityId = :ownerIdentityId ORDER BY createdAt DESC")
+    suspend fun listForOwner(ownerIdentityId: String): List<PersistedGroup>
+
     @Query("SELECT * FROM groups WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): PersistedGroup?
 
@@ -60,4 +66,11 @@ interface GroupDao {
 
     @Query("DELETE FROM groups WHERE id = :id")
     suspend fun delete(id: String): Int
+
+    /** Cascade delete for the identity-removal flow (PR-3 hooks
+     *  `IdentityRepository.setRemovalListener` to call this). Returns
+     *  the number of rows deleted so the caller can log the cleanup
+     *  size. */
+    @Query("DELETE FROM groups WHERE ownerIdentityId = :ownerIdentityId")
+    suspend fun deleteForOwner(ownerIdentityId: String): Int
 }

@@ -13,8 +13,18 @@ package chat.onym.android.group
  */
 interface GroupStore {
 
-    /** All persisted groups, sorted by [ChatGroup.createdAtMillis] desc. */
+    /** All persisted groups, sorted by [ChatGroup.createdAtMillis] desc.
+     *  Use [listForOwner] for the per-identity filter. */
     suspend fun list(): List<ChatGroup>
+
+    /** Groups owned by [ownerIdentityId]. Sorted by
+     *  [ChatGroup.createdAtMillis] desc. Drives the per-identity
+     *  chats filter ([GroupRepository.snapshots]). */
+    suspend fun listForOwner(ownerIdentityId: String): List<ChatGroup>
+
+    /** Cascade delete for the identity-removal flow. Returns the
+     *  number of rows deleted. */
+    suspend fun deleteForOwner(ownerIdentityId: String): Int
 
     /**
      * Idempotent on [ChatGroup.id]: if the row exists, sensitive +

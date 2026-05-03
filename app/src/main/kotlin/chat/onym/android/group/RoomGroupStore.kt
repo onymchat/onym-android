@@ -31,6 +31,16 @@ class RoomGroupStore(
         dao.list().mapNotNull(::decode)
     }
 
+    override suspend fun listForOwner(ownerIdentityId: String): List<ChatGroup> =
+        withContext(ioDispatcher) {
+            dao.listForOwner(ownerIdentityId).mapNotNull(::decode)
+        }
+
+    override suspend fun deleteForOwner(ownerIdentityId: String): Int =
+        withContext(ioDispatcher) {
+            dao.deleteForOwner(ownerIdentityId)
+        }
+
     override suspend fun insertOrUpdate(group: ChatGroup): Boolean = withContext(ioDispatcher) {
         val encoded = encode(group)
         // Pre-check via findById so we can honour the
@@ -78,6 +88,7 @@ class RoomGroupStore(
             tierRaw = group.tier.rawValue,
             groupTypeRaw = group.groupType.wireValue,
             isPublishedOnChain = group.isPublishedOnChain,
+            ownerIdentityId = group.ownerIdentityId,
             encryptedName = encryption.encrypt(group.name),
             encryptedGroupSecret = encryption.encrypt(group.groupSecret),
             encryptedMembersJson = encryption.encrypt(membersJson.toByteArray(Charsets.UTF_8)),
@@ -125,6 +136,7 @@ class RoomGroupStore(
             groupType = groupType,
             adminPubkeyHex = adminPubkeyHex,
             isPublishedOnChain = row.isPublishedOnChain,
+            ownerIdentityId = row.ownerIdentityId,
         )
     }
 

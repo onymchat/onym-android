@@ -242,6 +242,13 @@ open class CreateGroupInteractor(
         } else {
             null
         }
+        // Stamp the active identity at create time so the per-identity
+        // chats filter in `GroupRepository.snapshots` includes it
+        // automatically. There MUST be a current identity (we already
+        // resolved `identitySnapshot` above; without one the bootstrap
+        // step above would have thrown `MissingIdentity`).
+        val ownerId = identity.currentIdentityId.value
+            ?: throw CreateGroupError.MissingIdentity
         val group = ChatGroup(
             id = groupIdHex,
             name = trimmedName,
@@ -255,6 +262,7 @@ open class CreateGroupInteractor(
             groupType = groupType,
             adminPubkeyHex = adminPubkeyHex,
             isPublishedOnChain = false,
+            ownerIdentityId = ownerId.value,
         )
         groups.insert(group)
         groups.markPublished(group.id, proof.commitment)

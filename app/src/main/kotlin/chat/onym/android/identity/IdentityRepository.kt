@@ -62,7 +62,7 @@ import javax.crypto.spec.SecretKeySpec
 class IdentityRepository(
     private val store: IdentitySecretStore,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : InvitationEnvelopeDecrypter, InvitationEnvelopeSealer {
+) : InvitationEnvelopeDecrypter, InvitationEnvelopeSealer, ActiveIdentityProvider {
     private val mutex = Mutex()
     private val _snapshots = MutableStateFlow<Identity?>(null)
     private val _identities = MutableStateFlow<List<IdentitySummary>>(emptyList())
@@ -86,17 +86,25 @@ class IdentityRepository(
     /** Hot stream of the currently-selected [IdentityId], or `null` if
      *  none is selected (cold install OR last identity removed).
      *  Group / message repositories filter by this. */
-    val currentIdentityId: StateFlow<IdentityId?> = _currentIdentityId.asStateFlow()
+    override val currentIdentityId: StateFlow<IdentityId?> = _currentIdentityId.asStateFlow()
 
     /** Synchronous read of the current identity. Doesn't trigger a
      *  store load — call [bootstrap] for that. */
     fun currentIdentity(): Identity? = _snapshots.value
 
     /** Register a listener invoked just before a [remove] wipes its
-     *  storage. Single-listener — PR-3's GroupRepository hooks in
-     *  here. Pass `null` to clear. */
-    fun setRemovalListener(listener: (suspend (IdentityId) -> Unit)?) {
+     *  storage. Single-listener — `GroupRepository` hooks in here.
+     *  Pass `null` to clear. */
+    override fun registerRemovalListener(listener: (suspend (IdentityId) -> Unit)?) {
         removalListener = listener
+    }
+
+    /** Back-compat alias for [registerRemovalListener]. PR-2 named the
+     *  hook `setRemovalListener`; PR-3 renamed it to match the
+     *  [ActiveIdentityProvider] interface. */
+    @Deprecated("Use registerRemovalListener", ReplaceWith("registerRemovalListener(listener)"))
+    fun setRemovalListener(listener: (suspend (IdentityId) -> Unit)?) {
+        registerRemovalListener(listener)
     }
 
     /**

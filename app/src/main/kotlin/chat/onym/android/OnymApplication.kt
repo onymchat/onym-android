@@ -271,7 +271,15 @@ class OnymApplication : Application() {
         val storageEncryption = StorageEncryption.fromContext(applicationContext)
         val groupRepository = GroupRepository(
             store = RoomGroupStore(dao = groupDatabase.groupDao(), encryption = storageEncryption),
+            identity = identityRepository,
+            scope = applicationScope,
         )
+        // `start()` wires the per-identity-selection collector that
+        // recomputes `snapshots` on every active-id change. `reload()`
+        // is no longer strictly necessary (the collector emits an
+        // initial value once `currentIdentityId` settles), but keep it
+        // for symmetry with the previous boot path.
+        groupRepository.start()
         applicationScope.launch { groupRepository.reload() }
 
         // Inbox transport for invitation send. Constructed once;

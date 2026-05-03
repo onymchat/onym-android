@@ -42,14 +42,15 @@ data class PersistedGroup(
     val createdAt: Long,
     val epoch: Long,
     val tierRaw: Int,
-    /** Lowercase governance label — `tyranny`, `anarchy`, etc.
-     *  Type changed from `Int` to `String` in PR #27 (Android twin)
-     *  to match the relayer + contract wire spelling. Schema version
-     *  bumped from 1 to 2; the migration uses
-     *  `fallbackToDestructiveMigration` (no production data, PR-C
-     *  only just shipped). */
     val groupTypeRaw: String,
     val isPublishedOnChain: Boolean,
+    /** [chat.onym.android.identity.IdentityId.value]. Indexed (PR-3
+     *  added the column) so the per-identity flow filter (`SELECT *
+     *  FROM groups WHERE ownerIdentityId = :id`) doesn't full-scan.
+     *  Schema bumped to 3 — `fallbackToDestructiveMigration` cleans
+     *  any stale rows from the previous shape (no production data;
+     *  greenfield licence per the multi-identity spec). */
+    val ownerIdentityId: String,
 
     val encryptedName: ByteArray,
     val encryptedGroupSecret: ByteArray,
@@ -67,6 +68,7 @@ data class PersistedGroup(
             tierRaw == other.tierRaw &&
             groupTypeRaw == other.groupTypeRaw &&
             isPublishedOnChain == other.isPublishedOnChain &&
+            ownerIdentityId == other.ownerIdentityId &&
             encryptedName.contentEquals(other.encryptedName) &&
             encryptedGroupSecret.contentEquals(other.encryptedGroupSecret) &&
             encryptedMembersJson.contentEquals(other.encryptedMembersJson) &&
@@ -82,6 +84,7 @@ data class PersistedGroup(
         h = 31 * h + tierRaw
         h = 31 * h + groupTypeRaw.hashCode()
         h = 31 * h + isPublishedOnChain.hashCode()
+        h = 31 * h + ownerIdentityId.hashCode()
         h = 31 * h + encryptedName.contentHashCode()
         h = 31 * h + encryptedGroupSecret.contentHashCode()
         h = 31 * h + encryptedMembersJson.contentHashCode()

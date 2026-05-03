@@ -57,6 +57,7 @@ class ChatGroupTest {
             groupType = SepGroupType.TYRANNY,
             adminPubkeyHex = "cd".repeat(48),
             isPublishedOnChain = true,
+            ownerIdentityId = "test-owner",
         )
         val encoded = json.encodeToString(ChatGroup.serializer(), original)
         val decoded = json.decodeFromString(ChatGroup.serializer(), encoded)
@@ -78,6 +79,7 @@ class ChatGroupTest {
             groupType = SepGroupType.ANARCHY,
             adminPubkeyHex = null,
             isPublishedOnChain = false,
+            ownerIdentityId = "test-owner",
         )
         val encoded = json.encodeToString(ChatGroup.serializer(), cold)
         val decoded = json.decodeFromString(ChatGroup.serializer(), encoded)
@@ -99,5 +101,6 @@ class ChatGroupTest {
         groupType = SepGroupType.TYRANNY,
         adminPubkeyHex = null,
         isPublishedOnChain = false,
+            ownerIdentityId = "test-owner",
     )
 }
