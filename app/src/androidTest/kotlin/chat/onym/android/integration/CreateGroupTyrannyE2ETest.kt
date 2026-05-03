@@ -171,10 +171,13 @@ class CreateGroupTyrannyE2ETest {
 
         // Round-trip the on-chain state: read the commitment back via
         // get_commitment and assert it matches what we stored locally.
+        // Tyranny's `CommitmentEntry` ships only `commitment` + `epoch`
+        // + `timestamp` + `tier` — no `active` (that field is
+        // democracy/oligarchy-only). See SepCommitmentEntry's per-type
+        // table.
         val onChain = env.client.getCommitment(groupId = group.groupIdBytes)
         assertArrayEquals(group.commitment, onChain.commitment)
         assertEquals(0uL, onChain.epoch)
-        assertTrue(onChain.active)
     }
 
     /**

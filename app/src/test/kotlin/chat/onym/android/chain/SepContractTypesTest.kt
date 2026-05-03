@@ -208,6 +208,40 @@ class SepContractTypesTest {
     }
 
     @Test
+    fun commitmentEntry_decodesTyrannyShape_withoutActive() {
+        // Tyranny `get_commitment` returns commitment + epoch + timestamp
+        // + tier — but NOT `active` (that's democracy/oligarchy only).
+        // Release run #25271977084 surfaced exactly this: the relayer
+        // omitted `active` and the decoder threw `MissingFieldException`.
+        // See SepCommitmentEntry's per-governance table for the full
+        // shape matrix.
+        val tyrannyResponse = """
+            {"commitment":"CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+             "epoch":0,"timestamp":1700000000,"tier":0}
+        """.trimIndent()
+        val decoded = json.decodeFromString(SepCommitmentEntry.serializer(), tyrannyResponse)
+        assertEquals(0uL, decoded.epoch)
+        assertEquals(0u, decoded.tier)
+        assertEquals(1_700_000_000uL, decoded.timestamp)
+        assertNull("tyranny doesn't ship `active`", decoded.active)
+    }
+
+    @Test
+    fun commitmentEntry_decodesMinimalShape_commitmentEpochOnly() {
+        // The "every variant" floor — anarchy in some configurations
+        // ships only commitment + epoch. Decoder must tolerate it.
+        val minimalResponse = """
+            {"commitment":"CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+             "epoch":3}
+        """.trimIndent()
+        val decoded = json.decodeFromString(SepCommitmentEntry.serializer(), minimalResponse)
+        assertEquals(3uL, decoded.epoch)
+        assertNull(decoded.timestamp)
+        assertNull(decoded.tier)
+        assertNull(decoded.active)
+    }
+
+    @Test
     fun submissionResponse_keepsCamelCaseTransactionHashKey() {
         val payload = SepSubmissionResponse(
             accepted = true,
