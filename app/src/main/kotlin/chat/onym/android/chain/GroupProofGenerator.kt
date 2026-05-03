@@ -1,6 +1,7 @@
 package chat.onym.android.chain
 
 import chat.onym.android.group.GovernanceMember
+import chat.onym.sdk.OneOnOne
 import chat.onym.sdk.Tyranny
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -31,8 +32,11 @@ data class GroupCreateProof(
      *  on the wire). */
     val proof: ByteArray,
     /** SDK's full per-type PI bundle, split into 32-byte chunks.
-     *  Tyranny create returns 4:
-     *  `commitment || Fr(0) || admin_pubkey_commitment || group_id_fr`. */
+     *
+     *  - Tyranny create returns 4:
+     *    `commitment || Fr(0) || admin_pubkey_commitment || group_id_fr`.
+     *  - OneOnOne create returns 2:
+     *    `commitment || Fr(0)` (the contract's symmetric 1v1 PI shape). */
     val publicInputs: List<ByteArray>,
 ) {
     /** First 32 bytes of the PI bundle — the new commitment the
@@ -84,10 +88,20 @@ data class GroupProofCreateInput(
     /** Position of the admin in [members] (after the lex sort). */
     val adminIndex: Int,
     /** 32-byte raw group ID — used directly as the `group_id_fr`
-     *  per-group binding scalar in the Tyranny circuit. */
+     *  per-group binding scalar in the Tyranny circuit. MUST be a
+     *  canonical BLS12-381 Fr scalar (see [CanonicalFr.isCanonical]);
+     *  callers should generate via [CanonicalFr.randomCanonicalFr32]. */
     val groupId: ByteArray,
     /** 32 bytes; LE-mod-r in-circuit. */
     val salt: ByteArray,
+    /** 32 BE Fr — only required when [groupType] is
+     *  [SepGroupType.ONE_ON_ONE]: the SECOND party's BLS secret key,
+     *  fed into `OneOnOne.proveCreate(sk_0, sk_1, salt)` as `sk_1`.
+     *  The OneOnOne FFI rejects `sk_0 == sk_1`, so the creator MUST
+     *  generate a fresh ephemeral scalar (NOT reuse [adminBlsSecretKey])
+     *  and ship it to the invitee inside the sealed invitation envelope.
+     *  `null` for any non-OneOnOne governance type. */
+    val secondaryBlsSecretKey: ByteArray? = null,
 )
 
 /**
@@ -99,10 +113,24 @@ data class GroupProofCreateInput(
  */
 sealed class GroupProofGeneratorError(message: String, cause: Throwable? = null) : Exception(message, cause) {
 
-    /** Caller asked for a governance type other than [SepGroupType.TYRANNY].
-     *  PR-B ships Tyranny only — UI surfaces this as a clear "TBD". */
+    /** Caller asked for a governance type the proof generator hasn't
+     *  wired yet (currently: ANARCHY, DEMOCRACY, OLIGARCHY).
+     *  UI surfaces this as a clear "TBD". */
     class NotYetSupported(val type: SepGroupType) :
         GroupProofGeneratorError("group type not yet supported: $type")
+
+    /** Caller asked for a [SepGroupType.ONE_ON_ONE] proof but did
+     *  not supply [GroupProofCreateInput.secondaryBlsSecretKey]. The
+     *  OneOnOne circuit needs both parties' Fr scalars in the witness
+     *  (and the FFI rejects `sk_0 == sk_1`), so the second key is
+     *  load-bearing and not derivable from the admin secret alone. */
+    object SecondaryBlsSecretKeyRequired :
+        GroupProofGeneratorError(
+            "OneOnOne create requires a second BLS Fr scalar — caller must " +
+                "generate a fresh ephemeral key and pass it as secondaryBlsSecretKey",
+        ) {
+        private fun readResolve(): Any = SecondaryBlsSecretKeyRequired
+    }
 
     /** [GroupProofCreateInput.adminIndex] was negative or `>= members.size`.
      *  Short-circuits before the JNI call so the SDK doesn't have to
@@ -149,12 +177,43 @@ class OnymGroupProofGenerator : GroupProofGenerator {
     override suspend fun proveCreate(input: GroupProofCreateInput): GroupCreateProof =
         when (input.groupType) {
             SepGroupType.TYRANNY -> proveTyrannyCreate(input)
+            SepGroupType.ONE_ON_ONE -> proveOneOnOneCreate(input)
             SepGroupType.ANARCHY,
-            SepGroupType.ONE_ON_ONE,
             SepGroupType.DEMOCRACY,
             SepGroupType.OLIGARCHY,
                 -> throw GroupProofGeneratorError.NotYetSupported(input.groupType)
         }
+
+    private suspend fun proveOneOnOneCreate(input: GroupProofCreateInput): GroupCreateProof {
+        val sk1 = input.secondaryBlsSecretKey
+            ?: throw GroupProofGeneratorError.SecondaryBlsSecretKeyRequired
+
+        // CPU-bound — keep it off Dispatchers.IO and off Dispatchers.Main.
+        // The OneOnOne circuit is depth-5 (same as Tyranny SMALL), so
+        // the wall-time profile is comparable.
+        return withContext(Dispatchers.Default) {
+            val raw = try {
+                OneOnOne.proveCreate(
+                    /* secretKey0 = */ input.adminBlsSecretKey,
+                    /* secretKey1 = */ sk1,
+                    /* salt = */ input.salt,
+                )
+            } catch (e: Throwable) {
+                throw GroupProofGeneratorError.SdkFailure(e.message ?: e.toString())
+            }
+            // OneOnOne's CreateProof returns (proof, commitment) as
+            // separate buffers — unlike Tyranny's bundled 128-byte PI
+            // blob. The contract still expects a Vec<BytesN<32>> PI
+            // argument, so we synthesize the 2-element shape the
+            // sep-oneonone circuit verifies: [commitment, fr_zero].
+            // (`fr_zero` is the symmetric placeholder — see
+            // `onym-contracts/plonk/sep-oneonone/src/lib.rs`.)
+            GroupCreateProof(
+                proof = raw.proof,
+                publicInputs = listOf(raw.commitment, ByteArray(32)),
+            )
+        }
+    }
 
     private suspend fun proveTyrannyCreate(input: GroupProofCreateInput): GroupCreateProof {
         if (input.adminIndex < 0 || input.adminIndex >= input.members.size) {

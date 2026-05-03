@@ -101,6 +101,46 @@ class SepContractClientTest {
     }
 
     @Test
+    fun createGroupOneOnOne_sendsCreateGroupFunction_withTwoChunkPI_andNoTier() = runTest {
+        val transport = FakeSepContractTransport(
+            cannedResponseJson = """{"accepted":true,"transactionHash":"oo123"}""",
+        )
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.ONE_ON_ONE,
+            network = SepNetwork.TESTNET,
+            transport = transport,
+        )
+
+        val payload = OneOnOneCreateGroupPayload(
+            groupId = ByteArray(32) { 0x42 },
+            commitment = ByteArray(32) { 0x55 },
+            proof = ByteArray(1601) { 0x77 },
+            publicInputs = listOf(ByteArray(32) { 0x55 }, ByteArray(32)),
+        )
+        val response = client.createGroupOneOnOne(payload)
+        assertTrue(response.accepted)
+        assertEquals("oo123", response.transactionHash)
+
+        assertEquals("create_group", transport.lastFunction)
+        val invocation = transport.lastInvocationJson!!
+        assertEquals("oneonone", invocation["contractType"]!!.jsonPrimitive.contentOrNull)
+
+        val payloadJson = transport.lastPayloadJson!!
+        assertNotNull("group_id required", payloadJson["group_id"])
+        assertNotNull("commitment required", payloadJson["commitment"])
+        assertNotNull("proof required", payloadJson["proof"])
+        assertEquals("OneOnOne sends no tier", null, payloadJson["tier"])
+        assertEquals(
+            "OneOnOne sends no admin_pubkey_commitment",
+            null,
+            payloadJson["admin_pubkey_commitment"],
+        )
+        val pi = payloadJson["publicInputs"] as JsonArray
+        assertEquals(2, pi.size)
+    }
+
+    @Test
     fun updateCommitmentTyranny_routesToUpdateFunction_with5ChunkPI() = runTest {
         val transport = FakeSepContractTransport(
             cannedResponseJson = """{"accepted":true}""",

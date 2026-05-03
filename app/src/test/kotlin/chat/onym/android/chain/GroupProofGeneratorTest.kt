@@ -28,12 +28,25 @@ class GroupProofGeneratorTest {
     }
 
     @Test
-    fun proveCreate_oneOnOne_throwsNotYetSupported() = runTest {
-        val input = stubInput(SepGroupType.ONE_ON_ONE)
+    fun proveCreate_democracy_throwsNotYetSupported() = runTest {
+        val input = stubInput(SepGroupType.DEMOCRACY)
         val thrown = assertThrows(GroupProofGeneratorError.NotYetSupported::class.java) {
             kotlinx.coroutines.runBlocking { OnymGroupProofGenerator().proveCreate(input) }
         }
-        assertEquals(SepGroupType.ONE_ON_ONE, thrown.type)
+        assertEquals(SepGroupType.DEMOCRACY, thrown.type)
+    }
+
+    @Test
+    fun proveCreate_oneOnOne_withoutSecondaryKey_throws() = runTest {
+        // OneOnOne is now wired (no longer NotYetSupported), but the
+        // secondaryBlsSecretKey is mandatory and short-circuits before
+        // any FFI call when missing.
+        val input = stubInput(SepGroupType.ONE_ON_ONE)
+        val thrown = assertThrows(GroupProofGeneratorError.SecondaryBlsSecretKeyRequired::class.java) {
+            kotlinx.coroutines.runBlocking { OnymGroupProofGenerator().proveCreate(input) }
+        }
+        // Sanity: object-singleton, not a class with state to inspect.
+        assertEquals(GroupProofGeneratorError.SecondaryBlsSecretKeyRequired, thrown)
     }
 
     @Test

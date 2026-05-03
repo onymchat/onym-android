@@ -42,6 +42,14 @@ class SepContractClient(
             responseSerializer = SepSubmissionResponse.serializer(),
         )
 
+    suspend fun createGroupOneOnOne(payload: OneOnOneCreateGroupPayload): SepSubmissionResponse =
+        invoke(
+            function = "create_group",
+            payload = payload,
+            payloadSerializer = OneOnOneCreateGroupPayload.serializer(),
+            responseSerializer = SepSubmissionResponse.serializer(),
+        )
+
     suspend fun updateCommitmentTyranny(payload: TyrannyUpdateCommitmentPayload): SepSubmissionResponse =
         invoke(
             function = "update_commitment",
