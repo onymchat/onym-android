@@ -163,10 +163,12 @@ class RoomInvitationStoreTest {
         payload: String,
         receivedAt: Instant = Instant.parse("2026-05-02T12:00:00Z"),
         status: IncomingInvitationStatus = IncomingInvitationStatus.Pending,
+        ownerIdentityIdString: String = "test-owner",
     ) = IncomingInvitationRecord(
         id = id,
         payload = payload.toByteArray(Charsets.UTF_8),
         receivedAt = receivedAt,
         status = status,
+        ownerIdentityIdString = ownerIdentityIdString,
     )
 }

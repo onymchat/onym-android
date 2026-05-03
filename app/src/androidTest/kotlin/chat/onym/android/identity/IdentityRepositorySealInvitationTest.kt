@@ -91,7 +91,7 @@ class IdentityRepositorySealInvitationTest {
             payload = plaintext,
             recipientInboxPublicKey = recipientIdentity.inboxPublicKey,
         )
-        val decrypted = recipient.decryptInvitation(sealed)
+        val decrypted = recipient.decryptInvitation(sealed, asIdentity = recipient.currentIdentityId.value!!)
         assertArrayEquals(plaintext, decrypted)
     }
 

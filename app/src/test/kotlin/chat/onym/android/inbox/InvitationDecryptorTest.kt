@@ -1,5 +1,6 @@
 package chat.onym.android.inbox
 
+import chat.onym.android.identity.IdentityId
 import chat.onym.android.identity.InvitationDecryptError
 import chat.onym.android.support.FakeInvitationEnvelopeDecrypter
 import kotlinx.coroutines.test.runTest
@@ -27,6 +28,8 @@ import java.util.Base64
  */
 class InvitationDecryptorTest {
 
+    private val testIdentity = IdentityId("test-identity")
+
     @Test
     fun decrypt_passesEnvelopeBytesThroughToDecrypter() = runTest {
         val plaintext = decryptedInvitationJson("aGVsbG8=", "Group A", 7uL, "abcd")
@@ -36,13 +39,38 @@ class InvitationDecryptorTest {
         val decryptor = InvitationDecryptor(fake)
 
         val envelope = "envelope-bytes".toByteArray()
-        val result = decryptor.decrypt(envelope)
+        val result = decryptor.decrypt(envelope, asIdentity = testIdentity)
 
         assertEquals(1, fake.decryptCalls.size)
         assertArrayEquals(envelope, fake.decryptCalls.single())
         assertEquals("Group A", result.name)
         assertEquals(7uL, result.epoch)
         assertEquals("abcd", result.senderNostrPubkey)
+    }
+
+    @Test
+    fun decrypt_passesPerRecordAsIdentityThroughToEnvelopeDecrypter() = runTest {
+        val plaintext = decryptedInvitationJson("AAA=", "X", 1uL, "pk")
+        val fake = FakeInvitationEnvelopeDecrypter(
+            FakeInvitationEnvelopeDecrypter.Mode.Fixed(plaintext)
+        )
+        val decryptor = InvitationDecryptor(fake)
+        val alice = IdentityId("alice-id")
+        val bob = IdentityId("bob-id")
+
+        decryptor.decrypt("env-A".toByteArray(), asIdentity = alice)
+        decryptor.decrypt("env-B".toByteArray(), asIdentity = bob)
+
+        // The decryptor's only job for PR-6 (per-identity decryption
+        // routing) is to pass the per-record ownerIdentityId through
+        // to the envelope decrypter unchanged. This assertion is
+        // load-bearing: a regression here means envelopes addressed
+        // to identity B silently fail to decrypt while the user is
+        // on identity A — the exact bug PR-6 fixes.
+        val calls = fake.decryptCallsWithIdentity
+        assertEquals(2, calls.size)
+        assertEquals(alice, calls[0].asIdentity)
+        assertEquals(bob, calls[1].asIdentity)
     }
 
     @Test
@@ -58,8 +86,8 @@ class InvitationDecryptorTest {
         )
         val decryptor = InvitationDecryptor(fake)
 
-        val resA = decryptor.decrypt(envA)
-        val resB = decryptor.decrypt(envB)
+        val resA = decryptor.decrypt(envA, asIdentity = testIdentity)
+        val resB = decryptor.decrypt(envB, asIdentity = testIdentity)
 
         assertEquals("Alpha", resA.name); assertEquals(1uL, resA.epoch)
         assertEquals("Beta",  resB.name); assertEquals(2uL, resB.epoch)
@@ -74,8 +102,8 @@ class InvitationDecryptorTest {
         )
         val decryptor = InvitationDecryptor(fake)
 
-        val r1 = decryptor.decrypt("anything-1".toByteArray())
-        val r2 = decryptor.decrypt("anything-2".toByteArray())
+        val r1 = decryptor.decrypt("anything-1".toByteArray(), asIdentity = testIdentity)
+        val r2 = decryptor.decrypt("anything-2".toByteArray(), asIdentity = testIdentity)
 
         assertEquals(r1, r2)
         assertEquals("Constant", r1.name)
@@ -90,7 +118,7 @@ class InvitationDecryptorTest {
         val decryptor = InvitationDecryptor(fake)
 
         val thrown = assertThrows(InvitationDecryptError.UnsupportedScheme::class.java) {
-            kotlinx.coroutines.runBlocking { decryptor.decrypt("env".toByteArray()) }
+            kotlinx.coroutines.runBlocking { decryptor.decrypt("env".toByteArray(), asIdentity = testIdentity) }
         }
         // Same instance — interactor MUST NOT wrap or rewrap the seam's error.
         assertSame(cause, thrown)
@@ -108,7 +136,7 @@ class InvitationDecryptorTest {
         // contract is: seam errors are decryption failures; parser
         // errors are payload-shape failures, surfaced separately.
         val thrown = assertThrows(SerializationException::class.java) {
-            kotlinx.coroutines.runBlocking { decryptor.decrypt("env".toByteArray()) }
+            kotlinx.coroutines.runBlocking { decryptor.decrypt("env".toByteArray(), asIdentity = testIdentity) }
         }
         assertTrue("expected SerializationException, got ${thrown::class.simpleName}: ${thrown.message}", true)
     }

@@ -1,5 +1,6 @@
 package chat.onym.android.inbox
 
+import chat.onym.android.identity.IdentityId
 import chat.onym.android.transport.InboxTransport
 import chat.onym.android.transport.TransportInboxId
 import kotlinx.coroutines.coroutineScope
@@ -21,11 +22,12 @@ import kotlinx.coroutines.launch
  *  - No OnymSDK. No `Context`. No persistence backend.
  *  - One job: forward each [chat.onym.android.transport.InboundInbox]
  *    into [IncomingInvitationsRepository.recordIncoming]. Decryption
- *    + parsing of the inner payload belongs in a future
- *    `InvitationDetailsRepository` that owns the X25519 read; this
- *    interactor stays opaque-byte-shipping by design.
+ *    + parsing of the inner payload belongs in
+ *    [InvitationDecryptor]; this interactor stays opaque-byte-
+ *    shipping by design.
  *
- * Mirrors `IncomingInvitationsInteractor.swift` from onym-ios PR #16.
+ * Mirrors `IncomingInvitationsInteractor.swift` from onym-ios PR
+ * #16 + the per-identity-keyed fan-out from onym-ios PR #59.
  */
 class IncomingInvitationsInteractor(
     private val inboxTransport: InboxTransport,
@@ -34,39 +36,53 @@ class IncomingInvitationsInteractor(
 
     /**
      * Subscribe to [inbox] and forward each delivered message into
-     * the repository. Suspends for the lifetime of the subscription;
-     * cancellation of the calling scope unsubscribes upstream
-     * (production `NostrInboxTransport` runs `unsubscribe` from the
-     * subscribe Flow's `awaitClose`).
+     * the repository, stamping each record with [ownerIdentityId]
+     * so PR-6's per-identity decrypt path can route to the right
+     * X25519 private key.
+     *
+     * Suspends for the lifetime of the subscription; cancellation
+     * of the calling scope unsubscribes upstream (production
+     * `NostrInboxTransport` runs `unsubscribe` from the subscribe
+     * Flow's `awaitClose`).
      */
-    suspend fun run(inbox: TransportInboxId) {
+    suspend fun run(inbox: TransportInboxId, ownerIdentityId: IdentityId) {
         inboxTransport.subscribe(inbox).collect { inbound ->
             repository.recordIncoming(
                 id = inbound.messageId,
                 payload = inbound.payload,
                 receivedAt = inbound.receivedAt,
+                ownerIdentityId = ownerIdentityId,
             )
         }
     }
 
     /**
-     * Multi-identity fan-out. Subscribes to **every** inbox tag in
-     * the latest [tags] emission concurrently — one child coroutine
-     * per tag inside a structured-concurrency scope. When the upstream
-     * flow emits a new list (identity added / removed / selected), the
-     * old subscription set is cancelled wholesale and a fresh set is
-     * launched.
+     * Multi-identity fan-out. Subscribes to **every** entry in the
+     * latest [entries] emission concurrently — one child coroutine
+     * per identity inside a structured-concurrency scope. When the
+     * upstream flow emits a new list (identity added / removed /
+     * selected), the old subscription set is cancelled wholesale
+     * and a fresh set is launched.
      *
-     * Fan-out is the right shape for multi-identity: messages sent to
-     * any identity's inbox MUST land on disk regardless of which
-     * identity the user is currently viewing — otherwise switching
-     * identity would silently drop messages received under the others.
+     * Each emission is a list of `(IdentityId, TransportInboxId)`
+     * pairs so each launched subscription captures the identity
+     * the inbox tag belongs to and stamps inbounds with that ID
+     * on the way to [IncomingInvitationsRepository.recordIncoming].
+     * The identity ID is what makes per-identity decryption routing
+     * work later — without it, the decryptor can't tell which
+     * X25519 key the envelope is addressed to.
      *
-     * Suspends for the lifetime of the calling scope. Cancelling the
-     * caller cancels every subscription.
+     * Fan-out is the right shape for multi-identity: messages sent
+     * to any identity's inbox MUST land on disk regardless of
+     * which identity the user is currently viewing — otherwise
+     * switching identity would silently drop messages received
+     * under the others.
+     *
+     * Suspends for the lifetime of the calling scope. Cancelling
+     * the caller cancels every subscription.
      */
-    suspend fun runFanout(tags: Flow<List<TransportInboxId>>) {
-        tags.distinctUntilChanged().collectLatest { current ->
+    suspend fun runFanout(entries: Flow<List<Pair<IdentityId, TransportInboxId>>>) {
+        entries.distinctUntilChanged().collectLatest { current ->
             // Inner `coroutineScope` is the structured-concurrency
             // anchor for THIS emission. `collectLatest` cancels the
             // outer lambda on the next emission, which propagates
@@ -76,8 +92,8 @@ class IncomingInvitationsInteractor(
             // (each `run(tag)` collects a never-completing Flow), so
             // it stays alive until cancelled.
             coroutineScope {
-                for (tag in current) {
-                    launch { run(tag) }
+                for ((identityId, tag) in current) {
+                    launch { run(tag, identityId) }
                 }
             }
         }

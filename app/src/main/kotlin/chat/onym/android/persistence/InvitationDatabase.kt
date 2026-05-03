@@ -15,11 +15,18 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [PersistedInvitation::class],
-    version = 1,
+    // v2: PR-6 of the deeplink-invite stack adds the
+    // `ownerIdentityIdString` column for the per-identity
+    // decryption-routing filter. Pre-1.0 + greenfield licence — no
+    // Migration class. Builders MUST set
+    // `.fallbackToDestructiveMigration()` so a v1→v2 jump on an
+    // existing install drops the table (re-fetched from relays on
+    // next launch) instead of crashing on schema mismatch.
+    version = 2,
     // Schema export is for cross-version diffing during migration
-    // authoring; nothing to diff at v1 and KSP warns loudly about
-    // the missing `room.schemaLocation` directory otherwise.
-    // Flip to true and add the apt arg when version 2 lands.
+    // authoring; we don't write Migration classes (destructive
+    // fallback per the greenfield licence), so KSP-warn-suppression
+    // by leaving this off is fine.
     exportSchema = false,
 )
 abstract class InvitationDatabase : RoomDatabase() {

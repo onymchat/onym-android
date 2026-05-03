@@ -87,7 +87,7 @@ class IdentityRepositoryInvitationDecryptTest {
             payload = payload,
             recipientX25519Pubkey = identity.inboxPublicKey,
         )
-        val plaintext = repo.decryptInvitation(envelope)
+        val plaintext = repo.decryptInvitation(envelope, asIdentity = repo.currentIdentityId.value!!)
         assertArrayEquals(payload, plaintext)
     }
 
@@ -102,7 +102,7 @@ class IdentityRepositoryInvitationDecryptTest {
             recipientX25519Pubkey = identity.inboxPublicKey,
             senderEd25519Private = sender,
         )
-        val plaintext = repo.decryptInvitation(envelope)
+        val plaintext = repo.decryptInvitation(envelope, asIdentity = repo.currentIdentityId.value!!)
         assertArrayEquals(payload, plaintext)
     }
 
@@ -112,7 +112,7 @@ class IdentityRepositoryInvitationDecryptTest {
     fun decrypt_malformedJson_throwsMalformedEnvelope() = runBlocking {
         val garbage = "not really json {{".toByteArray()
         assertThrows(InvitationDecryptError.MalformedEnvelope::class.java) {
-            runBlocking { repo.decryptInvitation(garbage) }
+            runBlocking { repo.decryptInvitation(garbage, asIdentity = repo.currentIdentityId.value!!) }
         }
         Unit
     }
@@ -130,7 +130,7 @@ class IdentityRepositoryInvitationDecryptTest {
             }
         """.trimIndent().toByteArray()
         val thrown = assertThrows(InvitationDecryptError.UnsupportedScheme::class.java) {
-            runBlocking { repo.decryptInvitation(bad) }
+            runBlocking { repo.decryptInvitation(bad, asIdentity = repo.currentIdentityId.value!!) }
         }
         assertEquals("aes-128-cbc-v0", thrown.scheme)
         Unit
@@ -148,7 +148,7 @@ class IdentityRepositoryInvitationDecryptTest {
             }
         """.trimIndent().toByteArray()
         val thrown = assertThrows(InvitationDecryptError.MissingEphemeralKey::class.java) {
-            runBlocking { repo.decryptInvitation(bad) }
+            runBlocking { repo.decryptInvitation(bad, asIdentity = repo.currentIdentityId.value!!) }
         }
         assertSame(InvitationDecryptError.MissingEphemeralKey, thrown)
         Unit
@@ -173,7 +173,7 @@ class IdentityRepositoryInvitationDecryptTest {
             .encodeToString(SealedEnvelope.serializer(), tampered)
             .toByteArray()
         val thrown = assertThrows(InvitationDecryptError.SignatureFailed::class.java) {
-            runBlocking { repo.decryptInvitation(bytes) }
+            runBlocking { repo.decryptInvitation(bytes, asIdentity = repo.currentIdentityId.value!!) }
         }
         assertSame(InvitationDecryptError.SignatureFailed, thrown)
         Unit
@@ -195,7 +195,7 @@ class IdentityRepositoryInvitationDecryptTest {
             .encodeToString(SealedEnvelope.serializer(), tampered)
             .toByteArray()
         assertThrows(InvitationDecryptError.DecryptionFailed::class.java) {
-            runBlocking { repo.decryptInvitation(bytes) }
+            runBlocking { repo.decryptInvitation(bytes, asIdentity = repo.currentIdentityId.value!!) }
         }
         Unit
     }
@@ -211,7 +211,7 @@ class IdentityRepositoryInvitationDecryptTest {
             recipientX25519Pubkey = wellFormedX25519Pubkey(otherInbox),
         )
         assertThrows(InvitationDecryptError.DecryptionFailed::class.java) {
-            runBlocking { repo.decryptInvitation(envelope) }
+            runBlocking { repo.decryptInvitation(envelope, asIdentity = repo.currentIdentityId.value!!) }
         }
         Unit
     }
@@ -225,7 +225,7 @@ class IdentityRepositoryInvitationDecryptTest {
         )
         repo.wipe()
         val thrown = assertThrows(InvitationDecryptError.IdentityNotLoaded::class.java) {
-            runBlocking { repo.decryptInvitation(envelope) }
+            runBlocking { repo.decryptInvitation(envelope, asIdentity = repo.currentIdentityId.value!!) }
         }
         assertSame(InvitationDecryptError.IdentityNotLoaded, thrown)
         Unit

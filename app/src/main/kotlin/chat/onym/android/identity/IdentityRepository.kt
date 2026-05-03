@@ -322,28 +322,35 @@ class IdentityRepository(
 
     /**
      * Open an X25519+AES-GCM-sealed invitation envelope addressed to
-     * this identity's inbox keypair. The X25519 private key is
+     * the [asIdentity] inbox keypair. The X25519 private key is
      * recomputed from the persisted nostr secret on every call and
      * never assigned to a stored property — so the only persistent
      * footprint of this method on the recipient's machine is the
      * already-encrypted SharedPreferences blob.
      *
+     * Loading by [asIdentity] (rather than the currently-selected
+     * identity) is what makes the multi-identity fan-out actually
+     * usable: an envelope addressed to identity B that arrived
+     * while the user was on identity A still decrypts under B's
+     * key when the repository surfaces it. The repository tags
+     * every persisted record with its [asIdentity] at receive
+     * time; this method consumes that tag.
+     *
      * Throws [InvitationDecryptError]; never raw `javax.crypto` /
      * `kotlinx.serialization` exceptions. See [InvitationDecryptError]
      * for the failure-mode taxonomy.
      */
-    override suspend fun decryptInvitation(envelopeBytes: ByteArray): ByteArray =
-        withContext(ioDispatcher) {
-            // Snapshot read happens off the mutex — store I/O is a
-            // single atomic SharedPreferences read; concurrent `wipe()`
-            // either observes the pre-wipe blob or post-wipe null,
-            // both internally consistent. Reads against the
-            // currently-selected identity; the multi-identity inbox
-            // fan-out (PR-4) will iterate every id instead.
-            val id = store.loadCurrent() ?: throw InvitationDecryptError.IdentityNotLoaded
-            val snapshot = store.load(id) ?: throw InvitationDecryptError.IdentityNotLoaded
-            decryptInvitationLocked(snapshot, envelopeBytes)
-        }
+    override suspend fun decryptInvitation(
+        envelopeBytes: ByteArray,
+        asIdentity: IdentityId,
+    ): ByteArray = withContext(ioDispatcher) {
+        // Snapshot read happens off the mutex — store I/O is a
+        // single atomic SharedPreferences read; concurrent `wipe()`
+        // either observes the pre-wipe blob or post-wipe null,
+        // both internally consistent.
+        val snapshot = store.load(asIdentity) ?: throw InvitationDecryptError.IdentityNotLoaded
+        decryptInvitationLocked(snapshot, envelopeBytes)
+    }
 
     private fun decryptInvitationLocked(
         snapshot: StoredSnapshot,
