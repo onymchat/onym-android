@@ -87,19 +87,30 @@ class IdentityRepository(
      * Mirrors `IdentityRepository.blsSecretKey` from onym-ios PR #26.
      */
     suspend fun blsSecretKey(): ByteArray = withContext(ioDispatcher) {
-        store.load()?.blsSecretKey ?: throw IdentityError.IdentityNotLoaded
+        val id = store.loadCurrent() ?: throw IdentityError.IdentityNotLoaded
+        store.load(id)?.blsSecretKey ?: throw IdentityError.IdentityNotLoaded
     }
 
     /**
-     * Load the persisted identity, or generate a fresh BIP39-backed
-     * one if none exists. Idempotent: a second call after success
-     * returns the same identity without re-reading the store.
+     * Load the persisted identity (the currently-selected one), or
+     * generate a fresh BIP39-backed identity if no snapshot exists.
+     * Idempotent: a second call after success returns the same
+     * identity without re-reading the store.
+     *
+     * If multiple identities exist on disk, [store]'s `current`
+     * selection (set on every save) determines which one loads.
+     * Multi-identity selection / add APIs land in the next PR.
      */
     suspend fun bootstrap(): Identity = mutex.withLock {
         _snapshots.value?.let { return@withLock it }
         withContext(ioDispatcher) {
-            val stored = store.load()
-            if (stored != null) {
+            val currentId = store.loadCurrent() ?: store.listIds().firstOrNull()
+            val stored = currentId?.let { store.load(it) }
+            if (stored != null && currentId != null) {
+                // Re-pin `current` in case it was missing (defensive — a
+                // partial wipe could clear `current` while leaving the
+                // snapshot intact).
+                if (store.loadCurrent() != currentId) store.saveCurrent(currentId)
                 val identity = identityFromSnapshot(stored)
                 _snapshots.value = identity
                 identity
@@ -110,9 +121,10 @@ class IdentityRepository(
     }
 
     /**
-     * Generate a fresh BIP39-backed identity, replacing any existing
-     * stored identity. The previous identity is unrecoverable after
-     * this call (no in-app backup is taken).
+     * Generate a fresh BIP39-backed identity. Replaces the
+     * currently-selected identity in this PR's API; the multi-
+     * identity API (next PR) will give callers the choice between
+     * "add" and "replace".
      */
     suspend fun generateNew(): Identity = mutex.withLock {
         withContext(ioDispatcher) {
@@ -121,8 +133,10 @@ class IdentityRepository(
     }
 
     /**
-     * Restore an identity from a 12- or 24-word BIP39 mnemonic,
-     * replacing any existing stored identity.
+     * Restore an identity from a 12- or 24-word BIP39 mnemonic.
+     * Replaces the currently-selected identity in this PR's API; the
+     * multi-identity API (next PR) will let callers add a restored
+     * identity alongside existing ones.
      *
      * @throws IdentityError.InvalidMnemonic if the mnemonic is
      *         malformed or has a bad checksum.
@@ -132,17 +146,25 @@ class IdentityRepository(
             val entropy = Bip39.entropyFromMnemonic(mnemonic)
                 ?: throw IdentityError.InvalidMnemonic
             val snapshot = snapshotFromEntropy(entropy)
-            store.save(snapshot)
+            // Replace the active slot — wipe its old snapshot first,
+            // then save under a fresh id so derived caches keyed by id
+            // (when they land in PR-3) get a clean break.
+            val previousId = store.loadCurrent()
+            val newId = IdentityId.new()
+            if (previousId != null) store.wipe(previousId)
+            store.save(newId, snapshot)
+            store.saveCurrent(newId)
             val identity = identityFromSnapshot(snapshot)
             _snapshots.value = identity
             identity
         }
     }
 
-    /** Delete the persisted identity. Subscribers receive a `null` snapshot. */
+    /** Delete the currently-selected identity from storage.
+     *  Subscribers receive a `null` snapshot. */
     suspend fun wipe() = mutex.withLock {
         withContext(ioDispatcher) {
-            store.wipe()
+            store.loadCurrent()?.let { store.wipe(it) }
             _snapshots.value = null
         }
     }
@@ -163,11 +185,14 @@ class IdentityRepository(
      */
     override suspend fun decryptInvitation(envelopeBytes: ByteArray): ByteArray =
         withContext(ioDispatcher) {
-            // Snapshot read happens off the mutex — `store.load()` is a
+            // Snapshot read happens off the mutex — store I/O is a
             // single atomic SharedPreferences read; concurrent `wipe()`
             // either observes the pre-wipe blob or post-wipe null,
-            // both internally consistent.
-            val snapshot = store.load() ?: throw InvitationDecryptError.IdentityNotLoaded
+            // both internally consistent. Reads against the
+            // currently-selected identity; the multi-identity inbox
+            // fan-out (PR-4) will iterate every id instead.
+            val id = store.loadCurrent() ?: throw InvitationDecryptError.IdentityNotLoaded
+            val snapshot = store.load(id) ?: throw InvitationDecryptError.IdentityNotLoaded
             decryptInvitationLocked(snapshot, envelopeBytes)
         }
 
@@ -269,7 +294,8 @@ class IdentityRepository(
         } catch (e: IllegalArgumentException) {
             throw InvitationSealError.InvalidRecipientPublicKey(e.message ?: "parse failed")
         }
-        val snapshot = store.load() ?: throw InvitationSealError.IdentityNotLoaded
+        val id = store.loadCurrent() ?: throw InvitationSealError.IdentityNotLoaded
+        val snapshot = store.load(id) ?: throw InvitationSealError.IdentityNotLoaded
         sealInvitationLocked(snapshot, payload, recipientPub)
     }
 
@@ -356,7 +382,13 @@ class IdentityRepository(
             // Unreachable: generateMnemonic always emits a valid mnemonic.
             ?: throw IdentityError.InvalidMnemonic
         val snapshot = snapshotFromEntropy(entropy)
-        store.save(snapshot)
+        // Replace-the-active-slot semantics. PR-2's add-identity API
+        // will introduce a non-replacing variant.
+        val previousId = store.loadCurrent()
+        val newId = IdentityId.new()
+        if (previousId != null) store.wipe(previousId)
+        store.save(newId, snapshot)
+        store.saveCurrent(newId)
         val identity = identityFromSnapshot(snapshot)
         _snapshots.value = identity
         return identity

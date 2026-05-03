@@ -73,7 +73,7 @@ class IdentityRepositoryInvitationDecryptTest {
 
     @After
     fun tearDown() {
-        try { store.wipe() } catch (_: Throwable) { /* best-effort */ }
+        try { store.wipeAll() } catch (_: Throwable) { /* best-effort */ }
     }
 
     // ─── happy paths ──────────────────────────────────────────────

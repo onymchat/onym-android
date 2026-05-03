@@ -76,8 +76,8 @@ class IdentityRepositorySealInvitationTest {
 
     @After
     fun tearDown() {
-        try { senderStore.wipe() } catch (_: Throwable) { /* best-effort */ }
-        try { recipientStore.wipe() } catch (_: Throwable) { /* best-effort */ }
+        try { senderStore.wipeAll() } catch (_: Throwable) { /* best-effort */ }
+        try { recipientStore.wipeAll() } catch (_: Throwable) { /* best-effort */ }
     }
 
     // ─── happy paths ──────────────────────────────────────────────

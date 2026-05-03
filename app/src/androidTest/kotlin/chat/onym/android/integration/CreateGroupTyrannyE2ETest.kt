@@ -134,7 +134,7 @@ class CreateGroupTyrannyE2ETest {
 
     @After
     fun tearDown() {
-        try { identityStore.wipe() } catch (_: Throwable) { /* best-effort */ }
+        try { identityStore.wipeAll() } catch (_: Throwable) { /* best-effort */ }
     }
 
     // ─── Tests ───────────────────────────────────────────────────
