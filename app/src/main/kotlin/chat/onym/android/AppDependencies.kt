@@ -45,4 +45,6 @@ class AppDependencies(
     /** Chats tab — read-only view over [chat.onym.android.group.GroupRepository.snapshots].
      *  Mirrors `makeChatsFlow` from onym-ios PR #30. */
     val makeChatsViewModel: () -> ChatsViewModel,
+    /** Settings → Identities — multi-identity management (PR-5). */
+    val makeIdentitiesViewModel: () -> chat.onym.android.identity.IdentitiesViewModel,
 )

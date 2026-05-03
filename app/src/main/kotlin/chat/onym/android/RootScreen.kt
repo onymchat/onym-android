@@ -36,10 +36,12 @@ import chat.onym.android.group.creategroup.CreateGroupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.search.SearchScreen
+import chat.onym.android.identity.IdentitiesViewModel
 import chat.onym.android.settings.AnchorsNetworkScreen
 import chat.onym.android.settings.AnchorsPickerViewModel
 import chat.onym.android.settings.AnchorsRootScreen
 import chat.onym.android.settings.AnchorsVersionScreen
+import chat.onym.android.settings.IdentitiesScreen
 import chat.onym.android.settings.RelayerSettingsScreen
 import chat.onym.android.settings.RelayerSettingsViewModel
 import chat.onym.android.settings.SettingsScreen
@@ -138,6 +140,7 @@ fun RootScreen(dependencies: AppDependencies) {
                     onBackupClick = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
                     onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
+                    onIdentitiesClick = { navController.navigate(ROUTE_IDENTITIES) },
                     useMainnet = networkPref == chat.onym.android.chain.AppNetwork.Mainnet,
                     onToggleMainnet = { on ->
                         coroutineScope.launch {
@@ -167,6 +170,17 @@ fun RootScreen(dependencies: AppDependencies) {
             }
             composable(Tab.Search.route) {
                 SearchScreen()
+            }
+            composable(ROUTE_IDENTITIES) {
+                val vm: IdentitiesViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeIdentitiesViewModel() }
+                    },
+                )
+                IdentitiesScreen(
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                )
             }
             composable(ROUTE_RELAYER_SETTINGS) {
                 val vm: RelayerSettingsViewModel = viewModel(
@@ -266,6 +280,7 @@ private enum class Tab(val route: String, val labelRes: Int) {
 }
 
 private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
+private const val ROUTE_IDENTITIES = "identities"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
