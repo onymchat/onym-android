@@ -19,12 +19,30 @@ import org.junit.Test
 class GroupProofGeneratorTest {
 
     @Test
-    fun proveCreate_anarchy_throwsNotYetSupported() = runTest {
-        val input = stubInput(SepGroupType.ANARCHY)
-        val thrown = assertThrows(GroupProofGeneratorError.NotYetSupported::class.java) {
+    fun proveCreate_anarchy_outOfRangeIndex_shortCircuitsBeforeJni() = runTest {
+        // Anarchy is now wired (no longer NotYetSupported), but the
+        // adminIndex bounds check still short-circuits before the JNI
+        // call — same as the Tyranny path. Cheapest test that proves
+        // we entered the Anarchy branch without needing the SDK loaded.
+        val input = GroupProofCreateInput(
+            groupType = SepGroupType.ANARCHY,
+            tier = SepTier.SMALL,
+            members = listOf(
+                GovernanceMember(
+                    publicKeyCompressed = ByteArray(48) { 0xAA.toByte() },
+                    leafHash = ByteArray(32) { 0xBB.toByte() },
+                ),
+            ),
+            adminBlsSecretKey = ByteArray(32) { 0x01 },
+            adminIndex = 5,
+            groupId = ByteArray(32),
+            salt = ByteArray(32),
+        )
+        val thrown = assertThrows(GroupProofGeneratorError.AdminIndexOutOfRange::class.java) {
             kotlinx.coroutines.runBlocking { OnymGroupProofGenerator().proveCreate(input) }
         }
-        assertEquals(SepGroupType.ANARCHY, thrown.type)
+        assertEquals(5, thrown.index)
+        assertEquals(1, thrown.count)
     }
 
     @Test

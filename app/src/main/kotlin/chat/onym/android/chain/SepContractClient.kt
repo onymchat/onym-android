@@ -50,6 +50,14 @@ class SepContractClient(
             responseSerializer = SepSubmissionResponse.serializer(),
         )
 
+    suspend fun createGroupAnarchy(payload: AnarchyCreateGroupPayload): SepSubmissionResponse =
+        invoke(
+            function = "create_group",
+            payload = payload,
+            payloadSerializer = AnarchyCreateGroupPayload.serializer(),
+            responseSerializer = SepSubmissionResponse.serializer(),
+        )
+
     suspend fun updateCommitmentTyranny(payload: TyrannyUpdateCommitmentPayload): SepSubmissionResponse =
         invoke(
             function = "update_commitment",

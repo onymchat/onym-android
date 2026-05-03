@@ -1,6 +1,7 @@
 package chat.onym.android.chain
 
 import chat.onym.android.group.GovernanceMember
+import chat.onym.sdk.Anarchy
 import chat.onym.sdk.OneOnOne
 import chat.onym.sdk.Tyranny
 import kotlinx.coroutines.Dispatchers
@@ -178,11 +179,58 @@ class OnymGroupProofGenerator : GroupProofGenerator {
         when (input.groupType) {
             SepGroupType.TYRANNY -> proveTyrannyCreate(input)
             SepGroupType.ONE_ON_ONE -> proveOneOnOneCreate(input)
-            SepGroupType.ANARCHY,
+            SepGroupType.ANARCHY -> proveAnarchyCreate(input)
             SepGroupType.DEMOCRACY,
             SepGroupType.OLIGARCHY,
                 -> throw GroupProofGeneratorError.NotYetSupported(input.groupType)
         }
+
+    private suspend fun proveAnarchyCreate(input: GroupProofCreateInput): GroupCreateProof {
+        // Anarchy reuses the membership proof at create-time — the
+        // contract's `create_group` validates exactly the same
+        // (commitment, epoch=0) PI that a member would later produce
+        // via `verify_membership`. No `proveCreate` exists on the
+        // Anarchy SDK; `proveMembership` IS the create proof.
+        if (input.adminIndex < 0 || input.adminIndex >= input.members.size) {
+            throw GroupProofGeneratorError.AdminIndexOutOfRange(
+                index = input.adminIndex,
+                count = input.members.size,
+            )
+        }
+        val packedLeaves = ByteArray(input.members.size * 32)
+        for ((i, member) in input.members.withIndex()) {
+            require(member.leafHash.size == 32) {
+                "leafHash for member $i has unexpected size ${member.leafHash.size}, expected 32"
+            }
+            System.arraycopy(member.leafHash, 0, packedLeaves, i * 32, 32)
+        }
+
+        // CPU-bound — keep it off Dispatchers.IO and off Dispatchers.Main.
+        // Anarchy is multi-tier (depth ∈ {5, 8, 11}); MVP uses tier 0
+        // (depth 5) so wall-time is comparable to Tyranny SMALL.
+        return withContext(Dispatchers.Default) {
+            val raw = try {
+                Anarchy.proveMembership(
+                    /* depth = */ input.tier.depth,
+                    /* memberLeafHashes = */ packedLeaves,
+                    /* proverSecretKey = */ input.adminBlsSecretKey,
+                    /* proverIndex = */ input.adminIndex,
+                    /* epoch = */ 0L,
+                    /* salt = */ input.salt,
+                )
+            } catch (e: Throwable) {
+                throw GroupProofGeneratorError.SdkFailure(e.message ?: e.toString())
+            }
+            // Anarchy's MembershipProof returns (proof, commitment) as
+            // separate buffers. Synthesize the 2-element PI vector the
+            // contract verifies: [commitment, fr_zero] (epoch=0).
+            // (`MEMBERSHIP_PI_COUNT == 2` in sep-anarchy/src/lib.rs.)
+            GroupCreateProof(
+                proof = raw.proof,
+                publicInputs = listOf(raw.commitment, ByteArray(32)),
+            )
+        }
+    }
 
     private suspend fun proveOneOnOneCreate(input: GroupProofCreateInput): GroupCreateProof {
         val sk1 = input.secondaryBlsSecretKey

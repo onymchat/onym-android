@@ -216,6 +216,62 @@ class SepContractTypesTest {
         assertEquals(original, decoded)
     }
 
+    // ─── AnarchyCreateGroupPayload ────────────────────────────────
+
+    @Test
+    fun anarchyCreateGroupPayload_emitsExpectedKeys() {
+        val payload = AnarchyCreateGroupPayload(
+            groupId = ByteArray(32) { 0x10 },
+            commitment = ByteArray(32) { 0x20 },
+            tier = 0,
+            memberCount = 1,
+            proof = ByteArray(1601) { 0x30 },
+            publicInputs = listOf(
+                ByteArray(32) { 0x20 },
+                ByteArray(32),
+            ),
+        )
+        val obj = json.parseToJsonElement(
+            json.encodeToString(AnarchyCreateGroupPayload.serializer(), payload),
+        ).jsonObject
+
+        assertNotNull("group_id required", obj["group_id"])
+        assertNotNull("commitment required", obj["commitment"])
+        assertEquals(0, obj["tier"]!!.jsonPrimitive.int)
+        // Snake-case `member_count` per the relayer's
+        // `MEMBER_COUNT_KEYS` lookup.
+        assertEquals(1, obj["member_count"]!!.jsonPrimitive.int)
+        assertNotNull("proof required", obj["proof"])
+        // No `admin_pubkey_commitment` — Anarchy has no admin role.
+        assertNull("admin_pubkey_commitment must NOT appear", obj["admin_pubkey_commitment"])
+
+        val pi = obj["publicInputs"] as JsonArray
+        assertEquals("Anarchy PI is 2 × 32B (commitment, fr_zero)", 2, pi.size)
+        for (element in pi) {
+            val raw = Base64.getDecoder().decode(element.jsonPrimitive.content)
+            assertEquals(32, raw.size)
+        }
+
+        val proofBytes = Base64.getDecoder().decode(obj["proof"]!!.jsonPrimitive.content)
+        assertEquals(1601, proofBytes.size)
+        assertArrayEquals(payload.proof, proofBytes)
+    }
+
+    @Test
+    fun anarchyCreateGroupPayload_roundtripPreservesAllFields() {
+        val original = AnarchyCreateGroupPayload(
+            groupId = ByteArray(32) { 0x44 },
+            commitment = ByteArray(32) { 0x55 },
+            tier = 2,
+            memberCount = 0,
+            proof = ByteArray(1601) { 0x66 },
+            publicInputs = listOf(ByteArray(32) { 0x55 }, ByteArray(32)),
+        )
+        val encoded = json.encodeToString(AnarchyCreateGroupPayload.serializer(), original)
+        val decoded = json.decodeFromString(AnarchyCreateGroupPayload.serializer(), encoded)
+        assertEquals(original, decoded)
+    }
+
     // ─── TyrannyUpdateCommitmentPayload ───────────────────────────
 
     @Test
