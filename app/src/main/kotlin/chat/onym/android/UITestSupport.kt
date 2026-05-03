@@ -4,6 +4,7 @@ import chat.onym.android.chain.AnchorSelectionStore
 import chat.onym.android.chain.ContractsManifestFetcher
 import chat.onym.android.chain.KnownRelayersFetcher
 import chat.onym.android.chain.RelayerSelectionStore
+import chat.onym.android.identity.IdentitySecretStore
 
 /**
  * Indirection point that lets instrumented UI tests inject in-memory
@@ -53,6 +54,14 @@ object UITestRegistry {
      *  [chat.onym.android.chain.GitHubReleasesContractsManifestFetcher]. */
     var contractsFetcher: ContractsManifestFetcher? = null
 
+    /** Per-test isolated [IdentitySecretStore]. When non-null,
+     *  [OnymApplication] uses it instead of the production
+     *  default-prefs-file store — so each instrumented test that
+     *  exercises identity flows can wipe + bootstrap into a fresh
+     *  EncryptedSharedPreferences file without colliding with
+     *  parallel runs. */
+    var identitySecretStore: IdentitySecretStore? = null
+
     /** Reset between tests. Called from `@Before`. */
     fun reset() {
         enabled = false
@@ -60,5 +69,6 @@ object UITestRegistry {
         relayerFetcher = null
         contractsStore = null
         contractsFetcher = null
+        identitySecretStore = null
     }
 }

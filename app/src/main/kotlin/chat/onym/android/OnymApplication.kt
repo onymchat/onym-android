@@ -157,8 +157,17 @@ class OnymApplication : Application() {
     }
 
     private fun buildDependencies(): AppDependencies {
+        // Honour the test-injected per-prefs-file store when set
+        // (UI tests get a fresh EncryptedSharedPreferences file per
+        // test); fall back to the production default-name store
+        // otherwise.
+        val identityStore = if (UITestRegistry.enabled) {
+            UITestRegistry.identitySecretStore ?: IdentitySecretStore(applicationContext)
+        } else {
+            IdentitySecretStore(applicationContext)
+        }
         val identityRepository = IdentityRepository(
-            store = IdentitySecretStore(applicationContext),
+            store = identityStore,
         )
         // Eager bootstrap (PR-28 follow-up). Without this, the first
         // Create Group attempt on a fresh install fails with
