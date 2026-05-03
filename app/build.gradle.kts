@@ -149,6 +149,13 @@ dependencies {
 
     implementation(libs.bouncycastle)
 
+    // ZXing core — pure-Java QR encoder. Used by `OnymQrCode` to turn
+    // an invite URL into a 1-bit module grid; the Compose Canvas does
+    // the actual drawing (so we get rounded modules + center logo
+    // overlay matching the iOS design without ZXing's stock bitmap
+    // renderer).
+    implementation(libs.zxing.core)
+
     implementation(libs.onym.sdk)
 
     // Room — `suspend` DAO + KSP-generated bindings. PersistenceStore

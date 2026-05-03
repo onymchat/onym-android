@@ -1,5 +1,6 @@
 package chat.onym.android.settings
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -56,6 +59,7 @@ import chat.onym.android.R
 import chat.onym.android.group.OnymMark
 import chat.onym.android.identity.IdentitiesViewModel
 import chat.onym.android.identity.IdentityId
+import chat.onym.android.identity.inviteUrl
 
 /**
  * Identity Detail — per-identity hero, backup status, set-active,
@@ -167,6 +171,113 @@ fun IdentityDetailScreen(
                     )
                 }
             }
+
+            // ─── INVITE KEY card ─────────────────────────────────
+            // Full-size QR for the identity's invite URL with Copy /
+            // Share actions underneath. Mirrors `settings.jsx` lines
+            // 873–909 in the iOS prototype.
+            item { SettingsSectionLabel(stringResource(R.string.identity_detail_invite_section).uppercase()) }
+            item {
+                val inviteUrl = remember(row.summary) { row.summary.inviteUrl() }
+                val shareTextTemplate = stringResource(
+                    R.string.identity_detail_invite_share_text,
+                    inviteUrl,
+                )
+                val shareChooserTitle = stringResource(R.string.identity_detail_invite_share_chooser)
+                SettingsCard {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(Color.White)
+                                .padding(12.dp),
+                        ) {
+                            OnymQrCode(
+                                value = inviteUrl,
+                                size = 220.dp,
+                                modifier = Modifier.testTag("identity_detail.invite_qr"),
+                            )
+                        }
+                        Text(
+                            text = stringResource(R.string.identity_detail_invite_caption),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Text(
+                                text = inviteUrl,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                    SettingsHairline(insetStart = 16.dp)
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = {
+                                copyToClipboard(context, "Invite link", inviteUrl)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("identity_detail.invite_copy"),
+                        ) {
+                            Icon(
+                                Icons.Filled.ContentCopy,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.size(8.dp))
+                            Text(stringResource(R.string.identity_detail_invite_copy))
+                        }
+                        Box(
+                            modifier = Modifier
+                                .width(0.5.dp)
+                                .height(48.dp)
+                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        )
+                        TextButton(
+                            onClick = {
+                                val sendIntent = Intent().apply {
+                                    action = Intent.ACTION_SEND
+                                    putExtra(Intent.EXTRA_TEXT, shareTextTemplate)
+                                    type = "text/plain"
+                                }
+                                context.startActivity(
+                                    Intent.createChooser(sendIntent, shareChooserTitle),
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("identity_detail.invite_share"),
+                        ) {
+                            Icon(
+                                Icons.Filled.Share,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.size(8.dp))
+                            Text(stringResource(R.string.identity_detail_invite_share))
+                        }
+                    }
+                }
+            }
+            item { SettingsFootnote(stringResource(R.string.identity_detail_invite_footnote)) }
 
             // ─── BACKUP card ──────────────────────────────────────
             item { SettingsSectionLabel(stringResource(R.string.identity_detail_backup_section)) }
