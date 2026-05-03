@@ -163,7 +163,14 @@ fun AnchorsVersionScreen(
         },
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) { padding ->
-        LazyColumn(contentPadding = padding) {
+        // testTag lets instrumented tests scroll into the list to
+        // reach off-screen rows (Reset is at the bottom and may not
+        // be in the semantic tree on a CI emulator until scrolled
+        // into view).
+        LazyColumn(
+            contentPadding = padding,
+            modifier = Modifier.testTag("anchors.version.list"),
+        ) {
             item { SectionHeader(stringResource(R.string.anchors_section_releases)) }
             items(rows, key = { it.release.release }) { row ->
                 VersionRow(
