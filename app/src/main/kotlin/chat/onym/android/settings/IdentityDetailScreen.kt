@@ -467,6 +467,15 @@ private fun EditableIdentityName(
     var editing by remember { mutableStateOf(false) }
     var draft by remember(currentName) { mutableStateOf(currentName) }
     val focusRequester = remember { FocusRequester() }
+    // Tracks whether the field has ever held focus this editing
+    // session. Compose fires `onFocusChanged` once with
+    // `isFocused=false` when the field first enters the focus tree
+    // — *before* the `LaunchedEffect` below gets a chance to call
+    // `requestFocus()`. Without this latch the initial Inactive
+    // event would call `commit()` immediately and snap `editing`
+    // back to `false`, making the tap look broken (the field would
+    // appear for one frame and disappear).
+    var hasGainedFocus by remember(editing) { mutableStateOf(false) }
 
     val commit: () -> Unit = {
         // Repository trims + treats blank as no-op; we still gate
@@ -500,7 +509,15 @@ private fun EditableIdentityName(
             keyboardActions = KeyboardActions(onDone = { commit() }),
             modifier = Modifier
                 .focusRequester(focusRequester)
-                .onFocusChanged { if (!it.isFocused) commit() }
+                .onFocusChanged { state ->
+                    if (state.isFocused) {
+                        hasGainedFocus = true
+                    } else if (hasGainedFocus) {
+                        // Real blur — only fires after focus was
+                        // genuinely held at least once.
+                        commit()
+                    }
+                }
                 .clip(RoundedCornerShape(8.dp))
                 .border(
                     width = 1.5.dp,
@@ -511,13 +528,19 @@ private fun EditableIdentityName(
                 .testTag("identity_detail.name_field"),
         )
     } else {
+        // Min 44dp tall tap target (Material's accessible-touch
+        // minimum is 48dp; we sit just under because the headline
+        // glyph itself is ~32dp tall and pushing further breaks the
+        // hero's vertical rhythm). Pre-fix the row was 22dp tall —
+        // small enough that tap misses got blamed on the listener
+        // being broken.
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .clickable { editing = true }
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
                 .testTag("identity_detail.name_edit"),
         ) {
             Text(
@@ -529,7 +552,7 @@ private fun EditableIdentityName(
                 Icons.Filled.Edit,
                 contentDescription = stringResource(R.string.identity_detail_rename_action),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(20.dp),
             )
         }
     }
