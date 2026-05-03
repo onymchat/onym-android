@@ -8,7 +8,7 @@ body:
       value: |
         Submitting this issue triggers the [Release workflow](../actions/workflows/release.yml).
 
-        - The "UI tests" section auto-populates within ~30 s of opening, then ticks each box as the corresponding test class passes on the emulator.
+        - The "UI tests" section auto-populates within ~30 s of submitting, then ticks each box as the corresponding test class passes on the emulator.
         - The "Manual QA" section is yours — never overwritten by automation.
         - On test failure, the workflow posts a comment with stack-trace excerpts and a link to the run.
         - The signed APK build is gated on a green emulator run; failures block the artifact.
@@ -29,18 +29,22 @@ body:
       description: Free-form. The Release workflow generates a commit-log changelog automatically; this field is for anything additional you want surfaced.
       placeholder: Highlight the OneOnOne flow + the LFS checkout fix.
 
-  - type: markdown
+  - type: textarea
+    id: checklist
     attributes:
+      label: Checklist
+      description: |
+        ⚠ Submit as-is. The `<!-- UI_TESTS_START / END -->` and `<!-- MANUAL_QA_START / END -->` markers are load-bearing —
+        the workflow finds the auto-managed UI tests section by looking for them. Deleting markers will break the
+        check-tick automation. Manual QA items are yours to tick by hand once the APK uploads.
       value: |
         ## UI tests
 
         <!-- UI_TESTS_START -->
-        _Auto-populating… (the `release-from-issue` workflow will fill this in within ~30 s of opening)_
+        _Auto-populating… (the `release-from-issue` workflow fills this in within ~30 s of opening)_
         <!-- UI_TESTS_END -->
 
         ## Manual QA
-
-        Tick by hand on a real device once the APK uploads to the GitHub Release.
 
         <!-- MANUAL_QA_START -->
         ### Install + onboarding
