@@ -1,32 +1,44 @@
 package chat.onym.android.uitests.screens
 
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 
 /**
- * Page object for the root Settings screen. Just the two rows we
- * navigate into from instrumented tests.
+ * Page object for the root Settings screen. Page-object navigation
+ * helpers for the rows the rest of the suite cares about.
  *
- * Post-PR-30 the start destination is the Chats tab, not Settings —
- * so every method here first taps the Settings bottom-bar tab to
- * make sure the rows we want are in the visible window. Without
- * that hop the rows still exist in the NavHost (Chats is also
- * mounted) but their compose bounds aren't on-screen, so
- * `performClick` fails with `Failed to inject touch input`
- * (run #25263258259 surfaced this on every AnchorsUITest /
- * RelayerSettingsUITest case).
+ * Two reasons every method opens the Settings tab first AND scrolls
+ * the target row into view before tapping it:
+ *
+ *  1. **Tab discipline**: post-PR-30 the start destination is the
+ *     Chats tab, not Settings. Without `openSettingsTab` the rows
+ *     still resolve in the NavHost (Chats is mounted concurrently)
+ *     but their compose bounds aren't on the visible window, so
+ *     `performClick` fails with `Failed to inject touch input`
+ *     (run #25263258259 surfaced this on every AnchorsUITest /
+ *     RelayerSettingsUITest case).
+ *  2. **Scroll discipline**: post-multi-identity (PR-5) Settings
+ *     gained an "Identities" row between Security and Network.
+ *     On smaller test windows the Network rows (Relayer / Anchors /
+ *     Use Mainnet toggle) can sit below the fold. `scrollAndClick`
+ *     uses `performScrollToNode` against the LazyColumn's
+ *     `settings.list` tag so the target row is guaranteed visible
+ *     before the touch.
  */
 class SettingsScreenObject(private val rule: ComposeContentTestRule) {
 
-    fun tapRelayerRow() {
-        openSettingsTab()
-        rule.onNodeWithTag("settings.relayer_row").performClick()
-    }
+    fun tapRelayerRow() = scrollAndClick("settings.relayer_row")
+    fun tapAnchorsRow() = scrollAndClick("settings.anchors_row")
+    fun tapIdentitiesRow() = scrollAndClick("settings.identities_row")
 
-    fun tapAnchorsRow() {
+    private fun scrollAndClick(tag: String) {
         openSettingsTab()
-        rule.onNodeWithTag("settings.anchors_row").performClick()
+        rule.onNodeWithTag("settings.list")
+            .performScrollToNode(hasTestTag(tag))
+        rule.onNodeWithTag(tag).performClick()
     }
 
     /** Tap the Settings tab in the bottom NavigationBar. Idempotent

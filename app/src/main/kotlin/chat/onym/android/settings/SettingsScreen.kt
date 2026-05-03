@@ -83,7 +83,10 @@ fun SettingsScreen(
         },
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) { padding ->
-        LazyColumn(contentPadding = padding) {
+        LazyColumn(
+            contentPadding = padding,
+            modifier = Modifier.testTag("settings.list"),
+        ) {
             // Groups section moved to the Chats tab (PR-30) — Settings
             // now opens straight to the Security section.
             item {
