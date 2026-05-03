@@ -119,7 +119,7 @@ class IdentitiesUITest {
         }
         // Exactly one identity row is visible.
         val rowCount = composeRule.onAllNodesWithTag(
-            identityStore.listIds().first().testTagPrefix() + ".remove",
+            identityStore.listIds().first().testTagPrefix(),
         ).fetchSemanticsNodes().size
         assert(rowCount == 1) { "expected 1 identity row, saw $rowCount" }
     }
@@ -152,12 +152,20 @@ class IdentitiesUITest {
         }
 
         // The newly-added identity gets the auto-fill name "Identity 2".
+        // Post-redesign: removal moved into IdentityDetailScreen — tap
+        // the row to drill in, then "Delete identity" → typed-name
+        // confirm → Delete.
         val secondId = identityStore.listIds()[1]
-        composeRule.onNodeWithTag("identities.row.${secondId.value}.remove").performClick()
+        composeRule.onNodeWithTag("identities.row.${secondId.value}").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identity_detail.delete").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("identity_detail.delete").performClick()
 
-        // Type the expected name; tap Remove.
-        composeRule.onNodeWithTag("identities.remove.confirm.input").performTextInput("Identity 2")
-        composeRule.onNodeWithTag("identities.remove.confirm").performClick()
+        // Type the expected name; tap Delete.
+        composeRule.onNodeWithTag("identity_detail.delete.confirm.input")
+            .performTextInput("Identity 2")
+        composeRule.onNodeWithTag("identity_detail.delete.confirm").performClick()
 
         composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 1

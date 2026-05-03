@@ -134,6 +134,104 @@
     <string name="anchors_network_footer">Each governance type uses a separate contract. The release tag in parentheses is the version a brand-new chat would be anchored to.</string>
     <string name="anchors_reset_footer">Reset clears the explicit pick — new chats fall back to the latest published release.</string>
 
+    <!-- ─── Settings home (redesigned) ───────────────────────────── -->
+    <string name="brand_tagline">open · anonymous · onchain</string>
+    <string name="settings_active_identity_label">Active identity</string>
+    <string name="settings_app_section">App</string>
+    <string name="settings_identities_title">Identities</string>
+    <string name="settings_identities_subtitle_one">1 on this device</string>
+    <string name="settings_identities_subtitle_n">%1$d on this device</string>
+    <string name="settings_privacy_title">Privacy &amp; Encryption</string>
+    <string name="settings_privacy_subtitle">End-to-end · BIP-39</string>
+    <string name="settings_relayer_subtitle">Submits transactions on your behalf</string>
+    <string name="settings_anchors_subtitle_testnet">Stellar · Testnet</string>
+    <string name="settings_anchors_subtitle_mainnet">Stellar · Mainnet</string>
+    <string name="settings_use_mainnet_on_subtitle">New chats anchor on mainnet</string>
+    <string name="settings_use_mainnet_off_subtitle">Testnet by default while contracts are staged</string>
+    <string name="settings_about_title">About Onym</string>
+    <string name="settings_about_subtitle">Version %1$s (build %2$s)</string>
+
+    <!-- ─── Identities list (redesigned) ─────────────────────────── -->
+    <string name="identities_screen_title">Identities</string>
+    <string name="identities_screen_intro">Tap an identity to open it. Each identity has its own keys, chats, and recovery phrase.</string>
+    <string name="identities_screen_footer">Only the active identity\'s chats are visible. Switch between identities to see different inboxes.</string>
+    <string name="identities_section_your">Your identities</string>
+    <string name="identities_add_button">Add Identity</string>
+    <string name="identity_unnamed">Unnamed identity</string>
+
+    <!-- ─── Identity detail ──────────────────────────────────────── -->
+    <string name="identity_detail_title">Identity</string>
+    <string name="identity_detail_active_marker">Active</string>
+    <string name="identity_detail_backup_section">Backup</string>
+    <string name="identity_detail_backup_status_unknown">Back up your recovery phrase</string>
+    <string name="identity_detail_backup_status_subtitle">Without your phrase you can\'t restore this identity.</string>
+    <string name="identity_detail_backup_action">View recovery phrase</string>
+    <string name="identity_detail_backup_action_subtitle">12 words · BIP-39</string>
+    <string name="identity_detail_state_section">State</string>
+    <string name="identity_detail_set_active">Set as active</string>
+    <string name="identity_detail_advanced_section">Advanced</string>
+    <string name="identity_detail_copy_bls">Copy BLS public key</string>
+    <string name="identity_detail_copy_inbox">Copy inbox public key</string>
+    <string name="identity_detail_delete">Delete identity</string>
+    <string name="identity_detail_delete_footnote">Deleting an identity removes its keys and local chats from this device. Anchored groups stay on chain but you\'ll lose your local copy.</string>
+    <string name="identity_detail_delete_dialog_title">Delete %1$s?</string>
+    <string name="identity_detail_delete_dialog_body">This wipes the identity\'s local chats and messages permanently. Anchored groups stay on chain.</string>
+    <string name="identity_detail_delete_dialog_typename">Type \"%1$s\" to confirm:</string>
+    <string name="identity_detail_delete_dialog_confirm">Delete</string>
+
+    <!-- ─── Privacy &amp; Encryption ─────────────────────────────── -->
+    <string name="privacy_screen_title">Privacy &amp; Encryption</string>
+    <string name="privacy_hero_title">Everything is encrypted</string>
+    <string name="privacy_hero_subtitle">Messages, group state, and keys are encrypted on this device. No one — not even Onym — can read your chats.</string>
+    <string name="privacy_how_section">How it works</string>
+    <string name="privacy_e2e_title">End-to-end encryption</string>
+    <string name="privacy_e2e_subtitle">MLS · forward secrecy</string>
+    <string name="privacy_anon_title">Anonymous identities</string>
+    <string name="privacy_anon_subtitle">No phone, no email, no profile</string>
+    <string name="privacy_verifiable_title">Verifiable on-chain</string>
+    <string name="privacy_verifiable_subtitle">Group state is anchored on Stellar</string>
+    <string name="privacy_keys_section">Your keys</string>
+    <string name="privacy_keys_bip39">BIP-39 recovery phrase</string>
+    <string name="privacy_keys_bip39_subtitle">12 English words generated on this device</string>
+    <string name="privacy_keys_nostr">Nostr identity (npub)</string>
+    <string name="privacy_keys_nostr_subtitle">secp256k1 Schnorr — signs events on relays</string>
+    <string name="privacy_keys_bls">BLS group key</string>
+    <string name="privacy_keys_bls_subtitle">BLS12-381 — signs the group commitment</string>
+    <string name="privacy_keys_stellar">Stellar account key</string>
+    <string name="privacy_keys_stellar_subtitle">Ed25519 — anchors the chat on chain</string>
+    <string name="privacy_keys_footnote">Your recovery phrase generates a master seed. Onym derives a Nostr keypair (your public identity), a Stellar keypair (for anchoring), and a BLS key (for group signatures). The phrase never leaves this device.</string>
+    <string name="privacy_transport_section">Transport</string>
+    <string name="privacy_transport_relayer_title">Relayer is opaque</string>
+    <string name="privacy_transport_relayer_subtitle">It submits encrypted bytes — never sees plaintext</string>
+    <string name="privacy_transport_chain_title">Chain stores commitments only</string>
+    <string name="privacy_transport_chain_subtitle">Group IDs and member keys never appear in cleartext</string>
+    <string name="privacy_transport_footnote">Onym never stores your messages on our servers. Encrypted state lives on this device and on relays you choose.</string>
+
+    <!-- ─── About Onym ───────────────────────────────────────────── -->
+    <string name="about_screen_title">About</string>
+    <string name="about_version_pill">%1$s · build %2$s</string>
+    <string name="about_version_section">Version</string>
+    <string name="about_version_label">Version</string>
+    <string name="about_build_label">Build</string>
+    <string name="about_resources_section">Resources</string>
+    <string name="about_source_android">Android source</string>
+    <string name="about_source_ios">iOS source</string>
+    <string name="about_source_contracts">Soroban contracts</string>
+    <string name="about_source_relayer">Relayer</string>
+    <string name="about_documentation">Documentation &amp; org</string>
+    <string name="about_documentation_subtitle">github.com/onymchat</string>
+    <string name="about_whitepaper">Whitepaper</string>
+    <string name="about_whitepaper_subtitle">The Onym protocol</string>
+    <string name="about_help_section">Help</string>
+    <string name="about_issues_title">Report an issue</string>
+    <string name="about_issues_subtitle">github.com/onymchat/onym-android/issues</string>
+    <string name="about_discussions_title">Community discussions</string>
+    <string name="about_discussions_subtitle">Ask questions, share ideas</string>
+    <string name="about_contact_title">Contact</string>
+    <string name="about_credits_line1">Built by people who think privacy is a right.</string>
+    <string name="about_credits_line2">Released under the MIT license.</string>
+    <string name="about_credits_copyright">© 2026 · Onym</string>
+
     <!-- ─── ContractNetwork.displayName ──────────────────────────── -->
     <string name="network_testnet">Testnet</string>
     <string name="network_public">Mainnet</string>

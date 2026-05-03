@@ -2,25 +2,30 @@ package chat.onym.android.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -29,42 +34,51 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.onym.android.BuildConfig
 import chat.onym.android.R
+import chat.onym.android.group.OnymMark
+import chat.onym.android.identity.IdentitiesViewModel
+import chat.onym.android.identity.IdentityId
 
 /**
- * Settings tab — entry point for the recovery-phrase backup flow.
- * Minimal first cut: one Security section with the Backup row that
- * navigates to [chat.onym.android.recovery.RecoveryPhraseBackupScreen].
+ * Settings home — Apple-Settings-style, brand-anchored on the
+ * broken-ring Onym mark.
  *
- * Mirrors `SettingsView.swift` from onym-ios PR #6 (PR #6 there, not
- * the onym-android #6). More sections (preferences, advanced, about)
- * land as the app grows.
+ * Layout (top → bottom):
  *
- * UX choices vs iOS:
+ *   1. Active-identity hero (tap → identity detail).
+ *   2. SECURITY section: Identities · Privacy & Encryption.
+ *   3. NETWORK section: Relays · Anchors · Use Mainnet toggle.
+ *   4. APP section: About Onym.
+ *   5. Brand watermark + "open · anonymous · onchain" tagline.
  *
- *   - `LargeTopAppBar` = SwiftUI's `.navigationTitle("Settings")` in
- *     iOS 16+ default (large title that collapses on scroll).
- *   - `ListItem` + `headlineContent`/`leadingContent`/`trailingContent`
- *     = the iOS Form row shape.
- *   - The orange key-icon RoundedRect ([SettingsIconBox]) is the same
- *     atom the recovery-flow Intro screen's rules list uses.
+ * The redesign drops the original Backup row + standalone Identities
+ * row in favor of the Identity Detail card (per-identity backup) and
+ * a sectioned home that mirrors iOS Settings.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onBackupClick: () -> Unit,
+    identitiesViewModel: IdentitiesViewModel,
     onRelayerClick: () -> Unit,
     onAnchorsClick: () -> Unit,
     onIdentitiesClick: () -> Unit,
+    onIdentityDetailClick: (IdentityId) -> Unit,
+    onPrivacyClick: () -> Unit,
+    onAboutClick: () -> Unit,
     /** App-wide network preference. Bound to the Settings → Network
      *  → "Use Mainnet" Switch. */
     useMainnet: Boolean,
@@ -73,6 +87,10 @@ fun SettingsScreen(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
         rememberTopAppBarState()
     )
+    val items by identitiesViewModel.items.collectAsStateWithLifecycle()
+    val active = items.firstOrNull { it.isActive }
+    val identityCount = items.size
+
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
@@ -85,206 +103,235 @@ fun SettingsScreen(
     ) { padding ->
         LazyColumn(
             contentPadding = padding,
-            modifier = Modifier.testTag("settings.list"),
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("settings.list"),
         ) {
-            // Groups section moved to the Chats tab (PR-30) — Settings
-            // now opens straight to the Security section.
-            item {
-                SectionHeader(stringResource(R.string.security))
-            }
-            item {
-                ListItem(
-                    headlineContent = {
-                        Text(stringResource(R.string.backup_recovery_phrase))
-                    },
-                    leadingContent = {
-                        SettingsIconBox(
-                            icon = Icons.Filled.Key,
-                            background = Color(0xFFFF9500),
-                        )
-                    },
-                    trailingContent = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        )
-                    },
-                    colors = ListItemDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onBackupClick),
-                )
-            }
-            item {
-                Text(
-                    stringResource(R.string.security_footer_view_recovery_phrase),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
-                )
+            // ─── Active identity hero ──────────────────────────────
+            if (active != null) {
+                item {
+                    ActiveIdentityHero(
+                        name = active.summary.name.ifBlank {
+                            stringResource(R.string.identity_unnamed)
+                        },
+                        keyHex = heroHex(active.summary.blsPublicKey),
+                        onClick = { onIdentityDetailClick(active.summary.id) },
+                    )
+                }
             }
 
-            // Identities — multi-identity management (PR-5).
-            item { SectionHeader("Identities") }
+            // ─── SECURITY ──────────────────────────────────────────
+            item { SettingsSectionLabel(stringResource(R.string.security).uppercase()) }
             item {
-                ListItem(
-                    headlineContent = { Text("Manage identities") },
-                    leadingContent = {
-                        SettingsIconBox(
-                            icon = Icons.Filled.Person,
-                            background = Color(0xFFAF52DE),
-                        )
-                    },
-                    trailingContent = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        )
-                    },
-                    colors = ListItemDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onIdentitiesClick)
-                        .testTag("settings.identities_row"),
-                )
+                SettingsCard {
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.Person, SettingsTile.Purple)
+                        },
+                        title = stringResource(R.string.settings_identities_title),
+                        subtitle = if (identityCount == 1) {
+                            stringResource(R.string.settings_identities_subtitle_one)
+                        } else {
+                            stringResource(R.string.settings_identities_subtitle_n, identityCount)
+                        },
+                        onClick = onIdentitiesClick,
+                        modifier = Modifier.testTag("settings.identities_row"),
+                    )
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.Shield, SettingsTile.Blue)
+                        },
+                        title = stringResource(R.string.settings_privacy_title),
+                        subtitle = stringResource(R.string.settings_privacy_subtitle),
+                        onClick = onPrivacyClick,
+                        isLast = true,
+                        modifier = Modifier.testTag("settings.privacy_row"),
+                    )
+                }
             }
 
-            // Network section — relayer URL config + anchor contract
-            // versions. Localized via res/values/ + values-ru/ per
-            // PR #21's catalog work.
-            item { SectionHeader(stringResource(R.string.settings_network)) }
+            // ─── NETWORK ───────────────────────────────────────────
+            item { SettingsSectionLabel(stringResource(R.string.settings_network).uppercase()) }
             item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.relayer_title)) },
-                    leadingContent = {
-                        SettingsIconBox(
-                            icon = Icons.Filled.Cloud,
-                            background = Color(0xFF34C759),
-                        )
-                    },
-                    trailingContent = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        )
-                    },
-                    colors = ListItemDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onRelayerClick)
-                        .testTag("settings.relayer_row"),
-                )
+                SettingsCard {
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.Cloud, SettingsTile.Indigo)
+                        },
+                        title = stringResource(R.string.relayer_title),
+                        subtitle = stringResource(R.string.settings_relayer_subtitle),
+                        onClick = onRelayerClick,
+                        modifier = Modifier.testTag("settings.relayer_row"),
+                    )
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.Anchor, SettingsTile.Orange)
+                        },
+                        title = stringResource(R.string.anchors_title),
+                        subtitle = stringResource(
+                            if (useMainnet) R.string.settings_anchors_subtitle_mainnet
+                            else R.string.settings_anchors_subtitle_testnet
+                        ),
+                        onClick = onAnchorsClick,
+                        modifier = Modifier.testTag("settings.anchors_row"),
+                    )
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(
+                                icon = if (useMainnet) Icons.Filled.Public else Icons.Filled.Build,
+                                background = if (useMainnet) SettingsTile.Green else SettingsTile.Gray,
+                            )
+                        },
+                        title = stringResource(R.string.settings_use_mainnet),
+                        subtitle = stringResource(
+                            if (useMainnet) R.string.settings_use_mainnet_on_subtitle
+                            else R.string.settings_use_mainnet_off_subtitle
+                        ),
+                        showChevron = false,
+                        trailing = {
+                            Switch(
+                                checked = useMainnet,
+                                onCheckedChange = onToggleMainnet,
+                                modifier = Modifier.testTag("settings.use_mainnet_toggle"),
+                            )
+                        },
+                        onClick = { onToggleMainnet(!useMainnet) },
+                        isLast = true,
+                    )
+                }
             }
             item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.anchors_title)) },
-                    leadingContent = {
-                        SettingsIconBox(
-                            icon = Icons.Filled.Anchor,
-                            background = Color(0xFF5856D6),
-                        )
-                    },
-                    trailingContent = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        )
-                    },
-                    colors = ListItemDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onAnchorsClick)
-                        .testTag("settings.anchors_row"),
-                )
-            }
-            // Use Mainnet toggle (PR-C follow-up). Persisted in
-            // DataStore under `onym.useMainnet`; flipping here changes
-            // the network the next Create Group flow will use.
-            // Existing groups keep whatever network they were created on.
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.settings_use_mainnet)) },
-                    leadingContent = {
-                        SettingsIconBox(
-                            icon = if (useMainnet) Icons.Filled.Public else Icons.Filled.Build,
-                            background = if (useMainnet) Color(0xFF34C759) else Color(0xFF8E8E93),
-                        )
-                    },
-                    trailingContent = {
-                        Switch(checked = useMainnet, onCheckedChange = onToggleMainnet)
-                    },
-                    colors = ListItemDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onToggleMainnet(!useMainnet) }
-                        .testTag("settings.use_mainnet_toggle"),
-                )
-            }
-            item {
-                Text(
+                SettingsFootnote(
                     stringResource(
                         if (useMainnet) R.string.settings_use_mainnet_on_footer
                         else R.string.settings_use_mainnet_off_footer,
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+                    )
                 )
             }
+
+            // ─── APP ───────────────────────────────────────────────
+            item { SettingsSectionLabel(stringResource(R.string.settings_app_section).uppercase()) }
+            item {
+                SettingsCard {
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.Info, SettingsTile.Teal)
+                        },
+                        title = stringResource(R.string.settings_about_title),
+                        subtitle = stringResource(
+                            R.string.settings_about_subtitle,
+                            BuildConfig.VERSION_NAME,
+                            BuildConfig.VERSION_CODE.toString(),
+                        ),
+                        onClick = onAboutClick,
+                        isLast = true,
+                        modifier = Modifier.testTag("settings.about_row"),
+                    )
+                }
+            }
+
+            // ─── Brand watermark ───────────────────────────────────
+            item { Spacer(Modifier.height(28.dp)) }
+            item { BrandFooter() }
+            item { Spacer(Modifier.height(32.dp)) }
         }
     }
 }
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun ActiveIdentityHero(
+    name: String,
+    keyHex: String,
+    onClick: () -> Unit,
+) {
+    Row(
         modifier = Modifier
-            .padding(horizontal = 32.dp)
-            .padding(top = 16.dp, bottom = 6.dp),
-    )
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 16.dp)
+            .testTag("settings.identity_hero"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            modifier = Modifier.size(60.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Color(0xFFEEF5FF), Color(0xFFE0EEFE)),
+                        )
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                OnymMark(size = 36.dp, color = SettingsTile.Blue)
+            }
+            // Active-state dot (bottom-right)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(SettingsTile.Green),
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.settings_active_identity_label).uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = keyHex,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+            modifier = Modifier.size(18.dp),
+        )
+    }
 }
 
-/**
- * 30dp coloured RoundedRect with a centred Icon inside. Matches the
- * iOS `SettingsIconBox` and the recovery-flow `RoundedIcon` from the
- * Intro screen.
- */
 @Composable
-private fun SettingsIconBox(icon: ImageVector, background: Color) {
-    Box(
-        modifier = Modifier
-            .size(30.dp)
-            .clip(RoundedCornerShape(7.dp))
-            .background(background),
-        contentAlignment = Alignment.Center,
+private fun BrandFooter() {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(15.dp),
+        OnymMark(
+            size = 26.dp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+        )
+        Text(
+            text = stringResource(R.string.brand_tagline),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
         )
     }
 }

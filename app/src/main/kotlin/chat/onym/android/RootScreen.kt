@@ -43,11 +43,15 @@ import chat.onym.android.recovery.RecoveryPhraseBackupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.search.SearchScreen
 import chat.onym.android.identity.IdentitiesViewModel
+import chat.onym.android.identity.IdentityId
+import chat.onym.android.settings.AboutOnymScreen
 import chat.onym.android.settings.AnchorsNetworkScreen
 import chat.onym.android.settings.AnchorsPickerViewModel
 import chat.onym.android.settings.AnchorsRootScreen
 import chat.onym.android.settings.AnchorsVersionScreen
 import chat.onym.android.settings.IdentitiesScreen
+import chat.onym.android.settings.IdentityDetailScreen
+import chat.onym.android.settings.PrivacyEncryptionScreen
 import chat.onym.android.settings.RelayerSettingsScreen
 import chat.onym.android.settings.RelayerSettingsViewModel
 import chat.onym.android.settings.SettingsScreen
@@ -164,11 +168,21 @@ fun RootScreen(
                     initialValue = dependencies.networkPreferenceProvider.current(),
                 )
                 val coroutineScope = rememberCoroutineScope()
+                val identitiesVm: IdentitiesViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeIdentitiesViewModel() }
+                    },
+                )
                 SettingsScreen(
-                    onBackupClick = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
+                    identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
                     onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
                     onIdentitiesClick = { navController.navigate(ROUTE_IDENTITIES) },
+                    onIdentityDetailClick = { id ->
+                        navController.navigate("identity_detail/${id.value}")
+                    },
+                    onPrivacyClick = { navController.navigate(ROUTE_PRIVACY) },
+                    onAboutClick = { navController.navigate(ROUTE_ABOUT) },
                     useMainnet = networkPref == chat.onym.android.chain.AppNetwork.Mainnet,
                     onToggleMainnet = { on ->
                         coroutineScope.launch {
@@ -262,6 +276,33 @@ fun RootScreen(
                 )
                 IdentitiesScreen(
                     viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onIdentityClick = { id ->
+                        navController.navigate("identity_detail/${id.value}")
+                    },
+                )
+            }
+            composable("identity_detail/{identityId}") { entry ->
+                val raw = entry.arguments?.getString("identityId") ?: return@composable
+                val vm: IdentitiesViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeIdentitiesViewModel() }
+                    },
+                )
+                IdentityDetailScreen(
+                    viewModel = vm,
+                    identityId = IdentityId(raw),
+                    onBack = { navController.popBackStack() },
+                    onBackup = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
+                )
+            }
+            composable(ROUTE_PRIVACY) {
+                PrivacyEncryptionScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_ABOUT) {
+                AboutOnymScreen(
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -364,6 +405,8 @@ private enum class Tab(val route: String, val labelRes: Int) {
 
 private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
 private const val ROUTE_IDENTITIES = "identities"
+private const val ROUTE_PRIVACY = "privacy"
+private const val ROUTE_ABOUT = "about_onym"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
