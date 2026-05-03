@@ -145,6 +145,7 @@ data class CreateGroupState(
 typealias GroupCreator = suspend (
     name: String,
     invitees: List<ByteArray>,
+    groupType: SepGroupType,
     onProgress: (CreateGroupProgress) -> Unit,
 ) -> ChatGroup
 
@@ -293,6 +294,7 @@ class CreateGroupViewModel(
             val group = createGroup(
                 current.effectiveName,
                 current.invitees.map { it.inboxPublicKey },
+                current.governance.sepGroupType,
             ) { p -> _state.value = _state.value.copy(progress = p) }
             _state.value = _state.value.copy(
                 createdGroup = group,

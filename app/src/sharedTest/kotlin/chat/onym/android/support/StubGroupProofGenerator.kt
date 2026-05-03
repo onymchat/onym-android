@@ -16,18 +16,29 @@ import chat.onym.android.chain.SepGroupType
  * in the follow-up to drop the parsed-1568 + epoch-pair shape).
  */
 class StubGroupProofGenerator : GroupProofGenerator {
-    override suspend fun proveCreate(input: GroupProofCreateInput): GroupCreateProof {
-        if (input.groupType != SepGroupType.TYRANNY) {
-            throw GroupProofGeneratorError.NotYetSupported(input.groupType)
+    override suspend fun proveCreate(input: GroupProofCreateInput): GroupCreateProof =
+        when (input.groupType) {
+            SepGroupType.TYRANNY -> GroupCreateProof(
+                proof = ByteArray(1601) { 0xAB.toByte() },
+                publicInputs = listOf(
+                    ByteArray(32) { 0xCD.toByte() },  // commitment
+                    ByteArray(32),                     // Fr(0)
+                    ByteArray(32) { 0xEE.toByte() },  // admin_pubkey_commitment
+                    ByteArray(32) { 0xFF.toByte() },  // group_id_fr
+                ),
+            )
+            SepGroupType.ONE_ON_ONE -> {
+                if (input.secondaryBlsSecretKey == null) {
+                    throw GroupProofGeneratorError.SecondaryBlsSecretKeyRequired
+                }
+                GroupCreateProof(
+                    proof = ByteArray(1601) { 0x12.toByte() },
+                    publicInputs = listOf(
+                        ByteArray(32) { 0x34.toByte() },  // commitment
+                        ByteArray(32),                     // Fr(0)
+                    ),
+                )
+            }
+            else -> throw GroupProofGeneratorError.NotYetSupported(input.groupType)
         }
-        return GroupCreateProof(
-            proof = ByteArray(1601) { 0xAB.toByte() },
-            publicInputs = listOf(
-                ByteArray(32) { 0xCD.toByte() },  // commitment
-                ByteArray(32),                      // Fr(0)
-                ByteArray(32) { 0xEE.toByte() },  // admin_pubkey_commitment
-                ByteArray(32) { 0xFF.toByte() },  // group_id_fr
-            ),
-        )
-    }
 }

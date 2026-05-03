@@ -10,6 +10,7 @@ import chat.onym.android.chain.GroupProofGenerator
 import chat.onym.android.chain.GroupProofGeneratorError
 import chat.onym.android.chain.NetworkPreferenceProvider
 import chat.onym.android.chain.OkHttpSepContractTransport
+import chat.onym.android.chain.OneOnOneCreateGroupPayload
 import chat.onym.android.chain.OnymGroupProofGenerator
 import chat.onym.android.chain.RelayerRepository
 import chat.onym.android.chain.SepContractClient
@@ -87,6 +88,7 @@ open class CreateGroupInteractor(
     open suspend fun create(
         name: String,
         invitees: List<ByteArray>,
+        groupType: SepGroupType = SepGroupType.TYRANNY,
         onProgress: (CreateGroupProgress) -> Unit = {},
     ): ChatGroup {
         // 1. Validate
@@ -96,19 +98,27 @@ open class CreateGroupInteractor(
         for ((index, key) in invitees.withIndex()) {
             if (key.size != 32) throw CreateGroupError.InvalidInviteeKey(index)
         }
+        // OneOnOne is a strict 2-party group — exactly 1 invitee
+        // (the second party). Tyranny tolerates any count including
+        // zero.
+        if (groupType == SepGroupType.ONE_ON_ONE && invitees.size != 1) {
+            throw CreateGroupError.OneOnOneRequiresExactlyOneInvitee(actual = invitees.size)
+        }
 
-        // 2. Resolve relayer + contract binding
+        val governanceType = groupType.toGovernanceType()
+            ?: throw CreateGroupError.UnsupportedGroupType(groupType)
+
+        // 2. Resolve relayer + contract binding for the requested
+        //    governance type. Same key drives both `binding.contractId`
+        //    and the wire payload's top-level `contractType`.
         val relayerUrl = relayers.selectUrl() ?: throw CreateGroupError.NoActiveRelayer
-        // Resolve the contract binding for whichever network the
-        // user has selected — same key is reused for the wire
-        // payload's top-level `network` field below.
         val activeNetwork = networkPreference.current()
         val key = AnchorSelectionKey(
             network = activeNetwork.contractNetwork,
-            type = GovernanceType.Tyranny,
+            type = governanceType,
         )
         val binding = contracts.snapshots.value.binding(key)
-            ?: throw CreateGroupError.NoContractBinding(GovernanceType.Tyranny)
+            ?: throw CreateGroupError.NoContractBinding(governanceType)
 
         // 3. Group params.
         // `groupId` MUST be a canonical bls12-381 Fr (BE value < r) —
@@ -121,15 +131,14 @@ open class CreateGroupInteractor(
         val groupId = CanonicalFr.randomCanonicalFr32()
         val groupSecret = randomBytes(32)
         val salt = GroupCommitmentBuilder.generateSalt()
-        val tier = SepTier.SMALL
+        val tier = SepTier.SMALL  // OneOnOne ignores tier (depth=5 hardcoded)
 
-        // 4. Creator member — the one BLS Fr scalar read outside
-        // IdentityRepository this layer needs. The bytes pass straight
-        // into Tyranny.proveCreate (via GroupProofGenerator) and into
-        // computeLeafHash, then fall out of scope at the end of this
-        // method. IdentityRepository pins the "do not retain" contract
-        // on the accessor; this is the proof-generation hop the
-        // contract authorises.
+        // 4. Creator's BLS key. The bytes pass straight into the
+        //    proof generator and into `computeLeafHash`, then fall
+        //    out of scope at the end of this method.
+        //    IdentityRepository pins the "do not retain" contract on
+        //    the accessor; this is the proof-generation hop the
+        //    contract authorises.
         val blsSecret = try {
             // onym:allow-secret-read
             identity.blsSecretKey()
@@ -146,48 +155,77 @@ open class CreateGroupInteractor(
         } catch (e: Throwable) {
             throw CreateGroupError.SdkFailure(e.message ?: e.toString())
         }
-        val members = listOf(creatorMember)  // single-member roster, already sorted
+        val members = listOf(creatorMember)  // local creator-only roster
+
+        // OneOnOne: generate a fresh ephemeral BLS Fr for the second
+        // party and use it as `sk_1` in the founding ceremony. The
+        // FFI rejects `sk_0 == sk_1`, so retry on the (vanishing)
+        // chance the canonical sample collides with the creator's key.
+        val secondaryBlsSecret: ByteArray? = if (groupType == SepGroupType.ONE_ON_ONE) {
+            var candidate: ByteArray
+            do {
+                candidate = CanonicalFr.randomCanonicalFr32()
+            } while (candidate.contentEquals(blsSecret))
+            candidate
+        } else {
+            null
+        }
 
         // 5. Generate proof
         onProgress(CreateGroupProgress.Proving)
-        val input = GroupProofCreateInput(
-            groupType = SepGroupType.TYRANNY,
+        val proofInput = GroupProofCreateInput(
+            groupType = groupType,
             tier = tier,
             members = members,
             adminBlsSecretKey = blsSecret,
             adminIndex = 0,
             groupId = groupId,
             salt = salt,
+            secondaryBlsSecretKey = secondaryBlsSecret,
         )
         val proof: GroupCreateProof = try {
-            proofGenerator.proveCreate(input)
+            proofGenerator.proveCreate(proofInput)
         } catch (e: GroupProofGeneratorError) {
             throw CreateGroupError.ProofGenerationFailed(e)
         } catch (e: Throwable) {
             throw CreateGroupError.SdkFailure(e.message ?: e.toString())
         }
 
-        // 6. Anchor on chain
+        // 6. Anchor on chain — per-type payload + relayer call.
         onProgress(CreateGroupProgress.Anchoring)
         val transport = makeContractTransport(relayerUrl)
         val client = SepContractClient(
             contractID = binding.contractId,
-            contractType = SepGroupType.TYRANNY,
+            contractType = groupType,
             network = activeNetwork.sepNetwork,
             transport = transport,
         )
-        val payload = TyrannyCreateGroupPayload(
-            groupId = groupId,
-            commitment = proof.commitment,
-            tier = tier.rawValue,
-            adminPubkeyCommitment = proof.adminPubkeyCommitment,
-            proof = proof.proof,
-            publicInputs = proof.publicInputs,
-        )
         val response = try {
-            client.createGroupTyranny(payload)
+            when (groupType) {
+                SepGroupType.TYRANNY -> client.createGroupTyranny(
+                    TyrannyCreateGroupPayload(
+                        groupId = groupId,
+                        commitment = proof.commitment,
+                        tier = tier.rawValue,
+                        adminPubkeyCommitment = proof.adminPubkeyCommitment,
+                        proof = proof.proof,
+                        publicInputs = proof.publicInputs,
+                    ),
+                )
+                SepGroupType.ONE_ON_ONE -> client.createGroupOneOnOne(
+                    OneOnOneCreateGroupPayload(
+                        groupId = groupId,
+                        commitment = proof.commitment,
+                        proof = proof.proof,
+                        publicInputs = proof.publicInputs,
+                    ),
+                )
+                else -> throw CreateGroupError.UnsupportedGroupType(groupType)
+            }
         } catch (e: SepContractError) {
             throw CreateGroupError.AnchorTransport(e.message ?: "transport error")
+        } catch (e: CreateGroupError) {
+            throw e
         } catch (e: Throwable) {
             throw CreateGroupError.AnchorTransport(e.message ?: "unknown")
         }
@@ -195,9 +233,15 @@ open class CreateGroupInteractor(
             throw CreateGroupError.AnchorRejected(response.message)
         }
 
-        // 7. Save locally
+        // 7. Save locally. For OneOnOne we don't surface an
+        //    `adminPubkeyHex` (no admin role on chain); leaving it
+        //    null lets the receiver-side decoder branch on it.
         val groupIdHex = groupId.toHex()
-        val adminPubkeyHex = identitySnapshot.blsPublicKey.toHex()
+        val adminPubkeyHex = if (groupType == SepGroupType.TYRANNY) {
+            identitySnapshot.blsPublicKey.toHex()
+        } else {
+            null
+        }
         val group = ChatGroup(
             id = groupIdHex,
             name = trimmedName,
@@ -208,38 +252,41 @@ open class CreateGroupInteractor(
             salt = salt,
             commitment = proof.commitment,
             tier = tier,
-            groupType = SepGroupType.TYRANNY,
+            groupType = groupType,
             adminPubkeyHex = adminPubkeyHex,
             isPublishedOnChain = false,
         )
         groups.insert(group)
         groups.markPublished(group.id, proof.commitment)
 
-        // 8. Send invitations (group is already on disk; failures
-        //    throw but a future "retry invites" UI can pick up the
-        //    half-delivered state).
+        // 8. Send invitations. For OneOnOne the (sole) invitee gets
+        //    the ephemeral `secondaryBlsSecret` so they can act as
+        //    the second party of the immutable group.
         if (invitees.isNotEmpty()) {
             onProgress(CreateGroupProgress.SendingInvitations(invitees.size))
-            val invitePayload = GroupInvitationPayload(
-                version = 1,
-                groupId = groupId,
-                groupSecret = groupSecret,
-                name = trimmedName,
-                members = members,
-                epoch = 0uL,
-                salt = salt,
-                commitment = proof.commitment,
-                tierRaw = tier.rawValue,
-                groupTypeRaw = SepGroupType.TYRANNY.wireValue,
-                adminPubkeyHex = adminPubkeyHex,
-            )
-            val payloadBytes = try {
-                jsonFormat.encodeToString(GroupInvitationPayload.serializer(), invitePayload)
-                    .toByteArray(Charsets.UTF_8)
-            } catch (_: Throwable) {
-                throw CreateGroupError.InvitationEncodingFailed
-            }
             for ((index, inboxKey) in invitees.withIndex()) {
+                val invitePayload = GroupInvitationPayload(
+                    version = 1,
+                    groupId = groupId,
+                    groupSecret = groupSecret,
+                    name = trimmedName,
+                    members = members,
+                    epoch = 0uL,
+                    salt = salt,
+                    commitment = proof.commitment,
+                    tierRaw = tier.rawValue,
+                    groupTypeRaw = groupType.wireValue,
+                    adminPubkeyHex = adminPubkeyHex,
+                    inviteeBlsSecretKey = secondaryBlsSecret,
+                )
+                val payloadBytes = try {
+                    jsonFormat.encodeToString(
+                        GroupInvitationPayload.serializer(),
+                        invitePayload,
+                    ).toByteArray(Charsets.UTF_8)
+                } catch (_: Throwable) {
+                    throw CreateGroupError.InvitationEncodingFailed
+                }
                 val sealed = try {
                     identity.sealInvitation(payloadBytes, inboxKey)
                 } catch (e: Throwable) {
@@ -264,6 +311,18 @@ open class CreateGroupInteractor(
         // the caller sees `isPublishedOnChain = true`.
         return groups.snapshots.value.firstOrNull { it.id == group.id }
             ?: group.copy(isPublishedOnChain = true)
+    }
+
+    /** Bridge the wire-typed [SepGroupType] to the binding-key
+     *  [GovernanceType]. Returns `null` for governance flavours that
+     *  don't have a contract slot today (e.g. `democracy`,
+     *  `oligarchy` until they ship). */
+    private fun SepGroupType.toGovernanceType(): GovernanceType? = when (this) {
+        SepGroupType.TYRANNY -> GovernanceType.Tyranny
+        SepGroupType.ONE_ON_ONE -> GovernanceType.OneOnOne
+        SepGroupType.ANARCHY -> GovernanceType.Anarchy
+        SepGroupType.DEMOCRACY -> GovernanceType.Democracy
+        SepGroupType.OLIGARCHY -> GovernanceType.Oligarchy
     }
 
     private companion object {
@@ -320,6 +379,14 @@ sealed class CreateGroupError(message: String) : Exception(message) {
 
     class InvalidInviteeKey(val index: Int) :
         CreateGroupError("Invitee #${index + 1} is not a 32-byte X25519 public key")
+
+    class OneOnOneRequiresExactlyOneInvitee(val actual: Int) :
+        CreateGroupError(
+            "1-on-1 groups need exactly one invitee — you added $actual.",
+        )
+
+    class UnsupportedGroupType(val type: SepGroupType) :
+        CreateGroupError("$type groups can't be created yet")
 
     object MissingIdentity : CreateGroupError("No identity is loaded — bootstrap or restore first") {
         private fun readResolve(): Any = MissingIdentity

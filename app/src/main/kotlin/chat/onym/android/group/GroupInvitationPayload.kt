@@ -57,6 +57,21 @@ data class GroupInvitationPayload(
      *  `null` for ANARCHY / ONE_ON_ONE. */
     @SerialName("admin_pubkey_hex")
     val adminPubkeyHex: String? = null,
+    /** **OneOnOne only.** 32 BE Fr — the ephemeral BLS secret the
+     *  creator generated for this invitee and used as `sk_1` in the
+     *  founding `OneOnOne.proveCreate(sk_0, sk_1, salt)` call. The
+     *  receiver needs this to act as the second party of the
+     *  immutable 1v1 group.
+     *
+     *  `null` for every other governance type — those flows let the
+     *  receiver bring their own BLS identity.
+     *
+     *  ⚠ Carries a private key. Sealed by
+     *  [chat.onym.android.identity.IdentityRepository.sealInvitation]
+     *  before it leaves the device — never logged, never echoed. */
+    @SerialName("invitee_bls_secret_key")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val inviteeBlsSecretKey: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -71,7 +86,9 @@ data class GroupInvitationPayload(
             (commitment?.contentEquals(other.commitment) ?: (other.commitment == null)) &&
             tierRaw == other.tierRaw &&
             groupTypeRaw == other.groupTypeRaw &&
-            adminPubkeyHex == other.adminPubkeyHex
+            adminPubkeyHex == other.adminPubkeyHex &&
+            (inviteeBlsSecretKey?.contentEquals(other.inviteeBlsSecretKey)
+                ?: (other.inviteeBlsSecretKey == null))
     }
 
     override fun hashCode(): Int {
@@ -86,6 +103,7 @@ data class GroupInvitationPayload(
         h = 31 * h + tierRaw
         h = 31 * h + groupTypeRaw.hashCode()
         h = 31 * h + (adminPubkeyHex?.hashCode() ?: 0)
+        h = 31 * h + (inviteeBlsSecretKey?.contentHashCode() ?: 0)
         return h
     }
 }
