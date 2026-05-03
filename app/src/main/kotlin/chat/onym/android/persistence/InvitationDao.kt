@@ -33,4 +33,11 @@ interface InvitationDao {
 
     @Query("DELETE FROM incoming_invitations WHERE id = :id")
     suspend fun delete(id: String): Int
+
+    /** Cascade-delete every row owned by [ownerIdentityIdString].
+     *  Returns the number of rows removed. Used by the
+     *  identity-removed listener (see
+     *  [chat.onym.android.inbox.IncomingInvitationsRepository]). */
+    @Query("DELETE FROM incoming_invitations WHERE ownerIdentityIdString = :ownerIdentityIdString")
+    suspend fun deleteForOwner(ownerIdentityIdString: String): Int
 }

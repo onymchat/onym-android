@@ -1,5 +1,6 @@
 package chat.onym.android.support
 
+import chat.onym.android.identity.IdentityId
 import chat.onym.android.identity.InvitationDecryptError
 import chat.onym.android.identity.InvitationEnvelopeDecrypter
 
@@ -45,11 +46,21 @@ class FakeInvitationEnvelopeDecrypter(var mode: Mode) : InvitationEnvelopeDecryp
     /** Every envelope this fake has been asked to decrypt, in call
      *  order. Tests assert with `decryptCalls.last().contentEquals(...)`
      *  or by counting size. */
-    val decryptCalls: List<ByteArray> get() = _decryptCalls.toList()
-    private val _decryptCalls = mutableListOf<ByteArray>()
+    val decryptCalls: List<ByteArray> get() = _decryptCalls.map { it.envelope }
+    /** Per-call (envelope, asIdentity) tuples — lets the per-identity-
+     *  decryption tests assert that each record was decrypted with
+     *  the right identity, not just that something was decrypted. */
+    val decryptCallsWithIdentity: List<DecryptCall> get() = _decryptCalls.toList()
+    private val _decryptCalls = mutableListOf<DecryptCall>()
 
-    override suspend fun decryptInvitation(envelopeBytes: ByteArray): ByteArray {
-        _decryptCalls.add(envelopeBytes.copyOf())
+    data class DecryptCall(val envelope: ByteArray, val asIdentity: IdentityId) {
+        override fun equals(other: Any?): Boolean = this === other ||
+            (other is DecryptCall && envelope.contentEquals(other.envelope) && asIdentity == other.asIdentity)
+        override fun hashCode(): Int = 31 * envelope.contentHashCode() + asIdentity.hashCode()
+    }
+
+    override suspend fun decryptInvitation(envelopeBytes: ByteArray, asIdentity: IdentityId): ByteArray {
+        _decryptCalls.add(DecryptCall(envelopeBytes.copyOf(), asIdentity))
         return when (val m = mode) {
             is Mode.Fixed -> m.plaintext.copyOf()
             is Mode.Scripted -> m.script[envelopeBytes.toList()]

@@ -26,6 +26,7 @@ class RoomInvitationStore(
                 payload = encryption.decrypt(row.encryptedPayload),
                 receivedAt = Instant.ofEpochMilli(row.receivedAt),
                 status = parseStatus(row.statusRaw),
+                ownerIdentityIdString = row.ownerIdentityIdString,
             )
         }
     }
@@ -37,6 +38,7 @@ class RoomInvitationStore(
                 encryptedPayload = encryption.encrypt(record.payload),
                 receivedAt = record.receivedAt.toEpochMilli(),
                 statusRaw = record.status.name,
+                ownerIdentityIdString = record.ownerIdentityIdString,
             )
         )
         rowId != -1L
@@ -49,6 +51,9 @@ class RoomInvitationStore(
     override suspend fun delete(id: String) {
         withContext(ioDispatcher) { dao.delete(id) }
     }
+
+    override suspend fun deleteForOwner(ownerIdentityIdString: String): Int =
+        withContext(ioDispatcher) { dao.deleteForOwner(ownerIdentityIdString) }
 
     /** Tolerant parse: an unknown enum value (from a future schema
      *  rolled back, say) falls back to [IncomingInvitationStatus.Pending]

@@ -40,4 +40,12 @@ class InMemoryInvitationStore : InvitationStore {
     override suspend fun delete(id: String) {
         mutex.withLock { rows.remove(id) }
     }
+
+    override suspend fun deleteForOwner(ownerIdentityIdString: String): Int = mutex.withLock {
+        val toRemove = rows.values
+            .filter { it.ownerIdentityIdString == ownerIdentityIdString }
+            .map { it.id }
+        for (id in toRemove) rows.remove(id)
+        toRemove.size
+    }
 }

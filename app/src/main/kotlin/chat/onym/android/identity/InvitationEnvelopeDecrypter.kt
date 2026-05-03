@@ -16,10 +16,25 @@ package chat.onym.android.identity
  */
 interface InvitationEnvelopeDecrypter {
     /**
-     * Decrypt an X25519+AES-GCM-sealed invitation envelope.
+     * Decrypt an X25519+AES-GCM-sealed invitation envelope using the
+     * private key of the identity addressed by [asIdentity].
+     *
+     * The explicit [asIdentity] parameter (added in PR-6 of the
+     * deeplink-invite stack, mirroring onym-ios PR #59) is what
+     * makes the multi-identity inbox fan-out actually decrypt
+     * correctly: an envelope addressed to identity B that arrived
+     * while the user was on identity A still decrypts under B's
+     * key when surfaced. The repository tags every persisted record
+     * with its [asIdentity] at receive time
+     * ([chat.onym.android.inbox.IncomingInvitationsRepository.recordIncoming])
+     * and the decrypter consumes that tag here.
      *
      * @param envelopeBytes UTF-8 JSON of a [SealedEnvelope] with
      *        `scheme = "x25519-aes-256-gcm-v1"`.
+     * @param asIdentity the identity whose X25519 private key should
+     *        be used to open the envelope. Pass the value the
+     *        repository stamped on
+     *        [chat.onym.android.inbox.IncomingInvitation.ownerIdentityId].
      * @return the inner plaintext (typically a `BootstrapPayload`
      *         JSON for the inbox interactor to parse downstream).
      * @throws InvitationDecryptError on every failure mode — the
@@ -27,7 +42,7 @@ interface InvitationEnvelopeDecrypter {
      *         `kotlinx.serialization` exceptions, so callers can
      *         classify with a `when (e: InvitationDecryptError)`.
      */
-    suspend fun decryptInvitation(envelopeBytes: ByteArray): ByteArray
+    suspend fun decryptInvitation(envelopeBytes: ByteArray, asIdentity: IdentityId): ByteArray
 }
 
 /**

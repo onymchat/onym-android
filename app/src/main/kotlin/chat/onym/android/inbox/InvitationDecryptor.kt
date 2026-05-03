@@ -1,5 +1,6 @@
 package chat.onym.android.inbox
 
+import chat.onym.android.identity.IdentityId
 import chat.onym.android.identity.InvitationEnvelopeDecrypter
 import kotlinx.serialization.json.Json
 
@@ -17,14 +18,22 @@ import kotlinx.serialization.json.Json
  *  - Stateless — the only mutable thing in scope is the [Json]
  *    parser, which is thread-safe + immutable after construction.
  *
- * Mirrors `InvitationDecryptor.swift` from onym-ios PR #17.
+ * Mirrors `InvitationDecryptor.swift` from onym-ios PR #17 + the
+ * per-identity routing arg from onym-ios PR #59.
  */
 class InvitationDecryptor(
     private val envelopeDecrypter: InvitationEnvelopeDecrypter,
 ) {
     /**
      * Open + parse [envelopeBytes] (UTF-8 JSON of a
-     * [chat.onym.android.identity.SealedEnvelope]).
+     * [chat.onym.android.identity.SealedEnvelope]) using the X25519
+     * key of the identity addressed by [asIdentity].
+     *
+     * Pass the value the repository stamped on
+     * [IncomingInvitation.ownerIdentityId]. Hard-coding the
+     * currently-selected identity here would silently fail to
+     * decrypt envelopes addressed to a non-active identity — the
+     * whole reason PR-6 of the deeplink-invite stack exists.
      *
      * @throws chat.onym.android.identity.InvitationDecryptError on
      *         decryption failure; propagated verbatim from the seam.
@@ -32,8 +41,8 @@ class InvitationDecryptor(
      *         decrypted plaintext isn't a well-formed
      *         [DecryptedInvitation] JSON.
      */
-    suspend fun decrypt(envelopeBytes: ByteArray): DecryptedInvitation {
-        val plaintext = envelopeDecrypter.decryptInvitation(envelopeBytes)
+    suspend fun decrypt(envelopeBytes: ByteArray, asIdentity: IdentityId): DecryptedInvitation {
+        val plaintext = envelopeDecrypter.decryptInvitation(envelopeBytes, asIdentity)
         return jsonFormat.decodeFromString(plaintext.toString(Charsets.UTF_8))
     }
 

@@ -2,6 +2,8 @@
 
 package chat.onym.android.inbox
 
+import chat.onym.android.identity.IdentityId
+import chat.onym.android.support.FakeActiveIdentityProvider
 import chat.onym.android.support.FakeInboxTransport
 import chat.onym.android.support.InMemoryInvitationStore
 import chat.onym.android.transport.InboundInbox
@@ -23,7 +25,9 @@ import java.time.Instant
  * ([FakeInboxTransport] + [InMemoryInvitationStore]). Validates the
  * one job [IncomingInvitationsInteractor] has — forward each
  * inbound message into the repository, dedup at the repo, exit
- * cleanly on cancellation.
+ * cleanly on cancellation. Per-identity-keyed fan-out (PR-6 of
+ * deeplink-invite stack) is also covered: each subscription
+ * captures its identity ID and stamps inbounds with it.
  *
  * Mirrors `IncomingInvitationsInteractorTests.swift` from onym-ios PR #16.
  */
@@ -31,16 +35,17 @@ class IncomingInvitationsInteractorTest {
 
     private val inbox = TransportInboxId("inbox-test")
     private val now = Instant.parse("2026-05-02T12:00:00Z")
+    private val testOwner = IdentityId("test-owner")
 
     @Test
     fun oneInbound_oneRecord() = runTest(UnconfinedTestDispatcher()) {
         val transport = FakeInboxTransport()
         val store = InMemoryInvitationStore()
-        val repo = IncomingInvitationsRepository(store)
+        val repo = makeRepo(store, this)
         val interactor = IncomingInvitationsInteractor(transport, repo)
 
         coroutineScope {
-            val job = async { interactor.run(inbox) }
+            val job = async { interactor.run(inbox, testOwner) }
             transport.emit(inbound("ev1", "p1"))
             transport.finish(inbox)
             job.await()
@@ -50,17 +55,18 @@ class IncomingInvitationsInteractorTest {
         assertEquals(1, all.size)
         assertEquals("ev1", all[0].id)
         assertArrayEquals("p1".toByteArray(), all[0].payload)
+        assertEquals(testOwner.value, all[0].ownerIdentityIdString)
     }
 
     @Test
     fun multipleInbounds_persistedInOrder() = runTest(UnconfinedTestDispatcher()) {
         val transport = FakeInboxTransport()
         val store = InMemoryInvitationStore()
-        val repo = IncomingInvitationsRepository(store)
+        val repo = makeRepo(store, this)
         val interactor = IncomingInvitationsInteractor(transport, repo)
 
         coroutineScope {
-            val job = async { interactor.run(inbox) }
+            val job = async { interactor.run(inbox, testOwner) }
             transport.emit(inbound("ev1", "first", at = now))
             transport.emit(inbound("ev2", "second", at = now.plusSeconds(1)))
             transport.emit(inbound("ev3", "third", at = now.plusSeconds(2)))
@@ -76,11 +82,11 @@ class IncomingInvitationsInteractorTest {
     fun duplicateMessageId_dedupedAtRepository() = runTest(UnconfinedTestDispatcher()) {
         val transport = FakeInboxTransport()
         val store = InMemoryInvitationStore()
-        val repo = IncomingInvitationsRepository(store)
+        val repo = makeRepo(store, this)
         val interactor = IncomingInvitationsInteractor(transport, repo)
 
         coroutineScope {
-            val job = async { interactor.run(inbox) }
+            val job = async { interactor.run(inbox, testOwner) }
             // Same id, different payload — relays can replay events
             // across reconnects and the dedup-on-id property is what
             // protects the repository.
@@ -99,11 +105,11 @@ class IncomingInvitationsInteractorTest {
     fun cancellation_unsubscribesUpstream() = runTest(UnconfinedTestDispatcher()) {
         val transport = FakeInboxTransport()
         val store = InMemoryInvitationStore()
-        val repo = IncomingInvitationsRepository(store)
+        val repo = makeRepo(store, this)
         val interactor = IncomingInvitationsInteractor(transport, repo)
 
         coroutineScope {
-            val job = async { interactor.run(inbox) }
+            val job = async { interactor.run(inbox, testOwner) }
             // Make sure subscribe() has fired before we cancel.
             transport.emit(inbound("ev1", "x"))
             yield()
@@ -125,11 +131,11 @@ class IncomingInvitationsInteractorTest {
     fun finishWhileIdle_exitsCleanly() = runTest(UnconfinedTestDispatcher()) {
         val transport = FakeInboxTransport()
         val store = InMemoryInvitationStore()
-        val repo = IncomingInvitationsRepository(store)
+        val repo = makeRepo(store, this)
         val interactor = IncomingInvitationsInteractor(transport, repo)
 
         coroutineScope {
-            val job = async { interactor.run(inbox) }
+            val job = async { interactor.run(inbox, testOwner) }
             // No inbounds — just close the channel.
             yield()
             transport.finish(inbox)
@@ -144,24 +150,34 @@ class IncomingInvitationsInteractorTest {
     }
 
     @Test
-    fun runFanout_subscribesToEveryTagInTheList() = runTest(UnconfinedTestDispatcher()) {
+    fun runFanout_subscribesToEveryEntryInTheList_andStampsOwnerPerSubscription() = runTest(UnconfinedTestDispatcher()) {
         val transport = FakeInboxTransport()
         val store = InMemoryInvitationStore()
-        val repo = IncomingInvitationsRepository(store)
+        val alice = IdentityId("alice-id")
+        val bob = IdentityId("bob-id")
+        val aliceTag = TransportInboxId("alice-tag")
+        val bobTag = TransportInboxId("bob-tag")
+        val repo = makeRepo(store, this, initialActive = alice)
         val interactor = IncomingInvitationsInteractor(transport, repo)
 
-        val alice = TransportInboxId("alice-tag")
-        val bob = TransportInboxId("bob-tag")
-        val tags = kotlinx.coroutines.flow.MutableStateFlow(listOf(alice, bob))
+        val entries = kotlinx.coroutines.flow.MutableStateFlow(
+            listOf(alice to aliceTag, bob to bobTag),
+        )
 
         coroutineScope {
-            val job = async { interactor.runFanout(tags) }
+            val job = async { interactor.runFanout(entries) }
             yield()
-            // Inbounds on either tag must land in the store.
-            transport.emit(InboundInbox(alice, "alice-msg".toByteArray(), now, "alice-1"))
-            transport.emit(InboundInbox(bob, "bob-msg".toByteArray(), now, "bob-1"))
+            // Inbounds on either tag must land in the store, each
+            // stamped with its subscription's identity ID.
+            transport.emit(InboundInbox(aliceTag, "alice-msg".toByteArray(), now, "alice-1"))
+            transport.emit(InboundInbox(bobTag, "bob-msg".toByteArray(), now, "bob-1"))
             yield()
-            assertEquals(2, store.list().size)
+            val rows = store.list()
+            assertEquals(2, rows.size)
+            val aliceRow = rows.first { it.id == "alice-1" }
+            val bobRow = rows.first { it.id == "bob-1" }
+            assertEquals(alice.value, aliceRow.ownerIdentityIdString)
+            assertEquals(bob.value, bobRow.ownerIdentityIdString)
             // Cancel the fan-out so the test exits.
             job.cancel()
             job.join()
@@ -169,39 +185,53 @@ class IncomingInvitationsInteractorTest {
     }
 
     @Test
-    fun runFanout_unsubscribesRemovedTags_andSubscribesNewOnes() = runTest(UnconfinedTestDispatcher()) {
+    fun runFanout_unsubscribesRemovedEntries_andSubscribesNewOnes() = runTest(UnconfinedTestDispatcher()) {
         val transport = FakeInboxTransport()
         val store = InMemoryInvitationStore()
-        val repo = IncomingInvitationsRepository(store)
+        val alice = IdentityId("alice-id")
+        val carol = IdentityId("carol-id")
+        val aliceTag = TransportInboxId("alice-tag")
+        val carolTag = TransportInboxId("carol-tag")
+        val repo = makeRepo(store, this, initialActive = alice)
         val interactor = IncomingInvitationsInteractor(transport, repo)
 
-        val alice = TransportInboxId("alice-tag")
-        val carol = TransportInboxId("carol-tag")
-        val tags = kotlinx.coroutines.flow.MutableStateFlow(listOf(alice))
+        val entries = kotlinx.coroutines.flow.MutableStateFlow(
+            listOf(alice to aliceTag),
+        )
 
         coroutineScope {
-            val job = async { interactor.runFanout(tags) }
+            val job = async { interactor.runFanout(entries) }
             yield()
             // Initial subscription set is just Alice.
-            assertEquals(setOf(alice), transport.subscribedInboxes)
+            assertEquals(setOf(aliceTag), transport.subscribedInboxes)
 
             // Swap the entire list to [carol]: Alice unsubscribes,
-            // Carol subscribes. The wholesale cancel-and-rebuild
+            // Carol subscribes. Wholesale cancel-and-rebuild
             // semantics — collectLatest cancels the inner scope which
             // cancels every child launch, then re-launches with the
             // new list.
-            tags.value = listOf(carol)
+            entries.value = listOf(carol to carolTag)
             yield()
-            assertEquals(setOf(carol), transport.subscribedInboxes)
+            assertEquals(setOf(carolTag), transport.subscribedInboxes)
             assertTrue(
                 "Alice was unsubscribed when she dropped off the list",
-                transport.unsubscribedInboxes.contains(alice),
+                transport.unsubscribedInboxes.contains(aliceTag),
             )
 
             job.cancel()
             job.join()
         }
     }
+
+    private fun makeRepo(
+        store: InMemoryInvitationStore,
+        scope: kotlinx.coroutines.CoroutineScope,
+        initialActive: IdentityId = testOwner,
+    ): IncomingInvitationsRepository = IncomingInvitationsRepository(
+        store = store,
+        identity = FakeActiveIdentityProvider(initial = initialActive),
+        scope = scope,
+    )
 
     private fun inbound(id: String, payload: String, at: Instant = now) = InboundInbox(
         inbox = inbox,

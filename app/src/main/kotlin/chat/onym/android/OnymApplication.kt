@@ -297,13 +297,20 @@ class OnymApplication : Application() {
         // connects on first use via `NostrInboxTransport`).
         val inboxTransport = NostrInboxTransport(signerProvider = nostrSignerProvider)
 
-        // Multi-identity inbox fan-out (PR-4). Subscribes to every
-        // identity's inbox tag concurrently so messages targeted at
-        // a non-active identity still land on disk. Resubscribes
-        // wholesale when the identities list changes (add / remove).
+        // Multi-identity inbox fan-out (PR-4) + per-identity
+        // decryption routing (PR-6). Subscribes to every identity's
+        // inbox tag concurrently so messages targeted at a
+        // non-active identity still land on disk; each persisted
+        // record carries its `ownerIdentityId` so the decrypt path
+        // routes to the right X25519 private key when the user
+        // surfaces the envelope. Resubscribes wholesale when the
+        // identities list changes (add / remove).
         val invitationsRepository = chat.onym.android.inbox.IncomingInvitationsRepository(
             store = chat.onym.android.persistence.InMemoryInvitationStore(),
+            identity = identityRepository,
+            scope = applicationScope,
         )
+        invitationsRepository.start()
         val invitationsInteractor = chat.onym.android.inbox.IncomingInvitationsInteractor(
             inboxTransport = inboxTransport,
             repository = invitationsRepository,
@@ -312,7 +319,7 @@ class OnymApplication : Application() {
             invitationsInteractor.runFanout(
                 identityRepository.identities.map { summaries ->
                     summaries.map { summary ->
-                        chat.onym.android.transport.TransportInboxId(
+                        summary.id to chat.onym.android.transport.TransportInboxId(
                             chat.onym.android.identity.IdentityRepository.inboxTag(summary.inboxPublicKey),
                         )
                     }
