@@ -320,6 +320,47 @@ class OnymApplication : Application() {
             )
         }
 
+        // Intro inbox fan-out (deeplink-invite PR-3). Sender
+        // subscribes to every per-invite intro pubkey's tag so
+        // joiners' "request to join" envelopes land in the
+        // IntroRequestStore. Filtered to the currently-active
+        // identity — switching identity drops the prior set,
+        // re-subscribes for the new one.
+        val introKeyStore: chat.onym.android.group.IntroKeyStore =
+            chat.onym.android.group.EncryptedPrefsIntroKeyStore(applicationContext)
+        val introRequestStore: chat.onym.android.group.IntroRequestStore =
+            chat.onym.android.group.InMemoryIntroRequestStore()
+        val introInboxPump = chat.onym.android.group.IntroInboxPump(
+            transport = inboxTransport,
+            store = introRequestStore,
+            inboxTagFor = { introPub ->
+                chat.onym.android.transport.TransportInboxId(
+                    chat.onym.android.identity.IdentityRepository.inboxTag(introPub),
+                )
+            },
+        )
+        // Cascade-delete intro keys when an identity is removed so
+        // we don't keep listening on tags whose owner is gone. The
+        // removal-listener slot is multi-listener (PR-3 of the
+        // deeplink stack flipped it from single → list).
+        // GroupRepository's chat-wipe registered first (during its
+        // `init`); this hook appends. Order: chats wipe first, then
+        // intro keys.
+        identityRepository.registerRemovalListener { id ->
+            introKeyStore.deleteForOwner(id)
+        }
+        applicationScope.launch {
+            introInboxPump.runFanout(
+                kotlinx.coroutines.flow.combine(
+                    introKeyStore.entriesFlow,
+                    identityRepository.currentIdentityId,
+                ) { entries, activeId ->
+                    if (activeId == null) emptyList()
+                    else entries.filter { it.ownerIdentityId == activeId }
+                },
+            )
+        }
+
         // App-wide network preference (PR-C follow-up). Defaults to
         // testnet; the Settings → Network → "Use Mainnet" Switch
         // flips it. CreateGroupInteractor reads `current()` per call

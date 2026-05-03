@@ -69,9 +69,15 @@ class IdentityRepository(
     private val _currentIdentityId = MutableStateFlow<IdentityId?>(null)
     /** Listeners notified when an identity is removed; they get the
      *  removed id BEFORE the storage wipe completes (so they can
-     *  cascade-delete owned data). Set by [setRemovalListener] —
-     *  PR-3's `GroupRepository` registers itself. */
-    private var removalListener: (suspend (IdentityId) -> Unit)? = null
+     *  cascade-delete owned data). Multi-slot — `GroupRepository`
+     *  registers a chat-wipe listener; the deeplink-invite layer
+     *  registers an intro-key-wipe listener. Invoked in registration
+     *  order; later registrants run after earlier ones.
+     *
+     *  Snapshot-replace on register so iterators inside `remove()`
+     *  don't crash on concurrent mutations. */
+    @Volatile
+    private var removalListeners: List<suspend (IdentityId) -> Unit> = emptyList()
 
     /** Hot stream of the **currently-selected** identity's snapshot.
      *  New collectors get the current value immediately, then one new
@@ -93,15 +99,20 @@ class IdentityRepository(
     fun currentIdentity(): Identity? = _snapshots.value
 
     /** Register a listener invoked just before a [remove] wipes its
-     *  storage. Single-listener — `GroupRepository` hooks in here.
-     *  Pass `null` to clear. */
+     *  storage. Multi-slot — appends. Passing `null` clears every
+     *  registered listener (used by tests for setup hygiene; never
+     *  by production callers).
+     *
+     *  Listeners are invoked in registration order. A listener that
+     *  throws aborts the chain — subsequent listeners + the wipe
+     *  itself don't run, so wire ordering matters: register
+     *  listeners that MUST run before the wipe (e.g.
+     *  GroupRepository's chat-delete) FIRST. */
     override fun registerRemovalListener(listener: (suspend (IdentityId) -> Unit)?) {
-        removalListener = listener
+        removalListeners = if (listener == null) emptyList() else removalListeners + listener
     }
 
-    /** Back-compat alias for [registerRemovalListener]. PR-2 named the
-     *  hook `setRemovalListener`; PR-3 renamed it to match the
-     *  [ActiveIdentityProvider] interface. */
+    /** Back-compat alias. */
     @Deprecated("Use registerRemovalListener", ReplaceWith("registerRemovalListener(listener)"))
     fun setRemovalListener(listener: (suspend (IdentityId) -> Unit)?) {
         registerRemovalListener(listener)
@@ -183,7 +194,7 @@ class IdentityRepository(
             val newId = IdentityId.new()
             val snapshot = snapshotFromEntropy(entropy, name = "")
             if (previousId != null) {
-                removalListener?.invoke(previousId)
+                removalListeners.forEach { it.invoke(previousId) }
                 store.wipe(previousId)
             }
             store.save(newId, snapshot)
@@ -204,7 +215,7 @@ class IdentityRepository(
     suspend fun wipe() = mutex.withLock {
         withContext(ioDispatcher) {
             store.loadCurrent()?.let { id ->
-                removalListener?.invoke(id)
+                removalListeners.forEach { it.invoke(id) }
                 store.wipe(id)
             }
             _snapshots.value = null
@@ -264,7 +275,7 @@ class IdentityRepository(
     suspend fun remove(id: IdentityId) = mutex.withLock {
         withContext(ioDispatcher) {
             if (id !in store.listIds()) return@withContext
-            removalListener?.invoke(id)
+            removalListeners.forEach { it.invoke(id) }
             val wasActive = store.loadCurrent() == id
             store.wipe(id)
             if (wasActive) {
@@ -531,7 +542,7 @@ class IdentityRepository(
         }
         val snapshot = snapshotFromEntropy(entropy, name = resolved)
         if (previousId != null) {
-            removalListener?.invoke(previousId)
+            removalListeners.forEach { it.invoke(previousId) }
             store.wipe(previousId)
         }
         store.save(newId, snapshot)

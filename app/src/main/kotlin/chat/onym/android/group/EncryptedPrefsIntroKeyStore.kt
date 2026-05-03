@@ -6,6 +6,9 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import chat.onym.android.identity.Base64ByteArraySerializer
 import chat.onym.android.identity.IdentityId
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerializationException
@@ -30,6 +33,18 @@ class EncryptedPrefsIntroKeyStore(
 ) : IntroKeyStore {
 
     private val mutex = Mutex()
+
+    private val _entriesFlow = MutableStateFlow<List<IntroKeyEntry>>(emptyList())
+    override val entriesFlow: StateFlow<List<IntroKeyEntry>> = _entriesFlow.asStateFlow()
+
+    init {
+        // Seed the flow at construction time so the first subscriber
+        // sees the on-disk state without needing an explicit reload.
+        // EncryptedSharedPreferences read is lazy via the `prefs`
+        // delegate, so this only does work if a previous session
+        // wrote something.
+        _entriesFlow.value = loadAllUnlocked().map { it.toEntry() }
+    }
 
     private val prefs: SharedPreferences by lazy {
         val masterKey = MasterKey.Builder(context)
@@ -118,6 +133,10 @@ class EncryptedPrefsIntroKeyStore(
         // once IntroIntroducer wraps them) and we want
         // write-confirmation before returning.
         prefs.edit().putString(KEY_BLOB, raw).commit()
+        // Keep the reactive surface in lockstep with the on-disk
+        // state. Inside the mutex on every mutation path, so no
+        // emission interleaves with a partial in-flight write.
+        _entriesFlow.value = entries.map { it.toEntry() }
     }
 
     private fun StoredIntroKey.toEntry(): IntroKeyEntry = IntroKeyEntry(

@@ -1,6 +1,7 @@
 package chat.onym.android.group
 
 import chat.onym.android.identity.IdentityId
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Persistence seam for per-invite ephemeral X25519 keypairs.
@@ -24,6 +25,16 @@ import chat.onym.android.identity.IdentityId
  * we don't leak intro privkeys past the identity that minted them.
  */
 interface IntroKeyStore {
+    /** Hot stream of every entry across every owner. Emits the
+     *  current snapshot on subscribe, then a fresh value after
+     *  every [save] / [revoke] / [deleteForOwner].
+     *
+     *  Drives the inbox fan-out (PR-3): the wiring layer maps
+     *  this → list of intro inbox tags → feeds into the request
+     *  pump. New entry → new subscription within the next
+     *  emission window. */
+    val entriesFlow: StateFlow<List<IntroKeyEntry>>
+
     /** Persist a freshly-minted intro entry. Idempotent on
      *  [IntroKeyEntry.introPublicKey] — re-mint with the same pub
      *  is a no-op (shouldn't happen in practice; X25519 keypairs
