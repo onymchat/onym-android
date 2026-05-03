@@ -294,6 +294,31 @@ class IdentityRepository(
         }
     }
 
+    /**
+     * Rename [id] to [newName]. Trims, then a no-op when the trimmed
+     * value is empty (matches the iOS prototype's `name || i.name`
+     * "blank input keeps old name" behaviour) or unchanged from the
+     * current persisted name.
+     *
+     * Callable on any identity, active or inactive. Refreshes the
+     * [identities] summary stream so listeners see the new name; the
+     * active-[snapshots] stream isn't touched because [Identity]
+     * doesn't carry the display name (only [IdentitySummary] does).
+     *
+     * @throws IdentityError.IdentityNotLoaded if [id] doesn't exist
+     *         on this device.
+     */
+    suspend fun rename(id: IdentityId, newName: String) = mutex.withLock {
+        withContext(ioDispatcher) {
+            val trimmed = newName.trim()
+            if (trimmed.isEmpty()) return@withContext
+            val snapshot = store.load(id) ?: throw IdentityError.IdentityNotLoaded
+            if (snapshot.name == trimmed) return@withContext
+            store.save(id, snapshot.copy(name = trimmed))
+            refreshIdentitiesList()
+        }
+    }
+
     /** Recompute [_identities] from disk. Must be called from inside
      *  [mutex] (caller already holds it). */
     private fun refreshIdentitiesList() {

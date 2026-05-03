@@ -167,6 +167,9 @@
     <!-- ─── Identity detail ──────────────────────────────────────── -->
     <string name="identity_detail_title">Identity</string>
     <string name="identity_detail_active_marker">Active</string>
+    <!-- Hero name pencil affordance — content description for the
+         tap-to-edit Row that flips the alias into a BasicTextField. -->
+    <string name="identity_detail_rename_action">Rename identity</string>
     <string name="identity_detail_backup_section">Backup</string>
     <string name="identity_detail_backup_status_unknown">Back up your recovery phrase</string>
     <string name="identity_detail_backup_status_subtitle">Without your phrase you can\'t restore this identity.</string>

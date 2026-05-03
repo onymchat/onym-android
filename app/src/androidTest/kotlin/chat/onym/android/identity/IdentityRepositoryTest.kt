@@ -305,6 +305,77 @@ class IdentityRepositoryTest {
         }
     }
 
+    // ─── rename ────────────────────────────────────────────────────
+
+    @Test
+    fun rename_inactiveIdentity_persistsAndEmitsOnIdentities() = runBlocking {
+        repo.bootstrap()
+        val firstId = repo.currentIdentityId.first()!!
+        val secondId = repo.add(name = "Work")
+        // Active is `secondId`; rename the inactive `firstId`.
+        repo.rename(firstId, "Personal")
+
+        val list = repo.identities.first()
+        assertEquals("Personal", list.single { it.id == firstId }.name)
+        assertEquals("Work", list.single { it.id == secondId }.name)
+        // Active selection unchanged.
+        assertEquals(secondId, repo.currentIdentityId.first())
+
+        // Survives a full reload from disk.
+        val freshRepo = IdentityRepository(IdentitySecretStore(
+            ApplicationProvider.getApplicationContext(),
+            prefsFileName,
+        ))
+        freshRepo.bootstrap()
+        val reloaded = freshRepo.identities.first()
+        assertEquals("Personal", reloaded.single { it.id == firstId }.name)
+    }
+
+    @Test
+    fun rename_activeIdentity_updatesSummaryNotIdentity() = runBlocking {
+        val firstId = repo.add(name = "Original")
+        val originalIdentity = repo.snapshots.first()!!
+        repo.rename(firstId, "Renamed")
+
+        // Summary list reflects the new name.
+        val list = repo.identities.first()
+        assertEquals("Renamed", list.single { it.id == firstId }.name)
+
+        // Active Identity (which doesn't carry a name) is unchanged
+        // — same key bytes, no spurious re-derivation.
+        val afterIdentity = repo.snapshots.first()!!
+        assertArrayEquals(originalIdentity.nostrPublicKey, afterIdentity.nostrPublicKey)
+        assertArrayEquals(originalIdentity.blsPublicKey, afterIdentity.blsPublicKey)
+    }
+
+    @Test
+    fun rename_trimsWhitespace() = runBlocking {
+        val id = repo.add(name = "Original")
+        repo.rename(id, "  Padded   ")
+        val list = repo.identities.first()
+        assertEquals("Padded", list.single { it.id == id }.name)
+    }
+
+    @Test
+    fun rename_blankInput_isNoOp() = runBlocking {
+        val id = repo.add(name = "Keep")
+        repo.rename(id, "   ")
+        repo.rename(id, "")
+        val list = repo.identities.first()
+        assertEquals("Keep", list.single { it.id == id }.name)
+    }
+
+    @Test
+    fun rename_unknownId_throws() = runBlocking {
+        repo.bootstrap()
+        try {
+            repo.rename(IdentityId.new(), "Whatever")
+            fail("expected IdentityNotLoaded")
+        } catch (_: IdentityError.IdentityNotLoaded) {
+            // expected
+        }
+    }
+
     @Test
     fun remove_activeIdentity_pivotsToNext() = runBlocking {
         val firstId = repo.add(name = "A")
