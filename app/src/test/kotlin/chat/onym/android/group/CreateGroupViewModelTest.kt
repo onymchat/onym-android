@@ -248,14 +248,14 @@ class CreateGroupViewModelTest {
     @Test
     fun createCtaLabel_reflectsInviteeCount() = runTest {
         val vm = makeViewModel()
-        assertEquals("Create empty group", vm.state.value.createCtaLabel)
+        assertEquals(CreateCtaLabel.Empty, vm.state.value.createCtaLabel)
         vm.setInviteeInput("aa".repeat(32))
         vm.tappedAddInvitee()
-        assertEquals("Create with 1 person", vm.state.value.createCtaLabel)
+        assertEquals(CreateCtaLabel.OnePerson, vm.state.value.createCtaLabel)
         vm.tappedInviteByKey()
         vm.setInviteeInput("bb".repeat(32))
         vm.tappedAddInvitee()
-        assertEquals("Create with 2 people", vm.state.value.createCtaLabel)
+        assertEquals(CreateCtaLabel.NPeople(2), vm.state.value.createCtaLabel)
     }
 
     // ─── OneOnOne governance ──────────────────────────────────────
@@ -289,14 +289,14 @@ class CreateGroupViewModelTest {
     fun oneOnOne_ctaLabel_explainsTheGate() = runTest {
         val vm = makeViewModel()
         vm.setGovernance(OnymUIGovernance.OneOnOne)
-        assertEquals("Add the other person", vm.state.value.createCtaLabel)
+        assertEquals(CreateCtaLabel.OneOnOneAddOther, vm.state.value.createCtaLabel)
         vm.setInviteeInput("aa".repeat(32))
         vm.tappedAddInvitee()
-        assertEquals("Start 1-on-1", vm.state.value.createCtaLabel)
+        assertEquals(CreateCtaLabel.OneOnOneStart, vm.state.value.createCtaLabel)
         vm.tappedInviteByKey()
         vm.setInviteeInput("bb".repeat(32))
         vm.tappedAddInvitee()
-        assertEquals("1-on-1 needs exactly one", vm.state.value.createCtaLabel)
+        assertEquals(CreateCtaLabel.OneOnOneTooMany, vm.state.value.createCtaLabel)
     }
 
     @Test

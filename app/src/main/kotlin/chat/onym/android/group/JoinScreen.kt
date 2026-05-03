@@ -32,10 +32,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.onym.android.R
 
 /**
  * Joiner-side post-deeplink screen. The user lands here after tapping
@@ -68,10 +70,13 @@ fun JoinScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Join chat") },
+                title = { Text(stringResource(R.string.join_screen_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
                     }
                 },
             )
@@ -86,14 +91,18 @@ fun JoinScreen(
         ) {
             Spacer(Modifier.height(24.dp))
             Text(
-                text = viewModel.capability.groupName ?: "Invite to join a chat",
+                text = viewModel.capability.groupName
+                    ?: stringResource(R.string.join_invite_fallback_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "from ${viewModel.capability.introPublicKey.toShortFingerprint()}",
+                text = stringResource(
+                    R.string.join_invite_from,
+                    viewModel.capability.introPublicKey.toShortFingerprint(),
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -105,7 +114,7 @@ fun JoinScreen(
                     OutlinedTextField(
                         value = displayLabel,
                         onValueChange = { displayLabel = it.take(64) },
-                        label = { Text("How should the inviter see you?") },
+                        label = { Text(stringResource(R.string.join_label_field_label)) },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -113,8 +122,7 @@ fun JoinScreen(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "The inviter sees this name in their approval prompt. " +
-                            "They can decline if it doesn't match what they expect.",
+                        text = stringResource(R.string.join_label_field_helper),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -140,7 +148,12 @@ fun JoinScreen(
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.size(8.dp))
-                        Text(if (s is JoinViewModel.State.Failed) "Try again" else "Send join request")
+                        Text(
+                            stringResource(
+                                if (s is JoinViewModel.State.Failed) R.string.try_again
+                                else R.string.join_send_request,
+                            ),
+                        )
                     }
                 }
 
@@ -156,7 +169,10 @@ fun JoinScreen(
                         )
                     }
                     Spacer(Modifier.height(12.dp))
-                    Text("Sending request…", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = stringResource(R.string.join_sending_request),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
 
                 is JoinViewModel.State.AwaitingApproval -> {
@@ -172,15 +188,13 @@ fun JoinScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "Waiting for approval",
+                            text = stringResource(R.string.join_awaiting_title),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = "You'll see this chat appear in your list as soon as " +
-                                "the inviter taps Approve. You can close this screen — " +
-                                "we'll add it to Chats automatically.",
+                            text = stringResource(R.string.join_awaiting_body),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -190,7 +204,7 @@ fun JoinScreen(
                             onClick = onBackClick,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Back to chats")
+                            Text(stringResource(R.string.join_back_to_chats))
                         }
                     }
                 }
@@ -208,13 +222,13 @@ fun JoinScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "Joined!",
+                            text = stringResource(R.string.join_approved_title),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = "You're a member of ${s.group.name}.",
+                            text = stringResource(R.string.join_approved_body, s.group.name),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -223,7 +237,7 @@ fun JoinScreen(
                             onClick = { onOpenChat(s.group) },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Open chat")
+                            Text(stringResource(R.string.join_open_chat))
                         }
                     }
                 }

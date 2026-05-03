@@ -69,10 +69,19 @@ fun IdentitiesScreen(
     onIdentityClick: (IdentityId) -> Unit,
 ) {
     val items by viewModel.items.collectAsStateWithLifecycle()
-    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
+    val errorMessage = error?.let { e ->
+        val keyId = when (e) {
+            is IdentitiesViewModel.Error.Switch -> R.string.identities_error_switch
+            is IdentitiesViewModel.Error.Add -> R.string.identities_error_add
+            is IdentitiesViewModel.Error.Remove -> R.string.identities_error_remove
+            is IdentitiesViewModel.Error.Rename -> R.string.identities_error_rename
+        }
+        stringResource(keyId, e.cause)
+    }
     LaunchedEffect(errorMessage) {
         errorMessage?.let {
             snackbarHostState.showSnackbar(it)

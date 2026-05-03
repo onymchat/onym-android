@@ -33,6 +33,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +42,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.onym.android.R
+import chat.onym.android.group.CreateCtaLabel
 import chat.onym.android.group.CreateGroupProgress
 import chat.onym.android.group.CreateGroupRoute
 import chat.onym.android.group.CreateGroupViewModel
@@ -92,7 +96,10 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val accent = state.accent.color()
     Column(modifier = Modifier.fillMaxSize()) {
-        OnymNavTitle(title = "New Group", subtitle = "Step 1 of 2")
+        OnymNavTitle(
+            title = stringResource(R.string.create_group_step1_title),
+            subtitle = stringResource(R.string.create_group_step1_subtitle),
+        )
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -110,6 +117,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
             // `nameFieldFocused()`; the empty placeholder text below
             // shows the same generated name dimmed so the user
             // remembers what would be submitted.
+            val namePlaceholder = stringResource(R.string.create_group_name_placeholder)
             OnymCard {
                 BasicTextField(
                     value = state.name,
@@ -124,7 +132,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                         Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                             if (state.name.isEmpty()) {
                                 Text(
-                                    text = state.generatedName.ifEmpty { "Group name" },
+                                    text = state.generatedName.ifEmpty { namePlaceholder },
                                     color = LocalOnymTokens.current.text3,
                                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Medium),
                                 )
@@ -140,7 +148,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 )
             }
             Text(
-                text = "Visible to members. You can change this anytime.",
+                text = stringResource(R.string.create_group_name_helper),
                 color = LocalOnymTokens.current.text3,
                 style = TextStyle(fontSize = 11.5.sp),
                 modifier = Modifier
@@ -148,7 +156,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     .padding(start = 4.dp, top = 6.dp),
             )
 
-            OnymSectionLabel("Accent color")
+            OnymSectionLabel(stringResource(R.string.create_group_accent_color))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -180,7 +188,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 }
             }
 
-            OnymSectionLabel("How it’s run")
+            OnymSectionLabel(stringResource(R.string.create_group_how_its_run))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -217,7 +225,8 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     )
                     Column {
                         Text(
-                            text = "${state.governance.sub}. ${state.governance.tooltip}",
+                            text = "${stringResource(state.governance.subRes())}. " +
+                                stringResource(state.governance.tooltipRes()),
                             color = LocalOnymTokens.current.text2,
                             style = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
                         )
@@ -238,7 +247,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                         style = TextStyle(fontSize = 14.sp),
                     )
                     Text(
-                        text = "End-to-end encrypted · published on Stellar so anyone can verify it’s real.",
+                        text = stringResource(R.string.create_group_encrypted_footer),
                         color = LocalOnymTokens.current.text2,
                         style = TextStyle(fontSize = 12.5.sp, lineHeight = 17.sp),
                     )
@@ -254,13 +263,16 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 // type is wired (Tyranny only in PR-C); name has a
                 // random placeholder default so there's no "fill in
                 // the blank" gating step.
-                title = "Next · Add people",
+                title = stringResource(R.string.create_group_next),
                 accent = accent,
                 enabled = state.canAdvanceToStep2,
                 onClick = viewModel::tappedNext,
             )
             Spacer(Modifier.height(4.dp))
-            OnymQuietButton(title = "Cancel", onClick = viewModel.onClose)
+            OnymQuietButton(
+                title = stringResource(R.string.cancel),
+                onClick = viewModel.onClose,
+            )
         }
     }
 }
@@ -301,7 +313,7 @@ private fun GovernanceCard(
             )
             if (!available) {
                 Text(
-                    text = "Soon",
+                    text = stringResource(R.string.create_group_soon_badge),
                     color = LocalOnymTokens.current.text3,
                     style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp),
                     modifier = Modifier
@@ -313,12 +325,12 @@ private fun GovernanceCard(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            text = type.label,
+            text = stringResource(type.cardLabelRes()),
             color = labelColor,
             style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.13).sp),
         )
         Text(
-            text = type.sub,
+            text = stringResource(type.subRes()),
             color = LocalOnymTokens.current.text2,
             style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
         )
@@ -332,7 +344,10 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val accent = state.accent.color()
     Column(modifier = Modifier.fillMaxSize()) {
-        OnymNavTitle(title = "Add People", subtitle = "Step 2 of 2")
+        OnymNavTitle(
+            title = stringResource(R.string.create_group_step2_title),
+            subtitle = stringResource(R.string.create_group_step2_subtitle),
+        )
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -356,7 +371,8 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                 ) {
                     OnymGovIcon(type = state.governance, accent = accent, size = 28.dp)
                     Text(
-                        text = "${state.governance.label}. ${state.governance.step2Hint}",
+                        text = "${stringResource(state.governance.cardLabelRes())}. " +
+                            stringResource(state.governance.step2HintRes()),
                         color = LocalOnymTokens.current.text2,
                         style = TextStyle(fontSize = 12.5.sp, lineHeight = 17.sp),
                         modifier = Modifier.weight(1f),
@@ -384,13 +400,13 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                 ) {
                     Spacer(Modifier.height(28.dp))
                     Text(
-                        text = "No invitees yet",
+                        text = stringResource(R.string.create_group_no_invitees_title),
                         color = LocalOnymTokens.current.text,
                         style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "Use “Invite by inbox key” below to add someone.",
+                        text = stringResource(R.string.create_group_no_invitees_body),
                         color = LocalOnymTokens.current.text2,
                         style = TextStyle(fontSize = 12.5.sp),
                         textAlign = TextAlign.Center,
@@ -431,12 +447,15 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Inbox ${invitee.displayLabel}",
+                                        text = stringResource(
+                                            R.string.create_group_invitee_inbox_label,
+                                            invitee.displayLabel,
+                                        ),
                                         color = LocalOnymTokens.current.text,
                                         style = TextStyle(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
                                     )
                                     Text(
-                                        text = "Direct inbox key",
+                                        text = stringResource(R.string.create_group_invitee_inbox_subtitle),
                                         color = LocalOnymTokens.current.text2,
                                         style = TextStyle(fontSize = 12.sp),
                                     )
@@ -487,12 +506,12 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Invite by inbox key",
+                            text = stringResource(R.string.create_group_invite_by_key_row_title),
                             color = LocalOnymTokens.current.text,
                             style = TextStyle(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold),
                         )
                         Text(
-                            text = "Paste a 64-char key",
+                            text = stringResource(R.string.create_group_invite_by_key_row_subtitle),
                             color = LocalOnymTokens.current.text2,
                             style = TextStyle(fontSize = 11.5.sp),
                         )
@@ -506,12 +525,15 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
             }
             Spacer(Modifier.height(10.dp))
             OnymPrimaryButton(
-                title = state.createCtaLabel,
+                title = state.createCtaLabel.resolved(),
                 accent = accent,
                 enabled = state.canSubmit,
                 onClick = viewModel::tappedCreate,
             )
-            OnymQuietButton(title = "Back", onClick = viewModel::tappedBackFromStep2)
+            OnymQuietButton(
+                title = stringResource(R.string.back),
+                onClick = viewModel::tappedBackFromStep2,
+            )
         }
     }
 }
@@ -523,9 +545,15 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val accent = state.accent.color()
     Column(modifier = Modifier.fillMaxSize()) {
+        val groupLabel = state.name.ifEmpty {
+            stringResource(R.string.create_group_invite_by_key_default_group_label)
+        }
         OnymNavTitle(
-            title = "Invite by Inbox Key",
-            subtitle = "For ${if (state.name.isEmpty()) "group" else state.name}",
+            title = stringResource(R.string.create_group_invite_by_key_screen_title),
+            subtitle = stringResource(
+                R.string.create_group_invite_by_key_for_subtitle,
+                groupLabel,
+            ),
         )
         Column(
             modifier = Modifier
@@ -548,7 +576,7 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
                         Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                             if (state.inviteeInput.isEmpty()) {
                                 Text(
-                                    text = "Paste a 64-character hex key…",
+                                    text = stringResource(R.string.create_group_invite_by_key_placeholder),
                                     color = LocalOnymTokens.current.text3,
                                     style = TextStyle(fontSize = 14.sp),
                                 )
@@ -565,7 +593,10 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "(${state.inviteeInputCleanedLength}/64)",
+                    text = stringResource(
+                        R.string.create_group_invite_by_key_count,
+                        state.inviteeInputCleanedLength,
+                    ),
                     color = if (state.inviteeInputIsValid) accent else LocalOnymTokens.current.text3,
                     style = TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold),
                 )
@@ -579,7 +610,7 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
             }
             Spacer(Modifier.height(20.dp))
             Text(
-                text = "The recipient generates this key on their own device. They can find it in Settings → Identity → Inbox Key.",
+                text = stringResource(R.string.create_group_invite_by_key_helper),
                 color = LocalOnymTokens.current.text3,
                 style = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
             )
@@ -587,12 +618,15 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
 
         FlowFooter {
             OnymPrimaryButton(
-                title = "Add invitee",
+                title = stringResource(R.string.create_group_invite_by_key_add),
                 accent = accent,
                 enabled = state.inviteeInputIsValid,
                 onClick = viewModel::tappedAddInvitee,
             )
-            OnymQuietButton(title = "Cancel", onClick = viewModel::tappedCancelInviteByKey)
+            OnymQuietButton(
+                title = stringResource(R.string.cancel),
+                onClick = viewModel::tappedCancelInviteByKey,
+            )
         }
     }
 }
@@ -610,8 +644,11 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(20.dp))
+        val creatingName = state.name.ifEmpty {
+            stringResource(R.string.create_group_creating_default_name)
+        }
         Text(
-            text = "Creating ${state.name.ifEmpty { "Group" }}",
+            text = stringResource(R.string.create_group_creating_title, creatingName),
             color = LocalOnymTokens.current.text,
             style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
         )
@@ -621,7 +658,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
 
         OnymCard {
             Column {
-                val steps = creatingSteps(state.invitees.size)
+                val steps = creatingStepsLabels(state.invitees.size)
                 steps.forEachIndexed { index, step ->
                     if (index > 0) {
                         Box(
@@ -655,6 +692,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
                     // readability; SelectionContainer lets the user
                     // long-press to copy into a bug report.
                     // Mirrors onym-ios PR #29.
+                    val fallbackError = stringResource(R.string.create_group_error_fallback)
                     SelectionContainer(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -662,7 +700,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
                             .verticalScroll(rememberScrollState()),
                     ) {
                         Text(
-                            text = state.error?.message ?: "Couldn't create the group",
+                            text = state.error?.message ?: fallbackError,
                             color = LocalOnymTokens.current.red,
                             style = TextStyle(
                                 fontSize = 12.sp,
@@ -686,7 +724,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
                                 .padding(horizontal = 18.dp, vertical = 8.dp),
                         ) {
                             Text(
-                                text = "Cancel",
+                                text = stringResource(R.string.cancel),
                                 color = LocalOnymTokens.current.text2,
                                 style = TextStyle(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
                             )
@@ -699,7 +737,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
                                 .padding(horizontal = 18.dp, vertical = 8.dp),
                         ) {
                             Text(
-                                text = "Try again",
+                                text = stringResource(R.string.try_again),
                                 color = accent,
                                 style = TextStyle(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
                             )
@@ -710,7 +748,7 @@ private fun CreatingScreen(viewModel: CreateGroupViewModel) {
         } else {
             Spacer(Modifier.height(14.dp))
             Text(
-                text = "This usually takes a few seconds. It’s safe to close this — we’ll finish in the background.",
+                text = stringResource(R.string.create_group_helpful_note),
                 color = LocalOnymTokens.current.text3,
                 style = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
                 textAlign = TextAlign.Center,
@@ -743,13 +781,24 @@ private fun stepStatus(
     }
 }
 
-private fun creatingSteps(inviteeCount: Int): List<Pair<String, String>> = buildList {
-    add("Setting up encrypted group" to "Generating keys on your device")
-    add("Setting up your admin keys" to "You’ll be the only admin")
-    repeat(inviteeCount) { i ->
-        add("Sending invitation #${i + 1}" to "Encrypted, end-to-end")
+@Composable
+private fun creatingStepsLabels(inviteeCount: Int): List<Pair<String, String>> {
+    val setup = stringResource(R.string.create_group_step_setup) to
+        stringResource(R.string.create_group_step_setup_sub)
+    val admin = stringResource(R.string.create_group_step_admin) to
+        stringResource(R.string.create_group_step_admin_sub)
+    val invitationSub = stringResource(R.string.create_group_step_invitation_sub)
+    val invitations = (1..inviteeCount).map { n ->
+        stringResource(R.string.create_group_step_invitation, n) to invitationSub
     }
-    add("Anchoring on Stellar" to "So anyone can verify this group is real")
+    val anchor = stringResource(R.string.create_group_step_anchor) to
+        stringResource(R.string.create_group_step_anchor_sub)
+    return buildList {
+        add(setup)
+        add(admin)
+        addAll(invitations)
+        add(anchor)
+    }
 }
 
 @Composable
@@ -831,7 +880,7 @@ private fun SuccessScreen(viewModel: CreateGroupViewModel) {
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Anchored on Stellar testnet",
+            text = stringResource(R.string.create_group_anchored_testnet),
             color = LocalOnymTokens.current.text2,
             style = TextStyle(fontSize = 13.sp),
         )
@@ -840,20 +889,28 @@ private fun SuccessScreen(viewModel: CreateGroupViewModel) {
         OnymCard {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "Members",
+                    text = stringResource(R.string.create_group_members_section),
                     color = LocalOnymTokens.current.text3,
                     style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.88.sp),
                 )
                 Spacer(Modifier.height(8.dp))
+                val memberCount = group?.members?.size ?: 1
                 Text(
-                    text = "${(group?.members?.size ?: 1)} member" + if ((group?.members?.size ?: 1) == 1) "" else "s",
+                    text = pluralStringResource(
+                        R.plurals.create_group_members_count,
+                        memberCount,
+                        memberCount,
+                    ),
                     color = LocalOnymTokens.current.text,
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "${state.invitees.size} invitation" +
-                        (if (state.invitees.size == 1) "" else "s") + " sent",
+                    text = pluralStringResource(
+                        R.plurals.create_group_invitations_sent,
+                        state.invitees.size,
+                        state.invitees.size,
+                    ),
                     color = LocalOnymTokens.current.text2,
                     style = TextStyle(fontSize = 12.5.sp),
                 )
@@ -863,17 +920,57 @@ private fun SuccessScreen(viewModel: CreateGroupViewModel) {
         Spacer(Modifier.weight(1f))
         FlowFooter {
             OnymPrimaryButton(
-                title = "Share invite link",
+                title = stringResource(R.string.share_invite_link_chooser),
                 accent = accent,
                 onClick = viewModel::tappedShareInvite,
             )
             Spacer(Modifier.height(6.dp))
             OnymQuietButton(
-                title = "Done",
+                title = stringResource(R.string.done),
                 onClick = viewModel::tappedDone,
             )
         }
     }
+}
+
+// ─── Localized resource lookups for governance + CTA enums ──────
+
+@androidx.annotation.StringRes
+private fun OnymUIGovernance.cardLabelRes(): Int = when (this) {
+    OnymUIGovernance.Tyranny -> R.string.governance_tyranny_card_label
+    OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_card_label
+    OnymUIGovernance.Anarchy -> R.string.governance_anarchy_card_label
+}
+
+@androidx.annotation.StringRes
+private fun OnymUIGovernance.subRes(): Int = when (this) {
+    OnymUIGovernance.Tyranny -> R.string.governance_tyranny_sub
+    OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_sub
+    OnymUIGovernance.Anarchy -> R.string.governance_anarchy_sub
+}
+
+@androidx.annotation.StringRes
+private fun OnymUIGovernance.tooltipRes(): Int = when (this) {
+    OnymUIGovernance.Tyranny -> R.string.governance_tyranny_tooltip
+    OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_tooltip
+    OnymUIGovernance.Anarchy -> R.string.governance_anarchy_tooltip
+}
+
+@androidx.annotation.StringRes
+private fun OnymUIGovernance.step2HintRes(): Int = when (this) {
+    OnymUIGovernance.Tyranny -> R.string.governance_tyranny_step2hint
+    OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_step2hint
+    OnymUIGovernance.Anarchy -> R.string.governance_anarchy_step2hint
+}
+
+@Composable
+private fun CreateCtaLabel.resolved(): String = when (this) {
+    CreateCtaLabel.Empty -> stringResource(R.string.create_group_cta_empty)
+    CreateCtaLabel.OnePerson -> stringResource(R.string.create_group_cta_one_person)
+    is CreateCtaLabel.NPeople -> stringResource(R.string.create_group_cta_n_people, count)
+    CreateCtaLabel.OneOnOneAddOther -> stringResource(R.string.create_group_cta_oneonone_add)
+    CreateCtaLabel.OneOnOneStart -> stringResource(R.string.create_group_cta_oneonone_start)
+    CreateCtaLabel.OneOnOneTooMany -> stringResource(R.string.create_group_cta_oneonone_too_many)
 }
 
 // ─── Sticky-bottom footer wrapper ───────────────────────────────

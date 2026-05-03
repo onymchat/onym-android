@@ -35,10 +35,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.onym.android.R
 import chat.onym.android.group.IntroCapability
 import chat.onym.android.group.ShareInviteViewModel
 
@@ -70,9 +72,9 @@ fun ShareInviteScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Invite") },
+                title = { Text(stringResource(R.string.share_invite_title)) },
                 actions = {
-                    TextButton(onClick = onDone) { Text("Done") }
+                    TextButton(onClick = onDone) { Text(stringResource(R.string.done)) }
                 },
             )
         },
@@ -93,14 +95,13 @@ fun ShareInviteScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "Your group is ready",
+                text = stringResource(R.string.share_invite_hero_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Share this link with the people you want to invite. " +
-                    "You'll see and approve each request before they join.",
+                text = stringResource(R.string.share_invite_hero_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -118,6 +119,8 @@ fun ShareInviteScreen(
                 }
 
                 is ShareInviteViewModel.State.Ready -> {
+                    val chooserTitle = stringResource(R.string.share_invite_link_chooser)
+                    val clipboardLabel = stringResource(R.string.share_invite_clipboard_label)
                     Button(
                         onClick = {
                             val sendIntent = Intent().apply {
@@ -129,7 +132,7 @@ fun ShareInviteScreen(
                                 type = "text/plain"
                             }
                             context.startActivity(
-                                Intent.createChooser(sendIntent, "Share invite link"),
+                                Intent.createChooser(sendIntent, chooserTitle),
                             )
                         },
                         modifier = Modifier
@@ -142,32 +145,39 @@ fun ShareInviteScreen(
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.size(8.dp))
-                        Text("Share invite link")
+                        Text(stringResource(R.string.share_invite_link_chooser))
                     }
                     Spacer(Modifier.height(12.dp))
                     OutlinedButton(
                         onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
                                 as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Invite link", s.link))
+                            clipboard.setPrimaryClip(ClipData.newPlainText(clipboardLabel, s.link))
                             copied = true
                         },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("share_invite.copy_button"),
                     ) {
-                        Text(if (copied) "Copied!" else "Copy invite link")
+                        Text(
+                            stringResource(
+                                if (copied) R.string.share_invite_copied
+                                else R.string.share_invite_copy,
+                            ),
+                        )
                     }
                 }
 
                 is ShareInviteViewModel.State.Failed -> {
                     Text(
-                        text = "Couldn't generate an invite: ${s.reason}",
+                        text = stringResource(R.string.share_invite_failed, s.reason),
                         color = MaterialTheme.colorScheme.error,
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = { viewModel.mintFor(groupId) }) { Text("Retry") }
+                    Button(onClick = { viewModel.mintFor(groupId) }) {
+                        Text(stringResource(R.string.retry))
+                    }
                 }
             }
 
@@ -175,7 +185,7 @@ fun ShareInviteScreen(
 
             TextButton(onClick = onDone) {
                 Text(
-                    "I'll do this later",
+                    stringResource(R.string.share_invite_skip),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

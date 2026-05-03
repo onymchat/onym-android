@@ -28,9 +28,9 @@ import kotlinx.coroutines.launch
  *    input is a silent no-op in the repository (matches the iOS
  *    inline-edit "blur with empty input keeps old name" pattern).
  *
- * Errors raised by the repository surface on [errorMessage]; UI
- * shows them as a Snackbar / inline banner and clears via
- * [clearError].
+ * Errors raised by the repository surface on [error]; UI shows them
+ * as a Snackbar / inline banner (resolving the structured value to a
+ * localized string) and clears via [clearError].
  */
 class IdentitiesViewModel(
     private val identity: IdentityRepository,
@@ -40,6 +40,18 @@ class IdentitiesViewModel(
      *  the currently-selected one. */
     data class Row(val summary: IdentitySummary, val isActive: Boolean)
 
+    /** Structured error so the UI can render a localized message.
+     *  [cause] carries the underlying exception's message (or class
+     *  name when null) — substituted into a `%1$s` placeholder. */
+    sealed class Error {
+        abstract val cause: String
+
+        data class Switch(override val cause: String) : Error()
+        data class Add(override val cause: String) : Error()
+        data class Remove(override val cause: String) : Error()
+        data class Rename(override val cause: String) : Error()
+    }
+
     val items: StateFlow<List<Row>> = combine(
         identity.identities,
         identity.currentIdentityId,
@@ -47,15 +59,15 @@ class IdentitiesViewModel(
         list.map { Row(summary = it, isActive = it.id == activeId) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+    private val _error = MutableStateFlow<Error?>(null)
+    val error: StateFlow<Error?> = _error.asStateFlow()
 
     fun select(id: IdentityId) {
         viewModelScope.launch {
             try {
                 identity.select(id)
             } catch (e: Throwable) {
-                _errorMessage.value = "Couldn't switch identity: ${e.message ?: e.javaClass.simpleName}"
+                _error.value = Error.Switch(e.causeText())
             }
         }
     }
@@ -65,7 +77,7 @@ class IdentitiesViewModel(
             try {
                 identity.add(name = name)
             } catch (e: Throwable) {
-                _errorMessage.value = "Couldn't add identity: ${e.message ?: e.javaClass.simpleName}"
+                _error.value = Error.Add(e.causeText())
             }
         }
     }
@@ -75,7 +87,7 @@ class IdentitiesViewModel(
             try {
                 identity.remove(id)
             } catch (e: Throwable) {
-                _errorMessage.value = "Couldn't remove identity: ${e.message ?: e.javaClass.simpleName}"
+                _error.value = Error.Remove(e.causeText())
             }
         }
     }
@@ -87,12 +99,14 @@ class IdentitiesViewModel(
             try {
                 identity.rename(id, newName)
             } catch (e: Throwable) {
-                _errorMessage.value = "Couldn't rename identity: ${e.message ?: e.javaClass.simpleName}"
+                _error.value = Error.Rename(e.causeText())
             }
         }
     }
 
     fun clearError() {
-        _errorMessage.value = null
+        _error.value = null
     }
+
+    private fun Throwable.causeText(): String = message ?: javaClass.simpleName
 }

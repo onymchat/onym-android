@@ -341,4 +341,124 @@
     <string name="governance_oneonone">Один на один</string>
     <string name="governance_tyranny">Тирания</string>
 
+    <!-- ─── Governance card copy (CreateGroup Step 1 / Step 2) ─── -->
+    <string name="governance_tyranny_card_label">Тирания</string>
+    <string name="governance_tyranny_sub">Один админ</string>
+    <string name="governance_tyranny_oneline">Вы управляете участниками и настройками.</string>
+    <string name="governance_tyranny_tooltip">Только админ может управлять группой.</string>
+    <string name="governance_tyranny_step2hint">Вы будете единственным админом.</string>
+    <string name="governance_oneonone_card_label">1-на-1</string>
+    <string name="governance_oneonone_sub">Диалог</string>
+    <string name="governance_oneonone_oneline">Приватный разговор на двоих.</string>
+    <string name="governance_oneonone_tooltip">Ровно два человека. Никто другой не сможет присоединиться.</string>
+    <string name="governance_oneonone_step2hint">Выберите ровно одного человека.</string>
+    <string name="governance_anarchy_card_label">Анархия</string>
+    <string name="governance_anarchy_sub">Открытое управление</string>
+    <string name="governance_anarchy_oneline">У каждого участника одинаковые права.</string>
+    <string name="governance_anarchy_tooltip">Любой может добавлять, удалять или менять настройки.</string>
+    <string name="governance_anarchy_step2hint">Управление общее.</string>
+
+    <!-- ─── Generic / shared CTAs ──────────────────────────────── -->
+    <string name="retry">Повторить</string>
+
+    <!-- ─── Join chat (deeplink landing) ───────────────────────── -->
+    <string name="join_screen_title">Присоединиться к чату</string>
+    <string name="join_invite_fallback_title">Приглашение в чат</string>
+    <string name="join_invite_from">от %1$s</string>
+    <string name="join_label_field_label">Как пригласившему вас видеть?</string>
+    <string name="join_label_field_helper">Пригласивший увидит это имя в запросе на подтверждение. Он может отклонить запрос, если имя не совпадает с ожидаемым.</string>
+    <string name="join_send_request">Отправить запрос</string>
+    <string name="join_sending_request">Отправка запроса…</string>
+    <string name="join_awaiting_title">Ожидание подтверждения</string>
+    <string name="join_awaiting_body">Чат появится в списке, как только пригласивший нажмёт «Подтвердить». Этот экран можно закрыть — мы добавим чат в список автоматически.</string>
+    <string name="join_back_to_chats">Назад к чатам</string>
+    <string name="join_approved_title">Готово!</string>
+    <string name="join_approved_body">Вы участник %1$s.</string>
+    <string name="join_open_chat">Открыть чат</string>
+
+    <!-- ─── Share invite (post-create) ─────────────────────────── -->
+    <string name="share_invite_title">Приглашение</string>
+    <string name="share_invite_hero_title">Ваша группа готова</string>
+    <string name="share_invite_hero_body">Поделитесь этой ссылкой с теми, кого хотите пригласить. Вы увидите и подтвердите каждый запрос до того, как человек присоединится.</string>
+    <string name="share_invite_link_chooser">Поделиться ссылкой-приглашением</string>
+    <string name="share_invite_clipboard_label">Ссылка-приглашение</string>
+    <string name="share_invite_copy">Скопировать ссылку</string>
+    <string name="share_invite_copied">Скопировано!</string>
+    <string name="share_invite_failed">Не удалось создать приглашение: %1$s</string>
+    <string name="share_invite_skip">Сделаю это позже</string>
+
+    <!-- ─── Create group — Step 1 ─────────────────────────────── -->
+    <string name="create_group_step1_title">Новая группа</string>
+    <string name="create_group_step1_subtitle">Шаг 1 из 2</string>
+    <string name="create_group_name_placeholder">Название группы</string>
+    <string name="create_group_name_helper">Видно участникам. Можно изменить в любое время.</string>
+    <string name="create_group_accent_color">Акцентный цвет</string>
+    <string name="create_group_how_its_run">Как устроена</string>
+    <string name="create_group_soon_badge">Скоро</string>
+    <string name="create_group_encrypted_footer">Сквозное шифрование · публикуется в Stellar — каждый может проверить подлинность.</string>
+    <string name="create_group_next">Далее · Добавить участников</string>
+
+    <!-- ─── Create group — Step 2 ─────────────────────────────── -->
+    <string name="create_group_step2_title">Добавить участников</string>
+    <string name="create_group_step2_subtitle">Шаг 2 из 2</string>
+    <string name="create_group_no_invitees_title">Приглашённых пока нет</string>
+    <string name="create_group_no_invitees_body">Используйте «Пригласить по ключу входящих» ниже, чтобы добавить участника.</string>
+    <string name="create_group_invitee_inbox_label">Входящие %1$s</string>
+    <string name="create_group_invitee_inbox_subtitle">Прямой ключ входящих</string>
+    <string name="create_group_invite_by_key_row_title">Пригласить по ключу входящих</string>
+    <string name="create_group_invite_by_key_row_subtitle">Вставьте ключ из 64 символов</string>
+
+    <!-- ─── Create group — InviteByKey screen ─────────────────── -->
+    <string name="create_group_invite_by_key_screen_title">Приглашение по ключу входящих</string>
+    <string name="create_group_invite_by_key_for_subtitle">Для %1$s</string>
+    <string name="create_group_invite_by_key_default_group_label">группы</string>
+    <string name="create_group_invite_by_key_placeholder">Вставьте hex-ключ из 64 символов…</string>
+    <string name="create_group_invite_by_key_count">(%1$d/64)</string>
+    <string name="create_group_invite_by_key_helper">Получатель создаёт этот ключ на своём устройстве. Найти его можно в Настройках → Личность → Ключ входящих.</string>
+    <string name="create_group_invite_by_key_add">Добавить участника</string>
+
+    <!-- ─── Create group — Step 2 CTA labels ──────────────────── -->
+    <string name="create_group_cta_empty">Создать пустую группу</string>
+    <string name="create_group_cta_one_person">Создать с одним участником</string>
+    <string name="create_group_cta_n_people">Создать с %1$d участниками</string>
+    <string name="create_group_cta_oneonone_add">Добавьте второго участника</string>
+    <string name="create_group_cta_oneonone_start">Начать 1-на-1</string>
+    <string name="create_group_cta_oneonone_too_many">Для 1-на-1 нужен ровно один</string>
+
+    <!-- ─── Create group — Creating ───────────────────────────── -->
+    <string name="create_group_creating_title">Создание «%1$s»</string>
+    <string name="create_group_creating_default_name">группы</string>
+    <string name="create_group_step_setup">Настройка зашифрованной группы</string>
+    <string name="create_group_step_setup_sub">Генерация ключей на устройстве</string>
+    <string name="create_group_step_admin">Настройка ключей администратора</string>
+    <string name="create_group_step_admin_sub">Вы будете единственным администратором</string>
+    <string name="create_group_step_invitation">Отправка приглашения №%1$d</string>
+    <string name="create_group_step_invitation_sub">Сквозное шифрование</string>
+    <string name="create_group_step_anchor">Закрепление в Stellar</string>
+    <string name="create_group_step_anchor_sub">Чтобы каждый мог проверить подлинность группы</string>
+    <string name="create_group_error_fallback">Не удалось создать группу</string>
+    <string name="create_group_helpful_note">Обычно занимает несколько секунд. Можно закрыть экран — мы завершим в фоне.</string>
+
+    <!-- ─── Create group — Success ────────────────────────────── -->
+    <string name="create_group_anchored_testnet">Закреплено в Stellar testnet</string>
+    <string name="create_group_members_section">Участники</string>
+    <plurals name="create_group_members_count">
+        <item quantity="one">%1$d участник</item>
+        <item quantity="few">%1$d участника</item>
+        <item quantity="many">%1$d участников</item>
+        <item quantity="other">%1$d участника</item>
+    </plurals>
+    <plurals name="create_group_invitations_sent">
+        <item quantity="one">Отправлено %1$d приглашение</item>
+        <item quantity="few">Отправлено %1$d приглашения</item>
+        <item quantity="many">Отправлено %1$d приглашений</item>
+        <item quantity="other">Отправлено %1$d приглашения</item>
+    </plurals>
+
+    <!-- ─── Identities errors (Snackbar) ──────────────────────── -->
+    <string name="identities_error_switch">Не удалось переключить личность: %1$s</string>
+    <string name="identities_error_add">Не удалось добавить личность: %1$s</string>
+    <string name="identities_error_remove">Не удалось удалить личность: %1$s</string>
+    <string name="identities_error_rename">Не удалось переименовать личность: %1$s</string>
+
 </resources>
