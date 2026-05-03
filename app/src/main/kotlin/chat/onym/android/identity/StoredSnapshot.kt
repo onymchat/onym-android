@@ -39,6 +39,11 @@ data class StoredSnapshot(
     /** 32-byte BLS12-381 Fr scalar for SEP group membership. */
     @Serializable(with = ByteArrayBase64Serializer::class)
     val blsSecretKey: ByteArray,
+    /** User-supplied display name. Set at add-identity time, surfaced
+     *  via [IdentitySummary.name] in the UI. Default empty string for
+     *  the bootstrap-from-zero path; the repository auto-fills with
+     *  "Identity N" when persisting a blank name. */
+    val name: String = "",
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -50,13 +55,15 @@ data class StoredSnapshot(
         }
         return entropyEqual &&
                 nostrSecretKey.contentEquals(other.nostrSecretKey) &&
-                blsSecretKey.contentEquals(other.blsSecretKey)
+                blsSecretKey.contentEquals(other.blsSecretKey) &&
+                name == other.name
     }
 
     override fun hashCode(): Int {
         var result = entropy?.contentHashCode() ?: 0
         result = 31 * result + nostrSecretKey.contentHashCode()
         result = 31 * result + blsSecretKey.contentHashCode()
+        result = 31 * result + name.hashCode()
         return result
     }
 }
