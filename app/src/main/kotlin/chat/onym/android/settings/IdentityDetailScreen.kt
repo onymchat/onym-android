@@ -2,6 +2,7 @@ package chat.onym.android.settings
 
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -39,6 +43,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,13 +51,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.onym.android.R
@@ -159,10 +171,9 @@ fun IdentityDetailScreen(
                             )
                         }
                     }
-                    Text(
-                        text = displayName,
-                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface,
+                    EditableIdentityName(
+                        currentName = displayName,
+                        onSave = { newName -> viewModel.rename(identityId, newName) },
                     )
                     Text(
                         text = heroHex(row.summary.blsPublicKey),
@@ -433,6 +444,101 @@ fun IdentityDetailScreen(
     }
 }
 
+
+/**
+ * Tap-to-edit identity alias. Renders [currentName] as a clickable
+ * pill with a small edit pencil; tap → inline [BasicTextField] with
+ * a thin blue border, autofocus, and a 30-char cap. Commits on
+ * `Enter` (`ImeAction.Done`) or focus loss; commit-blank is a
+ * silent no-op handled in `IdentityRepository.rename`.
+ *
+ * The draft state is keyed on [currentName] so an external rename
+ * (e.g. another window of the same screen) re-seeds the field
+ * cleanly on the next recomposition.
+ *
+ * Mirrors the iOS prototype's hero-name edit affordance
+ * (`settings.jsx` lines 840–865).
+ */
+@Composable
+private fun EditableIdentityName(
+    currentName: String,
+    onSave: (String) -> Unit,
+) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember(currentName) { mutableStateOf(currentName) }
+    val focusRequester = remember { FocusRequester() }
+
+    val commit: () -> Unit = {
+        // Repository trims + treats blank as no-op; we still gate
+        // here so a blank submit doesn't trip the unchanged-write
+        // path on every blur.
+        val trimmed = draft.trim()
+        if (trimmed.isNotEmpty() && trimmed != currentName) {
+            onSave(trimmed)
+        } else {
+            draft = currentName
+        }
+        editing = false
+    }
+
+    if (editing) {
+        // Defer focus until after the field is composed so the
+        // keyboard pops on the same frame the field appears.
+        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+        BasicTextField(
+            value = draft,
+            onValueChange = { draft = it.take(MAX_IDENTITY_NAME_LENGTH) },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.headlineSmall.copy(
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { commit() }),
+            modifier = Modifier
+                .focusRequester(focusRequester)
+                .onFocusChanged { if (!it.isFocused) commit() }
+                .clip(RoundedCornerShape(8.dp))
+                .border(
+                    width = 1.5.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(8.dp),
+                )
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+                .testTag("identity_detail.name_field"),
+        )
+    } else {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { editing = true }
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+                .testTag("identity_detail.name_edit"),
+        ) {
+            Text(
+                text = currentName,
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Icon(
+                Icons.Filled.Edit,
+                contentDescription = stringResource(R.string.identity_detail_rename_action),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+/** Cap on the editable display alias — matches the iOS prototype's
+ *  `e.target.value.slice(0, 30)`. The repository accepts any length
+ *  but UI rejects further input past the cap. */
+private const val MAX_IDENTITY_NAME_LENGTH = 30
 
 @Composable
 private fun RemoveIdentityDialog(

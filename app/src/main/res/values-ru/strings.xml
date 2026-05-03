@@ -163,6 +163,8 @@
     <!-- ─── Identity detail ──────────────────────────────────────── -->
     <string name="identity_detail_title">Личность</string>
     <string name="identity_detail_active_marker">Активная</string>
+    <!-- Hero name pencil affordance — content description. -->
+    <string name="identity_detail_rename_action">Переименовать личность</string>
     <string name="identity_detail_backup_section">Резервное копирование</string>
     <string name="identity_detail_backup_status_unknown">Сделайте резервную копию фразы восстановления</string>
     <string name="identity_detail_backup_status_subtitle">Без неё восстановить эту личность будет невозможно.</string>

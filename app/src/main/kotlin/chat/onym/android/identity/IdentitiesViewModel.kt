@@ -24,6 +24,9 @@ import kotlinx.coroutines.launch
  *  - [remove] — gated by a typed-name confirm. The repository's
  *    removal listener (registered by `GroupRepository`) cascades a
  *    delete-by-owner over the identity's chats.
+ *  - [rename] — change an identity's display alias. Trimmed-blank
+ *    input is a silent no-op in the repository (matches the iOS
+ *    inline-edit "blur with empty input keeps old name" pattern).
  *
  * Errors raised by the repository surface on [errorMessage]; UI
  * shows them as a Snackbar / inline banner and clears via
@@ -73,6 +76,18 @@ class IdentitiesViewModel(
                 identity.remove(id)
             } catch (e: Throwable) {
                 _errorMessage.value = "Couldn't remove identity: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    /** Rename [id] to [newName]. Trimmed-blank inputs are a silent
+     *  no-op in the repository — UI doesn't need to pre-validate. */
+    fun rename(id: IdentityId, newName: String) {
+        viewModelScope.launch {
+            try {
+                identity.rename(id, newName)
+            } catch (e: Throwable) {
+                _errorMessage.value = "Couldn't rename identity: ${e.message ?: e.javaClass.simpleName}"
             }
         }
     }
