@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.Icon
@@ -63,6 +64,7 @@ fun SettingsScreen(
     onBackupClick: () -> Unit,
     onRelayerClick: () -> Unit,
     onAnchorsClick: () -> Unit,
+    onIdentitiesClick: () -> Unit,
     /** App-wide network preference. Bound to the Settings → Network
      *  → "Use Mainnet" Switch. */
     useMainnet: Boolean,
@@ -120,6 +122,35 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+                )
+            }
+
+            // Identities — multi-identity management (PR-5).
+            item { SectionHeader("Identities") }
+            item {
+                ListItem(
+                    headlineContent = { Text("Manage identities") },
+                    leadingContent = {
+                        SettingsIconBox(
+                            icon = Icons.Filled.Person,
+                            background = Color(0xFFAF52DE),
+                        )
+                    },
+                    trailingContent = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        )
+                    },
+                    colors = ListItemDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onIdentitiesClick)
+                        .testTag("settings.identities_row"),
                 )
             }
 

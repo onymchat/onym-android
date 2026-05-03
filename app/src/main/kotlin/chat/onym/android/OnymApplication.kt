@@ -374,6 +374,9 @@ class OnymApplication : Application() {
             makeChatsViewModel = {
                 chat.onym.android.chats.ChatsViewModel(repository = groupRepository)
             },
+            makeIdentitiesViewModel = {
+                chat.onym.android.identity.IdentitiesViewModel(identity = identityRepository)
+            },
         )
     }
 
