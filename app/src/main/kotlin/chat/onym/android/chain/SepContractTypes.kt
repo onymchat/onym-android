@@ -223,15 +223,34 @@ data class GetCommitmentPayload(
 
 // ─── responses ────────────────────────────────────────────────────
 
-/** On-chain state returned by `get_commitment`. */
+/**
+ * On-chain state returned by `get_commitment`. The contract-side
+ * `CommitmentEntry` shape varies per governance type — only
+ * [commitment] and [epoch] are present in every variant. The rest
+ * are decoded if present:
+ *
+ * | Field        | anarchy | 1v1 | tyranny | democracy | oligarchy |
+ * |--------------|---------|-----|---------|-----------|-----------|
+ * | `commitment` | ✅      | ✅  | ✅      | ✅        | ✅        |
+ * | `epoch`      | ✅      | ✅  | ✅      | ✅        | ✅        |
+ * | `timestamp`  | varies  | ✅  | ✅      | ✅        | ✅        |
+ * | `tier`       | varies  | —   | ✅      | ✅        | ✅        |
+ * | `active`     | —       | —   | —       | ✅        | ✅        |
+ *
+ * Mirrors `SEPCommitmentEntry` from onym-ios PR #36 — every optional
+ * field is `?` so the relayer can omit it without the client refusing
+ * to decode (which is how release run #25271977084 surfaced this:
+ * `MissingFieldException: Field 'active' is required` against a
+ * tyranny `get_commitment` response that doesn't ship `active`).
+ */
 @Serializable
 data class SepCommitmentEntry(
     @Serializable(with = Base64ByteArraySerializer::class)
     val commitment: ByteArray,
     val epoch: ULong,
-    val timestamp: ULong,
-    val tier: UInt,
-    val active: Boolean,
+    val timestamp: ULong? = null,
+    val tier: UInt? = null,
+    val active: Boolean? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -246,9 +265,9 @@ data class SepCommitmentEntry(
     override fun hashCode(): Int {
         var h = commitment.contentHashCode()
         h = 31 * h + epoch.hashCode()
-        h = 31 * h + timestamp.hashCode()
-        h = 31 * h + tier.hashCode()
-        h = 31 * h + active.hashCode()
+        h = 31 * h + (timestamp?.hashCode() ?: 0)
+        h = 31 * h + (tier?.hashCode() ?: 0)
+        h = 31 * h + (active?.hashCode() ?: 0)
         return h
     }
 }
