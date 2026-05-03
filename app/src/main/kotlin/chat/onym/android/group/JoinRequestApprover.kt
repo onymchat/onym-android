@@ -1,0 +1,254 @@
+package chat.onym.android.group
+
+import chat.onym.android.identity.IdentityRepository
+import chat.onym.android.identity.InvitationDecryptError
+import chat.onym.android.transport.InboxTransport
+import chat.onym.android.transport.TransportInboxId
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+
+/**
+ * Sender-side: turn raw [IntroRequest]s into UI-renderable
+ * [PendingRequest]s, and on user approval ship the actual sealed
+ * [GroupInvitationPayload] to the joiner.
+ *
+ * Lifecycle:
+ *  1. [start] subscribes to [IntroRequestStore.requests] and
+ *     decrypts each newly-arrived envelope using the matching
+ *     [IntroKeyEntry.introPrivateKey] from [IntroKeyStore]. Decrypt
+ *     failures are logged via [_decryptFailures] (drives a
+ *     debug-only counter; real users never see them).
+ *  2. UI subscribes to [pending] and renders "X wants to join Y.
+ *     Approve?" prompts.
+ *  3. On Approve → seals the existing [GroupInvitationPayload]
+ *     (built from the local [ChatGroup]) to the joiner's identity
+ *     inbox key, ships via [inboxTransport.send], revokes the
+ *     intro key. The fan-out from PR-3 stops listening on that
+ *     intro tag within one emission window.
+ *  4. On Decline → drop the request, revoke the intro key. No
+ *     NACK to the joiner; their JoinScreen times out gracefully.
+ */
+class JoinRequestApprover(
+    private val identity: IdentityRepository,
+    private val introKeyStore: IntroKeyStore,
+    private val introRequestStore: IntroRequestStore,
+    private val groupRepository: GroupRepository,
+    private val inboxTransport: InboxTransport,
+    private val scope: CoroutineScope,
+) {
+    /** UI-renderable view of one decrypted, awaiting-action request. */
+    data class PendingRequest(
+        /** Stable id == [IntroRequest.id]. Approve / Decline use it
+         *  as the dedupe key. */
+        val id: String,
+        val joinerInboxPublicKey: ByteArray,
+        val joinerDisplayLabel: String,
+        val groupId: ByteArray,
+        /** Looked up from the local [GroupRepository]. Null if the
+         *  joiner is asking about a group we don't know — surface
+         *  a "this invite isn't for any group on this device"
+         *  error in the UI rather than approving. */
+        val groupName: String?,
+    ) {
+        override fun equals(other: Any?): Boolean = this === other ||
+            (other is PendingRequest &&
+                id == other.id &&
+                joinerInboxPublicKey.contentEquals(other.joinerInboxPublicKey) &&
+                joinerDisplayLabel == other.joinerDisplayLabel &&
+                groupId.contentEquals(other.groupId) &&
+                groupName == other.groupName)
+
+        override fun hashCode(): Int {
+            var h = id.hashCode()
+            h = 31 * h + joinerInboxPublicKey.contentHashCode()
+            h = 31 * h + joinerDisplayLabel.hashCode()
+            h = 31 * h + groupId.contentHashCode()
+            h = 31 * h + (groupName?.hashCode() ?: 0)
+            return h
+        }
+    }
+
+    sealed class ApproveOutcome {
+        object Sent : ApproveOutcome()
+        object UnknownGroup : ApproveOutcome()
+        object UnknownRequest : ApproveOutcome()
+        object NoIdentityLoaded : ApproveOutcome()
+        class TransportFailed(val reason: String) : ApproveOutcome()
+    }
+
+    private val mutex = Mutex()
+    private val _pending = MutableStateFlow<List<PendingRequest>>(emptyList())
+    val pending: StateFlow<List<PendingRequest>> = _pending.asStateFlow()
+
+    /** Internal counter for decrypt failures — drives a future
+     *  diagnostic surface (e.g., Settings → Diagnostics shows
+     *  "N requests failed to decrypt" so users can detect a forged
+     *  link campaign or a corrupted intro key). */
+    private val _decryptFailures = MutableStateFlow(0)
+
+    @Suppress("unused")
+    val decryptFailures: StateFlow<Int> = _decryptFailures.asStateFlow()
+
+    /**
+     * Subscribe to [IntroRequestStore.requests] and keep [pending]
+     * in sync. Idempotent — safe to call once at app start. The
+     * collector lives for [scope]'s lifetime.
+     */
+    fun start() {
+        scope.launch {
+            introRequestStore.requests.collectLatest { raw ->
+                val decoded = raw.mapNotNull { decode(it) }
+                _pending.value = decoded
+            }
+        }
+    }
+
+    /** Test hook: decode + emit synchronously without spawning the
+     *  collector. Lets unit tests assert the decode path without
+     *  fighting collector scheduling. */
+    @androidx.annotation.VisibleForTesting
+    internal suspend fun pumpOnce() {
+        val raw = introRequestStore.requests.value
+        _pending.value = raw.mapNotNull { decode(it) }
+    }
+
+    /**
+     * Approve a pending request: build the [GroupInvitationPayload]
+     * from the local group state, seal to the joiner's inbox key,
+     * ship via Nostr, then revoke the intro slot + drop the
+     * pending entry.
+     */
+    suspend fun approve(requestId: String): ApproveOutcome = mutex.withLock {
+        val req = _pending.value.firstOrNull { it.id == requestId }
+            ?: return@withLock ApproveOutcome.UnknownRequest
+        val activeIdentity = identity.currentIdentity()
+            ?: return@withLock ApproveOutcome.NoIdentityLoaded
+
+        val group = groupRepository.snapshots.value.firstOrNull {
+            it.groupIdBytes.contentEquals(req.groupId)
+        } ?: return@withLock ApproveOutcome.UnknownGroup
+
+        val invitePayload = GroupInvitationPayload(
+            version = 1,
+            groupId = group.groupIdBytes,
+            groupSecret = group.groupSecret,
+            name = group.name,
+            members = group.members,
+            epoch = group.epoch,
+            salt = group.salt,
+            commitment = group.commitment,
+            tierRaw = group.tier.rawValue,
+            groupTypeRaw = group.groupType.wireValue,
+            adminPubkeyHex = group.adminPubkeyHex,
+        )
+        val payloadBytes = try {
+            jsonFormat.encodeToString(GroupInvitationPayload.serializer(), invitePayload)
+                .toByteArray(Charsets.UTF_8)
+        } catch (e: Throwable) {
+            return@withLock ApproveOutcome.TransportFailed("encode: ${e.message ?: e.javaClass.simpleName}")
+        }
+        val sealed = try {
+            identity.sealInvitation(payloadBytes, req.joinerInboxPublicKey)
+        } catch (e: Throwable) {
+            return@withLock ApproveOutcome.TransportFailed("seal: ${e.message ?: e.javaClass.simpleName}")
+        }
+        val joinerTag = TransportInboxId(IdentityRepository.inboxTag(req.joinerInboxPublicKey))
+        val receipt = try {
+            inboxTransport.send(sealed, joinerTag)
+        } catch (e: Throwable) {
+            return@withLock ApproveOutcome.TransportFailed("send: ${e.message ?: e.javaClass.simpleName}")
+        }
+        if (receipt.acceptedBy < 1) {
+            return@withLock ApproveOutcome.TransportFailed("no relay accepted the invitation")
+        }
+
+        // Best-effort cleanup. Both calls run regardless of failures
+        // because the request is conceptually consumed at this point;
+        // a leaked intro key is benign (sender ignores future
+        // requests on it via UnknownGroup or just not approving).
+        revokeAndConsume(introPub = findIntroPubFor(requestId), requestId = requestId)
+        ApproveOutcome.Sent
+    }
+
+    /** Decline a pending request: drop it + revoke the intro slot.
+     *  No NACK to the joiner — their JoinScreen times out. */
+    suspend fun decline(requestId: String) = mutex.withLock {
+        revokeAndConsume(introPub = findIntroPubFor(requestId), requestId = requestId)
+    }
+
+    // ─── private ──────────────────────────────────────────────────
+
+    private suspend fun decode(raw: IntroRequest): PendingRequest? {
+        // We hold the introPub on the IntroRequest from PR-3's
+        // pump. Look up the privkey via IntroKeyStore. If the
+        // privkey is missing (e.g., the entry was already revoked
+        // before we got here), drop the request silently.
+        val entry = introKeyStore.find(raw.targetIntroPublicKey) ?: return null
+
+        val plaintext = try {
+            IdentityRepository.decryptSealedEnvelopeWithKey(
+                envelopeBytes = raw.payload,
+                recipientX25519PrivateKey = entry.introPrivateKey,
+            )
+        } catch (e: InvitationDecryptError) {
+            _decryptFailures.value += 1
+            return null
+        } catch (e: Throwable) {
+            _decryptFailures.value += 1
+            return null
+        }
+        val payload = try {
+            jsonFormat.decodeFromString(JoinRequestPayload.serializer(), plaintext.toString(Charsets.UTF_8))
+        } catch (_: SerializationException) {
+            _decryptFailures.value += 1
+            return null
+        } catch (_: IllegalArgumentException) {
+            _decryptFailures.value += 1
+            return null
+        }
+        if (!payload.groupId.contentEquals(entry.groupId)) {
+            // Joiner is asking about a different group than the
+            // intro entry was minted for. Forged or stale link —
+            // drop silently.
+            _decryptFailures.value += 1
+            return null
+        }
+
+        val groupName = groupRepository.snapshots.value
+            .firstOrNull { it.groupIdBytes.contentEquals(payload.groupId) }
+            ?.name
+
+        return PendingRequest(
+            id = raw.id,
+            joinerInboxPublicKey = payload.joinerInboxPublicKey,
+            joinerDisplayLabel = payload.joinerDisplayLabel,
+            groupId = payload.groupId,
+            groupName = groupName,
+        )
+    }
+
+    private suspend fun findIntroPubFor(requestId: String): ByteArray? {
+        // PendingRequest doesn't carry the introPub (intentional —
+        // UI should never need it). Resolve via the raw store.
+        val raw = introRequestStore.requests.value.firstOrNull { it.id == requestId }
+            ?: return null
+        return raw.targetIntroPublicKey
+    }
+
+    private suspend fun revokeAndConsume(introPub: ByteArray?, requestId: String) {
+        if (introPub != null) introKeyStore.revoke(introPub)
+        introRequestStore.consume(requestId)
+    }
+
+    private companion object {
+        private val jsonFormat = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+    }
+}
