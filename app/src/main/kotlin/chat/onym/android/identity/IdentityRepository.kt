@@ -665,7 +665,7 @@ class IdentityRepository(
          * `GroupCrypto.hiddenInboxTag` in stellar-mls and
          * `IdentityRepository.inboxTag` in onym-ios.
          */
-        internal fun inboxTag(inboxPublicKey: ByteArray): String {
+        fun inboxTag(inboxPublicKey: ByteArray): String {
             val md = MessageDigest.getInstance("SHA-256")
             md.update("sep-inbox-v1".toByteArray(Charsets.UTF_8))
             md.update(inboxPublicKey)
