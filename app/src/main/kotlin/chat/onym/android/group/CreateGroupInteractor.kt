@@ -1,5 +1,6 @@
 package chat.onym.android.group
 
+import chat.onym.android.chain.AnarchyCreateGroupPayload
 import chat.onym.android.chain.AnchorSelectionKey
 import chat.onym.android.chain.CanonicalFr
 import chat.onym.android.chain.ContractsRepository
@@ -216,6 +217,20 @@ open class CreateGroupInteractor(
                     OneOnOneCreateGroupPayload(
                         groupId = groupId,
                         commitment = proof.commitment,
+                        proof = proof.proof,
+                        publicInputs = proof.publicInputs,
+                    ),
+                )
+                SepGroupType.ANARCHY -> client.createGroupAnarchy(
+                    AnarchyCreateGroupPayload(
+                        groupId = groupId,
+                        commitment = proof.commitment,
+                        tier = tier.rawValue,
+                        // Send the actual roster size so the contract's
+                        // informational `member_count` reflects reality.
+                        // The relayer would default to `0` ("not tracked")
+                        // if absent, but accurate state is cheap to send.
+                        memberCount = members.size,
                         proof = proof.proof,
                         publicInputs = proof.publicInputs,
                     ),
