@@ -1,0 +1,99 @@
+name: Release from issue
+
+# Triggered when someone opens (or labels) an issue with the `release`
+# label — typically via the "Release" issue template at
+# `.github/ISSUE_TEMPLATE/release.yml`. Discovers the current set of
+# instrumented test classes, hydrates the issue body's UI_TESTS section
+# with `- [ ] <FQN>` checkboxes, validates the tag from the issue body,
+# and dispatches the Release workflow with `tag` + `issue_number` so the
+# Release run can tick boxes / post failure comments back here.
+#
+# Re-running for the same issue is safe: hydrate is idempotent (rewrites
+# the section between `<!-- UI_TESTS_START -->` and `<!-- UI_TESTS_END -->`
+# in full each time).
+
+on:
+  issues:
+    # `labeled` only — NOT `opened` or `edited`. GitHub fires `labeled`
+    # for both template-auto-applied labels (at creation) and labels
+    # added later, so this catches every release-issue path with a
+    # single fire. Listening on `opened` would double-fire when the
+    # template auto-applies `release`. Listening on `edited` would re-
+    # dispatch every time the issue body changes (incl. when this same
+    # workflow hydrates the UI_TESTS section).
+    types: [labeled]
+
+permissions:
+  contents: read    # checkout
+  issues: write     # edit body, post comments
+  actions: write    # dispatch the Release workflow
+
+jobs:
+  hydrate-and-dispatch:
+    name: Hydrate checklist + dispatch Release
+    # Restrict to the specific label that was just added — without this,
+    # any other label change on a release-tagged issue would re-trigger.
+    if: github.event.label.name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        # No `lfs: true` — this job runs python3 over text only.
+
+      - name: Discover instrumented test classes
+        id: discover
+        run: |
+          python3 scripts/release_issue.py discover > /tmp/tests.txt
+          echo "Discovered $(wc -l < /tmp/tests.txt) test classes:"
+          cat /tmp/tests.txt
+
+      - name: Parse + validate release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          # Read the issue body fresh — `github.event.issue.body` is the
+          # snapshot at trigger time, which may be stale by a few seconds.
+          BODY=$(gh issue view ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} --json body --jq .body)
+          TAG=$(printf '%s' "$BODY" | python3 scripts/release_issue.py parse-tag)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $TAG"
+
+      - name: Hydrate UI_TESTS section
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          BODY=$(gh issue view ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} --json body --jq .body)
+          NEW_BODY=$(printf '%s' "$BODY" | python3 scripts/release_issue.py hydrate \
+            --tests /tmp/tests.txt)
+          # Idempotent: if the section is already populated with the
+          # same FQNs, the diff is a no-op. `gh issue edit` skips the
+          # API write when nothing changed.
+          printf '%s' "$NEW_BODY" | gh issue edit ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} --body-file -
+
+      - name: Dispatch Release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run Release \
+            --repo ${{ github.repository }} \
+            -f tag=${{ steps.tag.outputs.tag }} \
+            -f issue_number=${{ github.event.issue.number }}
+          echo "Dispatched Release for tag ${{ steps.tag.outputs.tag }}, issue #${{ github.event.issue.number }}"
+
+      - name: Confirm dispatch on the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # One-line acknowledgement so the issue author knows the
+          # automation kicked in. Includes a link to the Actions page —
+          # the brand-new run isn't easily linkable until it appears in
+          # the dispatched workflow's run list.
+          gh issue comment ${{ github.event.issue.number }} \
+            --repo ${{ github.repository }} \
+            --body "Dispatched [Release workflow](https://github.com/${{ github.repository }}/actions/workflows/release.yml) for tag \`${{ steps.tag.outputs.tag }}\`. UI test results will land here as the run completes."

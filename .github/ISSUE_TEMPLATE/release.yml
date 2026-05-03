@@ -1,0 +1,76 @@
+name: Release
+description: Cut a release. Auto-dispatches the Release workflow + reports test results back here.
+title: "Release: vX.Y.Z"
+labels: ["release"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Submitting this issue triggers the [Release workflow](../actions/workflows/release.yml).
+
+        - The "UI tests" section auto-populates within ~30 s of opening, then ticks each box as the corresponding test class passes on the emulator.
+        - The "Manual QA" section is yours — never overwritten by automation.
+        - On test failure, the workflow posts a comment with stack-trace excerpts and a link to the run.
+        - The signed APK build is gated on a green emulator run; failures block the artifact.
+
+  - type: input
+    id: tag
+    attributes:
+      label: Release tag
+      description: Must match `vX.Y.Z`. The Release workflow validates this and aborts if the tag already exists.
+      placeholder: v0.0.8
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Release notes (optional)
+      description: Free-form. The Release workflow generates a commit-log changelog automatically; this field is for anything additional you want surfaced.
+      placeholder: Highlight the OneOnOne flow + the LFS checkout fix.
+
+  - type: markdown
+    attributes:
+      value: |
+        ## UI tests
+
+        <!-- UI_TESTS_START -->
+        _Auto-populating… (the `release-from-issue` workflow will fill this in within ~30 s of opening)_
+        <!-- UI_TESTS_END -->
+
+        ## Manual QA
+
+        Tick by hand on a real device once the APK uploads to the GitHub Release.
+
+        <!-- MANUAL_QA_START -->
+        ### Install + onboarding
+        - [ ] Sideload the signed APK on a real device (Android 14+ recommended)
+        - [ ] First-launch onboarding flow renders without crash
+        - [ ] Bootstrap a new identity, then restart the app and confirm it persists
+        - [ ] Restore identity from a 12-word mnemonic, confirm pubkey matches
+
+        ### Create Group — Tyranny
+        - [ ] Create an empty Tyranny group against testnet, confirm it lands on the Stellar contract
+        - [ ] Create a Tyranny group with 1 invitee, confirm invitee receives sealed envelope
+        - [ ] Open Settings → toggle Mainnet, confirm next create resolves the mainnet contract binding
+
+        ### Create Group — 1-on-1
+        - [ ] Pick the 1-on-1 governance card, paste an invitee inbox key, confirm "Start 1-on-1" CTA enables only at exactly 1 invitee
+        - [ ] Create the 1-on-1 group, confirm anchor on testnet
+        - [ ] Confirm invitee receives sealed envelope carrying the ephemeral `sk_1`
+
+        ### Settings + relayer + anchors
+        - [ ] Settings → Relayer Settings → swipe-delete an endpoint, confirm primary marker clears if deleted
+        - [ ] Settings → Anchors → drill into Testnet → Tyranny, pick an older release, confirm persistence
+        - [ ] Add a custom relayer URL, confirm it lands as `custom` network endpoint
+
+        ### Theming + chrome
+        - [ ] Toggle system dark mode, every Create Group screen renders correctly in both themes
+        - [ ] Bottom-tab Chats / Settings / Search switching works without flicker
+        - [ ] Recovery-phrase backup flow (Settings → Backup) walks Intro → Reveal → Verify → Done
+
+        ### Production sanity
+        - [ ] APK installs without "package conflicts with existing" prompt over the prior release
+        - [ ] Network Settings shows the deployed `relayer.onym.chat` endpoint by default after auto-populate
+        - [ ] AltStore source updates with the new IPA URL once notarization mirrors land (separate workflow — leave unchecked if N/A)
+        <!-- MANUAL_QA_END -->

@@ -43,9 +43,20 @@ on:
         description: 'Release tag (e.g. v0.0.1)'
         required: true
         type: string
+      issue_number:
+        # Set by `release-from-issue.yml` when the workflow is dispatched
+        # from a release-tracking issue. The `report-to-issue` job uses
+        # this to tick UI_TESTS checkboxes + post failure comments back
+        # into the issue. Empty when dispatched manually via
+        # `gh workflow run Release -f tag=...`.
+        description: 'Optional release-issue number to report results into'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write   # tag push + GitHub Release creation + asset upload
+  issues: write     # report-to-issue job edits body + posts comments
 
 jobs:
   # ─── Hard gates ──────────────────────────────────────────────────
@@ -164,8 +175,12 @@ jobs:
           # keep the gradle invocation single-line to dodge the issue.
           script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.ONYM_INTEGRATION=1 -Pandroid.testInstrumentationRunnerArguments.ONYM_RELAYER_URL=https://relayer.onym.chat -Pandroid.testInstrumentationRunnerArguments.ONYM_RELAYER_AUTH_TOKEN="$RELAYER_AUTH_TOKEN"
 
-      - name: Upload androidTest report on failure
-        if: failure()
+      - name: Upload androidTest report
+        # Always upload — the `report-to-issue` job needs to read the
+        # JUnit XMLs even on a fully-green run so it can tick the
+        # UI_TESTS checkboxes in the release-tracking issue. Was
+        # `if: failure()` before the release-issue automation landed.
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: connectedAndroidTest-report
@@ -335,3 +350,55 @@ jobs:
         with:
           tag_name: ${{ inputs.tag }}
           files: ${{ steps.apk.outputs.path }}
+
+  # ─── Release-issue reporting ─────────────────────────────────────
+  # Only runs when dispatched from `release-from-issue.yml` (which
+  # passes the issue number). Ticks UI_TESTS checkboxes for passing
+  # test classes; on any failure, posts an aggregated comment with
+  # stack-trace excerpts. `if: always()` so failed runs still report.
+
+  report-to-issue:
+    name: Report test results to release issue
+    needs: [android-test]
+    if: always() && inputs.issue_number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        # No `lfs: true` — only need scripts/release_issue.py.
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: connectedAndroidTest-report
+          path: artifact
+
+      - name: Update UI_TESTS checkboxes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          BODY=$(gh issue view ${{ inputs.issue_number }} \
+            --repo ${{ github.repository }} --json body --jq .body)
+          NEW_BODY=$(printf '%s' "$BODY" | python3 scripts/release_issue.py tick \
+            --results artifact/outputs/androidTest-results)
+          # Idempotent: re-runs of the same Release dispatch overwrite
+          # the section in full.
+          printf '%s' "$NEW_BODY" | gh issue edit ${{ inputs.issue_number }} \
+            --repo ${{ github.repository }} --body-file -
+
+      - name: Post failure comment if any tests failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          python3 scripts/release_issue.py comment \
+            --results artifact/outputs/androidTest-results \
+            --run-url "$RUN_URL" > /tmp/comment.md
+          if [ -s /tmp/comment.md ]; then
+            gh issue comment ${{ inputs.issue_number }} \
+              --repo ${{ github.repository }} \
+              --body-file /tmp/comment.md
+          else
+            echo "All test classes green — no failure comment to post."
+          fi
