@@ -436,6 +436,83 @@ class CreateGroupInteractorTest {
         }
     }
 
+    // ─── Anarchy ──────────────────────────────────────────────────
+
+    @Test
+    fun create_anarchy_zeroInvitees_anchorsViaAnarchyPayload() = runBlocking {
+        // Anarchy tolerates any invitee count including zero (creator-
+        // only group is fine — the contract's `member_count` is
+        // informational, not enforced).
+        val contractsAnarchy = ContractsRepository(
+            store = InMemoryAnchorSelectionStore(),
+            fetcher = FakeContractsManifestFetcher(
+                FakeContractsManifestFetcher.Mode.Succeeds(makeManifest(includeTyranny = true, includeAnarchy = true)),
+            ),
+        )
+        contractsAnarchy.bootstrap()
+        contractsAnarchy.refresh()
+        val interactor = makeInteractor(contracts = contractsAnarchy)
+
+        val group = interactor.create(
+            name = "Anarchic group",
+            invitees = emptyList(),
+            groupType = chat.onym.android.chain.SepGroupType.ANARCHY,
+        )
+
+        assertEquals(chat.onym.android.chain.SepGroupType.ANARCHY, group.groupType)
+        assertTrue(group.isPublishedOnChain)
+        // Anarchy has no admin role on chain — adminPubkeyHex stays null.
+        assertEquals(null, group.adminPubkeyHex)
+
+        val invocations = contractTransport.invocations()
+        assertEquals(1, invocations.size)
+        assertEquals("create_group", invocations.single().function)
+
+        // No invitees → no inbox sends.
+        assertTrue(inboxTransport.sends().isEmpty())
+    }
+
+    @Test
+    fun create_anarchy_withInvitees_anchorsAndShipsInvitations() = runBlocking {
+        val contractsAnarchy = ContractsRepository(
+            store = InMemoryAnchorSelectionStore(),
+            fetcher = FakeContractsManifestFetcher(
+                FakeContractsManifestFetcher.Mode.Succeeds(makeManifest(includeTyranny = true, includeAnarchy = true)),
+            ),
+        )
+        contractsAnarchy.bootstrap()
+        contractsAnarchy.refresh()
+        val interactor = makeInteractor(contracts = contractsAnarchy)
+
+        val invitee1 = ByteArray(32) { 0x10 }
+        val invitee2 = ByteArray(32) { 0x20 }
+        val group = interactor.create(
+            name = "Open group",
+            invitees = listOf(invitee1, invitee2),
+            groupType = chat.onym.android.chain.SepGroupType.ANARCHY,
+        )
+
+        assertTrue(group.isPublishedOnChain)
+        assertEquals(2, inboxTransport.sends().size)
+    }
+
+    @Test
+    fun create_anarchy_noAnarchyBinding_throwsNoContractBinding() = runBlocking {
+        // Default contracts only has Tyranny — selecting Anarchy must
+        // raise NoContractBinding(Anarchy), not silently fall through.
+        val interactor = makeInteractor()
+        try {
+            interactor.create(
+                name = "Anarchic",
+                invitees = emptyList(),
+                groupType = chat.onym.android.chain.SepGroupType.ANARCHY,
+            )
+            error("expected NoContractBinding(Anarchy)")
+        } catch (e: CreateGroupError.NoContractBinding) {
+            assertEquals(GovernanceType.Anarchy, e.type)
+        }
+    }
+
     // ─── helpers ──────────────────────────────────────────────────
 
     private fun makeInteractor(
@@ -458,6 +535,7 @@ class CreateGroupInteractorTest {
     private fun makeManifest(
         includeTyranny: Boolean,
         includeOneOnOne: Boolean = false,
+        includeAnarchy: Boolean = false,
     ): ContractsManifest {
         val entries = buildList<ContractEntry> {
             if (includeTyranny) {
@@ -472,6 +550,13 @@ class CreateGroupInteractorTest {
                     network = ContractNetwork.Testnet,
                     type = GovernanceType.OneOnOne,
                     id = "CONEONONETEST0000000000000000000000000000000000000000000",
+                ))
+            }
+            if (includeAnarchy) {
+                add(ContractEntry(
+                    network = ContractNetwork.Testnet,
+                    type = GovernanceType.Anarchy,
+                    id = "CANARCHYTEST00000000000000000000000000000000000000000000",
                 ))
             }
         }
