@@ -1,9 +1,11 @@
 package chat.onym.android.uitests
 
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -157,9 +159,17 @@ class IdentitiesUITest {
         // confirm → Delete.
         val secondId = identityStore.listIds()[1]
         composeRule.onNodeWithTag("identities.row.${secondId.value}").performClick()
+        // Wait for IdentityDetailScreen's LazyColumn to mount, then
+        // scroll into it to materialise the Delete row's semantics.
+        // After the QR-hero PR, the screen's first viewport ends
+        // around the BACKUP card — Delete sits below the fold and
+        // never enters the semantic tree until scrolled into view,
+        // so a `waitUntil(... delete in tree)` would time out.
         composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
-            composeRule.onAllNodesWithTag("identity_detail.delete").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("identity_detail.list").fetchSemanticsNodes().isNotEmpty()
         }
+        composeRule.onNodeWithTag("identity_detail.list")
+            .performScrollToNode(hasTestTag("identity_detail.delete"))
         composeRule.onNodeWithTag("identity_detail.delete").performClick()
 
         // Type the expected name; tap Delete.

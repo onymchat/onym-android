@@ -2,10 +2,12 @@ package chat.onym.android.uitests.screens
 
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 
 /**
  * Page object for the Anchors drill-down. Three layers:
@@ -41,7 +43,17 @@ class AnchorsScreenObjects(private val rule: ComposeContentTestRule) {
     }
 
     fun tapReset(): AnchorsScreenObjects {
-        resetRow().performScrollTo().performClick()
+        // The reset row sits at the bottom of `AnchorsVersionScreen`,
+        // past the releases list, the custom-action rows, and the
+        // section header. On a CI emulator the row is below the
+        // initial viewport and the LazyColumn never realises its
+        // semantics, so a plain `performScrollTo()` (which only
+        // scrolls when the node is already in the tree) fails with
+        // "could not find any node". Scroll the parent list to the
+        // matcher first so the row materialises.
+        rule.onNodeWithTag("anchors.version.list")
+            .performScrollToNode(hasTestTag("anchors.version.reset"))
+        resetRow().performClick()
         return this
     }
 

@@ -219,13 +219,21 @@ class IdentityRepositoryInvitationDecryptTest {
     @Test
     fun decrypt_afterWipe_throwsIdentityNotLoaded() = runBlocking {
         val identity = repo.snapshots.value!!
+        // Capture the active id BEFORE wipe — `repo.wipe()` clears
+        // the active selection (and the snapshot stream) to null, so
+        // reading `currentIdentityId.value!!` afterwards would NPE
+        // before reaching `decryptInvitation`. The contract under
+        // test is that calling decrypt for a no-longer-present
+        // identity throws `IdentityNotLoaded` — same id, post-wipe
+        // store is what exercises that.
+        val identityId = repo.currentIdentityId.value!!
         val envelope = TestInvitationEncryptor.envelopeBytes(
             payload = "p".toByteArray(),
             recipientX25519Pubkey = identity.inboxPublicKey,
         )
         repo.wipe()
         val thrown = assertThrows(InvitationDecryptError.IdentityNotLoaded::class.java) {
-            runBlocking { repo.decryptInvitation(envelope, asIdentity = repo.currentIdentityId.value!!) }
+            runBlocking { repo.decryptInvitation(envelope, asIdentity = identityId) }
         }
         assertSame(InvitationDecryptError.IdentityNotLoaded, thrown)
         Unit
