@@ -228,6 +228,92 @@
     <string name="about_credits_line2">Распространяется по лицензии MIT.</string>
     <string name="about_credits_copyright">© 2026 · Onym</string>
 
+    <!-- ─── Run-your-own-relayer ─────────────────────────────────── -->
+    <string name="relayer_run_your_own_title">Запустите свой релеер</string>
+    <string name="relayer_run_your_own_subtitle">Разверните onym-relayer из GitHub за 5 минут</string>
+    <string name="run_relayer_title">Запустите свой релеер</string>
+    <string name="run_relayer_hero_title">Ваш релеер, ваши правила</string>
+    <string name="run_relayer_hero_body">Запустите релеер для себя, своей команды или организации. Сквозное шифрование сохраняется — Onym никогда не видит ваши сообщения.</string>
+    <string name="run_relayer_view_github">Открыть на GitHub</string>
+    <string name="run_relayer_read_docs">Документация</string>
+    <string name="run_relayer_step1_title">Клонируйте репозиторий</string>
+    <string name="run_relayer_step1_body">onym-relayer — открытый исходный код. Получите его на GitHub.</string>
+    <string name="run_relayer_step2_title">Настройте домен</string>
+    <string name="run_relayer_step2_body">Установите RELAYER_URL в .env. Этот URL будут использовать пользователи.</string>
+    <string name="run_relayer_step3_title">Разверните</string>
+    <string name="run_relayer_step3_body">Выберите хостинг. У Fly.io и Railway есть развёртывание в один клик.</string>
+    <string name="run_relayer_step4_title">Добавьте в Onym</string>
+    <string name="run_relayer_step4_body">Вернитесь в раздел «Релеер» и вставьте свой URL в «Добавить произвольный URL».</string>
+    <string name="run_relayer_deploy_section">Развёртывание в один клик</string>
+    <string name="run_relayer_deploy_fly">Развернуть на Fly.io</string>
+    <string name="run_relayer_deploy_fly_subtitle">Бесплатный тариф · глобальный edge</string>
+    <string name="run_relayer_deploy_railway">Развернуть на Railway</string>
+    <string name="run_relayer_deploy_railway_subtitle">Простая настройка</string>
+    <string name="run_relayer_deploy_docker">Запуск через Docker</string>
+    <string name="run_relayer_deploy_docker_subtitle">Самостоятельный хостинг где угодно</string>
+    <string name="run_relayer_footnote">Нужна помощь? Создайте issue на GitHub или присоединитесь к чату разработчиков.</string>
+
+    <!-- ─── Anchors → Custom (deploy / use existing) ─────────────── -->
+    <string name="anchors_section_custom">Произвольный</string>
+    <string name="anchors_releases_detail_footnote">Нажмите на версию, чтобы посмотреть контракт, исходный код и аудит.</string>
+    <string name="anchors_custom_deploy_title">Развернуть из исходников</string>
+    <string name="anchors_custom_deploy_subtitle">Соберите и опубликуйте свой контракт</string>
+    <string name="anchors_custom_use_title">Использовать существующий адрес</string>
+    <string name="anchors_custom_use_subtitle">Указать на уже развёрнутый контракт</string>
+    <string name="anchors_custom_footer">Onym поставляет только проверенные (или ожидающие аудита) контракты. Если у вас свой форк или развёртывание, укажите его здесь — он будет использоваться для новых чатов. Существующие чаты сохраняют свой контракт.</string>
+
+    <!-- ─── Contract Detail ──────────────────────────────────────── -->
+    <string name="contract_detail_hero_eyebrow">Контракт · %1$s</string>
+    <string name="contract_detail_hero_subtitle">Stellar %1$s</string>
+    <string name="contract_detail_onchain_section">В блокчейне</string>
+    <string name="contract_detail_explorer_title">Stellar Expert</string>
+    <string name="contract_detail_copy_address">Скопировать адрес контракта</string>
+    <string name="contract_detail_no_address">Не развернут</string>
+    <string name="contract_detail_source_section">Исходный код</string>
+    <string name="contract_detail_view_source">Открыть исходник на GitHub</string>
+    <string name="contract_detail_audit_title">Отчёт об аудите</string>
+    <string name="contract_detail_audit_subtitle">Ожидается — аудиты ещё не проведены</string>
+    <string name="contract_detail_footnote">Этот контракт привязывает группы типа «%1$s». Существующие чаты сохраняют контракт, с которым были созданы — выбор другой версии затрагивает только новые чаты.</string>
+
+    <!-- ─── Use existing contract address ────────────────────────── -->
+    <string name="use_contract_title">Использовать существующий адрес</string>
+    <string name="use_contract_hero_title">Свой контракт</string>
+    <string name="use_contract_hero_body">Привязать новые %1$s-чаты к Stellar %2$s контракту, который вы уже развернули.</string>
+    <string name="use_contract_address_section">Адрес Stellar контракта</string>
+    <string name="use_contract_address_helper">ID контракта Stellar Soroban</string>
+    <string name="use_contract_validity_ok">Корректный формат</string>
+    <string name="use_contract_validity_progress">%1$d/56 символов</string>
+    <string name="use_contract_label_section">Подпись</string>
+    <string name="use_contract_label_placeholder">Мой форк v0.0.5</string>
+    <string name="use_contract_label_footnote">Показывается рядом с адресом контракта в чатах и в списке якорей.</string>
+    <string name="use_contract_verify_button">Проверить</string>
+    <string name="use_contract_use_button">Использовать этот контракт</string>
+    <string name="use_contract_verified_title">Контракт проверен</string>
+    <string name="use_contract_verified_body">Проверка формата пройдена. Нажмите «Использовать этот контракт», чтобы привязать к нему новые чаты.</string>
+    <string name="use_contract_findit_section">Как его найти</string>
+    <string name="use_contract_findit_explorer">Открыть Stellar Expert</string>
+    <string name="use_contract_findit_cli">Soroban CLI</string>
+
+    <!-- ─── Deploy contract from source ──────────────────────────── -->
+    <string name="deploy_contract_title">Развернуть из исходников</string>
+    <string name="deploy_contract_hero_title">Собрать, развернуть, привязать</string>
+    <string name="deploy_contract_hero_body">Скомпилируйте контракт «%1$s» из исходников и разверните в Stellar %2$s прямо с этого устройства. Onym подписывает одноразовым ключом развёртывания.</string>
+    <string name="deploy_contract_source_section">Исходный код</string>
+    <string name="deploy_contract_repo">Репозиторий</string>
+    <string name="deploy_contract_ref_label">Ref</string>
+    <string name="deploy_contract_network_label">Сеть</string>
+    <string name="deploy_contract_module_label">Модуль</string>
+    <string name="deploy_contract_action">Собрать и развернуть</string>
+    <string name="deploy_contract_log_building">Сборка wasm…</string>
+    <string name="deploy_contract_log_deploying">Развёртывание в Stellar…</string>
+    <string name="deploy_contract_log_done">Готово</string>
+    <string name="deploy_contract_deployed_section">Развёрнутый контракт</string>
+    <string name="deploy_contract_deployed_title">Контракт развёрнут</string>
+    <string name="deploy_contract_view_explorer">Stellar Expert</string>
+    <string name="deploy_contract_use_button">Использовать этот контракт</string>
+    <string name="deploy_contract_cli_section">Или используйте CLI</string>
+    <string name="deploy_contract_passphrase_footnote">Сетевая passphrase: %1$s. После развёртывания через CLI вернитесь и выберите «Использовать существующий адрес».</string>
+
     <!-- ─── ContractNetwork.displayName ──────────────────────────── -->
     <string name="network_testnet">Тестовая сеть</string>
     <string name="network_public">Основная сеть</string>

@@ -1,24 +1,31 @@
 package chat.onym.android.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,6 +77,7 @@ import chat.onym.android.chain.RelayerStrategy
 fun RelayerSettingsScreen(
     viewModel: RelayerSettingsViewModel,
     onBackClick: () -> Unit,
+    onRunYourOwnClick: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     Scaffold(
@@ -197,7 +205,64 @@ fun RelayerSettingsScreen(
                 )
             }
             item { Footer(stringResource(R.string.relayer_custom_footer)) }
+
+            // ─── Run your own relayer (dark CTA) ─────────────────
+            item { RunYourOwnRelayerCta(onClick = onRunYourOwnClick) }
+            item { Spacer(Modifier.height(40.dp)) }
         }
+    }
+}
+
+@Composable
+private fun RunYourOwnRelayerCta(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(Color(0xFF1B1F24), Color(0xFF0D1117)),
+                )
+            )
+            .clickable(onClick = onClick)
+            .padding(18.dp)
+            .testTag("relayer.run_your_own"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.White.copy(alpha = 0.08f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Code,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.relayer_run_your_own_title),
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = Color.White,
+            )
+            Text(
+                text = stringResource(R.string.relayer_run_your_own_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.65f),
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.5f),
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 

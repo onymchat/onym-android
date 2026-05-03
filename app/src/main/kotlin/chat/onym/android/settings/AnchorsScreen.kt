@@ -15,7 +15,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -139,6 +141,9 @@ fun AnchorsVersionScreen(
     network: ContractNetwork,
     type: GovernanceType,
     onBackClick: () -> Unit,
+    onContractDetailClick: (version: String, contractId: String?) -> Unit = { _, _ -> },
+    onUseExistingClick: () -> Unit = {},
+    onDeployClick: () -> Unit = {},
 ) {
     viewModel.state.collectAsStateWithLifecycle()
     val rows = viewModel.versionRows(network, type)
@@ -169,8 +174,37 @@ fun AnchorsVersionScreen(
                         viewModel.pickVersion(network, type, row.release.release)
                         onBackClick()
                     },
+                    onDetailClick = { onContractDetailClick(row.release.release, row.entry.id) },
                 )
             }
+            item {
+                Footer(stringResource(R.string.anchors_releases_detail_footnote))
+            }
+
+            // ─── Custom (deploy / use existing) ──────────────────
+            item { SectionHeader(stringResource(R.string.anchors_section_custom)) }
+            item {
+                CustomActionRow(
+                    leadingTone = SettingsTile.GitHub,
+                    leadingIcon = androidx.compose.material.icons.Icons.Filled.Code,
+                    title = stringResource(R.string.anchors_custom_deploy_title),
+                    subtitle = stringResource(R.string.anchors_custom_deploy_subtitle),
+                    onClick = onDeployClick,
+                    testTagId = "anchors.custom.deploy",
+                )
+            }
+            item {
+                CustomActionRow(
+                    leadingTone = SettingsTile.Indigo,
+                    leadingIcon = androidx.compose.material.icons.Icons.Filled.AccountTree,
+                    title = stringResource(R.string.anchors_custom_use_title),
+                    subtitle = stringResource(R.string.anchors_custom_use_subtitle),
+                    onClick = onUseExistingClick,
+                    testTagId = "anchors.custom.use",
+                )
+            }
+            item { Footer(stringResource(R.string.anchors_custom_footer)) }
+
             item { SectionHeader(stringResource(R.string.anchors_section_reset)) }
             item {
                 ResetRow(
@@ -182,6 +216,51 @@ fun AnchorsVersionScreen(
             }
             item { Footer(stringResource(R.string.anchors_reset_footer)) }
         }
+    }
+}
+
+@Composable
+private fun CustomActionRow(
+    leadingTone: androidx.compose.ui.graphics.Color,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    testTagId: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag(testTagId),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SettingsTileBox(
+            icon = leadingIcon,
+            background = leadingTone,
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.size(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -272,6 +351,7 @@ private fun VersionRow(
     contractId: String,
     isCurrentlySelected: Boolean,
     onClick: () -> Unit,
+    onDetailClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -306,6 +386,22 @@ private fun VersionRow(
                     modifier = Modifier.size(14.dp),
                 )
             }
+            androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+        }
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onDetailClick)
+                .testTag("anchors.version.$label.detail"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }
