@@ -1,52 +1,88 @@
 package chat.onym.android.group
 
+import chat.onym.android.identity.ActiveIdentityProvider
+import chat.onym.android.identity.IdentityId
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * Owns the in-memory view of the user's chat groups plus the
- * corresponding writes to the persistence seam. Touch-surface
- * compliance:
+ * Owns the in-memory view of the **currently-selected identity's**
+ * chat groups plus the corresponding writes to the persistence seam.
+ * Touch-surface compliance:
  *
- *  - Holds **only** a [GroupStore] reference. No transport, no
- *    OnymSDK, no Compose, no `Context`.
- *  - Exposes a [StateFlow] for observation; [insert] / [markPublished]
- *    / [delete] / [reload] are the suspend mutators.
+ *  - Holds a [GroupStore] reference and a [chat.onym.android.identity.IdentityRepository]
+ *    (for the active-identity flow + the cascade-delete listener).
+ *  - Exposes a [StateFlow] for observation; mutators are suspend.
  *  - Mutations serialise through a [Mutex]; reads are lock-free
  *    off the [StateFlow].
  *
- * iOS uses `actor + AsyncStream` for the same role; Android stays
- * with [StateFlow] because Compose subscribes via
- * `collectAsStateWithLifecycle()` with no per-view boilerplate (same
- * argument as `IncomingInvitationsRepository` from PR #16).
+ * **Per-identity filter**: [snapshots] only emits groups whose
+ * [ChatGroup.ownerIdentityId] matches the currently-selected
+ * [IdentityId]. Switching identity → recompute. No identity
+ * selected → empty list.
  *
- * **Replay-on-subscribe** is intentional — every new collector
- * receives the current value immediately. Don't swap [StateFlow]
- * for [kotlinx.coroutines.flow.MutableSharedFlow]; PR-C's screen
- * relies on the replay so it can render an immediate snapshot
- * without a `LaunchedEffect { reload() }` dance.
+ * **Cascade delete**: registers a removal listener on
+ * [IdentityRepository] so when the user removes an identity, every
+ * group owned by that identity is deleted from disk before the
+ * identity's secrets are wiped.
  *
- * Mirrors `GroupRepository.swift` from onym-ios PR #25.
+ * Mirrors `GroupRepository.swift` from onym-ios PR #25 (extended
+ * for multi-identity in PR-3).
  */
 class GroupRepository(
     private val store: GroupStore,
+    private val identity: ActiveIdentityProvider,
+    /** Scope owning the per-identity-selection collector. The
+     *  collector lives for the process lifetime; pass an
+     *  `applicationScope` (SupervisorJob + Dispatchers.IO). */
+    private val scope: CoroutineScope,
 ) {
     private val mutex = Mutex()
     private val _snapshots = MutableStateFlow<List<ChatGroup>>(emptyList())
 
-    /** Hot stream of the user's groups, sorted by [ChatGroup.createdAtMillis]
-     *  desc. Empty until [reload] (or any mutator) runs. */
+    /** Hot stream of the **currently-selected identity's** groups,
+     *  sorted by [ChatGroup.createdAtMillis] desc. Empty until
+     *  [start] runs OR until an identity is selected — whichever
+     *  comes first. */
     val snapshots: StateFlow<List<ChatGroup>> = _snapshots.asStateFlow()
 
+    init {
+        // Cascade delete on identity removal. Single-listener — if
+        // anyone else needs the same hook, fan out via a multiplexer.
+        identity.registerRemovalListener { id ->
+            mutex.withLock { store.deleteForOwner(id.value) }
+        }
+    }
+
     /**
-     * Hydrate from disk. Idempotent — safe to call from any
-     * `onCreate` / `LaunchedEffect`. Repeated calls reload but don't
-     * error.
+     * Start observing the active-identity flow. Idempotent — safe to
+     * call from `onCreate`. Recomputes [snapshots] every time the
+     * active identity changes (including → null, which empties the
+     * list).
      */
-    suspend fun reload() = mutex.withLock { refreshLocked() }
+    fun start() {
+        scope.launch {
+            identity.currentIdentityId.collectLatest { id ->
+                mutex.withLock { refreshLocked(id) }
+            }
+        }
+    }
+
+    /**
+     * Hydrate from disk for the currently-selected identity.
+     * Idempotent — safe to call any time. Mostly redundant with
+     * [start]'s automatic recompute on identity change, but kept for
+     * tests + edge-case callers that want a deterministic refresh.
+     */
+    suspend fun reload() = mutex.withLock {
+        refreshLocked(identity.currentIdentityId.value)
+    }
 
     /**
      * Idempotent on [ChatGroup.id] (delegates to
@@ -59,27 +95,30 @@ class GroupRepository(
      */
     suspend fun insert(group: ChatGroup): Boolean = mutex.withLock {
         val inserted = store.insertOrUpdate(group)
-        refreshLocked()
+        refreshLocked(identity.currentIdentityId.value)
         inserted
     }
 
     /**
      * Mark a group as anchored on chain. The commitment, when
-     * supplied, replaces whatever was held in memory (the relayer's
-     * `get_state` is the source of truth post-anchor); a `null`
+     * supplied, replaces whatever was held in memory; a `null`
      * commitment leaves the existing column untouched.
      */
     suspend fun markPublished(id: String, commitment: ByteArray?) = mutex.withLock {
         store.markPublished(id, commitment)
-        refreshLocked()
+        refreshLocked(identity.currentIdentityId.value)
     }
 
     suspend fun delete(id: String) = mutex.withLock {
         store.delete(id)
-        refreshLocked()
+        refreshLocked(identity.currentIdentityId.value)
     }
 
-    private suspend fun refreshLocked() {
-        _snapshots.value = store.list()
+    private suspend fun refreshLocked(activeId: IdentityId?) {
+        _snapshots.value = if (activeId == null) {
+            emptyList()
+        } else {
+            store.listForOwner(activeId.value)
+        }
     }
 }

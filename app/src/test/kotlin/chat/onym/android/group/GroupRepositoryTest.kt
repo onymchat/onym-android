@@ -2,7 +2,12 @@ package chat.onym.android.group
 
 import chat.onym.android.chain.SepGroupType
 import chat.onym.android.chain.SepTier
+import chat.onym.android.identity.IdentityId
+import chat.onym.android.support.FakeActiveIdentityProvider
+import chat.onym.android.support.InMemoryGroupStore
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -12,37 +17,64 @@ import org.junit.Test
 
 /**
  * Reactive-surface tests for [GroupRepository]. Backed by an
- * in-memory [GroupStore] fake (defined at the bottom of this file)
- * so the Room layer doesn't pull in `Robolectric` /
- * `StorageEncryption` here — those are
- * [RoomGroupStoreTest]'s responsibility.
+ * in-memory [GroupStore] fake and a [FakeActiveIdentityProvider] so
+ * the Room layer doesn't pull in `Robolectric` / `StorageEncryption`
+ * here — those are [RoomGroupStoreTest]'s responsibility.
  *
- * Mirrors `GroupRepositoryTests.swift` from onym-ios PR #25.
+ * After PR-3, the repository is per-identity: every test uses
+ * `aliceId` as the active identity so the snapshot filter resolves
+ * cleanly. The cascade-delete-on-removal hook is exercised in
+ * [removeListener_cascadesDelete].
  */
 class GroupRepositoryTest {
+
+    private val aliceId = IdentityId("alice-uuid")
+    private val bobId = IdentityId("bob-uuid")
 
     @Test
     fun snapshots_replaysCurrentOnSubscribe() = runTest {
         val store = InMemoryGroupStore()
-        val group = makeGroup(id = "aa".repeat(32), name = "Family")
+        val group = makeGroup(id = "aa".repeat(32), name = "Family", owner = aliceId)
         store.preload(listOf(group))
-        val repo = GroupRepository(store)
+        val repo = makeRepo(store, active = aliceId)
         repo.reload()
 
-        // StateFlow.first() reads the current value — this is the
-        // replay-on-subscribe property the screen relies on for an
-        // immediate render.
         val snapshot = repo.snapshots.first()
         assertEquals(1, snapshot.size)
         assertEquals(group.id, snapshot.first().id)
     }
 
     @Test
+    fun snapshots_filtersToCurrentIdentity() = runTest {
+        val store = InMemoryGroupStore()
+        store.preload(listOf(
+            makeGroup(id = "aa".repeat(32), name = "Alice's", owner = aliceId),
+            makeGroup(id = "bb".repeat(32), name = "Bob's", owner = bobId),
+        ))
+        val repo = makeRepo(store, active = aliceId)
+        repo.reload()
+
+        val snapshot = repo.snapshots.first()
+        assertEquals("only Alice's group is visible while she's active", 1, snapshot.size)
+        assertEquals("Alice's", snapshot.first().name)
+    }
+
+    @Test
+    fun snapshots_emptyWhenNoActiveIdentity() = runTest {
+        val store = InMemoryGroupStore()
+        store.preload(listOf(makeGroup(id = "aa".repeat(32), name = "Family", owner = aliceId)))
+        val repo = makeRepo(store, active = null)
+        repo.reload()
+
+        assertTrue("no active identity → empty snapshot", repo.snapshots.first().isEmpty())
+    }
+
+    @Test
     fun insert_broadcastsNewSnapshot() = runTest {
         val store = InMemoryGroupStore()
-        val repo = GroupRepository(store)
+        val repo = makeRepo(store, active = aliceId)
 
-        val group = makeGroup(id = "bb".repeat(32), name = "Friends")
+        val group = makeGroup(id = "bb".repeat(32), name = "Friends", owner = aliceId)
         val inserted = repo.insert(group)
         assertTrue("first insert returns true", inserted)
 
@@ -54,9 +86,9 @@ class GroupRepositoryTest {
     @Test
     fun insert_secondCallUpdatesAndReturnsFalse() = runTest {
         val store = InMemoryGroupStore()
-        val repo = GroupRepository(store)
+        val repo = makeRepo(store, active = aliceId)
 
-        val group = makeGroup(id = "bc".repeat(32), name = "Friends")
+        val group = makeGroup(id = "bc".repeat(32), name = "Friends", owner = aliceId)
         repo.insert(group)
         val secondInserted = repo.insert(group.copy(name = "Friends (renamed)"))
 
@@ -67,9 +99,9 @@ class GroupRepositoryTest {
     @Test
     fun markPublished_broadcastsUpdatedSnapshot() = runTest {
         val store = InMemoryGroupStore()
-        val group = makeGroup(id = "cc".repeat(32), name = "G")
+        val group = makeGroup(id = "cc".repeat(32), name = "G", owner = aliceId)
         store.preload(listOf(group))
-        val repo = GroupRepository(store)
+        val repo = makeRepo(store, active = aliceId)
         repo.reload()
 
         val onchainCommitment = ByteArray(32) { 0x42 }
@@ -83,18 +115,54 @@ class GroupRepositoryTest {
     @Test
     fun delete_emptiesSnapshot() = runTest {
         val store = InMemoryGroupStore()
-        val group = makeGroup(id = "dd".repeat(32), name = "G")
+        val group = makeGroup(id = "dd".repeat(32), name = "G", owner = aliceId)
         store.preload(listOf(group))
-        val repo = GroupRepository(store)
+        val repo = makeRepo(store, active = aliceId)
         repo.reload()
 
         repo.delete(group.id)
         assertTrue(repo.snapshots.value.isEmpty())
     }
 
+    @Test
+    fun removeListener_cascadesDelete() = runTest {
+        // PR-3 wiring: removing an identity cascades a delete-by-owner
+        // through the registered listener so the about-to-be-wiped
+        // identity's chats vanish from disk before its secrets do.
+        val store = InMemoryGroupStore()
+        store.preload(listOf(
+            makeGroup(id = "aa".repeat(32), name = "Alice's", owner = aliceId),
+            makeGroup(id = "bb".repeat(32), name = "Bob's", owner = bobId),
+        ))
+        val active = FakeActiveIdentityProvider(initial = aliceId)
+        val repo = GroupRepository(
+            store = store,
+            identity = active,
+            scope = TestScope(UnconfinedTestDispatcher()),
+        )
+        repo.reload()
+        assertEquals(1, repo.snapshots.value.size)
+
+        // Simulate IdentityRepository invoking the removal listener
+        // for Alice.
+        active.emitRemoval(aliceId)
+        assertEquals(
+            "Alice's groups are gone from the store after the cascade",
+            1, store.list().size,
+        )
+        assertEquals("only Bob's group remains", "Bob's", store.list().single().name)
+    }
+
     // ─── helpers ──────────────────────────────────────────────────
 
-    private fun makeGroup(id: String, name: String) = ChatGroup(
+    private fun makeRepo(store: GroupStore, active: IdentityId?): GroupRepository =
+        GroupRepository(
+            store = store,
+            identity = FakeActiveIdentityProvider(initial = active),
+            scope = TestScope(UnconfinedTestDispatcher()),
+        )
+
+    private fun makeGroup(id: String, name: String, owner: IdentityId) = ChatGroup(
         id = id,
         name = name,
         groupSecret = ByteArray(32) { 0x33 },
@@ -107,41 +175,6 @@ class GroupRepositoryTest {
         groupType = SepGroupType.TYRANNY,
         adminPubkeyHex = null,
         isPublishedOnChain = false,
+        ownerIdentityId = owner.value,
     )
-}
-
-/**
- * In-memory [GroupStore] fake. Lives next to the test that uses it
- * because PR-B has only one consumer; promote to a `support/`
- * package when PR-C's interactor tests grow a second one. Mirrors
- * the same private-fake placement in
- * `GroupRepositoryTests.swift` (onym-ios PR #25).
- */
-private class InMemoryGroupStore : GroupStore {
-    private val rows = LinkedHashMap<String, ChatGroup>()
-
-    fun preload(groups: List<ChatGroup>) {
-        for (g in groups) rows[g.id] = g
-    }
-
-    override suspend fun list(): List<ChatGroup> =
-        rows.values.sortedByDescending { it.createdAtMillis }
-
-    override suspend fun insertOrUpdate(group: ChatGroup): Boolean {
-        val isNew = !rows.containsKey(group.id)
-        rows[group.id] = group
-        return isNew
-    }
-
-    override suspend fun markPublished(id: String, commitment: ByteArray?) {
-        val existing = rows[id] ?: return
-        rows[id] = existing.copy(
-            isPublishedOnChain = true,
-            commitment = commitment ?: existing.commitment,
-        )
-    }
-
-    override suspend fun delete(id: String) {
-        rows.remove(id)
-    }
 }

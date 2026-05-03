@@ -234,6 +234,7 @@ class RoomGroupStoreTest {
             groupType = SepGroupType.TYRANNY,
             adminPubkeyHex = adminPubkeyHex,
             isPublishedOnChain = false,
+            ownerIdentityId = "test-owner",
         )
     }
 

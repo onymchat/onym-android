@@ -107,7 +107,13 @@ class CreateGroupInteractorTest {
             contracts.refresh()
         }
 
-        groups = GroupRepository(InMemoryGroupStore())
+        groups = GroupRepository(
+            store = InMemoryGroupStore(),
+            identity = identity,
+            scope = kotlinx.coroutines.CoroutineScope(
+                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined,
+            ),
+        )
         inboxTransport = ConfigurableInboxTransport()
         contractTransport = ConfigurableContractTransport()
     }

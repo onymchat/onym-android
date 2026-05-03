@@ -6,9 +6,12 @@ import chat.onym.android.chain.SepGroupType
 import chat.onym.android.chain.SepTier
 import chat.onym.android.group.ChatGroup
 import chat.onym.android.group.GroupRepository
+import chat.onym.android.identity.IdentityId
+import chat.onym.android.support.FakeActiveIdentityProvider
 import chat.onym.android.support.InMemoryGroupStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -37,7 +40,11 @@ class ChatsViewModelTest {
     @Test
     fun groups_startsEmpty_whenRepositoryHasNoRows() = runTest {
         val store = InMemoryGroupStore()
-        val repository = GroupRepository(store)
+        val repository = GroupRepository(
+            store = store,
+            identity = FakeActiveIdentityProvider(initial = IdentityId("test-owner")),
+            scope = TestScope(UnconfinedTestDispatcher()),
+        )
         repository.reload()
 
         val vm = ChatsViewModel(repository)
@@ -48,7 +55,11 @@ class ChatsViewModelTest {
     @Test
     fun groups_reflectsRepositoryUpdates() = runTest {
         val store = InMemoryGroupStore()
-        val repository = GroupRepository(store)
+        val repository = GroupRepository(
+            store = store,
+            identity = FakeActiveIdentityProvider(initial = IdentityId("test-owner")),
+            scope = TestScope(UnconfinedTestDispatcher()),
+        )
         repository.reload()
         val vm = ChatsViewModel(repository)
         // Touch the StateFlow so the subscribe-side collector starts
@@ -67,7 +78,11 @@ class ChatsViewModelTest {
     @Test
     fun groups_sortedByCreatedAtDescending() = runTest {
         val store = InMemoryGroupStore()
-        val repository = GroupRepository(store)
+        val repository = GroupRepository(
+            store = store,
+            identity = FakeActiveIdentityProvider(initial = IdentityId("test-owner")),
+            scope = TestScope(UnconfinedTestDispatcher()),
+        )
         repository.insert(makeGroup(id = "01".repeat(32), name = "older", createdAtMillis = 1_700_000_000_000L))
         repository.insert(makeGroup(id = "02".repeat(32), name = "newer", createdAtMillis = 1_700_000_500_000L))
         repository.reload()
@@ -95,5 +110,6 @@ class ChatsViewModelTest {
         groupType = SepGroupType.TYRANNY,
         adminPubkeyHex = null,
         isPublishedOnChain = false,
+            ownerIdentityId = "test-owner",
     )
 }

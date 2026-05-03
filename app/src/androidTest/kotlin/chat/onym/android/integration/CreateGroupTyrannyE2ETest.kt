@@ -291,7 +291,13 @@ class CreateGroupTyrannyE2ETest {
             binding != null,
         )
 
-        val groups = GroupRepository(InMemoryGroupStore())
+        val groups = GroupRepository(
+            store = InMemoryGroupStore(),
+            identity = identity,
+            scope = kotlinx.coroutines.CoroutineScope(
+                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined,
+            ),
+        )
         val networkPreference = StaticNetworkPreferenceProvider(AppNetwork.Testnet)
 
         val makeContractTransport: (String) -> SepContractTransport = { url ->

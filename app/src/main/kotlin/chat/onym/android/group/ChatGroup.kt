@@ -3,6 +3,7 @@ package chat.onym.android.group
 import chat.onym.android.chain.SepGroupType
 import chat.onym.android.chain.SepTier
 import chat.onym.android.identity.Base64ByteArraySerializer
+import chat.onym.android.identity.IdentityId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -66,7 +67,24 @@ data class ChatGroup(
      */
     @SerialName("is_published_on_chain")
     val isPublishedOnChain: Boolean = false,
+    /**
+     * Stamped at create time from the currently-selected identity.
+     * Drives the per-identity chat-list filter:
+     * `GroupRepository.snapshots` only emits groups whose
+     * [ownerIdentityId] matches the active id. Removing an identity
+     * cascades a delete-by-owner over this column.
+     *
+     * Stored as the underlying `IdentityId.value` string so Room can
+     * persist it as a plain TEXT column without a custom converter.
+     */
+    @SerialName("owner_identity_id")
+    val ownerIdentityId: String,
 ) {
+    /** Strongly-typed accessor — same value as [ownerIdentityId] but
+     *  wrapped so callers don't carry stringly-typed identity ids
+     *  through the codebase. */
+    val owner: IdentityId get() = IdentityId(ownerIdentityId)
+
     /** Group ID as the raw 32-byte payload, parsed back from [id].
      *  Used directly when building chain payloads + invitations. */
     val groupIdBytes: ByteArray
@@ -86,7 +104,8 @@ data class ChatGroup(
             tier == other.tier &&
             groupType == other.groupType &&
             adminPubkeyHex == other.adminPubkeyHex &&
-            isPublishedOnChain == other.isPublishedOnChain
+            isPublishedOnChain == other.isPublishedOnChain &&
+            ownerIdentityId == other.ownerIdentityId
     }
 
     override fun hashCode(): Int {
@@ -102,6 +121,7 @@ data class ChatGroup(
         h = 31 * h + groupType.hashCode()
         h = 31 * h + (adminPubkeyHex?.hashCode() ?: 0)
         h = 31 * h + isPublishedOnChain.hashCode()
+        h = 31 * h + ownerIdentityId.hashCode()
         return h
     }
 

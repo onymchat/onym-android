@@ -129,7 +129,7 @@ class CreateGroupOneOnOneE2ETest {
 
     @After
     fun tearDown() {
-        try { identityStore.wipe() } catch (_: Throwable) { /* best-effort */ }
+        try { identityStore.wipeAll() } catch (_: Throwable) { /* best-effort */ }
     }
 
     // ─── Tests ───────────────────────────────────────────────────
@@ -326,7 +326,13 @@ class CreateGroupOneOnOneE2ETest {
             binding != null,
         )
 
-        val groups = GroupRepository(InMemoryGroupStore())
+        val groups = GroupRepository(
+            store = InMemoryGroupStore(),
+            identity = identity,
+            scope = kotlinx.coroutines.CoroutineScope(
+                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined,
+            ),
+        )
         val networkPreference = StaticNetworkPreferenceProvider(AppNetwork.Testnet)
 
         val makeContractTransport: (String) -> SepContractTransport = { url ->

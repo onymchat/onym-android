@@ -29,6 +29,18 @@ class InMemoryGroupStore : GroupStore {
         rows.values.sortedByDescending { it.createdAtMillis }
     }
 
+    override suspend fun listForOwner(ownerIdentityId: String): List<ChatGroup> = mutex.withLock {
+        rows.values
+            .filter { it.ownerIdentityId == ownerIdentityId }
+            .sortedByDescending { it.createdAtMillis }
+    }
+
+    override suspend fun deleteForOwner(ownerIdentityId: String): Int = mutex.withLock {
+        val before = rows.size
+        rows.values.removeAll { it.ownerIdentityId == ownerIdentityId }
+        before - rows.size
+    }
+
     override suspend fun insertOrUpdate(group: ChatGroup): Boolean = mutex.withLock {
         val isNew = !rows.containsKey(group.id)
         rows[group.id] = group
