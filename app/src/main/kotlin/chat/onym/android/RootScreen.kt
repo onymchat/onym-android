@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
@@ -88,6 +89,7 @@ fun RootScreen(dependencies: AppDependencies) {
                             icon = { Icon(tab.icon(), contentDescription = null) },
                             label = { Text(stringResource(tab.labelRes)) },
                             selected = currentRoute == tab.route,
+                            modifier = androidx.compose.ui.Modifier.testTag("nav.tab.${tab.route}"),
                             onClick = {
                                 navController.navigate(tab.route) {
                                     // Keep a single instance of each tab destination
