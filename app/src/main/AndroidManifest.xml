@@ -42,6 +42,39 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+                Universal "App Link" entry point for Level-2 invite
+                deeplinks (PR-6/7 in the deeplink-invite stack).
+
+                `autoVerify="true"`: Android fetches
+                https://onym.chat/.well-known/assetlinks.json on
+                install; if the SHA-256 cert fingerprint matches our
+                signing cert (40:AD:4E:78:…:CAD), the system opens
+                the link directly in onym-android without the
+                disambiguator chooser. assetlinks.json is already
+                served (verified live) — no server change needed.
+
+                Custom-scheme `onym://join` filter is the fallback for
+                pre-verification states (e.g., install-via-sideload
+                before assetlinks fetch completes) and for direct
+                test invocations from adb / shell.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https"
+                      android:host="onym.chat"
+                      android:pathPrefix="/join" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="onym" android:host="join" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

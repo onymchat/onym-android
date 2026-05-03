@@ -11,6 +11,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -32,6 +33,8 @@ import chat.onym.android.chain.GovernanceType
 import chat.onym.android.chats.ChatsScreen
 import chat.onym.android.chats.ChatsViewModel
 import chat.onym.android.group.CreateGroupViewModel
+import chat.onym.android.group.IntroCapability
+import chat.onym.android.group.JoinInviteCapturedPlaceholder
 import chat.onym.android.group.ShareInviteViewModel
 import chat.onym.android.group.creategroup.CreateGroupScreen
 import chat.onym.android.group.creategroup.ShareInviteScreen
@@ -76,10 +79,32 @@ import chat.onym.android.settings.SettingsScreen
  * composable in this graph holds a reference to a repository.
  */
 @Composable
-fun RootScreen(dependencies: AppDependencies) {
+fun RootScreen(
+    dependencies: AppDependencies,
+    /** Set by [MainActivity] when an `https://onym.chat/join?c=…` or
+     *  `onym://join?c=…` intent arrives — cold start or via
+     *  `addOnNewIntentListener`. RootScreen navigates to the join
+     *  destination when this flips non-null. */
+    pendingCapability: IntroCapability? = null,
+    /** Called immediately after RootScreen has issued the navigation
+     *  for [pendingCapability]. Lets the host clear its slot so a
+     *  later back-navigation doesn't re-fire the same capability. */
+    onPendingCapabilityHandled: () -> Unit = {},
+) {
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
+
+    // Forward an inbound deeplink capability to the join destination.
+    // The capability's encoded form is short and URL-safe — embed it
+    // as a path arg so the target composable can decode it without
+    // touching shared state. Acks the host immediately after the
+    // navigate() call (no need to wait for the destination to render).
+    LaunchedEffect(pendingCapability) {
+        val cap = pendingCapability ?: return@LaunchedEffect
+        navController.navigate("join_invite/${cap.encode()}")
+        onPendingCapabilityHandled()
+    }
 
     Scaffold(
         bottomBar = {
@@ -184,6 +209,30 @@ fun RootScreen(dependencies: AppDependencies) {
                     groupId = groupId,
                     viewModel = vm,
                     onDone = { navController.popBackStack() },
+                )
+            }
+            // Inbound deeplink destination. Path arg carries the
+            // url-safe-base64-of-JSON capability — re-decoded here
+            // (rather than threading the value type through nav args)
+            // so the screen survives process death: the system
+            // rebuilds the back stack from the saved route strings,
+            // and re-decoding from the path arg restores the same
+            // capability without round-tripping through a Parcelable.
+            //
+            // Placeholder body in PR-6 — PR-7 swaps in the real
+            // JoinScreen + JoinViewModel that calls
+            // JoinRequestSender.send(...).
+            composable("join_invite/{capability}") { entry ->
+                val encoded = entry.arguments?.getString("capability")
+                    ?: return@composable
+                val capability = try {
+                    IntroCapability.decode(encoded)
+                } catch (_: Throwable) {
+                    return@composable
+                }
+                JoinInviteCapturedPlaceholder(
+                    capability = capability,
+                    onBackClick = { navController.popBackStack() },
                 )
             }
             composable(Tab.Search.route) {
