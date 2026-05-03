@@ -52,6 +52,8 @@ import chat.onym.android.R
 import chat.onym.android.group.OnymMark
 import chat.onym.android.identity.IdentitiesViewModel
 import chat.onym.android.identity.IdentityId
+import chat.onym.android.identity.IdentitySummary
+import chat.onym.android.identity.inviteUrl
 
 /**
  * Settings home — Apple-Settings-style, brand-anchored on the
@@ -90,6 +92,11 @@ fun SettingsScreen(
     val items by identitiesViewModel.items.collectAsStateWithLifecycle()
     val active = items.firstOrNull { it.isActive }
     val identityCount = items.size
+    // Resolve display copy that the LazyColumn item blocks need from
+    // outside the LazyListScope (item content is @Composable, but
+    // LazyListScope itself is not — `stringResource` would fail there).
+    val unnamedFallback = stringResource(R.string.identity_unnamed)
+    val activeName = active?.summary?.name?.ifBlank { unnamedFallback }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -108,13 +115,21 @@ fun SettingsScreen(
                 .testTag("settings.list"),
         ) {
             // ─── Active identity hero ──────────────────────────────
-            if (active != null) {
+            if (active != null && activeName != null) {
                 item {
                     ActiveIdentityHero(
-                        name = active.summary.name.ifBlank {
-                            stringResource(R.string.identity_unnamed)
-                        },
+                        name = activeName,
                         keyHex = heroHex(active.summary.blsPublicKey),
+                        onClick = { onIdentityDetailClick(active.summary.id) },
+                    )
+                }
+                // Invite QR hero — compact card directly under the
+                // active-identity row. Tap opens the identity detail
+                // screen, which surfaces a full-size QR + copy/share.
+                item {
+                    InviteQrHero(
+                        summary = active.summary,
+                        activeName = activeName,
                         onClick = { onIdentityDetailClick(active.summary.id) },
                     )
                 }
@@ -305,6 +320,69 @@ private fun ActiveIdentityHero(
             Text(
                 text = keyHex,
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+/**
+ * Compact "Invite key" hero — a small QR with the active identity's
+ * invite URL on the left, an eyebrow + headline + subtitle on the
+ * right. Tapping the card hands off to the Identity Detail screen
+ * for the full-size QR + Copy / Share actions.
+ *
+ * Mirrors the iOS prototype's second hero card under the active-
+ * identity row (`settings.jsx` lines 559–587).
+ */
+@Composable
+private fun InviteQrHero(
+    summary: IdentitySummary,
+    activeName: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 18.dp)
+            .testTag("settings.invite_qr_hero"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.White)
+                .padding(8.dp),
+        ) {
+            OnymQrCode(value = summary.inviteUrl(), size = 92.dp)
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.settings_invite_qr_eyebrow).uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = stringResource(R.string.settings_invite_qr_title),
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.settings_invite_qr_subtitle, activeName),
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

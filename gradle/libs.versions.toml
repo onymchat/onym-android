@@ -43,6 +43,12 @@ onym-sdk = "0.0.2"
 # Crypto
 bouncycastle = "1.78.1"
 
+# ZXing — pure-Java QR encoder (Apache 2.0). The `core` artifact is
+# free of any Android dependency; we render the resulting BitMatrix
+# ourselves on a Compose `Canvas`, so the heavier `zxing-android`
+# extras (camera, intent integrators) stay out of the APK.
+zxing-core = "3.5.3"
+
 # Room — Kotlin-coroutines DAO (`suspend` queries) + KSP-generated
 # bindings. 2.6.1 is the newest stable that pairs cleanly with AGP
 # 8.7 and Kotlin 2.0.21 KSP without dragging in 2.7's KMP refactor.
@@ -116,6 +122,10 @@ androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref =
 
 # BouncyCastle — Curve25519 (Ed25519 + X25519) raw-key APIs not in the JDK
 bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+
+# ZXing core — QR-bit-matrix generator. Drawn by `OnymQrCode` onto a
+# Compose Canvas; no Android-side ZXing artifact needed.
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing-core" }
 
 # Test
 junit = { module = "junit:junit", version.ref = "junit" }

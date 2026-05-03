@@ -151,6 +151,11 @@
     <string name="settings_about_title">About Onym</string>
     <string name="settings_about_subtitle">Version %1$s (build %2$s)</string>
 
+    <!-- ─── Settings home → Invite QR hero ───────────────────────── -->
+    <string name="settings_invite_qr_eyebrow">Invite key</string>
+    <string name="settings_invite_qr_title">Start a chat by scanning</string>
+    <string name="settings_invite_qr_subtitle">Have someone scan this code with Onym to open a private chat with %1$s.</string>
+
     <!-- ─── Identities list (redesigned) ─────────────────────────── -->
     <string name="identities_screen_title">Identities</string>
     <string name="identities_screen_intro">Tap an identity to open it. Each identity has its own keys, chats, and recovery phrase.</string>
@@ -167,6 +172,15 @@
     <string name="identity_detail_backup_status_subtitle">Without your phrase you can\'t restore this identity.</string>
     <string name="identity_detail_backup_action">View recovery phrase</string>
     <string name="identity_detail_backup_action_subtitle">12 words · BIP-39</string>
+    <!-- Per-identity invite QR card on the Identity Detail screen. -->
+    <string name="identity_detail_invite_section">Invite key</string>
+    <string name="identity_detail_invite_caption">Scan with Onym on another device to open a private chat with this identity.</string>
+    <string name="identity_detail_invite_copy">Copy link</string>
+    <string name="identity_detail_invite_share">Share</string>
+    <string name="identity_detail_invite_footnote">Anyone with this code can start a chat with you. The chat itself is end-to-end encrypted.</string>
+    <string name="identity_detail_invite_share_chooser">Share invite link</string>
+    <string name="identity_detail_invite_share_text">Start a chat with me on Onym: %1$s</string>
+
     <string name="identity_detail_state_section">State</string>
     <string name="identity_detail_set_active">Set as active</string>
     <string name="identity_detail_advanced_section">Advanced</string>

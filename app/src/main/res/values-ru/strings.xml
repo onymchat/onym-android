@@ -147,6 +147,11 @@
     <string name="settings_about_title">О приложении Onym</string>
     <string name="settings_about_subtitle">Версия %1$s (сборка %2$s)</string>
 
+    <!-- ─── Settings home → Invite QR hero ───────────────────────── -->
+    <string name="settings_invite_qr_eyebrow">Ключ-приглашение</string>
+    <string name="settings_invite_qr_title">Начните чат, отсканировав код</string>
+    <string name="settings_invite_qr_subtitle">Дайте кому-нибудь отсканировать этот код в Onym, чтобы открыть приватный чат с %1$s.</string>
+
     <!-- ─── Identities list (redesigned) ─────────────────────────── -->
     <string name="identities_screen_title">Личности</string>
     <string name="identities_screen_intro">Нажмите на личность, чтобы открыть её. У каждой личности свои ключи, чаты и фраза восстановления.</string>
@@ -163,6 +168,15 @@
     <string name="identity_detail_backup_status_subtitle">Без неё восстановить эту личность будет невозможно.</string>
     <string name="identity_detail_backup_action">Показать фразу восстановления</string>
     <string name="identity_detail_backup_action_subtitle">12 слов · BIP-39</string>
+    <!-- Per-identity invite QR card on the Identity Detail screen. -->
+    <string name="identity_detail_invite_section">Ключ-приглашение</string>
+    <string name="identity_detail_invite_caption">Отсканируйте в Onym на другом устройстве, чтобы открыть приватный чат с этой личностью.</string>
+    <string name="identity_detail_invite_copy">Копировать ссылку</string>
+    <string name="identity_detail_invite_share">Поделиться</string>
+    <string name="identity_detail_invite_footnote">Любой обладатель этого кода может начать чат с вами. Сам чат сквозно зашифрован.</string>
+    <string name="identity_detail_invite_share_chooser">Поделиться ссылкой-приглашением</string>
+    <string name="identity_detail_invite_share_text">Начните чат со мной в Onym: %1$s</string>
+
     <string name="identity_detail_state_section">Статус</string>
     <string name="identity_detail_set_active">Сделать активной</string>
     <string name="identity_detail_advanced_section">Расширенные</string>
