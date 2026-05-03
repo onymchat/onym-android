@@ -3,6 +3,9 @@ package chat.onym.android.support
 import chat.onym.android.group.IntroKeyEntry
 import chat.onym.android.group.IntroKeyStore
 import chat.onym.android.identity.IdentityId
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -18,9 +21,13 @@ class InMemoryIntroKeyStore : IntroKeyStore {
     private val mutex = Mutex()
     private val entries = mutableListOf<IntroKeyEntry>()
 
+    private val _entriesFlow = MutableStateFlow<List<IntroKeyEntry>>(emptyList())
+    override val entriesFlow: StateFlow<List<IntroKeyEntry>> = _entriesFlow.asStateFlow()
+
     override suspend fun save(entry: IntroKeyEntry) = mutex.withLock {
         entries.removeAll { it.introPublicKey.contentEquals(entry.introPublicKey) }
         entries += entry
+        _entriesFlow.value = entries.toList()
     }
 
     override suspend fun find(introPublicKey: ByteArray): IntroKeyEntry? = mutex.withLock {
@@ -35,13 +42,16 @@ class InMemoryIntroKeyStore : IntroKeyStore {
 
     override suspend fun revoke(introPublicKey: ByteArray) {
         mutex.withLock {
-            entries.removeAll { it.introPublicKey.contentEquals(introPublicKey) }
+            val changed = entries.removeAll { it.introPublicKey.contentEquals(introPublicKey) }
+            if (changed) _entriesFlow.value = entries.toList()
         }
     }
 
     override suspend fun deleteForOwner(ownerIdentityId: IdentityId): Int = mutex.withLock {
         val before = entries.size
         entries.removeAll { it.ownerIdentityId == ownerIdentityId }
-        before - entries.size
+        val removed = before - entries.size
+        if (removed > 0) _entriesFlow.value = entries.toList()
+        removed
     }
 }
