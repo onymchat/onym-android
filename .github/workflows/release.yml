@@ -261,6 +261,13 @@ jobs:
           # true` the binary content is missing and AAPT2 fails with
           # "file failed to compile" on the pointer text.
           lfs: true
+          # Full history + tags so `resolveReleaseVersion()` in
+          # `app/build.gradle.kts` can fall back to `git describe` if
+          # the explicit `RELEASE_VERSION` env below isn't honoured
+          # for some reason. Belt + braces — the env is the canonical
+          # path; this just keeps a working fallback rather than
+          # silently shipping `0.0.0-dev`.
+          fetch-depth: 0
 
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
         with:
@@ -274,6 +281,11 @@ jobs:
         # (no signingConfig is declared on the release buildType, so
         # AGP emits an unsigned APK rather than failing the build).
         #
+        # RELEASE_VERSION pipes the dispatch tag straight into
+        # `resolveReleaseVersion()` in `app/build.gradle.kts`, which
+        # surfaces it as `BuildConfig.VERSION_NAME` (the About screen
+        # reads this directly). Single source of truth = the tag.
+        #
         # RELAYER_AUTH_TOKEN is consumed by `relayerAuthToken()` in
         # `app/build.gradle.kts` and inlined into BuildConfig at
         # compile time; runtime `BearerAuthInterceptor` reads it from
@@ -281,6 +293,7 @@ jobs:
         # — without it, release builds compile and ship but every
         # relayer call 401s with "missing bearer".
         env:
+          RELEASE_VERSION: ${{ inputs.tag }}
           RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
         run: ./gradlew :app:assembleRelease --no-daemon
 
