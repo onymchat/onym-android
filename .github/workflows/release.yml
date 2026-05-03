@@ -68,6 +68,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # Launcher icons (`ic_launcher_foreground.png`,
+          # `ic_launcher_monochrome.png`) live in Git LFS — without
+          # this AAPT2 sees the ~130-byte pointer text and `fail to
+          # compile` blows up the build. Run #25272219941 surfaced it.
+          lfs: true
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
         with:
           distribution: temurin
@@ -91,6 +97,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # AAPT2 needs the real launcher PNGs (Git LFS), not the
+          # pointer text. Same reason as the JVM-tests job above.
+          lfs: true
 
       - name: Enable KVM group permissions
         run: |
@@ -230,6 +240,12 @@ jobs:
     needs: [lint, test, android-test, create-release]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # `assembleRelease` runs AAPT2 over `app/src/main/res/`,
+          # which includes LFS-tracked launcher PNGs. Without `lfs:
+          # true` the binary content is missing and AAPT2 fails with
+          # "file failed to compile" on the pointer text.
+          lfs: true
 
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
         with:
