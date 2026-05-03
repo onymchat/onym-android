@@ -47,4 +47,6 @@ class AppDependencies(
     val makeChatsViewModel: () -> ChatsViewModel,
     /** Settings → Identities — multi-identity management (PR-5). */
     val makeIdentitiesViewModel: () -> chat.onym.android.identity.IdentitiesViewModel,
+    /** Post-create deeplink invite share (deeplink-invite PR-5). */
+    val makeShareInviteViewModel: () -> chat.onym.android.group.ShareInviteViewModel,
 )

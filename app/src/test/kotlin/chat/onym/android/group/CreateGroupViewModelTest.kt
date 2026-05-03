@@ -2,6 +2,8 @@
 
 package chat.onym.android.group
 
+import chat.onym.android.chain.SepGroupType
+import chat.onym.android.chain.SepTier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -331,6 +333,48 @@ class CreateGroupViewModelTest {
     }
 
     @Test
+    fun tappedShareInvite_handsOffGroupIdAndClosesFlow() = runTest {
+        val createdGroupId = "ab".repeat(32)
+        val vm = makeViewModelReturning(makeFakeGroup(id = createdGroupId))
+        var closedCount = 0
+        var sharedId: String? = null
+        vm.onClose = { closedCount++ }
+        vm.onShareInvite = { sharedId = it }
+
+        vm.submit()
+        // Sanity: pipeline succeeded.
+        assertNotNull(vm.state.value.createdGroup)
+
+        vm.tappedShareInvite()
+
+        // Order is "close → share" so the host can pop the create
+        // screen first then push share-invite. Both happen.
+        assertEquals(1, closedCount)
+        assertEquals(createdGroupId, sharedId)
+        // State is reset back to a fresh Step1 — re-entering the
+        // create flow doesn't carry the prior group along.
+        val state = vm.state.value
+        assertEquals(CreateGroupRoute.Step1, state.route)
+        assertNull(state.createdGroup)
+    }
+
+    @Test
+    fun tappedShareInvite_isNoOpWhenNoGroupCreated() = runTest {
+        val vm = makeViewModel()
+        var closedCount = 0
+        var sharedId: String? = null
+        vm.onClose = { closedCount++ }
+        vm.onShareInvite = { sharedId = it }
+
+        vm.tappedShareInvite()
+
+        // Without a createdGroup the call is a no-op — protects
+        // against a stray tap before submit() resolves.
+        assertEquals(0, closedCount)
+        assertNull(sharedId)
+    }
+
+    @Test
     fun cancelFromError_closesAndResets() = runTest {
         val vm = makeViewModel()
         var closedCount = 0
@@ -377,5 +421,30 @@ class CreateGroupViewModelTest {
         createGroup = { _, _, _, _ ->
             error("createGroup must not be invoked from VM tests")
         },
+    )
+
+    /** For tests that need a populated [CreateGroupState.createdGroup].
+     *  The lambda ignores its inputs and returns a canned [ChatGroup]
+     *  so the VM can be driven through `submit()` without standing up
+     *  the real interactor. */
+    private fun makeViewModelReturning(group: ChatGroup): CreateGroupViewModel =
+        CreateGroupViewModel(
+            createGroup = { _, _, _, _ -> group },
+        )
+
+    private fun makeFakeGroup(id: String): ChatGroup = ChatGroup(
+        id = id,
+        name = "Fake group",
+        groupSecret = ByteArray(32) { 0x11 },
+        createdAtMillis = 1_700_000_000_000L,
+        members = emptyList(),
+        epoch = 0uL,
+        salt = ByteArray(32) { 0x22 },
+        commitment = null,
+        tier = SepTier.SMALL,
+        groupType = SepGroupType.TYRANNY,
+        adminPubkeyHex = null,
+        isPublishedOnChain = false,
+        ownerIdentityId = "test-identity",
     )
 }

@@ -181,6 +181,11 @@ class CreateGroupViewModel(
      *  dismisses. */
     var onClose: () -> Unit = {}
 
+    /** Tapped "Share invite link" from the Success screen. Host
+     *  navigates to `share_invite/{groupId}` (see [RootScreen]).
+     *  No-op default keeps the VM testable in isolation. */
+    var onShareInvite: (groupId: String) -> Unit = {}
+
     /**
      * Called by the Step1 view when the name TextField gets focus.
      * On the *first* focus we clear the field so the user can type a
@@ -351,6 +356,25 @@ class CreateGroupViewModel(
     fun tappedDone() {
         reset()
         onClose()
+    }
+
+    /**
+     * From the Success screen. Hands the just-created group's hex id
+     * to the host so it can push the share-invite destination, then
+     * resets + closes the create-group flow underneath — back from
+     * the share screen lands on Chats, not on a stale Success
+     * screen. The host is responsible for navigating; the VM only
+     * fans out the id.
+     */
+    fun tappedShareInvite() {
+        val groupId = _state.value.createdGroup?.id ?: return
+        reset()
+        // Pop create-group first, then push share-invite. The
+        // reverse order would land share-invite on top of
+        // create-group, and the subsequent pop would tear it down
+        // immediately — leaving the user on a stale Success.
+        onClose()
+        onShareInvite(groupId)
     }
 
     fun tappedDismissError() {
