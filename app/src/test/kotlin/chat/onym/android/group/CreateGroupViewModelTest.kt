@@ -250,6 +250,55 @@ class CreateGroupViewModelTest {
         assertEquals("Create with 2 people", vm.state.value.createCtaLabel)
     }
 
+    // ─── OneOnOne governance ──────────────────────────────────────
+
+    @Test
+    fun oneOnOne_isSelectable_andAdvancesToStep2() = runTest {
+        val vm = makeViewModel()
+        vm.setGovernance(OnymUIGovernance.OneOnOne)
+        assertEquals(OnymUIGovernance.OneOnOne, vm.state.value.governance)
+        assertTrue(vm.state.value.canAdvanceToStep2)
+    }
+
+    @Test
+    fun oneOnOne_canSubmitOnly_whenInviteeCountIsExactlyOne() = runTest {
+        val vm = makeViewModel()
+        vm.setGovernance(OnymUIGovernance.OneOnOne)
+        // Zero invitees → cannot submit.
+        assertTrue("zero invitees blocks 1-on-1 submit", !vm.state.value.canSubmit)
+        // One invitee → enabled.
+        vm.setInviteeInput("aa".repeat(32))
+        vm.tappedAddInvitee()
+        assertTrue("one invitee enables 1-on-1 submit", vm.state.value.canSubmit)
+        // Two invitees → blocked again.
+        vm.tappedInviteByKey()
+        vm.setInviteeInput("bb".repeat(32))
+        vm.tappedAddInvitee()
+        assertTrue("two invitees blocks 1-on-1 submit", !vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun oneOnOne_ctaLabel_explainsTheGate() = runTest {
+        val vm = makeViewModel()
+        vm.setGovernance(OnymUIGovernance.OneOnOne)
+        assertEquals("Add the other person", vm.state.value.createCtaLabel)
+        vm.setInviteeInput("aa".repeat(32))
+        vm.tappedAddInvitee()
+        assertEquals("Start 1-on-1", vm.state.value.createCtaLabel)
+        vm.tappedInviteByKey()
+        vm.setInviteeInput("bb".repeat(32))
+        vm.tappedAddInvitee()
+        assertEquals("1-on-1 needs exactly one", vm.state.value.createCtaLabel)
+    }
+
+    @Test
+    fun tyranny_canSubmit_evenWithZeroInvitees() = runTest {
+        val vm = makeViewModel()
+        // Default is Tyranny — zero invitees still enables submit
+        // (creator-only group is the canonical Tyranny zero case).
+        assertTrue(vm.state.value.canSubmit)
+    }
+
     // ─── close / reset ────────────────────────────────────────────
 
     @Test

@@ -356,7 +356,7 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                 ) {
                     OnymGovIcon(type = state.governance, accent = accent, size = 28.dp)
                     Text(
-                        text = "${state.governance.label}. You'll be the only admin.",
+                        text = "${state.governance.label}. ${state.governance.step2Hint}",
                         color = LocalOnymTokens.current.text2,
                         style = TextStyle(fontSize = 12.5.sp, lineHeight = 17.sp),
                         modifier = Modifier.weight(1f),
@@ -508,6 +508,7 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
             OnymPrimaryButton(
                 title = state.createCtaLabel,
                 accent = accent,
+                enabled = state.canSubmit,
                 onClick = viewModel::tappedCreate,
             )
             OnymQuietButton(title = "Back", onClick = viewModel::tappedBackFromStep2)

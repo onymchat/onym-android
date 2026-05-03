@@ -91,9 +91,10 @@ data class CreateGroupState(
      *  screen content. */
     val createdGroup: ChatGroup? = null,
 ) {
-    /** True when the selected governance type is wired (Tyranny only
-     *  in PR-C). The name no longer gates advance — submit falls back
-     *  to [generatedName] when the field is empty. */
+    /** True when the selected governance type is wired to the chain
+     *  layer. Tyranny + 1-on-1 are wired; Anarchy is still TBD. The
+     *  name no longer gates advance — submit falls back to
+     *  [generatedName] when the field is empty. */
     val canAdvanceToStep2: Boolean
         get() = governance.isAvailable
 
@@ -102,12 +103,32 @@ data class CreateGroupState(
     val effectiveName: String
         get() = name.trim().ifEmpty { generatedName }
 
-    /** Label for the primary "Create" CTA on Step2. */
+    /** Label for the primary "Create" CTA on Step2. Per-governance:
+     *  - Tyranny tolerates 0..N invitees ("Create empty group" / "with N").
+     *  - 1-on-1 needs exactly 1 invitee — the CTA spells out the gate
+     *    so the user understands why it's disabled. */
     val createCtaLabel: String
-        get() = when (invitees.size) {
-            0 -> "Create empty group"
-            1 -> "Create with 1 person"
-            else -> "Create with ${invitees.size} people"
+        get() = when (governance) {
+            OnymUIGovernance.OneOnOne -> when (invitees.size) {
+                0 -> "Add the other person"
+                1 -> "Start 1-on-1"
+                else -> "1-on-1 needs exactly one"
+            }
+            else -> when (invitees.size) {
+                0 -> "Create empty group"
+                1 -> "Create with 1 person"
+                else -> "Create with ${invitees.size} people"
+            }
+        }
+
+    /** Whether the Create CTA on Step2 is enabled. Tyranny is always
+     *  enabled (zero invitees = creator-only group); 1-on-1 requires
+     *  exactly one invitee — the chain leg would reject otherwise
+     *  (PR-2's `OneOnOneRequiresExactlyOneInvitee`). */
+    val canSubmit: Boolean
+        get() = when (governance) {
+            OnymUIGovernance.OneOnOne -> invitees.size == 1
+            else -> governance.isAvailable
         }
 
     /** Live char count for the InviteByKey field — matches the
@@ -284,6 +305,18 @@ class CreateGroupViewModel(
             )
             return
         }
+        // 1-on-1 needs exactly one invitee — surface the error here
+        // rather than letting the interactor throw mid-pipeline.
+        if (current.governance == OnymUIGovernance.OneOnOne &&
+            current.invitees.size != 1
+        ) {
+            _state.value = current.copy(
+                error = CreateGroupError.OneOnOneRequiresExactlyOneInvitee(
+                    actual = current.invitees.size,
+                ),
+            )
+            return
+        }
         _state.value = current.copy(
             error = null,
             progress = CreateGroupProgress.Validating,
@@ -409,8 +442,20 @@ enum class OnymUIGovernance(
     ),
     ;
 
-    /** Per-PR-C scope: only Tyranny is wired to the chain layer. */
-    val isAvailable: Boolean get() = this == Tyranny
+    /** Tyranny + 1-on-1 are wired to the chain layer; Anarchy is
+     *  still TBD (no FFI proof generator and no contract slot). */
+    val isAvailable: Boolean get() = this == Tyranny || this == OneOnOne
+
+    /** One-line addendum rendered in the Step-2 banner under the
+     *  governance label. Type-specific because the implications
+     *  differ — Tyranny mentions the admin role, 1-on-1 mentions the
+     *  exact-one-invitee constraint. */
+    val step2Hint: String
+        get() = when (this) {
+            Tyranny -> "You'll be the only admin."
+            OneOnOne -> "Pick exactly one person."
+            Anarchy -> "Everyone shares control."
+        }
 
     val sepGroupType: SepGroupType
         get() = when (this) {
