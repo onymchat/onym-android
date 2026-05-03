@@ -221,6 +221,67 @@ data class OneOnOneCreateGroupPayload(
 }
 
 /**
+ * `create_group` payload for the Anarchy (open governance) contract.
+ * Layout mirrors `add_create_group_args` in `onym-relayer/src/handler.rs`,
+ * `ContractType::Anarchy` arm — the relayer extracts `caller` from
+ * its config, `group_id` / `commitment` / `tier` / `member_count` from
+ * this payload's top-level keys, then forwards `--proof` +
+ * `--public-inputs` to the `sep-anarchy` Soroban contract.
+ *
+ * Differs from [TyrannyCreateGroupPayload]: no `admin_pubkey_commitment`
+ * (Anarchy has no admin role). Differs from [OneOnOneCreateGroupPayload]:
+ * has `tier` (Anarchy supports all three depths) AND `member_count`
+ * (informational — supplied at create_group, never updated by the
+ * contract; `0` means "not tracked").
+ *
+ * The PI vector is 2 × 32B chunks: `[commitment, fr_zero]` — same
+ * shape the contract's `MEMBERSHIP_PI_COUNT = 2` checks against
+ * (the second element is the membership-proof `epoch=0` Fr).
+ */
+@Serializable
+data class AnarchyCreateGroupPayload(
+    @SerialName("group_id")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val groupId: ByteArray,
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val commitment: ByteArray,
+    val tier: Int,
+    /** Informational only on the contract side. `0` = "not tracked"
+     *  (the v1 sep-xxxx sentinel). The relayer defaults to `0` when
+     *  absent, but we send the real count so future occupancy logic
+     *  has accurate state to read back. */
+    @SerialName("member_count")
+    val memberCount: Int,
+    /** 1601-byte raw PLONK proof. */
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val proof: ByteArray,
+    /** 2 elements × 32 bytes — `[commitment, fr_zero]`. */
+    val publicInputs: List<@Serializable(with = Base64ByteArraySerializer::class) ByteArray>,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is AnarchyCreateGroupPayload) return false
+        return groupId.contentEquals(other.groupId) &&
+            commitment.contentEquals(other.commitment) &&
+            tier == other.tier &&
+            memberCount == other.memberCount &&
+            proof.contentEquals(other.proof) &&
+            publicInputs.size == other.publicInputs.size &&
+            publicInputs.zip(other.publicInputs).all { (a, b) -> a.contentEquals(b) }
+    }
+
+    override fun hashCode(): Int {
+        var h = groupId.contentHashCode()
+        h = 31 * h + commitment.contentHashCode()
+        h = 31 * h + tier
+        h = 31 * h + memberCount
+        h = 31 * h + proof.contentHashCode()
+        for (p in publicInputs) h = 31 * h + p.contentHashCode()
+        return h
+    }
+}
+
+/**
  * `update_commitment` payload — Tyranny variant. The SDK's
  * `Tyranny.UpdateProof.publicInputs` is 160 bytes = 5 × 32B
  * (`c_old || epoch_old || c_new || admin_pubkey_commitment || group_id_fr`).

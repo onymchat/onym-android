@@ -39,6 +39,13 @@ class StubGroupProofGenerator : GroupProofGenerator {
                     ),
                 )
             }
+            SepGroupType.ANARCHY -> GroupCreateProof(
+                proof = ByteArray(1601) { 0x56.toByte() },
+                publicInputs = listOf(
+                    ByteArray(32) { 0x78.toByte() },  // commitment
+                    ByteArray(32),                     // Fr(0) — epoch
+                ),
+            )
             else -> throw GroupProofGeneratorError.NotYetSupported(input.groupType)
         }
 }

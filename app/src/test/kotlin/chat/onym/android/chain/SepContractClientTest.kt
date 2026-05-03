@@ -141,6 +141,50 @@ class SepContractClientTest {
     }
 
     @Test
+    fun createGroupAnarchy_sendsCreateGroupFunction_withTierAndMemberCount_butNoAdminCommitment() = runTest {
+        val transport = FakeSepContractTransport(
+            cannedResponseJson = """{"accepted":true,"transactionHash":"an456"}""",
+        )
+        val client = SepContractClient(
+            contractID = testContractId,
+            contractType = SepGroupType.ANARCHY,
+            network = SepNetwork.TESTNET,
+            transport = transport,
+        )
+
+        val payload = AnarchyCreateGroupPayload(
+            groupId = ByteArray(32) { 0x42 },
+            commitment = ByteArray(32) { 0x66 },
+            tier = 0,
+            memberCount = 1,
+            proof = ByteArray(1601) { 0x99.toByte() },
+            publicInputs = listOf(ByteArray(32) { 0x66 }, ByteArray(32)),
+        )
+        val response = client.createGroupAnarchy(payload)
+        assertTrue(response.accepted)
+        assertEquals("an456", response.transactionHash)
+
+        assertEquals("create_group", transport.lastFunction)
+        val invocation = transport.lastInvocationJson!!
+        assertEquals("anarchy", invocation["contractType"]!!.jsonPrimitive.contentOrNull)
+
+        val payloadJson = transport.lastPayloadJson!!
+        assertNotNull("group_id required", payloadJson["group_id"])
+        assertNotNull("commitment required", payloadJson["commitment"])
+        assertEquals(0, payloadJson["tier"]!!.jsonPrimitive.int)
+        assertEquals(1, payloadJson["member_count"]!!.jsonPrimitive.int)
+        assertNotNull("proof required", payloadJson["proof"])
+        // No admin commitment — Anarchy has no admin role.
+        assertEquals(
+            "Anarchy sends no admin_pubkey_commitment",
+            null,
+            payloadJson["admin_pubkey_commitment"],
+        )
+        val pi = payloadJson["publicInputs"] as JsonArray
+        assertEquals(2, pi.size)
+    }
+
+    @Test
     fun updateCommitmentTyranny_routesToUpdateFunction_with5ChunkPI() = runTest {
         val transport = FakeSepContractTransport(
             cannedResponseJson = """{"accepted":true}""",
