@@ -49,4 +49,8 @@ class AppDependencies(
     val makeIdentitiesViewModel: () -> chat.onym.android.identity.IdentitiesViewModel,
     /** Post-create deeplink invite share (deeplink-invite PR-5). */
     val makeShareInviteViewModel: () -> chat.onym.android.group.ShareInviteViewModel,
+    /** Joiner-side post-deeplink-tap surface (deeplink-invite PR-7).
+     *  Takes the decoded capability so the same factory works for
+     *  both `https://onym.chat/join` and `onym://join` intents. */
+    val makeJoinViewModel: (chat.onym.android.group.IntroCapability) -> chat.onym.android.group.JoinViewModel,
 )

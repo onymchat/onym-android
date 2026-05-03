@@ -361,6 +361,14 @@ class OnymApplication : Application() {
             )
         }
 
+        // Joiner-side ship affordance for the deeplink-tap flow
+        // (PR-7). Single shared instance — JoinViewModel-per-tap
+        // captures the IntroCapability, the sender stays stateless.
+        val joinRequestSender = chat.onym.android.group.JoinRequestSender(
+            identity = identityRepository,
+            inboxTransport = inboxTransport,
+        )
+
         // App-wide network preference (PR-C follow-up). Defaults to
         // testnet; the Settings → Network → "Use Mainnet" Switch
         // flips it. CreateGroupInteractor reads `current()` per call
@@ -432,6 +440,24 @@ class OnymApplication : Application() {
                     identity = identityRepository,
                     introducer = chat.onym.android.group.InviteIntroducer(introKeyStore),
                     groupRepository = groupRepository,
+                )
+            },
+            makeJoinViewModel = { capability ->
+                // Suggest the active identity's display name as the
+                // initial label. Falls back to a generic "Anonymous"
+                // if no identity is selected (the VM will error out
+                // on send anyway, but the UI shouldn't show a blank
+                // field).
+                val activeId = identityRepository.currentIdentityId.value
+                val suggested = identityRepository.identities.value
+                    .firstOrNull { it.id == activeId }
+                    ?.name
+                    ?: "Anonymous"
+                chat.onym.android.group.JoinViewModel(
+                    capability = capability,
+                    submitRequest = joinRequestSender::send,
+                    groupRepository = groupRepository,
+                    suggestedDisplayLabel = suggested,
                 )
             },
         )

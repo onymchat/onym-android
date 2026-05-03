@@ -34,7 +34,8 @@ import chat.onym.android.chats.ChatsScreen
 import chat.onym.android.chats.ChatsViewModel
 import chat.onym.android.group.CreateGroupViewModel
 import chat.onym.android.group.IntroCapability
-import chat.onym.android.group.JoinInviteCapturedPlaceholder
+import chat.onym.android.group.JoinScreen
+import chat.onym.android.group.JoinViewModel
 import chat.onym.android.group.ShareInviteViewModel
 import chat.onym.android.group.creategroup.CreateGroupScreen
 import chat.onym.android.group.creategroup.ShareInviteScreen
@@ -218,10 +219,6 @@ fun RootScreen(
             // rebuilds the back stack from the saved route strings,
             // and re-decoding from the path arg restores the same
             // capability without round-tripping through a Parcelable.
-            //
-            // Placeholder body in PR-6 — PR-7 swaps in the real
-            // JoinScreen + JoinViewModel that calls
-            // JoinRequestSender.send(...).
             composable("join_invite/{capability}") { entry ->
                 val encoded = entry.arguments?.getString("capability")
                     ?: return@composable
@@ -230,9 +227,28 @@ fun RootScreen(
                 } catch (_: Throwable) {
                     return@composable
                 }
-                JoinInviteCapturedPlaceholder(
-                    capability = capability,
+                val vm: JoinViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeJoinViewModel(capability) }
+                    },
+                )
+                JoinScreen(
+                    viewModel = vm,
                     onBackClick = { navController.popBackStack() },
+                    onOpenChat = {
+                        // No chat-detail destination yet — for now
+                        // landing on Chats with the new group at the
+                        // top of the list is the success state. The
+                        // future ChatDetailScreen replaces this with
+                        // a navigate to chat_detail/{id}.
+                        navController.navigate(Tab.Chats.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
             }
             composable(Tab.Search.route) {
