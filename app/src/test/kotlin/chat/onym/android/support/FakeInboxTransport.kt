@@ -52,6 +52,14 @@ class FakeInboxTransport : InboxTransport {
     val unsubscribedInboxes: List<TransportInboxId> get() = _unsubscribedInboxes.toList()
     private val _unsubscribedInboxes = mutableListOf<TransportInboxId>()
 
+    /** Currently-active subscriptions. Inserts on `subscribe`, removes
+     *  on `onCompletion` of the returned Flow (= unsubscribe OR
+     *  cancellation). Multi-identity fan-out tests assert on the
+     *  set-equals contract: "the active subscription set tracks the
+     *  identity list across changes". */
+    val subscribedInboxes: Set<TransportInboxId> get() = synchronized(_subscribedInboxes) { _subscribedInboxes.toSet() }
+    private val _subscribedInboxes = mutableSetOf<TransportInboxId>()
+
     override suspend fun connect(endpoints: List<TransportEndpoint>) { /* no-op */ }
 
     override suspend fun disconnect() {
@@ -67,6 +75,7 @@ class FakeInboxTransport : InboxTransport {
 
     override fun subscribe(inbox: TransportInboxId): Flow<InboundInbox> {
         subscribeCallCount += 1
+        synchronized(_subscribedInboxes) { _subscribedInboxes.add(inbox) }
         // Pre-create the channel so a test that calls emit() before
         // the collector starts doesn't hit a missing-key error;
         // unbounded buffer because tests typically know what they
@@ -75,13 +84,17 @@ class FakeInboxTransport : InboxTransport {
             channels.getOrPut(inbox) { Channel(Channel.UNLIMITED) }
         }
         return channel.consumeAsFlow()
-            .onCompletion { _unsubscribedInboxes.add(inbox) }
+            .onCompletion {
+                _unsubscribedInboxes.add(inbox)
+                synchronized(_subscribedInboxes) { _subscribedInboxes.remove(inbox) }
+            }
     }
 
     override suspend fun unsubscribe(inbox: TransportInboxId) {
         mutex.withLock {
             channels.remove(inbox)?.close()
             _unsubscribedInboxes.add(inbox)
+            synchronized(_subscribedInboxes) { _subscribedInboxes.remove(inbox) }
         }
     }
 

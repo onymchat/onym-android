@@ -2,7 +2,11 @@ package chat.onym.android.inbox
 
 import chat.onym.android.transport.InboxTransport
 import chat.onym.android.transport.TransportInboxId
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
 /**
  * Stateless transport-to-persistence pump. Holds two refs — the
@@ -42,6 +46,40 @@ class IncomingInvitationsInteractor(
                 payload = inbound.payload,
                 receivedAt = inbound.receivedAt,
             )
+        }
+    }
+
+    /**
+     * Multi-identity fan-out. Subscribes to **every** inbox tag in
+     * the latest [tags] emission concurrently — one child coroutine
+     * per tag inside a structured-concurrency scope. When the upstream
+     * flow emits a new list (identity added / removed / selected), the
+     * old subscription set is cancelled wholesale and a fresh set is
+     * launched.
+     *
+     * Fan-out is the right shape for multi-identity: messages sent to
+     * any identity's inbox MUST land on disk regardless of which
+     * identity the user is currently viewing — otherwise switching
+     * identity would silently drop messages received under the others.
+     *
+     * Suspends for the lifetime of the calling scope. Cancelling the
+     * caller cancels every subscription.
+     */
+    suspend fun runFanout(tags: Flow<List<TransportInboxId>>) {
+        tags.distinctUntilChanged().collectLatest { current ->
+            // Inner `coroutineScope` is the structured-concurrency
+            // anchor for THIS emission. `collectLatest` cancels the
+            // outer lambda on the next emission, which propagates
+            // cancellation to the inner scope, which cancels every
+            // child `launch` — the wholesale-resubscribe semantics.
+            // The inner scope never returns under happy operation
+            // (each `run(tag)` collects a never-completing Flow), so
+            // it stays alive until cancelled.
+            coroutineScope {
+                for (tag in current) {
+                    launch { run(tag) }
+                }
+            }
         }
     }
 }

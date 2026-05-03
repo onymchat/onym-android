@@ -38,6 +38,7 @@ import chat.onym.android.transport.nostr.NostrInboxTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.bouncycastle.jce.provider.BouncyCastleProvider
@@ -286,6 +287,29 @@ class OnymApplication : Application() {
         // CreateGroupInteractor.create blocks on `send` (which
         // connects on first use via `NostrInboxTransport`).
         val inboxTransport = NostrInboxTransport(signerProvider = nostrSignerProvider)
+
+        // Multi-identity inbox fan-out (PR-4). Subscribes to every
+        // identity's inbox tag concurrently so messages targeted at
+        // a non-active identity still land on disk. Resubscribes
+        // wholesale when the identities list changes (add / remove).
+        val invitationsRepository = chat.onym.android.inbox.IncomingInvitationsRepository(
+            store = chat.onym.android.persistence.InMemoryInvitationStore(),
+        )
+        val invitationsInteractor = chat.onym.android.inbox.IncomingInvitationsInteractor(
+            inboxTransport = inboxTransport,
+            repository = invitationsRepository,
+        )
+        applicationScope.launch {
+            invitationsInteractor.runFanout(
+                identityRepository.identities.map { summaries ->
+                    summaries.map { summary ->
+                        chat.onym.android.transport.TransportInboxId(
+                            chat.onym.android.identity.IdentityRepository.inboxTag(summary.inboxPublicKey),
+                        )
+                    }
+                },
+            )
+        }
 
         // App-wide network preference (PR-C follow-up). Defaults to
         // testnet; the Settings → Network → "Use Mainnet" Switch

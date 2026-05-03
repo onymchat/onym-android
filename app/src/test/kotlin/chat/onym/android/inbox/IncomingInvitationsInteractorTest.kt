@@ -143,6 +143,66 @@ class IncomingInvitationsInteractorTest {
         )
     }
 
+    @Test
+    fun runFanout_subscribesToEveryTagInTheList() = runTest(UnconfinedTestDispatcher()) {
+        val transport = FakeInboxTransport()
+        val store = InMemoryInvitationStore()
+        val repo = IncomingInvitationsRepository(store)
+        val interactor = IncomingInvitationsInteractor(transport, repo)
+
+        val alice = TransportInboxId("alice-tag")
+        val bob = TransportInboxId("bob-tag")
+        val tags = kotlinx.coroutines.flow.MutableStateFlow(listOf(alice, bob))
+
+        coroutineScope {
+            val job = async { interactor.runFanout(tags) }
+            yield()
+            // Inbounds on either tag must land in the store.
+            transport.emit(InboundInbox(alice, "alice-msg".toByteArray(), now, "alice-1"))
+            transport.emit(InboundInbox(bob, "bob-msg".toByteArray(), now, "bob-1"))
+            yield()
+            assertEquals(2, store.list().size)
+            // Cancel the fan-out so the test exits.
+            job.cancel()
+            job.join()
+        }
+    }
+
+    @Test
+    fun runFanout_unsubscribesRemovedTags_andSubscribesNewOnes() = runTest(UnconfinedTestDispatcher()) {
+        val transport = FakeInboxTransport()
+        val store = InMemoryInvitationStore()
+        val repo = IncomingInvitationsRepository(store)
+        val interactor = IncomingInvitationsInteractor(transport, repo)
+
+        val alice = TransportInboxId("alice-tag")
+        val carol = TransportInboxId("carol-tag")
+        val tags = kotlinx.coroutines.flow.MutableStateFlow(listOf(alice))
+
+        coroutineScope {
+            val job = async { interactor.runFanout(tags) }
+            yield()
+            // Initial subscription set is just Alice.
+            assertEquals(setOf(alice), transport.subscribedInboxes)
+
+            // Swap the entire list to [carol]: Alice unsubscribes,
+            // Carol subscribes. The wholesale cancel-and-rebuild
+            // semantics — collectLatest cancels the inner scope which
+            // cancels every child launch, then re-launches with the
+            // new list.
+            tags.value = listOf(carol)
+            yield()
+            assertEquals(setOf(carol), transport.subscribedInboxes)
+            assertTrue(
+                "Alice was unsubscribed when she dropped off the list",
+                transport.unsubscribedInboxes.contains(alice),
+            )
+
+            job.cancel()
+            job.join()
+        }
+    }
+
     private fun inbound(id: String, payload: String, at: Instant = now) = InboundInbox(
         inbox = inbox,
         payload = payload.toByteArray(Charsets.UTF_8),
