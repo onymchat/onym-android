@@ -863,8 +863,13 @@ private fun SuccessScreen(viewModel: CreateGroupViewModel) {
         Spacer(Modifier.weight(1f))
         FlowFooter {
             OnymPrimaryButton(
-                title = "Done",
+                title = "Share invite link",
                 accent = accent,
+                onClick = viewModel::tappedShareInvite,
+            )
+            Spacer(Modifier.height(6.dp))
+            OnymQuietButton(
+                title = "Done",
                 onClick = viewModel::tappedDone,
             )
         }

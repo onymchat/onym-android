@@ -32,7 +32,9 @@ import chat.onym.android.chain.GovernanceType
 import chat.onym.android.chats.ChatsScreen
 import chat.onym.android.chats.ChatsViewModel
 import chat.onym.android.group.CreateGroupViewModel
+import chat.onym.android.group.ShareInviteViewModel
 import chat.onym.android.group.creategroup.CreateGroupScreen
+import chat.onym.android.group.creategroup.ShareInviteScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupScreen
 import chat.onym.android.recovery.RecoveryPhraseBackupViewModel
 import chat.onym.android.search.SearchScreen
@@ -159,6 +161,9 @@ fun RootScreen(dependencies: AppDependencies) {
                     },
                 )
                 vm.onClose = { navController.popBackStack() }
+                vm.onShareInvite = { id ->
+                    navController.navigate("share_invite/$id")
+                }
                 // OnymTheme provides LocalOnymTokens (light or dark
                 // bundle picked off `isSystemInDarkTheme()`) so every
                 // CreateGroup* screen reads the right surface family.
@@ -167,6 +172,19 @@ fun RootScreen(dependencies: AppDependencies) {
                 chat.onym.android.group.OnymTheme {
                     CreateGroupScreen(viewModel = vm)
                 }
+            }
+            composable("share_invite/{groupId}") { entry ->
+                val groupId = entry.arguments?.getString("groupId") ?: return@composable
+                val vm: ShareInviteViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeShareInviteViewModel() }
+                    },
+                )
+                ShareInviteScreen(
+                    groupId = groupId,
+                    viewModel = vm,
+                    onDone = { navController.popBackStack() },
+                )
             }
             composable(Tab.Search.route) {
                 SearchScreen()
