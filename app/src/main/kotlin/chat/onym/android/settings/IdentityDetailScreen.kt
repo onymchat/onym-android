@@ -1,0 +1,386 @@
+package chat.onym.android.settings
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.onym.android.R
+import chat.onym.android.group.OnymMark
+import chat.onym.android.identity.IdentitiesViewModel
+import chat.onym.android.identity.IdentityId
+
+/**
+ * Identity Detail — per-identity hero, backup status, set-active,
+ * delete. Backup launches the recovery flow for the active identity;
+ * if this identity isn't the active one, taps switch to it first
+ * (the `RecoveryPhraseBackupViewModel` reads `repository.snapshots`
+ * which always points at the active identity).
+ *
+ * Uses [IdentitiesViewModel] for select/remove intents.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun IdentityDetailScreen(
+    viewModel: IdentitiesViewModel,
+    identityId: IdentityId,
+    onBack: () -> Unit,
+    onBackup: () -> Unit,
+) {
+    val items by viewModel.items.collectAsStateWithLifecycle()
+    val row = items.firstOrNull { it.summary.id == identityId }
+    val context = LocalContext.current
+    var pendingRemoval by remember { mutableStateOf(false) }
+
+    if (row == null) {
+        // Identity was removed (or hasn't loaded yet) — show empty
+        // scaffold with the back-button.
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text(stringResource(R.string.identity_detail_title)) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                        }
+                    },
+                )
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        ) { padding ->
+            Box(modifier = Modifier.fillMaxSize().padding(padding))
+        }
+        return
+    }
+
+    val displayName = row.summary.name.ifBlank { stringResource(R.string.identity_unnamed) }
+
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(displayName) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
+                    }
+                },
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+    ) { padding ->
+        LazyColumn(
+            contentPadding = padding,
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("identity_detail.list"),
+        ) {
+            // ─── Hero ─────────────────────────────────────────────
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier.size(100.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(96.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (row.isActive) {
+                                        Brush.linearGradient(listOf(Color(0xFFEEF5FF), Color(0xFFD5E8FE)))
+                                    } else {
+                                        Brush.linearGradient(listOf(Color(0xFFEFEFF2), Color(0xFFEFEFF2)))
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            OnymMark(
+                                size = 64.dp,
+                                color = if (row.isActive) SettingsTile.Blue else SettingsTile.Gray,
+                            )
+                        }
+                    }
+                    Text(
+                        text = displayName,
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = heroHex(row.summary.blsPublicKey),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // ─── BACKUP card ──────────────────────────────────────
+            item { SettingsSectionLabel(stringResource(R.string.identity_detail_backup_section)) }
+            item {
+                SettingsCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(SettingsTile.Amber),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.Warning,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.identity_detail_backup_status_unknown),
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = stringResource(R.string.identity_detail_backup_status_subtitle),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    SettingsHairline(insetStart = 16.dp)
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.Key, SettingsTile.Orange)
+                        },
+                        title = stringResource(R.string.identity_detail_backup_action),
+                        subtitle = stringResource(R.string.identity_detail_backup_action_subtitle),
+                        onClick = {
+                            // Flip active first (recovery VM reads
+                            // repository.snapshots — always the active
+                            // identity), then launch the flow.
+                            if (!row.isActive) {
+                                viewModel.select(identityId)
+                            }
+                            onBackup()
+                        },
+                        isLast = true,
+                    )
+                }
+            }
+
+            // ─── STATE ─────────────────────────────────────────────
+            item { SettingsSectionLabel(stringResource(R.string.identity_detail_state_section)) }
+            item {
+                SettingsCard {
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.Check, SettingsTile.Green)
+                        },
+                        title = stringResource(R.string.identity_detail_set_active),
+                        showChevron = !row.isActive,
+                        trailing = if (row.isActive) {
+                            {
+                                Text(
+                                    text = stringResource(R.string.identity_detail_active_marker),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else null,
+                        onClick = if (row.isActive) null else {
+                            { viewModel.select(identityId) }
+                        },
+                        isLast = true,
+                        modifier = Modifier.testTag("identity_detail.set_active"),
+                    )
+                }
+            }
+
+            // ─── ADVANCED ──────────────────────────────────────────
+            item { SettingsSectionLabel(stringResource(R.string.identity_detail_advanced_section)) }
+            item {
+                SettingsCard {
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.ContentCopy, SettingsTile.Gray)
+                        },
+                        title = stringResource(R.string.identity_detail_copy_bls),
+                        subtitle = heroHex(row.summary.blsPublicKey),
+                        subtitleMono = true,
+                        showChevron = false,
+                        onClick = {
+                            val hex = row.summary.blsPublicKey.joinToString("") {
+                                "%02x".format(it.toInt() and 0xFF)
+                            }
+                            copyToClipboard(context, "BLS public key", hex)
+                        },
+                    )
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.ContentCopy, SettingsTile.Gray)
+                        },
+                        title = stringResource(R.string.identity_detail_copy_inbox),
+                        subtitle = heroHex(row.summary.inboxPublicKey),
+                        subtitleMono = true,
+                        showChevron = false,
+                        onClick = {
+                            val hex = row.summary.inboxPublicKey.joinToString("") {
+                                "%02x".format(it.toInt() and 0xFF)
+                            }
+                            copyToClipboard(context, "Inbox public key", hex)
+                        },
+                    )
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.Delete, SettingsTile.Red)
+                        },
+                        title = stringResource(R.string.identity_detail_delete),
+                        titleColor = MaterialTheme.colorScheme.error,
+                        showChevron = false,
+                        onClick = { pendingRemoval = true },
+                        isLast = true,
+                        modifier = Modifier.testTag("identity_detail.delete"),
+                    )
+                }
+            }
+            item {
+                SettingsFootnote(stringResource(R.string.identity_detail_delete_footnote))
+            }
+            item { Spacer(Modifier.height(40.dp)) }
+        }
+    }
+
+    if (pendingRemoval) {
+        RemoveIdentityDialog(
+            displayName = displayName,
+            onDismiss = { pendingRemoval = false },
+            onConfirm = {
+                viewModel.remove(identityId)
+                pendingRemoval = false
+                onBack()
+            },
+        )
+    }
+}
+
+@Composable
+private fun RemoveIdentityDialog(
+    displayName: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    var typed by remember { mutableStateOf("") }
+    val canConfirm = typed.trim() == displayName
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.identity_detail_delete_dialog_title, displayName)) },
+        text = {
+            Column {
+                Text(
+                    stringResource(R.string.identity_detail_delete_dialog_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.identity_detail_delete_dialog_typename, displayName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = typed,
+                    onValueChange = { typed = it },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("identity_detail.delete.confirm.input"),
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = canConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                ),
+                modifier = Modifier.testTag("identity_detail.delete.confirm"),
+            ) {
+                Text(stringResource(R.string.identity_detail_delete_dialog_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+private fun copyToClipboard(context: Context, label: String, value: String) {
+    val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cb.setPrimaryClip(ClipData.newPlainText(label, value))
+    Toast.makeText(context, R.string.copied, Toast.LENGTH_SHORT).show()
+}

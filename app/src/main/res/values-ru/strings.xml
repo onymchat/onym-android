@@ -130,6 +130,104 @@
     <string name="anchors_network_footer">Каждый тип управления использует отдельный контракт. Тег версии в скобках — это версия, к которой будет привязан новый чат.</string>
     <string name="anchors_reset_footer">Сброс очищает явный выбор — новые чаты используют последнюю опубликованную версию.</string>
 
+    <!-- ─── Settings home (redesigned) ───────────────────────────── -->
+    <string name="brand_tagline">открыто · анонимно · в блокчейне</string>
+    <string name="settings_active_identity_label">Активная личность</string>
+    <string name="settings_app_section">Приложение</string>
+    <string name="settings_identities_title">Личности</string>
+    <string name="settings_identities_subtitle_one">1 на этом устройстве</string>
+    <string name="settings_identities_subtitle_n">%1$d на этом устройстве</string>
+    <string name="settings_privacy_title">Приватность и шифрование</string>
+    <string name="settings_privacy_subtitle">Сквозное шифрование · BIP-39</string>
+    <string name="settings_relayer_subtitle">Отправляет транзакции от вашего имени</string>
+    <string name="settings_anchors_subtitle_testnet">Stellar · Тестовая сеть</string>
+    <string name="settings_anchors_subtitle_mainnet">Stellar · Основная сеть</string>
+    <string name="settings_use_mainnet_on_subtitle">Новые чаты будут привязаны к основной сети</string>
+    <string name="settings_use_mainnet_off_subtitle">По умолчанию — тестовая сеть, пока контракты подготавливаются</string>
+    <string name="settings_about_title">О приложении Onym</string>
+    <string name="settings_about_subtitle">Версия %1$s (сборка %2$s)</string>
+
+    <!-- ─── Identities list (redesigned) ─────────────────────────── -->
+    <string name="identities_screen_title">Личности</string>
+    <string name="identities_screen_intro">Нажмите на личность, чтобы открыть её. У каждой личности свои ключи, чаты и фраза восстановления.</string>
+    <string name="identities_screen_footer">Видимы только чаты активной личности. Переключайтесь между личностями, чтобы увидеть разные входящие.</string>
+    <string name="identities_section_your">Ваши личности</string>
+    <string name="identities_add_button">Добавить личность</string>
+    <string name="identity_unnamed">Безымянная личность</string>
+
+    <!-- ─── Identity detail ──────────────────────────────────────── -->
+    <string name="identity_detail_title">Личность</string>
+    <string name="identity_detail_active_marker">Активная</string>
+    <string name="identity_detail_backup_section">Резервное копирование</string>
+    <string name="identity_detail_backup_status_unknown">Сделайте резервную копию фразы восстановления</string>
+    <string name="identity_detail_backup_status_subtitle">Без неё восстановить эту личность будет невозможно.</string>
+    <string name="identity_detail_backup_action">Показать фразу восстановления</string>
+    <string name="identity_detail_backup_action_subtitle">12 слов · BIP-39</string>
+    <string name="identity_detail_state_section">Статус</string>
+    <string name="identity_detail_set_active">Сделать активной</string>
+    <string name="identity_detail_advanced_section">Расширенные</string>
+    <string name="identity_detail_copy_bls">Скопировать BLS открытый ключ</string>
+    <string name="identity_detail_copy_inbox">Скопировать ключ входящих</string>
+    <string name="identity_detail_delete">Удалить личность</string>
+    <string name="identity_detail_delete_footnote">Удаление личности стирает её ключи и локальные чаты с этого устройства. Привязанные группы остаются в блокчейне, но локальная копия будет потеряна.</string>
+    <string name="identity_detail_delete_dialog_title">Удалить %1$s?</string>
+    <string name="identity_detail_delete_dialog_body">Это безвозвратно удалит локальные чаты и сообщения этой личности. Привязанные группы остаются в блокчейне.</string>
+    <string name="identity_detail_delete_dialog_typename">Введите \"%1$s\" для подтверждения:</string>
+    <string name="identity_detail_delete_dialog_confirm">Удалить</string>
+
+    <!-- ─── Privacy &amp; Encryption ─────────────────────────────── -->
+    <string name="privacy_screen_title">Приватность и шифрование</string>
+    <string name="privacy_hero_title">Всё зашифровано</string>
+    <string name="privacy_hero_subtitle">Сообщения, состояние группы и ключи зашифрованы на этом устройстве. Никто — даже Onym — не может прочитать ваши чаты.</string>
+    <string name="privacy_how_section">Как это работает</string>
+    <string name="privacy_e2e_title">Сквозное шифрование</string>
+    <string name="privacy_e2e_subtitle">MLS · прямая секретность</string>
+    <string name="privacy_anon_title">Анонимные личности</string>
+    <string name="privacy_anon_subtitle">Без телефона, без email, без профиля</string>
+    <string name="privacy_verifiable_title">Проверяемо в блокчейне</string>
+    <string name="privacy_verifiable_subtitle">Состояние группы привязывается к Stellar</string>
+    <string name="privacy_keys_section">Ваши ключи</string>
+    <string name="privacy_keys_bip39">Фраза восстановления BIP-39</string>
+    <string name="privacy_keys_bip39_subtitle">12 английских слов, сгенерированных на устройстве</string>
+    <string name="privacy_keys_nostr">Идентификатор Nostr (npub)</string>
+    <string name="privacy_keys_nostr_subtitle">secp256k1 Schnorr — подписывает события на релеях</string>
+    <string name="privacy_keys_bls">Групповой ключ BLS</string>
+    <string name="privacy_keys_bls_subtitle">BLS12-381 — подписывает обязательство группы</string>
+    <string name="privacy_keys_stellar">Ключ аккаунта Stellar</string>
+    <string name="privacy_keys_stellar_subtitle">Ed25519 — закрепляет чат в блокчейне</string>
+    <string name="privacy_keys_footnote">Ваша фраза восстановления генерирует мастер-сид. Onym выводит из него пару ключей Nostr (ваша публичная личность), пару ключей Stellar (для якорения) и ключ BLS (для подписей в группе). Фраза никогда не покидает устройство.</string>
+    <string name="privacy_transport_section">Транспорт</string>
+    <string name="privacy_transport_relayer_title">Релеер не видит содержимое</string>
+    <string name="privacy_transport_relayer_subtitle">Он отправляет зашифрованные байты — открытый текст ему недоступен</string>
+    <string name="privacy_transport_chain_title">В блокчейне только обязательства</string>
+    <string name="privacy_transport_chain_subtitle">Идентификаторы группы и ключи участников никогда не появляются в открытом виде</string>
+    <string name="privacy_transport_footnote">Onym никогда не хранит ваши сообщения на своих серверах. Зашифрованное состояние находится на этом устройстве и на выбранных вами релеях.</string>
+
+    <!-- ─── About Onym ───────────────────────────────────────────── -->
+    <string name="about_screen_title">О приложении</string>
+    <string name="about_version_pill">%1$s · сборка %2$s</string>
+    <string name="about_version_section">Версия</string>
+    <string name="about_version_label">Версия</string>
+    <string name="about_build_label">Сборка</string>
+    <string name="about_resources_section">Ресурсы</string>
+    <string name="about_source_android">Исходный код Android</string>
+    <string name="about_source_ios">Исходный код iOS</string>
+    <string name="about_source_contracts">Контракты Soroban</string>
+    <string name="about_source_relayer">Релеер</string>
+    <string name="about_documentation">Документация и организация</string>
+    <string name="about_documentation_subtitle">github.com/onymchat</string>
+    <string name="about_whitepaper">Whitepaper</string>
+    <string name="about_whitepaper_subtitle">Протокол Onym</string>
+    <string name="about_help_section">Помощь</string>
+    <string name="about_issues_title">Сообщить о проблеме</string>
+    <string name="about_issues_subtitle">github.com/onymchat/onym-android/issues</string>
+    <string name="about_discussions_title">Обсуждения сообщества</string>
+    <string name="about_discussions_subtitle">Задавайте вопросы, делитесь идеями</string>
+    <string name="about_contact_title">Контакты</string>
+    <string name="about_credits_line1">Создано теми, кто считает приватность правом.</string>
+    <string name="about_credits_line2">Распространяется по лицензии MIT.</string>
+    <string name="about_credits_copyright">© 2026 · Onym</string>
+
     <!-- ─── ContractNetwork.displayName ──────────────────────────── -->
     <string name="network_testnet">Тестовая сеть</string>
     <string name="network_public">Основная сеть</string>
