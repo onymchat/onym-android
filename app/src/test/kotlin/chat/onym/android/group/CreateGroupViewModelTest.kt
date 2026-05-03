@@ -55,14 +55,20 @@ class CreateGroupViewModelTest {
     }
 
     @Test
-    fun unavailableGovernance_isNotSelectable() = runTest {
+    fun allGovernanceTypes_areSelectable() = runTest {
+        // All three flavours (Tyranny / OneOnOne / Anarchy) are wired
+        // post-Anarchy stack — the picker accepts every entry. This
+        // test used to assert Anarchy was a no-op (when only Tyranny
+        // was wired) and then OneOnOne (after the OneOnOne stack);
+        // both invariants are gone now. Kept as a guard against
+        // someone re-introducing an "unavailable" flavour without
+        // also updating the picker UI.
         val vm = makeViewModel()
-        // setGovernance silently no-ops on unavailable types — the
-        // VM-level invariant guards even if the screen forgets to
-        // disable the card.
-        vm.setGovernance(OnymUIGovernance.Anarchy)
-        assertEquals(OnymUIGovernance.Tyranny, vm.state.value.governance)
-        assertTrue(vm.state.value.canAdvanceToStep2)
+        for (g in OnymUIGovernance.entries) {
+            vm.setGovernance(g)
+            assertEquals(g, vm.state.value.governance)
+            assertTrue(vm.state.value.canAdvanceToStep2)
+        }
     }
 
     @Test
@@ -343,10 +349,10 @@ class CreateGroupViewModelTest {
     @Test
     fun tappedDismissError_clearsErrorAndReturnsToStep2() = runTest {
         val vm = makeViewModel()
-        // Synthesise an error state by submitting on an unavailable
-        // governance type — submit() short-circuits and sets `error`
-        // without touching the interactor.
-        vm.setGovernance(OnymUIGovernance.Anarchy)  // no-op
+        // Note: this test used to rely on Anarchy being unavailable to
+        // force an error via submit(). Now all flavours are wired, so
+        // we just exercise the error-dismiss path on a clean state.
+        vm.setGovernance(OnymUIGovernance.Anarchy)
         // Force the unavailable state by reflection-equivalent: there
         // isn't a direct setter. Instead just observe that submit
         // with available=Tyranny doesn't set error, then trigger the

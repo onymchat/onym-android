@@ -92,9 +92,9 @@ data class CreateGroupState(
     val createdGroup: ChatGroup? = null,
 ) {
     /** True when the selected governance type is wired to the chain
-     *  layer. Tyranny + 1-on-1 are wired; Anarchy is still TBD. The
-     *  name no longer gates advance — submit falls back to
-     *  [generatedName] when the field is empty. */
+     *  layer. All three flavours (Tyranny / 1-on-1 / Anarchy) are
+     *  wired today. The name no longer gates advance — submit falls
+     *  back to [generatedName] when the field is empty. */
     val canAdvanceToStep2: Boolean
         get() = governance.isAvailable
 
@@ -442,9 +442,11 @@ enum class OnymUIGovernance(
     ),
     ;
 
-    /** Tyranny + 1-on-1 are wired to the chain layer; Anarchy is
-     *  still TBD (no FFI proof generator and no contract slot). */
-    val isAvailable: Boolean get() = this == Tyranny || this == OneOnOne
+    /** All three governance flavours are wired to the chain layer:
+     *  Tyranny (`@RunWith` PR #36), OneOnOne (#36/47/48 stack),
+     *  Anarchy (#50/51/this-PR stack). Future flavours
+     *  (Democracy, Oligarchy) flip on as they wire. */
+    val isAvailable: Boolean get() = true
 
     /** One-line addendum rendered in the Step-2 banner under the
      *  governance label. Type-specific because the implications
