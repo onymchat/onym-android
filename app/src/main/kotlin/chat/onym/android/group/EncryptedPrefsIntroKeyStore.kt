@@ -37,15 +37,14 @@ class EncryptedPrefsIntroKeyStore(
     private val _entriesFlow = MutableStateFlow<List<IntroKeyEntry>>(emptyList())
     override val entriesFlow: StateFlow<List<IntroKeyEntry>> = _entriesFlow.asStateFlow()
 
-    init {
-        // Seed the flow at construction time so the first subscriber
-        // sees the on-disk state without needing an explicit reload.
-        // EncryptedSharedPreferences read is lazy via the `prefs`
-        // delegate, so this only does work if a previous session
-        // wrote something.
-        _entriesFlow.value = loadAllUnlocked().map { it.toEntry() }
-    }
-
+    // Property declarations MUST precede the `init` block that reads
+    // them: Kotlin runs field initializers + init blocks in source
+    // order. With `prefs` declared after init, `prefs$delegate` is
+    // still null when init dereferences it via `loadAllUnlocked()`,
+    // and the app crashes on launch with NPE on `Lazy.getValue()`.
+    // Repro before this fix: cold-launch the installed APK on any
+    // device — `OnymApplication.buildDependencies` faults on the
+    // first read of `EncryptedPrefsIntroKeyStore`.
     private val prefs: SharedPreferences by lazy {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -62,6 +61,15 @@ class EncryptedPrefsIntroKeyStore(
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+    }
+
+    init {
+        // Seed the flow at construction time so the first subscriber
+        // sees the on-disk state without needing an explicit reload.
+        // EncryptedSharedPreferences read is lazy via the `prefs`
+        // delegate, so this only does work if a previous session
+        // wrote something.
+        _entriesFlow.value = loadAllUnlocked().map { it.toEntry() }
     }
 
     override suspend fun save(entry: IntroKeyEntry) = mutex.withLock {
