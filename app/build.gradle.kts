@@ -19,8 +19,15 @@ android {
         // path with no compatibility shims.
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.0.1"
+        // Single source of truth: the GitHub release tag. See
+        // `resolveReleaseVersion()` for the resolution order
+        // (release-workflow env → -PreleaseVersion → git describe →
+        // dev fallback). The release tag flows through here into
+        // `BuildConfig.VERSION_NAME` / `VERSION_CODE`, which the
+        // About screen renders directly — no manual bump needed.
+        val releaseVersion = resolveReleaseVersion()
+        versionCode = releaseVersion.code
+        versionName = releaseVersion.name
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -234,4 +241,64 @@ fun relayerAuthToken(): String {
         if (f.exists()) f.inputStream().use { load(it) }
     }
     return props.getProperty("relayer.authToken").orEmpty()
+}
+
+/**
+ * The app's `versionName` + `versionCode`, derived (in this order) from:
+ *
+ *  1. Environment variable `RELEASE_VERSION` — `release.yml` passes
+ *     the dispatch input through here at `assembleRelease`. This is
+ *     the canonical CI path; the explicit override skips git so the
+ *     APK version always matches the release tag exactly, even on a
+ *     shallow clone.
+ *  2. Gradle property `-PreleaseVersion=v0.0.10` — same purpose,
+ *     command-line equivalent. Useful for one-off local "what would
+ *     this look like at v0.0.X" builds.
+ *  3. `git describe --tags --match 'v*'` — local dev between tags
+ *     gets a descriptor like `v0.0.10-3-gca6471b` that's useful in
+ *     bug reports (encodes the last release + commits-since + SHA).
+ *  4. Fallback `v0.0.0-dev` — covers shallow clones with no tags
+ *     fetched, no-git sandboxes, and brand-new repos before the first
+ *     tag.
+ *
+ * `name` strips the leading `v` (Play / About-screen convention).
+ *
+ * `code` is `MAJOR * 10000 + MINOR * 100 + PATCH` parsed from the
+ * resolved name (any `-N-gXXX` dev suffix is ignored). Monotonic
+ * across `v0.x.y` and across the eventual jump to `v0.1.0`. Floors
+ * at 1 so AGP doesn't reject `versionCode = 0` on a brand-new repo.
+ */
+data class ReleaseVersion(val name: String, val code: Int)
+
+fun resolveReleaseVersion(): ReleaseVersion {
+    val raw = System.getenv("RELEASE_VERSION")?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty("releaseVersion") as? String)?.takeIf { it.isNotBlank() }
+        ?: gitDescribeOrNull()
+        ?: "v0.0.0-dev"
+    val name = raw.removePrefix("v")
+    val parts = name.substringBefore('-').split('.')
+    val code = if (parts.size == 3) {
+        val major = parts[0].toIntOrNull() ?: 0
+        val minor = parts[1].toIntOrNull() ?: 0
+        val patch = parts[2].toIntOrNull() ?: 0
+        major * 10000 + minor * 100 + patch
+    } else 0
+    return ReleaseVersion(name = name, code = code.coerceAtLeast(1))
+}
+
+/** `git describe`-derived release identifier, or `null` if no `v*`
+ *  tag is reachable from `HEAD` (or git itself isn't available).
+ *
+ *  Uses `providers.exec` (Gradle 8.5+) rather than a direct
+ *  `ProcessBuilder` so the call is configuration-cache-safe — direct
+ *  subprocesses at configure time are forbidden by the cache. */
+fun gitDescribeOrNull(): String? {
+    val exec = providers.exec {
+        commandLine("git", "describe", "--tags", "--match", "v*", "--abbrev=7")
+        workingDir = rootProject.projectDir
+        isIgnoreExitValue = true
+    }
+    val exit = exec.result.get().exitValue
+    val output = exec.standardOutput.asText.get().trim()
+    return output.takeIf { exit == 0 && it.isNotBlank() }
 }
