@@ -97,17 +97,6 @@ import java.util.UUID
  * Mirrors `CreateGroupTyrannyE2ETests.swift` from onym-ios PR #32.
  */
 @RunWith(AndroidJUnit4::class)
-@org.junit.Ignore(
-    "Disabled pending the cross-repo BLS Fr canonical-encoding fix between " +
-        "OnymSDK + the deployed Tyranny contract. Run #25262987336 hit " +
-        "`Error(Contract, #15) InvalidCommitmentEncoding` — the contract's " +
-        "`is_canonical_fr` (sep-tyranny/src/lib.rs:284-300) rejects either the " +
-        "`commitment`, `admin_pubkey_commitment`, or `group_id_fr` arg because " +
-        "the SDK emits Fr scalars in a byte order Soroban's `Fr::from_bytes` " +
-        "treats as non-canonical. The fix lives in onym-sdk or at the contract's " +
-        "Fr encoding boundary — not in this test's wiring. Re-enable + " +
-        "re-dispatch a release once a contracts release pins the byte order.",
-)
 class CreateGroupTyrannyE2ETest {
 
     private val args by lazy { InstrumentationRegistry.getArguments() }

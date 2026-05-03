@@ -1,6 +1,7 @@
 package chat.onym.android.group
 
 import chat.onym.android.chain.AnchorSelectionKey
+import chat.onym.android.chain.CanonicalFr
 import chat.onym.android.chain.ContractsRepository
 import chat.onym.android.chain.GovernanceType
 import chat.onym.android.chain.GroupCreateProof
@@ -109,8 +110,15 @@ open class CreateGroupInteractor(
         val binding = contracts.snapshots.value.binding(key)
             ?: throw CreateGroupError.NoContractBinding(GovernanceType.Tyranny)
 
-        // 3. Group params
-        val groupId = randomBytes(32)
+        // 3. Group params.
+        // `groupId` MUST be a canonical bls12-381 Fr (BE value < r) —
+        // sep-tyranny's `is_canonical_fr(&group_id)` rejects anything
+        // else with `Error::InvalidCommitmentEncoding` (#15). The check
+        // exists to close a same-`group_id_fr` collision via
+        // `group_id + p (mod 2^256)` — see the contract comment at
+        // sep-tyranny/src/lib.rs:290–298. Run #25262987336 hit exactly
+        // that with an `ea…` first byte from raw `SecureRandom.nextBytes`.
+        val groupId = CanonicalFr.randomCanonicalFr32()
         val groupSecret = randomBytes(32)
         val salt = GroupCommitmentBuilder.generateSalt()
         val tier = SepTier.SMALL
