@@ -177,6 +177,12 @@ fun OnymTheme(
 
 // ─── OnymMark — broken-ring brand logo ───────────────────────────
 
+/** Rotation that lands the brand mark's two gaps at clock positions
+ *  1:00 and 7:00. See [OnymMark]'s "Gap orientation" doc for the
+ *  derivation. */
+private const val GAP_ORIENTATION_DEG: Float = -52.8f
+
+
 /**
  * The Onym brand mark: a broken/segmented ring with two narrow
  * radial gaps. The gaps suggest privacy/anonymity — the identity is
@@ -187,6 +193,15 @@ fun OnymTheme(
  * Compose's `drawArc` is the most direct equivalent on Android.
  *
  * Mirrors `OnymMark` from onym-ios PR #26.
+ *
+ * **Gap orientation.** The pre-rotation arc geometry (startAngle 0°
+ * + 180°, each sweeping 165.6° clockwise) places the two ~14.4° gaps
+ * symmetrically at canvas angles 352.8° and 172.8° — i.e. just above
+ * the 3 o'clock and 9 o'clock points. We then apply a fixed rotation
+ * to swing the gaps to the brand-canonical positions: **1 o'clock**
+ * (canvas 300°) and **7 o'clock** (canvas 120°). The required offset
+ * is `300° − 352.8° = −52.8°`. Don't change this without coordinating
+ * with iOS — the brand mark must read identical across platforms.
  */
 @Composable
 fun OnymMark(
@@ -196,11 +211,11 @@ fun OnymMark(
     spinning: Boolean = false,
     fillOpacity: Float = 0.92f,
 ) {
-    val rotation = remember { Animatable(-90f) }
+    val rotation = remember { Animatable(GAP_ORIENTATION_DEG) }
     LaunchedEffect(spinning) {
         if (spinning) {
             rotation.animateTo(
-                targetValue = -90f + 360f,
+                targetValue = GAP_ORIENTATION_DEG + 360f,
                 animationSpec = infiniteRepeatable(
                     animation = tween(durationMillis = 4200, easing = LinearEasing),
                     repeatMode = RepeatMode.Restart,
