@@ -49,12 +49,16 @@ import chat.onym.android.settings.AnchorsNetworkScreen
 import chat.onym.android.settings.AnchorsPickerViewModel
 import chat.onym.android.settings.AnchorsRootScreen
 import chat.onym.android.settings.AnchorsVersionScreen
+import chat.onym.android.settings.ContractDetailScreen
+import chat.onym.android.settings.DeployContractScreen
 import chat.onym.android.settings.IdentitiesScreen
 import chat.onym.android.settings.IdentityDetailScreen
 import chat.onym.android.settings.PrivacyEncryptionScreen
 import chat.onym.android.settings.RelayerSettingsScreen
 import chat.onym.android.settings.RelayerSettingsViewModel
+import chat.onym.android.settings.RunRelayerScreen
 import chat.onym.android.settings.SettingsScreen
+import chat.onym.android.settings.UseExistingContractScreen
 
 /**
  * App shell. `Scaffold` + Material 3 [NavigationBar] across the bottom,
@@ -315,7 +319,11 @@ fun RootScreen(
                 RelayerSettingsScreen(
                     viewModel = vm,
                     onBackClick = { navController.popBackStack() },
+                    onRunYourOwnClick = { navController.navigate(ROUTE_RUN_RELAYER) },
                 )
+            }
+            composable(ROUTE_RUN_RELAYER) {
+                RunRelayerScreen(onBack = { navController.popBackStack() })
             }
             composable(ROUTE_ANCHORS_ROOT) {
                 val vm: AnchorsPickerViewModel = viewModel(
@@ -363,6 +371,56 @@ fun RootScreen(
                     network = network,
                     type = type,
                     onBackClick = { navController.popBackStack() },
+                    onContractDetailClick = { version, contractId ->
+                        navController.navigate(
+                            "contract_detail/${network.wireValue}/${type.wireValue}/${version}?addr=${contractId ?: ""}"
+                        )
+                    },
+                    onUseExistingClick = {
+                        navController.navigate("use_contract/${network.wireValue}/${type.wireValue}")
+                    },
+                    onDeployClick = {
+                        navController.navigate("deploy_contract/${network.wireValue}/${type.wireValue}")
+                    },
+                )
+            }
+            composable("contract_detail/{network}/{type}/{version}?addr={addr}") { entry ->
+                val net = ContractNetwork.fromWire(entry.arguments?.getString("network") ?: "")
+                    ?: return@composable
+                val gov = GovernanceType.fromWire(entry.arguments?.getString("type") ?: "")
+                    ?: return@composable
+                val ver = entry.arguments?.getString("version") ?: return@composable
+                val addr = entry.arguments?.getString("addr")?.takeIf { it.isNotBlank() }
+                ContractDetailScreen(
+                    network = net,
+                    type = gov,
+                    version = ver,
+                    contractAddress = addr,
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable("use_contract/{network}/{type}") { entry ->
+                val net = ContractNetwork.fromWire(entry.arguments?.getString("network") ?: "")
+                    ?: return@composable
+                val gov = GovernanceType.fromWire(entry.arguments?.getString("type") ?: "")
+                    ?: return@composable
+                UseExistingContractScreen(
+                    network = net,
+                    type = gov,
+                    onBack = { navController.popBackStack() },
+                    onUseContract = { _, _ -> navController.popBackStack() },
+                )
+            }
+            composable("deploy_contract/{network}/{type}") { entry ->
+                val net = ContractNetwork.fromWire(entry.arguments?.getString("network") ?: "")
+                    ?: return@composable
+                val gov = GovernanceType.fromWire(entry.arguments?.getString("type") ?: "")
+                    ?: return@composable
+                DeployContractScreen(
+                    network = net,
+                    type = gov,
+                    onBack = { navController.popBackStack() },
+                    onUseDeployed = { navController.popBackStack() },
                 )
             }
             composable(ROUTE_RECOVERY_BACKUP) {
@@ -408,6 +466,7 @@ private const val ROUTE_IDENTITIES = "identities"
 private const val ROUTE_PRIVACY = "privacy"
 private const val ROUTE_ABOUT = "about_onym"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
+private const val ROUTE_RUN_RELAYER = "run_relayer"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
 private val TAB_ROUTES = setOf(Tab.Chats.route, Tab.Settings.route, Tab.Search.route)
