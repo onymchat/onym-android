@@ -114,7 +114,7 @@ class CreateGroupInteractorTest {
 
     @After
     fun tearDown() {
-        try { identityStore.wipe() } catch (_: Throwable) { /* best-effort */ }
+        try { identityStore.wipeAll() } catch (_: Throwable) { /* best-effort */ }
     }
 
     // ─── happy path ───────────────────────────────────────────────

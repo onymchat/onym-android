@@ -51,7 +51,7 @@ class IdentityRepositoryTest {
     @After
     fun tearDown() {
         try {
-            store.wipe()
+            store.wipeAll()
         } catch (_: Throwable) {
             // Best-effort cleanup; the unique prefs file name keeps
             // tests from colliding even if a previous run leaked.
@@ -74,7 +74,9 @@ class IdentityRepositoryTest {
         assertNotNull(identity.recoveryPhrase)
         assertEquals(12, identity.recoveryPhrase!!.split(" ").size)
 
-        val stored = store.load()
+        val activeId = store.loadCurrent()
+        assertNotNull("bootstrap must persist a current-identity selection", activeId)
+        val stored = store.load(activeId!!)
         assertNotNull(stored)
         assertEquals(16, stored!!.entropy?.size)
         assertEquals(32, stored.nostrSecretKey.size)
@@ -186,7 +188,14 @@ class IdentityRepositoryTest {
         repo.bootstrap()
         repo.wipe()
         assertNull(repo.currentIdentity())
-        assertNull(store.load())
+        assertTrue(
+            "wipe clears the active identity from the keyed store",
+            store.listIds().isEmpty(),
+        )
+        assertNull(
+            "wipe also clears the `current` selection",
+            store.loadCurrent(),
+        )
     }
 
     // ─── snapshots ─────────────────────────────────────────────────

@@ -90,7 +90,7 @@ class RecoveryPhraseBackupViewModelTest {
     @After
     fun tearDown() {
         viewModel.stop()
-        try { store.wipe() } catch (_: Throwable) {}
+        try { store.wipeAll() } catch (_: Throwable) {}
     }
 
     // ─── Auth ───────────────────────────────────────────────────────
