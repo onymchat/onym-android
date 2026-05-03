@@ -1,9 +1,5 @@
 package chat.onym.android.settings
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -326,6 +322,7 @@ fun IdentityDetailScreen(
     }
 }
 
+
 @Composable
 private fun RemoveIdentityDialog(
     displayName: String,
@@ -379,8 +376,3 @@ private fun RemoveIdentityDialog(
     )
 }
 
-private fun copyToClipboard(context: Context, label: String, value: String) {
-    val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    cb.setPrimaryClip(ClipData.newPlainText(label, value))
-    Toast.makeText(context, R.string.copied, Toast.LENGTH_SHORT).show()
-}

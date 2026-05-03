@@ -232,6 +232,92 @@
     <string name="about_credits_line2">Released under the MIT license.</string>
     <string name="about_credits_copyright">© 2026 · Onym</string>
 
+    <!-- ─── Run-your-own-relayer ─────────────────────────────────── -->
+    <string name="relayer_run_your_own_title">Run your own relayer</string>
+    <string name="relayer_run_your_own_subtitle">Deploy onym-relayer from GitHub in 5 minutes</string>
+    <string name="run_relayer_title">Run your own relayer</string>
+    <string name="run_relayer_hero_title">Your relayer, your rules</string>
+    <string name="run_relayer_hero_body">Run a relayer for yourself, your team, or your org. End-to-end encryption stays intact — Onym never sees your messages.</string>
+    <string name="run_relayer_view_github">View on GitHub</string>
+    <string name="run_relayer_read_docs">Read the docs</string>
+    <string name="run_relayer_step1_title">Clone the repo</string>
+    <string name="run_relayer_step1_body">onym-relayer is open source. Grab it from GitHub.</string>
+    <string name="run_relayer_step2_title">Configure your domain</string>
+    <string name="run_relayer_step2_body">Set RELAYER_URL in .env. This is what users will paste.</string>
+    <string name="run_relayer_step3_title">Deploy</string>
+    <string name="run_relayer_step3_body">Pick a host. Fly.io and Railway have one-click deploys.</string>
+    <string name="run_relayer_step4_title">Add it to Onym</string>
+    <string name="run_relayer_step4_body">Back on Relayer, paste your URL into "Add Custom URL".</string>
+    <string name="run_relayer_deploy_section">One-click deploy</string>
+    <string name="run_relayer_deploy_fly">Deploy to Fly.io</string>
+    <string name="run_relayer_deploy_fly_subtitle">Free tier · global edge</string>
+    <string name="run_relayer_deploy_railway">Deploy to Railway</string>
+    <string name="run_relayer_deploy_railway_subtitle">Simple setup</string>
+    <string name="run_relayer_deploy_docker">Run with Docker</string>
+    <string name="run_relayer_deploy_docker_subtitle">Self-host anywhere</string>
+    <string name="run_relayer_footnote">Need help? Open an issue on GitHub or join the dev chat.</string>
+
+    <!-- ─── Anchors → Custom (deploy / use existing) ─────────────── -->
+    <string name="anchors_section_custom">Custom</string>
+    <string name="anchors_releases_detail_footnote">Tap a version to view the contract, source code, and audit report.</string>
+    <string name="anchors_custom_deploy_title">Deploy from source</string>
+    <string name="anchors_custom_deploy_subtitle">Build &amp; publish your own contract</string>
+    <string name="anchors_custom_use_title">Use existing address</string>
+    <string name="anchors_custom_use_subtitle">Point to a deployed contract</string>
+    <string name="anchors_custom_footer">Onym only ships audited (or pending-audit) contracts. If you\'ve forked or deployed your own, point new chats at it here. Existing chats keep the contract they were created with.</string>
+
+    <!-- ─── Contract Detail ──────────────────────────────────────── -->
+    <string name="contract_detail_hero_eyebrow">Contract · %1$s</string>
+    <string name="contract_detail_hero_subtitle">Stellar %1$s</string>
+    <string name="contract_detail_onchain_section">On-chain</string>
+    <string name="contract_detail_explorer_title">Stellar Expert</string>
+    <string name="contract_detail_copy_address">Copy contract address</string>
+    <string name="contract_detail_no_address">Not deployed</string>
+    <string name="contract_detail_source_section">Source</string>
+    <string name="contract_detail_view_source">View source on GitHub</string>
+    <string name="contract_detail_audit_title">Audit report</string>
+    <string name="contract_detail_audit_subtitle">Pending — no audits yet</string>
+    <string name="contract_detail_footnote">This is the contract that anchors %1$s groups. Existing chats keep the contract they were created with — picking a different version only affects new chats.</string>
+
+    <!-- ─── Use existing contract address ────────────────────────── -->
+    <string name="use_contract_title">Use existing address</string>
+    <string name="use_contract_hero_title">Bring your own contract</string>
+    <string name="use_contract_hero_body">Anchor new %1$s chats on a Stellar %2$s contract you\'ve already deployed.</string>
+    <string name="use_contract_address_section">Stellar contract address</string>
+    <string name="use_contract_address_helper">Stellar Soroban contract ID</string>
+    <string name="use_contract_validity_ok">Valid format</string>
+    <string name="use_contract_validity_progress">%1$d/56 chars</string>
+    <string name="use_contract_label_section">Label</string>
+    <string name="use_contract_label_placeholder">My fork v0.0.5</string>
+    <string name="use_contract_label_footnote">Shown alongside the contract address in chats and on the Anchors list.</string>
+    <string name="use_contract_verify_button">Verify</string>
+    <string name="use_contract_use_button">Use this contract</string>
+    <string name="use_contract_verified_title">Contract verified</string>
+    <string name="use_contract_verified_body">Format check passed. Tap "Use this contract" to anchor new chats here.</string>
+    <string name="use_contract_findit_section">How to find it</string>
+    <string name="use_contract_findit_explorer">Browse on Stellar Expert</string>
+    <string name="use_contract_findit_cli">Soroban CLI</string>
+
+    <!-- ─── Deploy contract from source ──────────────────────────── -->
+    <string name="deploy_contract_title">Deploy from source</string>
+    <string name="deploy_contract_hero_title">Build, deploy, anchor</string>
+    <string name="deploy_contract_hero_body">Compile the %1$s contract from source and deploy it to Stellar %2$s from this device. Onym signs with a one-time deploy key.</string>
+    <string name="deploy_contract_source_section">Source</string>
+    <string name="deploy_contract_repo">Repository</string>
+    <string name="deploy_contract_ref_label">Ref</string>
+    <string name="deploy_contract_network_label">Network</string>
+    <string name="deploy_contract_module_label">Module</string>
+    <string name="deploy_contract_action">Build &amp; Deploy</string>
+    <string name="deploy_contract_log_building">Building wasm…</string>
+    <string name="deploy_contract_log_deploying">Deploying to Stellar…</string>
+    <string name="deploy_contract_log_done">Complete</string>
+    <string name="deploy_contract_deployed_section">Deployed contract</string>
+    <string name="deploy_contract_deployed_title">Contract deployed</string>
+    <string name="deploy_contract_view_explorer">Stellar Expert</string>
+    <string name="deploy_contract_use_button">Use this contract</string>
+    <string name="deploy_contract_cli_section">Or use the CLI</string>
+    <string name="deploy_contract_passphrase_footnote">Network passphrase: %1$s. After deploying via CLI, come back and choose "Use existing address".</string>
+
     <!-- ─── ContractNetwork.displayName ──────────────────────────── -->
     <string name="network_testnet">Testnet</string>
     <string name="network_public">Mainnet</string>
