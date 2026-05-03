@@ -228,6 +228,124 @@ class IdentityRepositoryTest {
         assertNull(repo.snapshots.first())
     }
 
+    // ─── Multi-identity API (PR-2) ─────────────────────────────────
+
+    @Test
+    fun add_appendsIdentity_andSelectsIt() = runBlocking {
+        val first = repo.bootstrap()
+        val firstId = repo.currentIdentityId.first()!!
+        assertEquals(1, repo.identities.first().size)
+
+        val secondId = repo.add(name = "Work")
+        assertNotNull(secondId)
+        assertNotEquals("add must mint a fresh id", firstId, secondId)
+
+        val list = repo.identities.first()
+        assertEquals(2, list.size)
+        assertEquals(secondId, repo.currentIdentityId.first())
+        assertEquals("Work", list.single { it.id == secondId }.name)
+        // Original identity is preserved (not wiped like restore() does).
+        assertEquals(true, list.any { it.id == firstId })
+    }
+
+    @Test
+    fun add_blankName_autofillsToIdentityN() = runBlocking {
+        repo.bootstrap()
+        repo.add(name = "  ")
+        repo.add(name = "")
+        val list = repo.identities.first()
+        // Bootstrap yields name="" (intentional — first install reads
+        // as a single nameless identity); the two `add` calls fill the
+        // 2nd and 3rd slots with the auto-label.
+        val names = list.map { it.name }
+        assertEquals("Identity 2", names[1])
+        assertEquals("Identity 3", names[2])
+    }
+
+    @Test
+    fun add_withRestoreMnemonic_restoresInsteadOfGenerating() = runBlocking {
+        val mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon " +
+            "abandon abandon abandon about"
+        repo.bootstrap()
+        val restoredId = repo.add(name = "Imported", restoreMnemonic = mnemonic)
+        // The identity restored from the test-vector mnemonic has a
+        // recovery phrase that round-trips to the same words.
+        val identity = repo.snapshots.first()!!
+        assertEquals(mnemonic, identity.recoveryPhrase)
+        assertEquals(restoredId, repo.currentIdentityId.first())
+    }
+
+    @Test
+    fun select_swapsActiveIdentity_andEmitsOnSnapshots() = runBlocking {
+        val firstId = repo.add(name = "A")
+        val firstIdentity = repo.snapshots.first()!!
+        val secondId = repo.add(name = "B")
+        val secondIdentity = repo.snapshots.first()!!
+        assertEquals(secondId, repo.currentIdentityId.first())
+
+        repo.select(firstId)
+        assertEquals(firstId, repo.currentIdentityId.first())
+        // Snapshot bytes match the originally-bootstrapped identity.
+        assertArrayEquals(firstIdentity.blsPublicKey, repo.snapshots.first()!!.blsPublicKey)
+        assertNotEquals(
+            "switching identities must change the public key",
+            secondIdentity.blsPublicKey.toList(),
+            repo.snapshots.first()!!.blsPublicKey.toList(),
+        )
+    }
+
+    @Test
+    fun select_unknownId_throws() = runBlocking {
+        repo.bootstrap()
+        try {
+            repo.select(IdentityId.new())
+            error("expected IdentityNotLoaded")
+        } catch (_: IdentityError.IdentityNotLoaded) {
+            // expected
+        }
+    }
+
+    @Test
+    fun remove_activeIdentity_pivotsToNext() = runBlocking {
+        val firstId = repo.add(name = "A")
+        val secondId = repo.add(name = "B")
+        assertEquals(secondId, repo.currentIdentityId.first())
+
+        repo.remove(secondId)
+        assertEquals("pivot to the remaining identity",
+            firstId, repo.currentIdentityId.first())
+        assertEquals(1, repo.identities.first().size)
+    }
+
+    @Test
+    fun remove_lastIdentity_clearsSelection() = runBlocking {
+        repo.bootstrap()
+        val onlyId = repo.currentIdentityId.first()!!
+        repo.remove(onlyId)
+        assertNull(repo.currentIdentityId.first())
+        assertNull(repo.snapshots.first())
+        assertEquals(0, repo.identities.first().size)
+    }
+
+    @Test
+    fun remove_invokesRemovalListener_beforeWipe() = runBlocking {
+        repo.bootstrap()
+        val id = repo.currentIdentityId.first()!!
+        var listenerSawId: IdentityId? = null
+        var snapshotPresentDuringListener = false
+        repo.setRemovalListener { invokedId ->
+            listenerSawId = invokedId
+            // Snapshot must still be on disk while the listener runs —
+            // PR-3's GroupRepository will use this window to delete
+            // chats owned by the about-to-be-wiped identity.
+            snapshotPresentDuringListener = store.load(invokedId) != null
+        }
+        repo.remove(id)
+        assertEquals(id, listenerSawId)
+        assertEquals(true, snapshotPresentDuringListener)
+        assertNull("after wipe, snapshot is gone", store.load(id))
+    }
+
     private fun ByteArray.toHex(): String {
         val sb = StringBuilder(size * 2)
         for (b in this) sb.append("%02x".format(b.toInt() and 0xFF))
