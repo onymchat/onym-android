@@ -103,21 +103,23 @@ data class CreateGroupState(
     val effectiveName: String
         get() = name.trim().ifEmpty { generatedName }
 
-    /** Label for the primary "Create" CTA on Step2. Per-governance:
+    /** Structured label for the primary "Create" CTA on Step2.
+     *  Compose maps each variant to its [androidx.compose.ui.res.stringResource]
+     *  via `createCtaLabelRes`. Per-governance:
      *  - Tyranny tolerates 0..N invitees ("Create empty group" / "with N").
      *  - 1-on-1 needs exactly 1 invitee — the CTA spells out the gate
      *    so the user understands why it's disabled. */
-    val createCtaLabel: String
+    val createCtaLabel: CreateCtaLabel
         get() = when (governance) {
             OnymUIGovernance.OneOnOne -> when (invitees.size) {
-                0 -> "Add the other person"
-                1 -> "Start 1-on-1"
-                else -> "1-on-1 needs exactly one"
+                0 -> CreateCtaLabel.OneOnOneAddOther
+                1 -> CreateCtaLabel.OneOnOneStart
+                else -> CreateCtaLabel.OneOnOneTooMany
             }
             else -> when (invitees.size) {
-                0 -> "Create empty group"
-                1 -> "Create with 1 person"
-                else -> "Create with ${invitees.size} people"
+                0 -> CreateCtaLabel.Empty
+                1 -> CreateCtaLabel.OnePerson
+                else -> CreateCtaLabel.NPeople(invitees.size)
             }
         }
 
@@ -434,36 +436,20 @@ class CreateGroupViewModel(
 
 /**
  * UI-side mirror of the design's three governance cards. Maps to
- * [SepGroupType] for the actual chain call. PR-C only enables
- * [Tyranny] — the other two render with a "Soon" pill and aren't
- * selectable.
+ * [SepGroupType] for the actual chain call. All three flavours are
+ * wired post-Anarchy — `isAvailable` returns true for every entry.
+ *
+ * Display strings (card label, sub-line, tooltip, Step-2 hint) live
+ * in the `res/values*` localized `strings.xml` files and are resolved
+ * by Compose via `stringResource(governance.cardLabelRes())` etc. —
+ * see `CreateGroupScreen.kt`.
  *
  * Mirrors `OnymUIGovernance` from onym-ios PR #26.
  */
-enum class OnymUIGovernance(
-    val label: String,
-    val sub: String,
-    val oneLine: String,
-    val tooltip: String,
-) {
-    Tyranny(
-        label = "Tyranny",
-        sub = "Single admin",
-        oneLine = "You control membership and settings.",
-        tooltip = "Only the admin can manage this group.",
-    ),
-    OneOnOne(
-        label = "1‑1on‑1",
-        sub = "Dialog",
-        oneLine = "A private two-person conversation.",
-        tooltip = "Exactly two people. No one else can join.",
-    ),
-    Anarchy(
-        label = "Anarchy",
-        sub = "Open control",
-        oneLine = "Every member has the same control.",
-        tooltip = "Anyone can add, remove, or change settings.",
-    ),
+enum class OnymUIGovernance {
+    Tyranny,
+    OneOnOne,
+    Anarchy,
     ;
 
     /** All three governance flavours are wired to the chain layer:
@@ -471,17 +457,6 @@ enum class OnymUIGovernance(
      *  Anarchy (#50/51/this-PR stack). Future flavours
      *  (Democracy, Oligarchy) flip on as they wire. */
     val isAvailable: Boolean get() = true
-
-    /** One-line addendum rendered in the Step-2 banner under the
-     *  governance label. Type-specific because the implications
-     *  differ — Tyranny mentions the admin role, 1-on-1 mentions the
-     *  exact-one-invitee constraint. */
-    val step2Hint: String
-        get() = when (this) {
-            Tyranny -> "You'll be the only admin."
-            OneOnOne -> "Pick exactly one person."
-            Anarchy -> "Everyone shares control."
-        }
 
     val sepGroupType: SepGroupType
         get() = when (this) {
@@ -498,6 +473,25 @@ enum class OnymUIGovernance(
             OneOnOne -> chat.onym.android.chain.GovernanceType.OneOnOne
             Anarchy -> chat.onym.android.chain.GovernanceType.Anarchy
         }
+}
+
+/**
+ * Structured label for the Step-2 primary "Create" CTA. Compose
+ * resolves to a `stringResource` so the visible text honours the
+ * device locale; tests assert on the variant identity directly. */
+sealed class CreateCtaLabel {
+    /** Tyranny / Anarchy / default — zero invitees. */
+    data object Empty : CreateCtaLabel()
+    /** Tyranny / Anarchy / default — one invitee. */
+    data object OnePerson : CreateCtaLabel()
+    /** Tyranny / Anarchy / default — two or more invitees. */
+    data class NPeople(val count: Int) : CreateCtaLabel()
+    /** 1-on-1 with no invitee — needs exactly one. */
+    data object OneOnOneAddOther : CreateCtaLabel()
+    /** 1-on-1 with one invitee — ready to start. */
+    data object OneOnOneStart : CreateCtaLabel()
+    /** 1-on-1 with more than one invitee — over-quota. */
+    data object OneOnOneTooMany : CreateCtaLabel()
 }
 
 private val WHITESPACE_REGEX = Regex("\\s+")

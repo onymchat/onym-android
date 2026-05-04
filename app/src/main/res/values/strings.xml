@@ -346,4 +346,123 @@
     <string name="governance_oneonone">One-on-one</string>
     <string name="governance_tyranny">Tyranny</string>
 
+    <!-- ─── Governance card copy (CreateGroup Step 1 / Step 2) ─────
+         Short pill labels for the picker cards plus the per-flavour
+         sub-line, tooltip blurb, and Step-2 banner hint that used
+         to live as hardcoded strings inside `OnymUIGovernance`. -->
+    <string name="governance_tyranny_card_label">Tyranny</string>
+    <string name="governance_tyranny_sub">Single admin</string>
+    <string name="governance_tyranny_oneline">You control membership and settings.</string>
+    <string name="governance_tyranny_tooltip">Only the admin can manage this group.</string>
+    <string name="governance_tyranny_step2hint">You\'ll be the only admin.</string>
+    <string name="governance_oneonone_card_label">1-on-1</string>
+    <string name="governance_oneonone_sub">Dialog</string>
+    <string name="governance_oneonone_oneline">A private two-person conversation.</string>
+    <string name="governance_oneonone_tooltip">Exactly two people. No one else can join.</string>
+    <string name="governance_oneonone_step2hint">Pick exactly one person.</string>
+    <string name="governance_anarchy_card_label">Anarchy</string>
+    <string name="governance_anarchy_sub">Open control</string>
+    <string name="governance_anarchy_oneline">Every member has the same control.</string>
+    <string name="governance_anarchy_tooltip">Anyone can add, remove, or change settings.</string>
+    <string name="governance_anarchy_step2hint">Everyone shares control.</string>
+
+    <!-- ─── Generic / shared CTAs ──────────────────────────────── -->
+    <string name="retry">Retry</string>
+
+    <!-- ─── Join chat (deeplink landing) ───────────────────────── -->
+    <string name="join_screen_title">Join chat</string>
+    <string name="join_invite_fallback_title">Invite to join a chat</string>
+    <string name="join_invite_from">from %1$s</string>
+    <string name="join_label_field_label">How should the inviter see you?</string>
+    <string name="join_label_field_helper">The inviter sees this name in their approval prompt. They can decline if it doesn\'t match what they expect.</string>
+    <string name="join_send_request">Send join request</string>
+    <string name="join_sending_request">Sending request…</string>
+    <string name="join_awaiting_title">Waiting for approval</string>
+    <string name="join_awaiting_body">You\'ll see this chat appear in your list as soon as the inviter taps Approve. You can close this screen — we\'ll add it to Chats automatically.</string>
+    <string name="join_back_to_chats">Back to chats</string>
+    <string name="join_approved_title">Joined!</string>
+    <string name="join_approved_body">You\'re a member of %1$s.</string>
+    <string name="join_open_chat">Open chat</string>
+
+    <!-- ─── Share invite (post-create) ─────────────────────────── -->
+    <string name="share_invite_title">Invite</string>
+    <string name="share_invite_hero_title">Your group is ready</string>
+    <string name="share_invite_hero_body">Share this link with the people you want to invite. You\'ll see and approve each request before they join.</string>
+    <string name="share_invite_link_chooser">Share invite link</string>
+    <string name="share_invite_clipboard_label">Invite link</string>
+    <string name="share_invite_copy">Copy invite link</string>
+    <string name="share_invite_copied">Copied!</string>
+    <string name="share_invite_failed">Couldn\'t generate an invite: %1$s</string>
+    <string name="share_invite_skip">I\'ll do this later</string>
+
+    <!-- ─── Create group — Step 1 ─────────────────────────────── -->
+    <string name="create_group_step1_title">New Group</string>
+    <string name="create_group_step1_subtitle">Step 1 of 2</string>
+    <string name="create_group_name_placeholder">Group name</string>
+    <string name="create_group_name_helper">Visible to members. You can change this anytime.</string>
+    <string name="create_group_accent_color">Accent color</string>
+    <string name="create_group_how_its_run">How it\'s run</string>
+    <string name="create_group_soon_badge">Soon</string>
+    <string name="create_group_encrypted_footer">End-to-end encrypted · published on Stellar so anyone can verify it\'s real.</string>
+    <string name="create_group_next">Next · Add people</string>
+
+    <!-- ─── Create group — Step 2 ─────────────────────────────── -->
+    <string name="create_group_step2_title">Add People</string>
+    <string name="create_group_step2_subtitle">Step 2 of 2</string>
+    <string name="create_group_no_invitees_title">No invitees yet</string>
+    <string name="create_group_no_invitees_body">Use \"Invite by inbox key\" below to add someone.</string>
+    <string name="create_group_invitee_inbox_label">Inbox %1$s</string>
+    <string name="create_group_invitee_inbox_subtitle">Direct inbox key</string>
+    <string name="create_group_invite_by_key_row_title">Invite by inbox key</string>
+    <string name="create_group_invite_by_key_row_subtitle">Paste a 64-char key</string>
+
+    <!-- ─── Create group — InviteByKey screen ─────────────────── -->
+    <string name="create_group_invite_by_key_screen_title">Invite by Inbox Key</string>
+    <string name="create_group_invite_by_key_for_subtitle">For %1$s</string>
+    <string name="create_group_invite_by_key_default_group_label">group</string>
+    <string name="create_group_invite_by_key_placeholder">Paste a 64-character hex key…</string>
+    <string name="create_group_invite_by_key_count">(%1$d/64)</string>
+    <string name="create_group_invite_by_key_helper">The recipient generates this key on their own device. They can find it in Settings → Identity → Inbox Key.</string>
+    <string name="create_group_invite_by_key_add">Add invitee</string>
+
+    <!-- ─── Create group — Step 2 CTA labels ──────────────────── -->
+    <string name="create_group_cta_empty">Create empty group</string>
+    <string name="create_group_cta_one_person">Create with 1 person</string>
+    <string name="create_group_cta_n_people">Create with %1$d people</string>
+    <string name="create_group_cta_oneonone_add">Add the other person</string>
+    <string name="create_group_cta_oneonone_start">Start 1-on-1</string>
+    <string name="create_group_cta_oneonone_too_many">1-on-1 needs exactly one</string>
+
+    <!-- ─── Create group — Creating ───────────────────────────── -->
+    <string name="create_group_creating_title">Creating %1$s</string>
+    <string name="create_group_creating_default_name">Group</string>
+    <string name="create_group_step_setup">Setting up encrypted group</string>
+    <string name="create_group_step_setup_sub">Generating keys on your device</string>
+    <string name="create_group_step_admin">Setting up your admin keys</string>
+    <string name="create_group_step_admin_sub">You\'ll be the only admin</string>
+    <string name="create_group_step_invitation">Sending invitation #%1$d</string>
+    <string name="create_group_step_invitation_sub">Encrypted, end-to-end</string>
+    <string name="create_group_step_anchor">Anchoring on Stellar</string>
+    <string name="create_group_step_anchor_sub">So anyone can verify this group is real</string>
+    <string name="create_group_error_fallback">Couldn\'t create the group</string>
+    <string name="create_group_helpful_note">This usually takes a few seconds. It\'s safe to close this — we\'ll finish in the background.</string>
+
+    <!-- ─── Create group — Success ────────────────────────────── -->
+    <string name="create_group_anchored_testnet">Anchored on Stellar testnet</string>
+    <string name="create_group_members_section">Members</string>
+    <plurals name="create_group_members_count">
+        <item quantity="one">%1$d member</item>
+        <item quantity="other">%1$d members</item>
+    </plurals>
+    <plurals name="create_group_invitations_sent">
+        <item quantity="one">%1$d invitation sent</item>
+        <item quantity="other">%1$d invitations sent</item>
+    </plurals>
+
+    <!-- ─── Identities errors (Snackbar) ──────────────────────── -->
+    <string name="identities_error_switch">Couldn\'t switch identity: %1$s</string>
+    <string name="identities_error_add">Couldn\'t add identity: %1$s</string>
+    <string name="identities_error_remove">Couldn\'t remove identity: %1$s</string>
+    <string name="identities_error_rename">Couldn\'t rename identity: %1$s</string>
+
 </resources>
