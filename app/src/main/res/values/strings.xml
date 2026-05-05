@@ -353,17 +353,14 @@
     <string name="governance_tyranny_card_label">Tyranny</string>
     <string name="governance_tyranny_sub">Single admin</string>
     <string name="governance_tyranny_oneline">You control membership and settings.</string>
-    <string name="governance_tyranny_tooltip">Only the admin can manage this group.</string>
     <string name="governance_tyranny_step2hint">You\'ll be the only admin.</string>
     <string name="governance_oneonone_card_label">1-on-1</string>
     <string name="governance_oneonone_sub">Dialog</string>
     <string name="governance_oneonone_oneline">A private two-person conversation.</string>
-    <string name="governance_oneonone_tooltip">Exactly two people. No one else can join.</string>
     <string name="governance_oneonone_step2hint">Pick exactly one person.</string>
     <string name="governance_anarchy_card_label">Anarchy</string>
     <string name="governance_anarchy_sub">Open control</string>
     <string name="governance_anarchy_oneline">Every member has the same control.</string>
-    <string name="governance_anarchy_tooltip">Anyone can add, remove, or change settings.</string>
     <string name="governance_anarchy_step2hint">Everyone shares control.</string>
 
     <!-- ─── Generic / shared CTAs ──────────────────────────────── -->
@@ -403,7 +400,6 @@
     <string name="create_group_accent_color">Accent color</string>
     <string name="create_group_how_its_run">How it\'s run</string>
     <string name="create_group_soon_badge">Soon</string>
-    <string name="create_group_encrypted_footer">End-to-end encrypted · published on Stellar so anyone can verify it\'s real.</string>
     <string name="create_group_next">Next · Add people</string>
 
     <!-- ─── Create group — Step 2 ─────────────────────────────── -->

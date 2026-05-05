@@ -228,56 +228,6 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     )
                 }
             }
-
-            // Selected explanation
-            Spacer(Modifier.height(12.dp))
-            OnymCard(
-                fill = LocalOnymTokens.current.surface2,
-                borderColor = accent.copy(alpha = 0.22f),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(accent.copy(alpha = 0.08f))
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(width = 6.dp, height = 36.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(accent.copy(alpha = 0.85f)),
-                    )
-                    Column {
-                        Text(
-                            text = "${stringResource(state.governance.subRes())}. " +
-                                stringResource(state.governance.tooltipRes()),
-                            color = LocalOnymTokens.current.text2,
-                            style = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(18.dp))
-
-            // Encrypted footer card
-            OnymCard(fill = LocalOnymTokens.current.surface) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text(
-                        text = "🔒",
-                        color = LocalOnymTokens.current.text2,
-                        style = TextStyle(fontSize = 14.sp),
-                    )
-                    Text(
-                        text = stringResource(R.string.create_group_encrypted_footer),
-                        color = LocalOnymTokens.current.text2,
-                        style = TextStyle(fontSize = 12.5.sp, lineHeight = 17.sp),
-                    )
-                }
-            }
             Spacer(Modifier.height(16.dp))
         }
 
@@ -967,13 +917,6 @@ private fun OnymUIGovernance.subRes(): Int = when (this) {
     OnymUIGovernance.Tyranny -> R.string.governance_tyranny_sub
     OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_sub
     OnymUIGovernance.Anarchy -> R.string.governance_anarchy_sub
-}
-
-@androidx.annotation.StringRes
-private fun OnymUIGovernance.tooltipRes(): Int = when (this) {
-    OnymUIGovernance.Tyranny -> R.string.governance_tyranny_tooltip
-    OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_tooltip
-    OnymUIGovernance.Anarchy -> R.string.governance_anarchy_tooltip
 }
 
 @androidx.annotation.StringRes

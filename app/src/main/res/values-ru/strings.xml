@@ -345,17 +345,14 @@
     <string name="governance_tyranny_card_label">Тирания</string>
     <string name="governance_tyranny_sub">Один админ</string>
     <string name="governance_tyranny_oneline">Вы управляете участниками и настройками.</string>
-    <string name="governance_tyranny_tooltip">Только админ может управлять группой.</string>
     <string name="governance_tyranny_step2hint">Вы будете единственным админом.</string>
     <string name="governance_oneonone_card_label">1-на-1</string>
     <string name="governance_oneonone_sub">Диалог</string>
     <string name="governance_oneonone_oneline">Приватный разговор на двоих.</string>
-    <string name="governance_oneonone_tooltip">Ровно два человека. Никто другой не сможет присоединиться.</string>
     <string name="governance_oneonone_step2hint">Выберите ровно одного человека.</string>
     <string name="governance_anarchy_card_label">Анархия</string>
     <string name="governance_anarchy_sub">Открытое управление</string>
     <string name="governance_anarchy_oneline">У каждого участника одинаковые права.</string>
-    <string name="governance_anarchy_tooltip">Любой может добавлять, удалять или менять настройки.</string>
     <string name="governance_anarchy_step2hint">Управление общее.</string>
 
     <!-- ─── Generic / shared CTAs ──────────────────────────────── -->
@@ -395,7 +392,6 @@
     <string name="create_group_accent_color">Акцентный цвет</string>
     <string name="create_group_how_its_run">Как устроена</string>
     <string name="create_group_soon_badge">Скоро</string>
-    <string name="create_group_encrypted_footer">Сквозное шифрование · публикуется в Stellar — каждый может проверить подлинность.</string>
     <string name="create_group_next">Далее · Добавить участников</string>
 
     <!-- ─── Create group — Step 2 ─────────────────────────────── -->
