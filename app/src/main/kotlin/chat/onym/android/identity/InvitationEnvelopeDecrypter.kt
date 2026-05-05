@@ -43,6 +43,25 @@ interface InvitationEnvelopeDecrypter {
      *         classify with a `when (e: InvitationDecryptError)`.
      */
     suspend fun decryptInvitation(envelopeBytes: ByteArray, asIdentity: IdentityId): ByteArray
+
+    /**
+     * Same as [decryptInvitation] but also surfaces the sealed
+     * envelope's `sender_ed25519_public_key` block so callers that
+     * need provenance can authenticate the sender without re-parsing.
+     *
+     * The receive-side dispatcher (PR 80) reads both at the same
+     * hop: the plaintext routes to the right fast-path decoder, the
+     * sender pubkey gates `MemberAnnouncementPayload` against the
+     * group's stored admin Ed25519 (PR 84).
+     *
+     * `senderEd25519PublicKey == null` is allowed by the wire format
+     * — callers that require authenticated provenance MUST refuse
+     * to act on the plaintext when it's null.
+     */
+    suspend fun decryptInvitationWithSender(
+        envelopeBytes: ByteArray,
+        asIdentity: IdentityId,
+    ): DecryptedEnvelope
 }
 
 /**

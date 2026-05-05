@@ -377,6 +377,17 @@ class IdentityRepository(
         decryptInvitationLocked(snapshot, envelopeBytes)
     }
 
+    override suspend fun decryptInvitationWithSender(
+        envelopeBytes: ByteArray,
+        asIdentity: IdentityId,
+    ): DecryptedEnvelope = withContext(ioDispatcher) {
+        val snapshot = store.load(asIdentity) ?: throw InvitationDecryptError.IdentityNotLoaded
+        decryptSealedEnvelopeWithKeyAndSender(
+            envelopeBytes = envelopeBytes,
+            recipientX25519PrivateKey = inboxKeyAgreementPrivateKey(snapshot.nostrSecretKey).encoded,
+        )
+    }
+
     private fun decryptInvitationLocked(
         snapshot: StoredSnapshot,
         envelopeBytes: ByteArray,
@@ -588,6 +599,29 @@ class IdentityRepository(
          * Throws [InvitationDecryptError]; never raw `javax.crypto`
          * / `kotlinx.serialization` exceptions.
          */
+        /**
+         * Same as [decryptSealedEnvelopeWithKey] but returns both
+         * the plaintext and the envelope's sender Ed25519 pubkey
+         * (when present). Used by the inbox dispatcher (PR 80) so
+         * the admin-Ed25519 trust check on
+         * `MemberAnnouncementPayload` can authenticate the sender
+         * without re-parsing the envelope.
+         */
+        fun decryptSealedEnvelopeWithKeyAndSender(
+            envelopeBytes: ByteArray,
+            recipientX25519PrivateKey: ByteArray,
+        ): DecryptedEnvelope {
+            require(recipientX25519PrivateKey.size == 32) {
+                "recipient X25519 priv: expected 32 bytes, got ${recipientX25519PrivateKey.size}"
+            }
+            val envelope = parseEnvelope(envelopeBytes)
+            val plaintext = openEnvelope(envelope, recipientX25519PrivateKey)
+            return DecryptedEnvelope(
+                plaintext = plaintext,
+                senderEd25519PublicKey = envelope.senderEd25519PublicKey,
+            )
+        }
+
         fun decryptSealedEnvelopeWithKey(
             envelopeBytes: ByteArray,
             recipientX25519PrivateKey: ByteArray,
@@ -595,6 +629,11 @@ class IdentityRepository(
             require(recipientX25519PrivateKey.size == 32) {
                 "recipient X25519 priv: expected 32 bytes, got ${recipientX25519PrivateKey.size}"
             }
+            val envelope = parseEnvelope(envelopeBytes)
+            return openEnvelope(envelope, recipientX25519PrivateKey)
+        }
+
+        private fun parseEnvelope(envelopeBytes: ByteArray): SealedEnvelope {
             val envelope = try {
                 envelopeJsonFormat.decodeFromString<SealedEnvelope>(
                     envelopeBytes.toString(Charsets.UTF_8)
@@ -625,6 +664,15 @@ class IdentityRepository(
                     throw InvitationDecryptError.SignatureFailed
                 }
             }
+            return envelope
+        }
+
+        private fun openEnvelope(
+            envelope: SealedEnvelope,
+            recipientX25519PrivateKey: ByteArray,
+        ): ByteArray {
+            val ephemeralPub = envelope.ephemeralPublicKey
+                ?: throw InvitationDecryptError.MissingEphemeralKey
 
             // ECDH against the recipient's X25519 private.
             val recipientPriv = X25519PrivateKeyParameters(recipientX25519PrivateKey, 0)

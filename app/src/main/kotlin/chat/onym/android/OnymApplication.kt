@@ -317,9 +317,19 @@ class OnymApplication : Application() {
             scope = applicationScope,
         )
         invitationsRepository.start()
+        // PR 80: receive-side dispatcher routes MemberAnnouncementPayload
+        // straight into local group state instead of queueing it as a
+        // raw invitation. Falls through to the legacy queue for anything
+        // else.
+        val incomingDispatcher = chat.onym.android.inbox.IncomingMessageDispatcher(
+            envelopeDecrypter = identityRepository,
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+        )
         val invitationsInteractor = chat.onym.android.inbox.IncomingInvitationsInteractor(
             inboxTransport = inboxTransport,
             repository = invitationsRepository,
+            dispatcher = incomingDispatcher,
         )
         applicationScope.launch {
             invitationsInteractor.runFanout(

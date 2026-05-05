@@ -1,5 +1,6 @@
 package chat.onym.android.support
 
+import chat.onym.android.identity.DecryptedEnvelope
 import chat.onym.android.identity.IdentityId
 import chat.onym.android.identity.InvitationDecryptError
 import chat.onym.android.identity.InvitationEnvelopeDecrypter
@@ -70,4 +71,12 @@ class FakeInvitationEnvelopeDecrypter(var mode: Mode) : InvitationEnvelopeDecryp
             is Mode.Failing -> throw m.error
         }
     }
+
+    override suspend fun decryptInvitationWithSender(
+        envelopeBytes: ByteArray,
+        asIdentity: IdentityId,
+    ): DecryptedEnvelope = DecryptedEnvelope(
+        plaintext = decryptInvitation(envelopeBytes, asIdentity),
+        senderEd25519PublicKey = null,
+    )
 }
