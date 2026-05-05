@@ -205,6 +205,12 @@ open class JoinRequestApprover(
                 inboxPub = req.joinerInboxPublicKey,
                 alias = req.joinerDisplayLabel,
             )
+            broadcastJoin(
+                group = group,
+                joinerBlsPub = blsPub,
+                joinerInboxPub = req.joinerInboxPublicKey,
+                joinerAlias = req.joinerDisplayLabel,
+            )
         }
 
         // Best-effort cleanup. Both calls run regardless of failures
@@ -234,6 +240,86 @@ open class JoinRequestApprover(
                 (key to MemberProfile(alias = alias, inboxPublicKey = inboxPub)),
         )
         groupRepository.insert(updated)
+    }
+
+    /**
+     * Build a [MemberAnnouncementPayload] for the new joiner and fan
+     * it out to every existing member's inbox. Recipients =
+     * `group.memberProfiles ∖ {admin, new joiner}`. The admin already
+     * knows about the join (just recorded it locally); the joiner
+     * gets the full [GroupInvitationPayload] instead.
+     *
+     * Best-effort per recipient: a per-member transport failure is
+     * swallowed silently and the loop moves on. The receive-side is
+     * idempotent on `(groupId, blsPub)` so a future retry path could
+     * re-broadcast without creating duplicates.
+     *
+     * Empty fanout (single-member group) is a no-op.
+     */
+    private suspend fun broadcastJoin(
+        group: ChatGroup,
+        joinerBlsPub: ByteArray,
+        joinerInboxPub: ByteArray,
+        joinerAlias: String,
+    ) {
+        // Identity has no display-name field on Android — the
+        // per-identity summary carries it. Fall back to empty when
+        // unresolved (best-effort — receivers always display the
+        // BLS fingerprint alongside the alias).
+        val activeId = identity.currentIdentityId.value
+        val adminAlias = identity.identities.value
+            .firstOrNull { it.id == activeId }
+            ?.name
+            .orEmpty()
+        val payload = try {
+            MemberAnnouncementPayload(
+                version = 1,
+                groupId = group.groupIdBytes,
+                newMember = MemberAnnouncementPayload.AnnouncedMember(
+                    blsPub = joinerBlsPub,
+                    inboxPub = joinerInboxPub,
+                    alias = joinerAlias,
+                ),
+                adminAlias = adminAlias,
+                // PR 88 fills these for Tyranny anchors. Until then,
+                // ship without — receivers fall back to best-effort
+                // acceptance for non-Tyranny / pre-PR-88 announcements.
+                commitment = null,
+                epoch = null,
+            )
+        } catch (_: Throwable) {
+            // Wrong-sized BLS / inbox pub shouldn't happen — caller
+            // already used the same bytes for recordJoiner — but
+            // skipping fanout is safer than crashing.
+            return
+        }
+        val payloadBytes = try {
+            jsonFormat.encodeToString(MemberAnnouncementPayload.serializer(), payload)
+                .toByteArray(Charsets.UTF_8)
+        } catch (_: Throwable) {
+            return
+        }
+
+        val joinerKey = joinerBlsPub.toHexLowercase()
+        val adminKey = group.adminPubkeyHex?.lowercase()
+
+        for ((memberKey, profile) in group.memberProfiles) {
+            // Skip self (admin) + the new joiner (covered by the
+            // GroupInvitationPayload above).
+            if (memberKey == joinerKey) continue
+            if (adminKey != null && memberKey == adminKey) continue
+
+            val sealed = try {
+                identity.sealInvitation(payloadBytes, profile.inboxPublicKey)
+            } catch (_: Throwable) {
+                continue
+            }
+            val tag = TransportInboxId(IdentityRepository.inboxTag(profile.inboxPublicKey))
+            // Throw away the receipt — fanout is best-effort. A
+            // member that misses one announcement will still see the
+            // joiner in any subsequent group activity.
+            runCatching { inboxTransport.send(sealed, tag) }
+        }
     }
 
     /** Decline a pending request: drop it + revoke the intro slot.
