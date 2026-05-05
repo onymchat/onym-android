@@ -132,7 +132,14 @@ class IdentitiesUITest {
         composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 1
         }
+        // Tap "Add" → name dialog appears pre-filled with the suggested
+        // default ("Identity 2"); accept it without editing.
         composeRule.onNodeWithTag("identities.add").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identities.add.dialog.confirm")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("identities.add.dialog.confirm").performClick()
         composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 2
         }
@@ -150,10 +157,17 @@ class IdentitiesUITest {
         // the next dependency rebuild, complicating the assertion).
         composeRule.onNodeWithTag("identities.add").performClick()
         composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identities.add.dialog.confirm")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("identities.add.dialog.confirm").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 2
         }
 
-        // The newly-added identity gets the auto-fill name "Identity 2".
+        // The dialog pre-fills the suggested default ("Identity 2");
+        // we accept it without editing, so the new row's display name
+        // is "Identity 2" — matched by the typed-name confirm below.
         // Post-redesign: removal moved into IdentityDetailScreen — tap
         // the row to drill in, then "Delete identity" → typed-name
         // confirm → Delete.

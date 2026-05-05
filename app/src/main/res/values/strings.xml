@@ -163,6 +163,14 @@
     <string name="identities_section_your">Your identities</string>
     <string name="identities_add_button">Add Identity</string>
     <string name="identity_unnamed">Unnamed identity</string>
+    <!-- Add-identity name dialog. The dialog prompts the user before
+         creating a new identity, pre-filled with the suggested default
+         (`identities_add_dialog_default_name`) so a user who just wants
+         the auto-name can confirm in one tap. -->
+    <string name="identities_add_dialog_title">Name your identity</string>
+    <string name="identities_add_dialog_label">Identity name</string>
+    <string name="identities_add_dialog_confirm">Create</string>
+    <string name="identities_add_dialog_default_name">Identity %1$d</string>
 
     <!-- ─── Identity detail ──────────────────────────────────────── -->
     <string name="identity_detail_title">Identity</string>

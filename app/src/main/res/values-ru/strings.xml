@@ -159,6 +159,11 @@
     <string name="identities_section_your">Ваши личности</string>
     <string name="identities_add_button">Добавить личность</string>
     <string name="identity_unnamed">Безымянная личность</string>
+    <!-- Add-identity name dialog. -->
+    <string name="identities_add_dialog_title">Назовите личность</string>
+    <string name="identities_add_dialog_label">Имя личности</string>
+    <string name="identities_add_dialog_confirm">Создать</string>
+    <string name="identities_add_dialog_default_name">Личность %1$d</string>
 
     <!-- ─── Identity detail ──────────────────────────────────────── -->
     <string name="identity_detail_title">Личность</string>
