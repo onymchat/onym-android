@@ -90,7 +90,7 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel) {
     }
 }
 
-// ─── Step 1 — name + governance ─────────────────────────────────
+// ─── Step 1 — name + accent + governance ────────────────────────
 
 @Composable
 private fun Step1Screen(viewModel: CreateGroupViewModel) {
@@ -109,6 +109,8 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(10.dp))
+            OnymGroupAvatar(size = 92.dp, accent = accent)
+            Spacer(Modifier.height(18.dp))
 
             // Name field — pre-filled with the generated placeholder
             // (e.g. "Maple Garden") so the user can hit Create
@@ -154,6 +156,38 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     .fillMaxWidth()
                     .padding(start = 4.dp, top = 6.dp),
             )
+
+            OnymSectionLabel(stringResource(R.string.create_group_accent_color))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                for (a in OnymAccent.entries) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(a.color())
+                            .then(
+                                if (state.accent == a) {
+                                    Modifier.border(2.dp, a.color(), CircleShape)
+                                } else Modifier,
+                            )
+                            .clickable { viewModel.setAccent(a) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (state.accent == a) {
+                            Text(
+                                text = "✓",
+                                color = Color.White,
+                                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                            )
+                        }
+                    }
+                }
+            }
 
             OnymSectionLabel(stringResource(R.string.create_group_how_its_run))
             Row(
@@ -355,38 +389,6 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                             color = LocalOnymTokens.current.text,
                             style = TextStyle(fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold),
                         )
-                    }
-                }
-            }
-
-            OnymSectionLabel(stringResource(R.string.create_group_accent_color))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                for (a in OnymAccent.entries) {
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(a.color())
-                            .then(
-                                if (state.accent == a) {
-                                    Modifier.border(2.dp, a.color(), CircleShape)
-                                } else Modifier,
-                            )
-                            .clickable { viewModel.setAccent(a) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (state.accent == a) {
-                            Text(
-                                text = "✓",
-                                color = Color.White,
-                                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
-                            )
-                        }
                     }
                 }
             }

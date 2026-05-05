@@ -17,8 +17,8 @@ import java.util.UUID
  * Mirrors `CreateGroupRoute` from onym-ios PR #26.
  */
 enum class CreateGroupRoute {
-    Step1,            // name + governance
-    Step2,            // accent + review invitees + create
+    Step1,            // name + accent + governance
+    Step2,            // review invitees + create
     InviteByKey,      // paste 64-char inbox key
     Creating,         // progress steps
     Success,          // hero + members + done
