@@ -552,6 +552,24 @@ open class JoinRequestApprover(
             )
         }
 
+        // PR 93 pre-flight: confirm the active identity actually IS
+        // the admin of this group before handing the secret to the
+        // prover. Catches the common "user switched identities since
+        // group creation" case cleanly — without this check the SDK
+        // surfaces the same problem as a cryptic
+        // `Poseidon(admin_secret_key) != supplied leaf hash` error
+        // ~3-5s later (after the prover's pre-witness checks fail).
+        val activePubFromSecret = try {
+            GroupCommitmentBuilder.computePublicKey(blsSecret)
+        } catch (e: Throwable) {
+            return AnchorOutcome.Failed(
+                ApproveOutcome.TransportFailed("derive_pub: ${e.message ?: e::class.simpleName}"),
+            )
+        }
+        if (!activePubFromSecret.contentEquals(group.members[adminIndexOld].publicKeyCompressed)) {
+            return AnchorOutcome.Failed(ApproveOutcome.NotAdminOfThisGroup)
+        }
+
         val proofInput = GroupProofUpdateInput(
             groupType = SepGroupType.TYRANNY,
             tier = group.tier,
