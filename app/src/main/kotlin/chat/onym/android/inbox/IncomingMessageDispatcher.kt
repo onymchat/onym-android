@@ -310,11 +310,18 @@ class IncomingMessageDispatcher(
         // V1 never reaches the on-chain branch in tests.
         val reader = chainState ?: return true
         val claimed = invitation.commitment ?: return false
-        // Internal consistency (PR 91 fixes this to recompute the
-        // full Poseidon commitment). For now, mirror iOS's PR-89
-        // intermediate state.
+        // Internal consistency: recompute the FULL Poseidon
+        // commitment from `(members, epoch, salt)` and compare. The
+        // commitment is `Poseidon(Poseidon(root, epoch), salt)` —
+        // NOT just the merkle root. PR 89's original implementation
+        // compared the root, which always failed; PR 91 fixes that.
         val recomputed = try {
-            GroupCommitmentBuilder.computeMerkleRoot(invitation.members, tier)
+            val root = GroupCommitmentBuilder.computeMerkleRoot(invitation.members, tier)
+            GroupCommitmentBuilder.computePoseidonCommitment(
+                poseidonRoot = root,
+                epoch = invitation.epoch,
+                salt = invitation.salt,
+            )
         } catch (_: Throwable) {
             return false
         }
