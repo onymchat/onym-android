@@ -102,10 +102,26 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
     val accent = state.accent.color()
     val focusManager = LocalFocusManager.current
     Column(modifier = Modifier.fillMaxSize()) {
-        OnymNavTitle(
-            title = stringResource(R.string.create_group_step1_title),
-            subtitle = stringResource(R.string.create_group_step1_subtitle),
-        )
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OnymNavTitle(
+                title = stringResource(R.string.create_group_step1_title),
+                subtitle = stringResource(R.string.create_group_step1_subtitle),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 12.dp, top = 8.dp)
+                    .size(32.dp)
+                    .clickable(onClick = viewModel.onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "✕",
+                    color = LocalOnymTokens.current.text2,
+                    style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium),
+                )
+            }
+        }
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -276,11 +292,6 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 accent = accent,
                 enabled = state.canAdvanceToStep2,
                 onClick = viewModel::tappedNext,
-            )
-            Spacer(Modifier.height(4.dp))
-            OnymQuietButton(
-                title = stringResource(R.string.cancel),
-                onClick = viewModel.onClose,
             )
         }
     }
