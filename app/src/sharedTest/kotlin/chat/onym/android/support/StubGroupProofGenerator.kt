@@ -4,6 +4,8 @@ import chat.onym.android.chain.GroupCreateProof
 import chat.onym.android.chain.GroupProofCreateInput
 import chat.onym.android.chain.GroupProofGenerator
 import chat.onym.android.chain.GroupProofGeneratorError
+import chat.onym.android.chain.GroupProofUpdateInput
+import chat.onym.android.chain.GroupUpdateProof
 import chat.onym.android.chain.SepGroupType
 
 /**
@@ -44,6 +46,24 @@ class StubGroupProofGenerator : GroupProofGenerator {
                 publicInputs = listOf(
                     ByteArray(32) { 0x78.toByte() },  // commitment
                     ByteArray(32),                     // Fr(0) — epoch
+                ),
+            )
+            else -> throw GroupProofGeneratorError.NotYetSupported(input.groupType)
+        }
+
+    override suspend fun proveUpdate(input: GroupProofUpdateInput): GroupUpdateProof =
+        when (input.groupType) {
+            SepGroupType.TYRANNY -> GroupUpdateProof(
+                proof = ByteArray(1601) { 0x9A.toByte() },
+                publicInputs = listOf(
+                    ByteArray(32) { 0xC0.toByte() },  // c_old
+                    java.nio.ByteBuffer.allocate(32).apply {
+                        position(24)
+                        putLong(input.epochOld.toLong())
+                    }.array(),                          // epoch_old_be
+                    ByteArray(32) { 0xC1.toByte() },  // c_new
+                    ByteArray(32) { 0xAD.toByte() },  // admin_pubkey_commitment
+                    ByteArray(32) { 0x10.toByte() },  // group_id_fr
                 ),
             )
             else -> throw GroupProofGeneratorError.NotYetSupported(input.groupType)

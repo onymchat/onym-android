@@ -47,12 +47,24 @@ class JoinRequestSender(
         joinerDisplayLabel: String,
     ): Outcome = withContext(ioDispatcher) {
         val activeIdentity = identity.currentIdentity() ?: return@withContext Outcome.NoIdentityLoaded()
+        // PR 88: ship the Poseidon leaf hash so the admin can run
+        // Tyranny.proveUpdate without having to derive it again.
+        // Computation goes through the FFI; pull the BLS secret only
+        // for the duration of the call, never retain.
+        val leafHash = try {
+            // onym:allow-secret-read
+            val sk = identity.blsSecretKey()
+            GroupCommitmentBuilder.computeLeafHash(sk)
+        } catch (_: Throwable) {
+            null
+        }
         val payload = JoinRequestPayload(
             joinerInboxPublicKey = activeIdentity.inboxPublicKey,
             // Stable cross-device identifier — the admin keys the
             // joiner into the local roster under this. Pre-PR-78
             // joiners shipped without it; post-PR-78 ships it always.
             joinerBlsPublicKey = activeIdentity.blsPublicKey,
+            joinerLeafHash = leafHash,
             joinerDisplayLabel = joinerDisplayLabel,
             groupId = capability.groupId,
         )

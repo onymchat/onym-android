@@ -166,6 +166,83 @@ interface GroupProofGenerator {
      * to overlap with I/O should not switch dispatchers themselves.
      */
     suspend fun proveCreate(input: GroupProofCreateInput): GroupCreateProof
+
+    /**
+     * Generate a Tyranny update-commitment proof. Used by the admin
+     * to anchor a roster change (typically a join admit) on chain.
+     *
+     * Other governance types throw
+     * [GroupProofGeneratorError.NotYetSupported].
+     *
+     * Mirrors `proveUpdate` from onym-ios PR #88.
+     */
+    suspend fun proveUpdate(input: GroupProofUpdateInput): GroupUpdateProof
+}
+
+/**
+ * Inputs for a Tyranny update-commitment proof. Mirrors the
+ * pre-witness contract: caller supplies the new merkle root +
+ * fresh `salt_new`; the prover synthesises the witness by re-hashing
+ * the admin's leaf inside the circuit.
+ *
+ * Mirrors `GroupProofUpdateInput` from onym-ios PR #88.
+ */
+data class GroupProofUpdateInput(
+    val groupType: SepGroupType,
+    val tier: SepTier,
+    /** Lex-sorted by `publicKeyCompressed`. Same canonical sort the
+     *  create-time roster used. */
+    val oldMembers: List<GovernanceMember>,
+    val adminBlsSecretKey: ByteArray,
+    val adminIndexOld: Int,
+    val epochOld: ULong,
+    /** Poseidon merkle root over the lex-sorted new roster. */
+    val memberRootNew: ByteArray,
+    val groupId: ByteArray,
+    val saltOld: ByteArray,
+    val saltNew: ByteArray,
+)
+
+/**
+ * Output of [GroupProofGenerator.proveUpdate]. PI bundle is 160
+ * bytes = 5 × 32B chunks:
+ * `c_old || epoch_old_be || c_new || admin_pubkey_commitment || group_id_fr`.
+ *
+ * Mirrors `GroupUpdateProof` from onym-ios PR #88.
+ */
+data class GroupUpdateProof(
+    val proof: ByteArray,
+    val publicInputs: List<ByteArray>,
+) {
+    val commitmentOld: ByteArray get() = publicInputs[0]
+    val commitmentNew: ByteArray get() = publicInputs[2]
+    val adminPubkeyCommitment: ByteArray get() = publicInputs[3]
+    val groupIdFr: ByteArray get() = publicInputs[4]
+
+    fun epochNew(): ULong = currentEpochOld() + 1uL
+
+    /** Read epoch_old back from the PI bundle's second chunk. */
+    fun currentEpochOld(): ULong {
+        val be = publicInputs[1]
+        // Last 8 bytes are the BE-encoded ULong epoch.
+        var acc = 0uL
+        for (i in 24 until 32) {
+            acc = (acc shl 8) or (be[i].toULong() and 0xFFuL)
+        }
+        return acc
+    }
+
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is GroupUpdateProof &&
+            proof.contentEquals(other.proof) &&
+            publicInputs.size == other.publicInputs.size &&
+            publicInputs.zip(other.publicInputs).all { (a, b) -> a.contentEquals(b) })
+
+    override fun hashCode(): Int {
+        var h = proof.contentHashCode()
+        for (p in publicInputs) h = 31 * h + p.contentHashCode()
+        return h
+    }
 }
 
 /**
@@ -184,6 +261,59 @@ class OnymGroupProofGenerator : GroupProofGenerator {
             SepGroupType.OLIGARCHY,
                 -> throw GroupProofGeneratorError.NotYetSupported(input.groupType)
         }
+
+    override suspend fun proveUpdate(input: GroupProofUpdateInput): GroupUpdateProof =
+        when (input.groupType) {
+            SepGroupType.TYRANNY -> proveTyrannyUpdate(input)
+            else -> throw GroupProofGeneratorError.NotYetSupported(input.groupType)
+        }
+
+    private suspend fun proveTyrannyUpdate(input: GroupProofUpdateInput): GroupUpdateProof {
+        if (input.adminIndexOld < 0 || input.adminIndexOld >= input.oldMembers.size) {
+            throw GroupProofGeneratorError.AdminIndexOutOfRange(
+                index = input.adminIndexOld,
+                count = input.oldMembers.size,
+            )
+        }
+        val packedLeaves = ByteArray(input.oldMembers.size * 32)
+        for ((i, member) in input.oldMembers.withIndex()) {
+            require(member.leafHash.size == 32) {
+                "leafHash for member $i has unexpected size ${member.leafHash.size}, expected 32"
+            }
+            System.arraycopy(member.leafHash, 0, packedLeaves, i * 32, 32)
+        }
+
+        return withContext(Dispatchers.Default) {
+            val raw = try {
+                Tyranny.proveUpdate(
+                    /* depth = */ input.tier.depth,
+                    /* memberLeafHashesOld = */ packedLeaves,
+                    /* adminSecretKey = */ input.adminBlsSecretKey,
+                    /* adminIndexOld = */ input.adminIndexOld,
+                    /* epochOld = */ input.epochOld.toLong(),
+                    /* memberRootNew = */ input.memberRootNew,
+                    /* groupIdFr = */ input.groupId,
+                    /* saltOld = */ input.saltOld,
+                    /* saltNew = */ input.saltNew,
+                )
+            } catch (e: Throwable) {
+                throw GroupProofGeneratorError.SdkFailure(e.message ?: e.toString())
+            }
+            // PI bundle layout (`Tyranny.UpdateProof.publicInputs`, 160 B):
+            //   c_old(32) || epoch_old_be(32) || c_new(32)
+            //     || admin_pubkey_commitment(32) || group_id_fr(32)
+            val bundle = raw.publicInputs
+            if (bundle.size != 160) {
+                throw GroupProofGeneratorError.SdkFailure(
+                    "expected 160-byte PI bundle, got ${bundle.size}",
+                )
+            }
+            val chunks = (0 until 160 step 32).map { offset ->
+                bundle.copyOfRange(offset, offset + 32)
+            }
+            GroupUpdateProof(proof = raw.proof, publicInputs = chunks)
+        }
+    }
 
     private suspend fun proveAnarchyCreate(input: GroupProofCreateInput): GroupCreateProof {
         // Anarchy reuses the membership proof at create-time — the

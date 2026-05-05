@@ -437,6 +437,15 @@ class OnymApplication : Application() {
 
         // Approver-side: turn raw IntroRequests into UI-renderable
         // pending requests + ship sealed GroupInvitationPayloads on
+        // App-wide network preference (PR-C follow-up). Defaults to
+        // testnet; the Settings → Network → "Use Mainnet" Switch
+        // flips it. CreateGroupInteractor reads `current()` per call
+        // for both the contract-binding lookup and the wire payload's
+        // top-level `network` field.
+        val networkPreference = DataStoreNetworkPreferenceProvider(
+            dataStore = applicationContext.networkPreferenceDataStore,
+        )
+
         // user approval. Single instance — the toolbar badge + the
         // modal screen share state via [ApproveRequestsViewModel].
         val joinRequestApprover = chat.onym.android.group.JoinRequestApprover(
@@ -446,6 +455,15 @@ class OnymApplication : Application() {
             groupRepository = groupRepository,
             inboxTransport = inboxTransport,
             scope = applicationScope,
+            // PR 88 admin-anchor wiring: same OkHttp client as
+            // CreateGroupInteractor so the relayer's auth token rides
+            // along.
+            relayers = relayerRepository,
+            contracts = contractsRepository,
+            networkPreference = networkPreference,
+            makeContractTransport = { url ->
+                OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url)
+            },
         )
         val approveRequestsViewModel = chat.onym.android.group.ApproveRequestsViewModel(
             approver = joinRequestApprover,
@@ -453,15 +471,6 @@ class OnymApplication : Application() {
         // Kick the collector at app start so requests landing while
         // the chats screen isn't open still drive the badge count.
         approveRequestsViewModel.start()
-
-        // App-wide network preference (PR-C follow-up). Defaults to
-        // testnet; the Settings → Network → "Use Mainnet" Switch
-        // flips it. CreateGroupInteractor reads `current()` per call
-        // for both the contract-binding lookup and the wire payload's
-        // top-level `network` field.
-        val networkPreference = DataStoreNetworkPreferenceProvider(
-            dataStore = applicationContext.networkPreferenceDataStore,
-        )
 
         return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,

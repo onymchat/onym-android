@@ -124,6 +124,18 @@ class ApproveRequestsViewModel(
                 "Sign in first."
             is JoinRequestApprover.ApproveOutcome.TransportFailed ->
                 "Couldn’t send: ${outcome.reason}"
+            is JoinRequestApprover.ApproveOutcome.OutdatedJoinerClient ->
+                "Joiner is on an outdated app. Ask them to update."
+            is JoinRequestApprover.ApproveOutcome.NoActiveRelayer ->
+                "No chain relayer configured. Set one in Settings → Network → Relayer."
+            is JoinRequestApprover.ApproveOutcome.NoContractBinding ->
+                "No Tyranny contract selected for this network. Pick one in Settings → Network → Anchors."
+            is JoinRequestApprover.ApproveOutcome.NotAdminOfThisGroup ->
+                "The active identity isn’t this group’s admin. Switch to the identity that created the group, then try again."
+            is JoinRequestApprover.ApproveOutcome.ProofFailed ->
+                "Couldn’t generate proof: ${outcome.reason}"
+            is JoinRequestApprover.ApproveOutcome.AnchorRejected ->
+                "Chain rejected the proof: ${outcome.reason}"
         }
     }
 }
