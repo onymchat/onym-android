@@ -20,6 +20,7 @@ import chat.onym.android.chain.SepContractTransport
 import chat.onym.android.chain.SepGroupType
 import chat.onym.android.chain.SepTier
 import chat.onym.android.chain.TyrannyCreateGroupPayload
+import chat.onym.android.identity.Identity
 import chat.onym.android.identity.IdentityRepository
 import chat.onym.android.transport.InboxTransport
 import chat.onym.android.transport.TransportInboxId
@@ -264,12 +265,17 @@ open class CreateGroupInteractor(
         // step above would have thrown `MissingIdentity`).
         val ownerId = identity.currentIdentityId.value
             ?: throw CreateGroupError.MissingIdentity
+        val creatorAlias = identity.identities.value
+            .firstOrNull { it.id == ownerId }
+            ?.name
+            .orEmpty()
         val group = ChatGroup(
             id = groupIdHex,
             name = trimmedName,
             groupSecret = groupSecret,
             createdAtMillis = System.currentTimeMillis(),
             members = members,
+            memberProfiles = creatorProfiles(identitySnapshot, creatorAlias),
             epoch = 0uL,
             salt = salt,
             commitment = proof.commitment,
@@ -350,6 +356,29 @@ open class CreateGroupInteractor(
 
     private companion object {
         private val jsonFormat = Json { encodeDefaults = true }
+
+        /**
+         * Single-entry seed for [ChatGroup.memberProfiles] at create
+         * time. Maps the creator's lowercase BLS pubkey hex (96 chars)
+         * to a [MemberProfile] carrying their current display name +
+         * inbox public key. Mirrors `creatorProfiles(...)` in
+         * `CreateGroupInteractor.swift`. Applied to all governance
+         * paths (Tyranny / OneOnOne / Anarchy).
+         */
+        fun creatorProfiles(
+            identitySnapshot: Identity,
+            alias: String,
+        ): Map<String, MemberProfile> {
+            val key = identitySnapshot.blsPublicKey.toHex()
+            // [Identity] has no display name field on Android — alias
+            // is read once from the per-identity [IdentitySummary] at
+            // create time. A later identity rename doesn't backfill
+            // historical groups.
+            return mapOf(key to MemberProfile(
+                alias = alias,
+                inboxPublicKey = identitySnapshot.inboxPublicKey,
+            ))
+        }
 
         /** Same derivation as `Identity.inboxTag` — duplicated here
          *  because the helper is tied to a specific identity, and we

@@ -209,6 +209,38 @@ class RoomGroupStoreTest {
         assertEquals(listOf(newer.id, older.id), store.list().map { it.id })
     }
 
+    // ─── memberProfiles ───────────────────────────────────────────
+
+    @Test
+    fun memberProfiles_roundTripsThroughEncryptedColumn() = runTest {
+        val profile = MemberProfile(
+            alias = "Alice",
+            inboxPublicKey = ByteArray(32) { 0x77 },
+        )
+        val group = makeGroup(
+            id = "fa".repeat(32),
+            name = "G",
+            memberProfiles = mapOf("aa".repeat(48) to profile),
+        )
+        store.insertOrUpdate(group)
+
+        val listed = store.list().single()
+        assertEquals(1, listed.memberProfiles.size)
+        val restored = listed.memberProfiles["aa".repeat(48)]!!
+        assertEquals("Alice", restored.alias)
+        assertArrayEquals(profile.inboxPublicKey, restored.inboxPublicKey)
+    }
+
+    @Test
+    fun memberProfiles_emptyMapPersistsAsNullColumn() = runTest {
+        val group = makeGroup(id = "fb".repeat(32), name = "G", memberProfiles = emptyMap())
+        store.insertOrUpdate(group)
+        val raw = db.groupDao().findById(group.id)!!
+        assertNull(raw.encryptedMemberProfilesJson)
+        // Decode side maps null → emptyMap.
+        assertEquals(emptyMap<String, MemberProfile>(), store.list().single().memberProfiles)
+    }
+
     // ─── helpers ──────────────────────────────────────────────────
 
     private fun makeGroup(
@@ -216,6 +248,7 @@ class RoomGroupStoreTest {
         name: String,
         adminPubkeyHex: String? = null,
         createdAtMillis: Long = 1_700_000_000_000L,
+        memberProfiles: Map<String, MemberProfile> = emptyMap(),
     ): ChatGroup {
         val member = GovernanceMember(
             publicKeyCompressed = ByteArray(48) { 0x11 },
@@ -227,6 +260,7 @@ class RoomGroupStoreTest {
             groupSecret = ByteArray(32) { 0x33 },
             createdAtMillis = createdAtMillis,
             members = listOf(member),
+            memberProfiles = memberProfiles,
             epoch = 0uL,
             salt = ByteArray(32) { 0x44 },
             commitment = ByteArray(32) { 0x55 },
