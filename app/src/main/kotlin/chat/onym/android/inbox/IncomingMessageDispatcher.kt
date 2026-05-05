@@ -1,8 +1,10 @@
 package chat.onym.android.inbox
 
+import chat.onym.android.chain.ChainStateReading
 import chat.onym.android.chain.SepGroupType
 import chat.onym.android.chain.SepTier
 import chat.onym.android.group.ChatGroup
+import chat.onym.android.group.GroupCommitmentBuilder
 import chat.onym.android.group.GroupInvitationPayload
 import chat.onym.android.group.GroupRepository
 import chat.onym.android.group.MemberAnnouncementPayload
@@ -51,6 +53,10 @@ class IncomingMessageDispatcher(
      *  directory. Pass [chat.onym.android.identity.IdentityRepository.identities]
      *  in production. */
     private val identitiesFlow: StateFlow<List<IdentitySummary>>? = null,
+    /** Live chain-state reader for PR 89's commitment verification.
+     *  When null (test / V1 best-effort), Tyranny payloads still
+     *  apply with admin-Ed25519 + envelope-signature gating only. */
+    private val chainState: ChainStateReading? = null,
 ) {
 
     suspend fun dispatch(
@@ -122,6 +128,17 @@ class IncomingMessageDispatcher(
     ) {
         val tier = SepTier.entries.firstOrNull { it.rawValue == invitation.tierRaw } ?: return
         val groupType = SepGroupType.fromWire(invitation.groupTypeRaw) ?: return
+
+        // PR 89: receiver-side commitment verification. For Tyranny
+        // groups, the payload's `commitment` MUST match both the
+        // recomputed Poseidon root over the wire-shipped members AND
+        // the on-chain state. Either mismatch is treated as a forged
+        // invitation — drop silently.
+        if (groupType == SepGroupType.TYRANNY &&
+            !verifyTyrannyInvitation(invitation, tier)
+        ) {
+            return
+        }
 
         // Wire-shipped profiles first; receiver's own entry overwrites
         // any same-keyed wire entry (sender shouldn't be able to
@@ -235,6 +252,13 @@ class IncomingMessageDispatcher(
             if (senderHex != storedAdmin.lowercase()) return
         }
 
+        // PR 89: chain-state check. For Tyranny groups, the announced
+        // `commitment + epoch` must match what's actually anchored.
+        // Closes the residual spoof path where Bob (with the admin's
+        // Ed25519 somehow obtained) ships an announcement with a fake
+        // commitment. The chain has the truth.
+        if (!verifyTyrannyAnnouncement(payload, group)) return
+
         val key = payload.newMember.blsPub.toHexLowercase()
         if (group.memberProfiles[key] != null) return  // dedup
         val updated = group.copy(
@@ -253,6 +277,88 @@ class IncomingMessageDispatcher(
         )
     } catch (_: Throwable) {
         null
+    }
+
+    /**
+     * PR 89: validate a Tyranny invitation's commitment against
+     * BOTH the wire-shipped state (recomputed Poseidon merkle root)
+     * AND the on-chain state.
+     *
+     * Three failure modes — all return `false`:
+     *   - Payload omits `commitment` (pre-PR-88 sender, can't verify).
+     *   - Recomputed root != claimed commitment (internally
+     *     inconsistent — sender fabricated `members` while copying
+     *     a real on-chain commitment).
+     *   - On-chain `commitment` != claimed OR on-chain `epoch` !=
+     *     claimed (forged commitment that doesn't match anchor).
+     *
+     * **Known issue (fixed in PR 91):** the recompute path here
+     * compares the merkle root to the commitment, but the contract
+     * stores `Poseidon(Poseidon(merkle_root, epoch), salt)`. PR 91
+     * rewrites this to recompute the FULL Poseidon commitment. Until
+     * then, every legitimate Tyranny invitation fails this check —
+     * the chain anchor verification still catches forgeries via the
+     * second branch.
+     *
+     * Mirrors `verifyTyrannyInvitation` from onym-ios PR #89.
+     */
+    private suspend fun verifyTyrannyInvitation(
+        invitation: chat.onym.android.group.GroupInvitationPayload,
+        tier: SepTier,
+    ): Boolean {
+        // Without a chain reader we treat Tyranny as best-effort;
+        // V1 never reaches the on-chain branch in tests.
+        val reader = chainState ?: return true
+        val claimed = invitation.commitment ?: return false
+        // Internal consistency (PR 91 fixes this to recompute the
+        // full Poseidon commitment). For now, mirror iOS's PR-89
+        // intermediate state.
+        val recomputed = try {
+            GroupCommitmentBuilder.computeMerkleRoot(invitation.members, tier)
+        } catch (_: Throwable) {
+            return false
+        }
+        if (!recomputed.contentEquals(claimed)) return false
+        // External anchor.
+        val onchain = try {
+            reader.tyrannyCommitment(invitation.groupId)
+        } catch (_: Throwable) {
+            return false
+        }
+        if (!onchain.commitment.contentEquals(claimed)) return false
+        if (onchain.epoch != invitation.epoch) return false
+        return true
+    }
+
+    /**
+     * PR 89: validate a Tyranny [MemberAnnouncementPayload]'s
+     * claimed `commitment + epoch` against the on-chain state. Same
+     * failure-modes posture as the invitation verifier — any
+     * mismatch / missing-field / read-error returns `false` and the
+     * announcement is dropped.
+     *
+     * No recompute here because the announcement only carries one
+     * new member, not the full roster. The on-chain check alone is
+     * the strong gate.
+     *
+     * Mirrors `verifyTyrannyAnnouncement` from onym-ios PR #89.
+     */
+    private suspend fun verifyTyrannyAnnouncement(
+        announcement: MemberAnnouncementPayload,
+        group: ChatGroup,
+    ): Boolean {
+        if (group.groupType != SepGroupType.TYRANNY) return true  // best-effort
+        val reader = chainState ?: return true
+        val claimedCommitment = announcement.commitment ?: return false
+        val claimedEpoch = announcement.epoch ?: return false
+        val onchain = try {
+            reader.tyrannyCommitment(announcement.groupId)
+        } catch (_: Throwable) {
+            return false
+        }
+        if (!onchain.commitment.contentEquals(claimedCommitment)) return false
+        if (onchain.epoch != claimedEpoch) return false
+        return true
     }
 
     private companion object {

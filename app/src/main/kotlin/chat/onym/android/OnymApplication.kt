@@ -310,6 +310,12 @@ class OnymApplication : Application() {
         groupRepository.start()
         applicationScope.launch { groupRepository.reload() }
 
+        // App-wide network preference (PR-C follow-up). Constructed
+        // here (early) so PR-89's chainStateReader can read it.
+        val networkPreference = DataStoreNetworkPreferenceProvider(
+            dataStore = applicationContext.networkPreferenceDataStore,
+        )
+
         // PR 87: Nostr relays configuration + first-launch seed. The
         // inbox transport reads endpoints once at boot — no live
         // re-connect on Settings changes (a banner explains this).
@@ -363,11 +369,24 @@ class OnymApplication : Application() {
         // straight into local group state instead of queueing it as a
         // raw invitation. Falls through to the legacy queue for anything
         // else.
+        // PR 89: live chain-state reader for the Tyranny verifier
+        // branches. Reuses the same OkHttp client (with
+        // BearerAuthInterceptor) so the relayer's auth token rides
+        // along.
+        val chainStateReader = chat.onym.android.chain.SepContractChainStateReader(
+            relayers = relayerRepository,
+            contracts = contractsRepository,
+            networkPreference = networkPreference,
+            makeContractTransport = { url ->
+                OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url)
+            },
+        )
         val incomingDispatcher = chat.onym.android.inbox.IncomingMessageDispatcher(
             envelopeDecrypter = identityRepository,
             groupRepository = groupRepository,
             invitationsRepository = invitationsRepository,
             identitiesFlow = identityRepository.identities,
+            chainState = chainStateReader,
         )
         val invitationsInteractor = chat.onym.android.inbox.IncomingInvitationsInteractor(
             inboxTransport = inboxTransport,
@@ -437,15 +456,6 @@ class OnymApplication : Application() {
 
         // Approver-side: turn raw IntroRequests into UI-renderable
         // pending requests + ship sealed GroupInvitationPayloads on
-        // App-wide network preference (PR-C follow-up). Defaults to
-        // testnet; the Settings → Network → "Use Mainnet" Switch
-        // flips it. CreateGroupInteractor reads `current()` per call
-        // for both the contract-binding lookup and the wire payload's
-        // top-level `network` field.
-        val networkPreference = DataStoreNetworkPreferenceProvider(
-            dataStore = applicationContext.networkPreferenceDataStore,
-        )
-
         // user approval. Single instance — the toolbar badge + the
         // modal screen share state via [ApproveRequestsViewModel].
         val joinRequestApprover = chat.onym.android.group.JoinRequestApprover(
