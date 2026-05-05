@@ -59,4 +59,9 @@ class AppDependencies(
      *  lands on the relay shows up in the badge before the modal
      *  is opened. */
     val approveRequestsViewModel: chat.onym.android.group.ApproveRequestsViewModel,
+    /** Settings → Transport → Nostr Relays. */
+    val makeNostrRelaySettingsViewModel: () -> chat.onym.android.settings.NostrRelaySettingsViewModel,
+    /** Live snapshot of configured Nostr relays — drives the
+     *  Settings entry's "{n} configured" subtitle. */
+    val nostrRelaysFlow: kotlinx.coroutines.flow.StateFlow<chat.onym.android.transport.nostr.NostrRelaysConfiguration>,
 )

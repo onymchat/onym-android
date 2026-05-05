@@ -214,6 +214,7 @@ fun RootScreen(
                         initializer { dependencies.makeIdentitiesViewModel() }
                     },
                 )
+                val nostrRelays by dependencies.nostrRelaysFlow.collectAsStateWithLifecycle()
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
@@ -233,6 +234,8 @@ fun RootScreen(
                             )
                         }
                     },
+                    onNostrRelaysClick = { navController.navigate(ROUTE_NOSTR_RELAYS) },
+                    nostrRelaysCount = nostrRelays.endpoints.size,
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -344,6 +347,17 @@ fun RootScreen(
             }
             composable(ROUTE_ABOUT) {
                 AboutOnymScreen(
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_NOSTR_RELAYS) {
+                val vm = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeNostrRelaySettingsViewModel() }
+                    },
+                ) as chat.onym.android.settings.NostrRelaySettingsViewModel
+                chat.onym.android.settings.NostrRelaySettingsScreen(
+                    viewModel = vm,
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -503,6 +517,7 @@ private const val ROUTE_IDENTITIES = "identities"
 private const val ROUTE_PRIVACY = "privacy"
 private const val ROUTE_ABOUT = "about_onym"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
+private const val ROUTE_NOSTR_RELAYS = "nostr_relays"
 private const val ROUTE_RUN_RELAYER = "run_relayer"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
