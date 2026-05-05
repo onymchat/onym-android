@@ -40,7 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -448,11 +448,13 @@ private fun PhraseCard(
             .padding(16.dp),
         contentAlignment = Alignment.Center,
     ) {
-        // 2-column grid of indexed words. Slight blur when hidden.
+        // 2-column grid of indexed words. Hidden via alpha = 0 when
+        // not revealed — Modifier.blur is a no-op below API 31 and
+        // would leak the secret on Android 8–11.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .blur(if (revealed) 0.dp else 10.dp),
+                .alpha(if (revealed) 1f else 0f),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             words.chunked(2).forEachIndexed { rowIdx, pair ->
@@ -490,7 +492,7 @@ private fun PhraseCard(
         }
 
         if (!revealed) {
-            // Tap target overlaying the blurred phrase
+            // Tap target covering the hidden phrase
             Column(
                 modifier = Modifier
                     .matchParentSize()
