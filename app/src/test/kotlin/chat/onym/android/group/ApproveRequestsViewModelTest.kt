@@ -119,6 +119,7 @@ class ApproveRequestsViewModelTest {
     private fun samplePending(id: String) = JoinRequestApprover.PendingRequest(
         id = id,
         joinerInboxPublicKey = ByteArray(32),
+        joinerBlsPublicKey = null,
         joinerDisplayLabel = "Bob",
         groupId = ByteArray(32),
         groupName = "Family",

@@ -45,6 +45,48 @@ class JoinRequestPayloadTest {
     }
 
     @Test
+    fun decodes_pre_pr78_payload_without_joiner_bls_pub() {
+        // Pre-PR-78 joiner — no joiner_bls_pub field. Must still decode.
+        val text = """
+            {
+              "joiner_inbox_pub": "${java.util.Base64.getEncoder().encodeToString(ByteArray(32))}",
+              "joiner_display_label": "Alice",
+              "group_id": "${java.util.Base64.getEncoder().encodeToString(ByteArray(32))}"
+            }
+        """.trimIndent()
+        val decoded = json.decodeFromString(JoinRequestPayload.serializer(), text)
+        assertEquals(null, decoded.joinerBlsPublicKey)
+        assertEquals("Alice", decoded.joinerDisplayLabel)
+    }
+
+    @Test
+    fun decodes_post_pr78_payload_with_joiner_bls_pub() {
+        val bls = ByteArray(48) { 0xBB.toByte() }
+        val text = """
+            {
+              "joiner_inbox_pub": "${java.util.Base64.getEncoder().encodeToString(ByteArray(32))}",
+              "joiner_bls_pub": "${java.util.Base64.getEncoder().encodeToString(bls)}",
+              "joiner_display_label": "Alice",
+              "group_id": "${java.util.Base64.getEncoder().encodeToString(ByteArray(32))}"
+            }
+        """.trimIndent()
+        val decoded = json.decodeFromString(JoinRequestPayload.serializer(), text)
+        assertEquals(48, decoded.joinerBlsPublicKey!!.size)
+    }
+
+    @Test
+    fun constructor_rejectsWrongSizedBlsKey() {
+        assertThrows(IllegalArgumentException::class.java) {
+            JoinRequestPayload(
+                joinerInboxPublicKey = ByteArray(32),
+                joinerBlsPublicKey = ByteArray(47),
+                joinerDisplayLabel = "x",
+                groupId = ByteArray(32),
+            )
+        }
+    }
+
+    @Test
     fun constructor_rejectsWrongSizedKeys() {
         assertThrows(IllegalArgumentException::class.java) {
             JoinRequestPayload(
