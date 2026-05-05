@@ -34,6 +34,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,8 +46,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.runtime.collectAsState
 import chat.onym.android.R
 import chat.onym.android.chain.SepGroupType
+import chat.onym.android.group.ApproveRequestsToolbarBadge
+import chat.onym.android.group.ApproveRequestsViewModel
 import chat.onym.android.group.ChatGroup
 import chat.onym.android.group.OnymAccent
 import chat.onym.android.group.OnymGroupAvatar
@@ -65,14 +73,43 @@ import chat.onym.android.group.OnymGroupAvatar
 fun ChatsScreen(
     viewModel: ChatsViewModel,
     onCreateGroup: () -> Unit,
+    approveRequestsViewModel: ApproveRequestsViewModel? = null,
+    onOpenApproveRequests: (() -> Unit)? = null,
 ) {
     val groups by viewModel.groups.collectAsStateWithLifecycle()
+    val pending by (approveRequestsViewModel?.pending?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(emptyList<chat.onym.android.group.JoinRequestApprover.PendingRequest>()) })
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.chats_title)) },
                 actions = {
+                    if (approveRequestsViewModel != null && onOpenApproveRequests != null) {
+                        Box(modifier = Modifier.padding(end = 4.dp)) {
+                            IconButton(
+                                onClick = onOpenApproveRequests,
+                                modifier = Modifier.testTag("approve_requests.toolbar_button"),
+                            ) {
+                                Icon(
+                                    Icons.Filled.PersonAdd,
+                                    contentDescription = "Join requests",
+                                )
+                            }
+                            // Numeric red-badge overlay anchored top-end
+                            // of the icon button. Mirrors the iOS
+                            // ZStack(.topTrailing) layout.
+                            if (pending.isNotEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = (-4).dp, y = 6.dp),
+                                ) {
+                                    ApproveRequestsToolbarBadge(pending.size)
+                                }
+                            }
+                        }
+                    }
                     // Plus button mirrors Mail / Messages — useful
                     // once the user has at least one chat. Hidden in
                     // the empty state because the central CTA already
