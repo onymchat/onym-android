@@ -24,6 +24,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,11 +36,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -96,6 +100,7 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel) {
 private fun Step1Screen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val accent = state.accent.color()
+    val focusManager = LocalFocusManager.current
     Column(modifier = Modifier.fillMaxSize()) {
         OnymNavTitle(
             title = stringResource(R.string.create_group_step1_title),
@@ -123,6 +128,9 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 BasicTextField(
                     value = state.name,
                     onValueChange = viewModel::setName,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                     textStyle = TextStyle(
                         color = LocalOnymTokens.current.text,
                         fontSize = 17.sp,
