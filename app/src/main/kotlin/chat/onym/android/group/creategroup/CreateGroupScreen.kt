@@ -18,11 +18,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,11 +36,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -95,11 +100,28 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel) {
 private fun Step1Screen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val accent = state.accent.color()
+    val focusManager = LocalFocusManager.current
     Column(modifier = Modifier.fillMaxSize()) {
-        OnymNavTitle(
-            title = stringResource(R.string.create_group_step1_title),
-            subtitle = stringResource(R.string.create_group_step1_subtitle),
-        )
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OnymNavTitle(
+                title = stringResource(R.string.create_group_step1_title),
+                subtitle = stringResource(R.string.create_group_step1_subtitle),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 12.dp, top = 8.dp)
+                    .size(32.dp)
+                    .clickable(onClick = viewModel.onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "✕",
+                    color = LocalOnymTokens.current.text2,
+                    style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium),
+                )
+            }
+        }
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -122,6 +144,9 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 BasicTextField(
                     value = state.name,
                     onValueChange = viewModel::setName,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                     textStyle = TextStyle(
                         color = LocalOnymTokens.current.text,
                         fontSize = 17.sp,
@@ -203,56 +228,6 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     )
                 }
             }
-
-            // Selected explanation
-            Spacer(Modifier.height(12.dp))
-            OnymCard(
-                fill = LocalOnymTokens.current.surface2,
-                borderColor = accent.copy(alpha = 0.22f),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(accent.copy(alpha = 0.08f))
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(width = 6.dp, height = 36.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(accent.copy(alpha = 0.85f)),
-                    )
-                    Column {
-                        Text(
-                            text = "${stringResource(state.governance.subRes())}. " +
-                                stringResource(state.governance.tooltipRes()),
-                            color = LocalOnymTokens.current.text2,
-                            style = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(18.dp))
-
-            // Encrypted footer card
-            OnymCard(fill = LocalOnymTokens.current.surface) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text(
-                        text = "🔒",
-                        color = LocalOnymTokens.current.text2,
-                        style = TextStyle(fontSize = 14.sp),
-                    )
-                    Text(
-                        text = stringResource(R.string.create_group_encrypted_footer),
-                        color = LocalOnymTokens.current.text2,
-                        style = TextStyle(fontSize = 12.5.sp, lineHeight = 17.sp),
-                    )
-                }
-            }
             Spacer(Modifier.height(16.dp))
         }
 
@@ -267,11 +242,6 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 accent = accent,
                 enabled = state.canAdvanceToStep2,
                 onClick = viewModel::tappedNext,
-            )
-            Spacer(Modifier.height(4.dp))
-            OnymQuietButton(
-                title = stringResource(R.string.cancel),
-                onClick = viewModel.onClose,
             )
         }
     }
@@ -950,13 +920,6 @@ private fun OnymUIGovernance.subRes(): Int = when (this) {
 }
 
 @androidx.annotation.StringRes
-private fun OnymUIGovernance.tooltipRes(): Int = when (this) {
-    OnymUIGovernance.Tyranny -> R.string.governance_tyranny_tooltip
-    OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_tooltip
-    OnymUIGovernance.Anarchy -> R.string.governance_anarchy_tooltip
-}
-
-@androidx.annotation.StringRes
 private fun OnymUIGovernance.step2HintRes(): Int = when (this) {
     OnymUIGovernance.Tyranny -> R.string.governance_tyranny_step2hint
     OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_step2hint
@@ -980,6 +943,7 @@ private fun FlowFooter(content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .imePadding()
             .background(LocalOnymTokens.current.bg)
             .border(
                 width = 1.dp,
