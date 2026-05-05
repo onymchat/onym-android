@@ -19,6 +19,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -100,9 +102,10 @@ fun ApproveRequestsScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 ) {
                     items(pending, key = { it.id }) { request ->
+                        val isInFlight = inFlight.contains(request.id)
                         RequestCard(
                             request = request,
-                            inFlight = inFlight.contains(request.id),
+                            inFlight = isInFlight,
                             onApprove = { viewModel.approve(request.id) },
                             onDecline = { viewModel.decline(request.id) },
                         )
@@ -268,10 +271,34 @@ private fun RequestCard(
                     .weight(1f)
                     .testTag("approve_requests.approve_button.${request.id}"),
             ) {
-                Text("Approve")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (inFlight) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                    Text(if (inFlight) "Anchoring on chain…" else "Approve")
+                }
             }
         }
-        if (request.groupName == null) {
+        if (inFlight) {
+            // The on-chain admit ceremony is multi-second (PLONK
+            // proving + relayer roundtrip + Stellar tx confirmation)
+            // — surface that explicitly so the admin doesn't think
+            // the tap was lost.
+            Text(
+                text = "Generating proof and updating the on-chain commitment. " +
+                    "This usually takes a few seconds.",
+                modifier = Modifier.testTag("approve_requests.in_flight_hint.${request.id}"),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (request.groupName == null) {
             Text(
                 text = "This request is for a group that isn’t on this device. Decline to clear it.",
                 fontSize = 12.sp,
