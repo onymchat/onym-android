@@ -268,6 +268,48 @@ class IncomingMessageDispatcherTest {
     }
 
     @Test
+    fun announcement_droppedWhenSenderDoesNotMatchStoredAdmin() = runTest {
+        // Seed a group whose adminEd25519PubkeyHex is set.
+        val storedAdmin = ByteArray(32) { 0x10 }
+        val storedAdminHex = storedAdmin.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        groupStore.replaceForTest(makeGroup(groupId).copy(adminEd25519PubkeyHex = storedAdminHex))
+        groupRepository.reload()
+
+        val payload = announcementPayload()
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
+            .toByteArray(Charsets.UTF_8)
+        // Forged announcement — different sender pubkey.
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = ByteArray(32) { 0x99.toByte() }),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+        )
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        // Forged announcement must NOT mutate the group.
+        assertTrue(groupRepository.snapshots.value.single().memberProfiles.isEmpty())
+    }
+
+    @Test
+    fun announcement_acceptedWhenSenderMatchesStoredAdmin() = runTest {
+        val storedAdmin = ByteArray(32) { 0x10 }
+        val storedAdminHex = storedAdmin.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        groupStore.replaceForTest(makeGroup(groupId).copy(adminEd25519PubkeyHex = storedAdminHex))
+        groupRepository.reload()
+
+        val payload = announcementPayload()
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
+            .toByteArray(Charsets.UTF_8)
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = storedAdmin),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+        )
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        assertEquals(1, groupRepository.snapshots.value.single().memberProfiles.size)
+    }
+
+    @Test
     fun unrecognizedPlaintext_fallsThroughToQueue() = runTest {
         val dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter = StubDecrypter(
@@ -360,6 +402,12 @@ private class InMemoryGroupStore : GroupStore {
         )
     }
     override suspend fun delete(id: String) { rows.remove(id) }
+
+    /** Test-only helper — replace a row by id without going through
+     *  insertOrUpdate's "preserve createdAt" branch. */
+    fun replaceForTest(group: ChatGroup) {
+        rows[group.id] = group
+    }
 }
 
 private class ConstantIdentity(private val id: IdentityId) : ActiveIdentityProvider {

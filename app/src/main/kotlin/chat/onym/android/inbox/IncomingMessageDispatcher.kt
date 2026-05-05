@@ -118,7 +118,7 @@ class IncomingMessageDispatcher(
     private suspend fun materializeGroup(
         invitation: GroupInvitationPayload,
         ownerIdentityId: IdentityId,
-        @Suppress("UNUSED_PARAMETER") senderEd25519PublicKey: ByteArray?,
+        senderEd25519PublicKey: ByteArray?,
     ) {
         val tier = SepTier.entries.firstOrNull { it.rawValue == invitation.tierRaw } ?: return
         val groupType = SepGroupType.fromWire(invitation.groupTypeRaw) ?: return
@@ -129,6 +129,16 @@ class IncomingMessageDispatcher(
         val profiles = (invitation.memberProfiles ?: emptyMap()).toMutableMap()
         selfMemberProfileEntry(ownerIdentityId)?.let { (key, profile) ->
             profiles[key] = profile
+        }
+
+        // PR 84: stamp the inviting envelope's Ed25519 pubkey as the
+        // group's admin signing key. Subsequent
+        // `MemberAnnouncementPayload` apply paths verify the sender
+        // matches. `null` for Anarchy / OneOnOne (no admin), or when
+        // the envelope shipped without a signature block.
+        val adminEd25519PubkeyHex: String? = when (groupType) {
+            SepGroupType.ANARCHY, SepGroupType.ONE_ON_ONE -> null
+            else -> senderEd25519PublicKey?.toHexLowercase()
         }
 
         val groupIdHex = invitation.groupId.toHexLowercase()
@@ -145,6 +155,7 @@ class IncomingMessageDispatcher(
             tier = tier,
             groupType = groupType,
             adminPubkeyHex = invitation.adminPubkeyHex,
+            adminEd25519PubkeyHex = adminEd25519PubkeyHex,
             // Sender already anchored before sending the invite, so
             // by the time it lands the group is on chain.
             isPublishedOnChain = true,
@@ -205,12 +216,24 @@ class IncomingMessageDispatcher(
      */
     private suspend fun applyAnnouncement(
         payload: MemberAnnouncementPayload,
-        @Suppress("UNUSED_PARAMETER") senderEd25519PublicKey: ByteArray?,
+        senderEd25519PublicKey: ByteArray?,
     ) {
         val groups = groupRepository.snapshots.value
         val group = groups.firstOrNull {
             it.groupIdBytes.contentEquals(payload.groupId)
         } ?: return
+
+        // PR 84 trust check: announcement must be signed by the
+        // group's known admin. Skipped (best-effort) when the group
+        // has no stored admin Ed25519 — happens for governance
+        // models without an admin (Anarchy / OneOnOne) or pre-PR-84
+        // rows that materialized before the field existed.
+        val storedAdmin = group.adminEd25519PubkeyHex
+        if (storedAdmin != null) {
+            val sender = senderEd25519PublicKey ?: return
+            val senderHex = sender.toHexLowercase()
+            if (senderHex != storedAdmin.lowercase()) return
+        }
 
         val key = payload.newMember.blsPub.toHexLowercase()
         if (group.memberProfiles[key] != null) return  // dedup

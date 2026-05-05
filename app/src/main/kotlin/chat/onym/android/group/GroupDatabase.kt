@@ -17,11 +17,11 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [PersistedGroup::class],
-    // v4 (member-profiles): adds nullable `encryptedMemberProfilesJson`
-    // column. v3→v4 migration is non-destructive (the column is
-    // nullable and decodes to an empty map at the store boundary), so
-    // existing rows survive — see [GroupDatabaseMigrations.MIGRATION_3_4].
-    version = 4,
+    // v5 (admin Ed25519): adds nullable `encryptedAdminEd25519PubkeyHex`
+    // column on top of v4's `encryptedMemberProfilesJson`. Both
+    // migrations are non-destructive — existing rows decode to null
+    // at the store boundary.
+    version = 5,
     exportSchema = false,
 )
 abstract class GroupDatabase : RoomDatabase() {
@@ -43,6 +43,17 @@ object GroupDatabaseMigrations {
     val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE groups ADD COLUMN encryptedMemberProfilesJson BLOB")
+        }
+    }
+
+    /**
+     * v4 → v5: introduce `encryptedAdminEd25519PubkeyHex` (nullable
+     * BLOB). Existing rows decode to null (best-effort fallback for
+     * pre-PR-84 announcements).
+     */
+    val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE groups ADD COLUMN encryptedAdminEd25519PubkeyHex BLOB")
         }
     }
 }

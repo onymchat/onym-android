@@ -77,6 +77,24 @@ data class ChatGroup(
     @SerialName("admin_pubkey_hex")
     val adminPubkeyHex: String? = null,
     /**
+     * Hex (lowercase, 64 chars) Ed25519 pubkey of the admin —
+     * HKDF-derived from their nostr secret on the admin's device.
+     * Captured at materialize time from the inviting envelope's
+     * `senderEd25519PublicKey`, or stamped at create time from the
+     * creator's own [chat.onym.android.identity.Identity.stellarPublicKey].
+     * Used by the receive-side dispatcher to verify that an inbound
+     * [MemberAnnouncementPayload] was actually signed by the known
+     * admin (and not a peer who happens to know the recipient's
+     * inbox pubkey).
+     *
+     * `null` for [SepGroupType.ANARCHY] / [SepGroupType.ONE_ON_ONE]
+     * (no admin) or when a pre-PR-84 group materialized before the
+     * field existed — announcements for such groups fall back to V1
+     * best-effort (decrypt-only verification).
+     */
+    @SerialName("admin_ed25519_pubkey_hex")
+    val adminEd25519PubkeyHex: String? = null,
+    /**
      * Flips to `true` once the relayer's `create_group_v2` returns
      * `accepted = true`. Persisted-but-not-anchored groups can be
      * retried.
@@ -121,6 +139,7 @@ data class ChatGroup(
             tier == other.tier &&
             groupType == other.groupType &&
             adminPubkeyHex == other.adminPubkeyHex &&
+            adminEd25519PubkeyHex == other.adminEd25519PubkeyHex &&
             isPublishedOnChain == other.isPublishedOnChain &&
             ownerIdentityId == other.ownerIdentityId
     }
@@ -138,6 +157,7 @@ data class ChatGroup(
         h = 31 * h + tier.hashCode()
         h = 31 * h + groupType.hashCode()
         h = 31 * h + (adminPubkeyHex?.hashCode() ?: 0)
+        h = 31 * h + (adminEd25519PubkeyHex?.hashCode() ?: 0)
         h = 31 * h + isPublishedOnChain.hashCode()
         h = 31 * h + ownerIdentityId.hashCode()
         return h

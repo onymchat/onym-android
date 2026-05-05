@@ -262,6 +262,15 @@ open class CreateGroupInteractor(
         } else {
             null
         }
+        // PR 84: stamp the admin's Ed25519 pubkey at create time. The
+        // receive-side dispatcher cross-checks `MemberAnnouncement`s
+        // against this. `null` for governance models without a
+        // privileged member.
+        val adminEd25519PubkeyHex: String? = if (groupType == SepGroupType.TYRANNY) {
+            identitySnapshot.stellarPublicKey.toHex()
+        } else {
+            null
+        }
         // Stamp the active identity at create time so the per-identity
         // chats filter in `GroupRepository.snapshots` includes it
         // automatically. There MUST be a current identity (we already
@@ -286,6 +295,7 @@ open class CreateGroupInteractor(
             tier = tier,
             groupType = groupType,
             adminPubkeyHex = adminPubkeyHex,
+            adminEd25519PubkeyHex = adminEd25519PubkeyHex,
             isPublishedOnChain = false,
             ownerIdentityId = ownerId.value,
         )
