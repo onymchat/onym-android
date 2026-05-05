@@ -45,7 +45,6 @@
     <string name="copied">Скопировано</string>
     <string name="ok">ОК</string>
     <string name="recovery_phrase_copied_message">Фраза восстановления скопирована. Через 60 секунд она будет удалена из буфера обмена. Сохраните её сейчас в надёжном месте.</string>
-    <string name="tap_to_reveal">Нажмите, чтобы показать</string>
 
     <!-- ─── Verify screen ────────────────────────────────────────── -->
     <string name="select_word_number">Выберите слово номер</string>

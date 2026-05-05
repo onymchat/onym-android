@@ -49,7 +49,7 @@ class RecoveryPhraseBackupViewModel(
     sealed class Step {
         data object Intro : Step()
         data class AuthFailed(val reason: String) : Step()
-        data class Reveal(val phrase: String, val revealed: Boolean) : Step()
+        data class Reveal(val phrase: String) : Step()
         data class Verify(
             val phrase: String,
             val rounds: List<VerifyRound>,
@@ -144,16 +144,9 @@ class RecoveryPhraseBackupViewModel(
         if (_step.value is Step.AuthFailed) _step.value = Step.Intro
     }
 
-    fun tappedReveal() {
-        val current = _step.value
-        if (current is Step.Reveal) {
-            _step.value = current.copy(revealed = true)
-        }
-    }
-
     fun tappedCopyPhrase() {
         val current = _step.value
-        if (current !is Step.Reveal || !current.revealed) return
+        if (current !is Step.Reveal) return
         // onym:allow-secret-read: copy is the explicit user intent on the
         // reveal screen; auto-clears after `clipboardClearDelay` so the
         // value doesn't sit on the system clipboard indefinitely.
@@ -168,7 +161,7 @@ class RecoveryPhraseBackupViewModel(
 
     fun tappedContinueFromReveal() {
         val current = _step.value
-        if (current is Step.Reveal && current.revealed) {
+        if (current is Step.Reveal) {
             _step.value = Step.Verify(
                 phrase = current.phrase,
                 rounds = makeRounds(current.phrase),
@@ -241,7 +234,7 @@ class RecoveryPhraseBackupViewModel(
             )
             return
         }
-        _step.value = Step.Reveal(phrase = phrase, revealed = false)
+        _step.value = Step.Reveal(phrase = phrase)
     }
 
     companion object {

@@ -109,7 +109,7 @@ class RecoveryPhraseBackupViewModelTest {
     }
 
     @Test
-    fun authSuccess_transitionsToReveal_unrevealed() = runBlocking {
+    fun authSuccess_transitionsToReveal() = runBlocking {
         authenticator.outcome = FakeAuthenticator.Outcome.Success
         viewModel.authenticate()
 
@@ -118,7 +118,6 @@ class RecoveryPhraseBackupViewModelTest {
             fail("expected Reveal, got $step"); return@runBlocking
         }
         assertEquals(testMnemonic, step.phrase)
-        assertEquals(false, step.revealed)
     }
 
     @Test
@@ -148,21 +147,8 @@ class RecoveryPhraseBackupViewModelTest {
     // ─── Reveal ─────────────────────────────────────────────────────
 
     @Test
-    fun tappedReveal_flipsRevealedTrue() = runBlocking {
-        advanceToReveal()
-        viewModel.tappedReveal()
-
-        val step = viewModel.step.value
-        if (step !is RecoveryPhraseBackupViewModel.Step.Reveal) {
-            fail("expected Reveal, got $step"); return@runBlocking
-        }
-        assertTrue(step.revealed)
-    }
-
-    @Test
     fun tappedCopyPhrase_writesToClipboard_thenClearsAfterDelay() = runBlocking {
         advanceToReveal()
-        viewModel.tappedReveal()
 
         viewModel.tappedCopyPhrase()
         assertEquals(testMnemonic, clipboard.lastWritten)
@@ -174,9 +160,8 @@ class RecoveryPhraseBackupViewModelTest {
     }
 
     @Test
-    fun tappedCopyPhrase_isNoop_beforeReveal() = runBlocking {
-        advanceToReveal()
-        // Don't tap reveal — phrase still hidden.
+    fun tappedCopyPhrase_isNoop_outsideReveal() = runBlocking {
+        // Still on Intro — no Reveal step yet, so copy must not write.
         viewModel.tappedCopyPhrase()
         assertNull(clipboard.lastWritten)
     }
@@ -184,7 +169,6 @@ class RecoveryPhraseBackupViewModelTest {
     @Test
     fun tappedContinueFromReveal_movesToVerify_withThreeRounds() = runBlocking {
         advanceToReveal()
-        viewModel.tappedReveal()
         viewModel.tappedContinueFromReveal()
 
         val step = viewModel.step.value
@@ -296,7 +280,6 @@ class RecoveryPhraseBackupViewModelTest {
 
     private suspend fun advanceToVerify() {
         advanceToReveal()
-        viewModel.tappedReveal()
         viewModel.tappedContinueFromReveal()
     }
 

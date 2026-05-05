@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
@@ -40,7 +39,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -129,8 +127,6 @@ fun RecoveryPhraseBackupScreen(
                 is RecoveryPhraseBackupViewModel.Step.Reveal -> {
                     RevealScreen(
                         phrase = s.phrase,
-                        revealed = s.revealed,
-                        onReveal = viewModel::tappedReveal,
                         onCopy = viewModel::tappedCopyPhrase,
                         onContinue = viewModel::tappedContinueFromReveal,
                     )
@@ -331,8 +327,6 @@ private fun IntroRow(
 @Composable
 private fun RevealScreen(
     phrase: String,
-    revealed: Boolean,
-    onReveal: () -> Unit,
     onCopy: () -> Unit,
     onContinue: () -> Unit,
 ) {
@@ -361,8 +355,6 @@ private fun RevealScreen(
 
         PhraseCard(
             words = words,
-            revealed = revealed,
-            onReveal = onReveal,
             modifier = Modifier
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 12.dp),
@@ -380,7 +372,6 @@ private fun RevealScreen(
                     onCopy()
                     copyConfirmShown = true
                 },
-                enabled = revealed,
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -397,7 +388,6 @@ private fun RevealScreen(
 
         Button(
             onClick = onContinue,
-            enabled = revealed,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
@@ -436,8 +426,6 @@ private fun RevealScreen(
 @Composable
 private fun PhraseCard(
     words: List<String>,
-    revealed: Boolean,
-    onReveal: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -448,13 +436,16 @@ private fun PhraseCard(
             .padding(16.dp),
         contentAlignment = Alignment.Center,
     ) {
-        // 2-column grid of indexed words. Hidden via alpha = 0 when
-        // not revealed — Modifier.blur is a no-op below API 31 and
-        // would leak the secret on Android 8–11.
+        // 2-column grid of indexed words. Visible immediately — the
+        // biometric gate in [authenticate] + FLAG_SECURE on the window
+        // (set in MainActivity) is the protection. The previous attempt
+        // (blur-then-tap-to-reveal, then alpha-then-tap-to-reveal) kept
+        // a tap-to-reveal overlay that confused users when the words
+        // were already plainly visible (issue #82). Since the user has
+        // just authenticated with biometrics, the extra gate adds no
+        // real protection and was visually broken on its broken paths.
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .alpha(if (revealed) 1f else 0f),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             words.chunked(2).forEachIndexed { rowIdx, pair ->
@@ -488,36 +479,6 @@ private fun PhraseCard(
                     // Pad-cell when chunked left an odd word out
                     if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
-            }
-        }
-
-        if (!revealed) {
-            // Tap target covering the hidden phrase
-            Column(
-                modifier = Modifier
-                    .matchParentSize()
-                    .clickable { onReveal() },
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.VisibilityOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    stringResource(R.string.tap_to_reveal),
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                )
             }
         }
     }
