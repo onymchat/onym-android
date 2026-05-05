@@ -162,7 +162,22 @@
     <string name="identities_screen_footer">Only the active identity\'s chats are visible. Switch between identities to see different inboxes.</string>
     <string name="identities_section_your">Your identities</string>
     <string name="identities_add_button">Add Identity</string>
+    <string name="identities_restore_button">Restore from recovery phrase</string>
     <string name="identity_unnamed">Unnamed identity</string>
+
+    <!-- ─── Restore identity (Settings → Identities → Restore) ─── -->
+    <string name="restore_identity_screen_title">Restore identity</string>
+    <string name="restore_identity_intro">Enter your 12-word recovery phrase to restore an identity on this device. Your existing identities are not affected.</string>
+    <string name="restore_identity_phrase_label">Recovery phrase</string>
+    <string name="restore_identity_phrase_placeholder">Enter your 12 words separated by spaces</string>
+    <string name="restore_identity_word_count_hint">12 or 24 words, separated by spaces.</string>
+    <string name="restore_identity_invalid">Invalid phrase. Check the spelling and order of your words.</string>
+    <string name="restore_identity_valid">Phrase looks good.</string>
+    <string name="restore_identity_name_label">Name (optional)</string>
+    <string name="restore_identity_name_placeholder">e.g. Personal</string>
+    <string name="restore_identity_action">Restore identity</string>
+    <string name="restore_identity_restoring">Restoring…</string>
+    <string name="restore_identity_footnote">Restoring derives the same keys from your phrase. The restored identity becomes active.</string>
 
     <!-- ─── Identity detail ──────────────────────────────────────── -->
     <string name="identity_detail_title">Identity</string>

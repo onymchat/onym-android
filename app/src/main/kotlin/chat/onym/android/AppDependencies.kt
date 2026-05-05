@@ -47,6 +47,8 @@ class AppDependencies(
     val makeChatsViewModel: () -> ChatsViewModel,
     /** Settings → Identities — multi-identity management (PR-5). */
     val makeIdentitiesViewModel: () -> chat.onym.android.identity.IdentitiesViewModel,
+    /** Settings → Identities → Restore from recovery phrase. */
+    val makeRestoreIdentityViewModel: () -> chat.onym.android.identity.RestoreIdentityViewModel,
     /** Post-create deeplink invite share (deeplink-invite PR-5). */
     val makeShareInviteViewModel: () -> chat.onym.android.group.ShareInviteViewModel,
     /** Joiner-side post-deeplink-tap surface (deeplink-invite PR-7).

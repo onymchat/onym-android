@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -67,6 +68,7 @@ fun IdentitiesScreen(
     viewModel: IdentitiesViewModel,
     onBack: () -> Unit,
     onIdentityClick: (IdentityId) -> Unit,
+    onRestoreClick: () -> Unit,
 ) {
     val items by viewModel.items.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
@@ -130,35 +132,25 @@ fun IdentitiesScreen(
             item {
                 Spacer(Modifier.height(12.dp))
                 SettingsCard(modifier = Modifier.testTag("identities.add_card")) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.add() }
-                            .padding(horizontal = 16.dp, vertical = 13.dp)
-                            .testTag("identities.add"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(22.dp)
-                                .clip(CircleShape)
-                                .background(SettingsTile.Blue),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Filled.Add,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp),
-                            )
-                        }
-                        Text(
-                            text = stringResource(R.string.identities_add_button),
-                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                            color = SettingsTile.Blue,
-                        )
-                    }
+                    IdentityActionRow(
+                        icon = Icons.Filled.Add,
+                        background = SettingsTile.Blue,
+                        label = stringResource(R.string.identities_add_button),
+                        onClick = { viewModel.add() },
+                        rowTestTag = "identities.add",
+                    )
+                }
+            }
+            item {
+                Spacer(Modifier.height(12.dp))
+                SettingsCard(modifier = Modifier.testTag("identities.restore_card")) {
+                    IdentityActionRow(
+                        icon = Icons.Filled.Restore,
+                        background = SettingsTile.Green,
+                        label = stringResource(R.string.identities_restore_button),
+                        onClick = onRestoreClick,
+                        rowTestTag = "identities.restore",
+                    )
                 }
             }
             item {
@@ -166,6 +158,45 @@ fun IdentitiesScreen(
             }
             item { Spacer(Modifier.height(40.dp)) }
         }
+    }
+}
+
+@Composable
+private fun IdentityActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    background: Color,
+    label: String,
+    onClick: () -> Unit,
+    rowTestTag: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp)
+            .testTag(rowTestTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(background),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+            color = background,
+        )
     }
 }
 

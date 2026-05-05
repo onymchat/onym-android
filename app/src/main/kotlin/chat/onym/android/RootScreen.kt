@@ -56,6 +56,7 @@ import chat.onym.android.settings.IdentityDetailScreen
 import chat.onym.android.settings.PrivacyEncryptionScreen
 import chat.onym.android.settings.RelayerSettingsScreen
 import chat.onym.android.settings.RelayerSettingsViewModel
+import chat.onym.android.settings.RestoreIdentityScreen
 import chat.onym.android.settings.RunRelayerScreen
 import chat.onym.android.settings.SettingsScreen
 import chat.onym.android.settings.UseExistingContractScreen
@@ -324,6 +325,19 @@ fun RootScreen(
                     onIdentityClick = { id ->
                         navController.navigate("identity_detail/${id.value}")
                     },
+                    onRestoreClick = { navController.navigate(ROUTE_RESTORE_IDENTITY) },
+                )
+            }
+            composable(ROUTE_RESTORE_IDENTITY) {
+                val vm: chat.onym.android.identity.RestoreIdentityViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeRestoreIdentityViewModel() }
+                    },
+                )
+                RestoreIdentityScreen(
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onDone = { navController.popBackStack() },
                 )
             }
             composable("identity_detail/{identityId}") { entry ->
@@ -514,6 +528,7 @@ private enum class Tab(val route: String, val labelRes: Int) {
 
 private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
 private const val ROUTE_IDENTITIES = "identities"
+private const val ROUTE_RESTORE_IDENTITY = "restore_identity"
 private const val ROUTE_PRIVACY = "privacy"
 private const val ROUTE_ABOUT = "about_onym"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
