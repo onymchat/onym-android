@@ -1,0 +1,299 @@
+name: QA Build
+
+# Manually-dispatched build of the current branch's HEAD, signed
+# with the production keystore and published to onym.app/qa/.
+# Distinct from `release.yml`, which is gated on tag input + the
+# full lint/test suite. This one prioritises iteration speed:
+# build -> sign -> upload, no test gates.
+#
+# To dispatch:
+#   gh workflow run "QA Build" --ref <branch> \
+#     -f description="Fix login crash on iPad" \
+#     -f issue=42
+#
+# Required secrets:
+#   org-wide:
+#     DEPLOY_SSH_KEY         -- private ed25519 for deploy@droplet
+#     DEPLOY_HOST            -- onym.app (resolves via DNS to droplet)
+#   repo-local (same as release.yml):
+#     ANDROID_KEYSTORE_BASE64
+#     ANDROID_KEYSTORE_PASSWORD
+#     ANDROID_KEY_ALIAS
+#     ANDROID_KEY_PASSWORD
+#     RELAYER_AUTH_TOKEN
+#
+# Note on cross-repo action access: this workflow calls
+# `onymchat/onym-website/.github/actions/deploy@main`. That action's
+# repo (`onym-website`) must be either public or accessible to this
+# workflow's runner -- see the org's "Actions permissions" settings,
+# or make `onym-website` public (it's just a marketing site +
+# QA-dashboard scaffold; no secrets in source).
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'What changed in this build (shown in the QA Dashboard)'
+        required: true
+        type: string
+      issue:
+        description: 'Linked GitHub issue number (optional, e.g. 42)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  issues: read   # gh issue view -> resolve issue title for the dashboard entry
+
+# Serialize concurrent QA dispatches so two runs don't race against
+# the same builds.json on the droplet. (The workflow does a
+# fetch-merge-write cycle that isn't atomic on the server.)
+concurrency:
+  group: qa-build-android
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build & publish to QA Dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # Same as release.yml: launcher icons live in Git LFS, AAPT2
+          # needs the real PNG bytes not the pointer text.
+          lfs: true
+          # Full history + tags so `git describe --match=v*` finds the
+          # most recent tag for the version-stamping logic below.
+          fetch-depth: 0
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
+
+      - name: Compute version
+        id: ver
+        run: |
+          set -eu
+          commit=$(git rev-parse HEAD)
+          commit_short=$(git rev-parse --short=5 HEAD)
+          branch="${GITHUB_REF_NAME}"
+
+          # Most recent v*-tag reachable from HEAD (empty if none).
+          tag=$(git describe --tags --abbrev=0 --match='v*' 2>/dev/null || echo "")
+
+          # If HEAD is exactly the tag commit, this is a "tag build"
+          # (no extra commits). Otherwise it's a "branch build" and we
+          # decorate the version with the commit SHA: v0.0.14-ab4cd.
+          if [ -n "$tag" ] && [ "$(git rev-parse "$tag")" = "$commit" ]; then
+            kind="tag"
+            version="$tag"
+          else
+            kind="branch"
+            base="${tag:-v0.0.0}"
+            version="${base}-${commit_short}"
+          fi
+
+          {
+            echo "commit=$commit"
+            echo "commit_short=$commit_short"
+            echo "branch=$branch"
+            echo "tag=$tag"
+            echo "kind=$kind"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Building $version (kind=$kind, branch=$branch, commit=$commit_short)"
+
+      - name: assembleRelease
+        # `RELEASE_VERSION` is consumed by `resolveReleaseVersion()`
+        # in app/build.gradle.kts -> BuildConfig.VERSION_NAME, which the
+        # About screen renders. Same env contract as release.yml.
+        env:
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
+          RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Stage + zipalign + sign APK
+        # Mirrors release.yml's signing pipeline:
+        #   zipalign -p -v 4   -> 4-byte align + 16KB page-align .so's
+        #   apksigner sign     -> v1+v2+v3 signatures with the prod keystore
+        #   apksigner verify   -> fail loudly on any signing misconfiguration
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          KEYSTORE_BASE64:   ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS:         ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD:      ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -eu
+          [ -n "$KEYSTORE_BASE64" ]   || { echo "secret ANDROID_KEYSTORE_BASE64 unset"   >&2; exit 1; }
+          [ -n "$KEYSTORE_PASSWORD" ] || { echo "secret ANDROID_KEYSTORE_PASSWORD unset" >&2; exit 1; }
+          [ -n "$KEY_ALIAS" ]         || { echo "secret ANDROID_KEY_ALIAS unset"         >&2; exit 1; }
+          [ -n "$KEY_PASSWORD" ]      || { echo "secret ANDROID_KEY_PASSWORD unset"      >&2; exit 1; }
+
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          [ -f "$UNSIGNED" ] || {
+            echo "expected unsigned APK at $UNSIGNED" >&2
+            ls -la app/build/outputs/apk/release/ >&2 || true
+            exit 1
+          }
+
+          ZIPALIGN=$(find "$ANDROID_HOME" -name zipalign 2>/dev/null | sort -V | tail -1)
+          APKSIGNER=$(find "$ANDROID_HOME" -name apksigner 2>/dev/null | sort -V | tail -1)
+          [ -x "$ZIPALIGN" ]  || { echo "zipalign not found in $ANDROID_HOME" >&2; exit 1; }
+          [ -x "$APKSIGNER" ] || { echo "apksigner not found in $ANDROID_HOME" >&2; exit 1; }
+
+          mkdir -p "dist/qa/android/$VERSION"
+          DEST="dist/qa/android/$VERSION/onym.apk"
+
+          $ZIPALIGN -p -v 4 "$UNSIGNED" "$DEST"
+
+          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/keystore.jks
+          $APKSIGNER sign \
+            --ks /tmp/keystore.jks \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            "$DEST"
+          rm /tmp/keystore.jks
+
+          $APKSIGNER verify --verbose "$DEST"
+
+          echo "APK_SIZE=$(stat -c%s "$DEST")" >> "$GITHUB_ENV"
+
+      - name: Build dashboard entry + merge into builds.json
+        env:
+          VERSION:      ${{ steps.ver.outputs.version }}
+          KIND:         ${{ steps.ver.outputs.kind }}
+          BRANCH:       ${{ steps.ver.outputs.branch }}
+          TAG:          ${{ steps.ver.outputs.tag }}
+          COMMIT:       ${{ steps.ver.outputs.commit }}
+          COMMIT_SHORT: ${{ steps.ver.outputs.commit_short }}
+          DESCRIPTION:  ${{ inputs.description }}
+          ISSUE:        ${{ inputs.issue }}
+          REPO:         ${{ github.repository }}
+          RUN_ID:       ${{ github.run_id }}
+          HOST:         ${{ secrets.DEPLOY_HOST }}
+          GH_TOKEN:     ${{ github.token }}
+        run: |
+          set -eu
+
+          BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          # Resolve issue title (best-effort; gh failure -> empty title)
+          ISSUE_OBJ='null'
+          if [ -n "$ISSUE" ]; then
+            TITLE=$(gh issue view "$ISSUE" --repo "$REPO" --json title -q .title 2>/dev/null || echo "")
+            ISSUE_OBJ=$(jq -n \
+              --arg n "$ISSUE" --arg t "$TITLE" \
+              --arg url "https://github.com/$REPO/issues/$ISSUE" \
+              '{number: ($n|tonumber), title: $t, url: $url}')
+          fi
+
+          # The dashboard's contract -- see public/qa/builds.json on
+          # onym-website for the schema. Keep field names in sync.
+          jq -n \
+            --arg platform "android" \
+            --arg version "$VERSION" \
+            --arg kind "$KIND" \
+            --arg branch "$BRANCH" \
+            --arg tag "$TAG" \
+            --arg commit "$COMMIT" \
+            --arg commit_short "$COMMIT_SHORT" \
+            --arg built_at "$BUILT_AT" \
+            --arg description "$DESCRIPTION" \
+            --argjson issue "$ISSUE_OBJ" \
+            --arg install_url "https://${HOST}/qa/android/${VERSION}/onym.apk" \
+            --arg apk_url     "https://${HOST}/qa/android/${VERSION}/onym.apk" \
+            --argjson size_bytes "${APK_SIZE}" \
+            --arg commit_url   "https://github.com/$REPO/commit/$COMMIT" \
+            --arg workflow_url "https://github.com/$REPO/actions/runs/$RUN_ID" \
+            '{
+              platform: $platform,
+              version: $version,
+              kind: $kind,
+              branch: (if $kind == "branch" then $branch else null end),
+              tag:    (if $tag != "" then $tag else null end),
+              commit: $commit,
+              commit_short: $commit_short,
+              built_at: $built_at,
+              description: $description,
+              issue: $issue,
+              install_url: $install_url,
+              apk_url: $apk_url,
+              size_bytes: $size_bytes,
+              commit_url: $commit_url,
+              workflow_url: $workflow_url
+            }' > /tmp/new-entry.json
+
+          echo "::group::New dashboard entry"
+          cat /tmp/new-entry.json
+          echo "::endgroup::"
+
+          # Fetch the live builds.json. 404 (no file yet) -> empty skeleton.
+          if curl -sf -o /tmp/current.json "https://${HOST}/qa/builds.json"; then
+            echo "::notice::Fetched current builds.json from https://${HOST}/qa/builds.json"
+          else
+            echo "::notice::No existing builds.json -- starting fresh"
+            echo '{"schema_version":1,"builds":[]}' > /tmp/current.json
+          fi
+
+          # Merge:
+          #  1. If the live file is the scaffold sample (is_sample:true),
+          #     drop its entries -- first real publish wins.
+          #  2. Prepend our entry, dedupe by platform+version (newer wins
+          #     since we lead the array), sort by built_at desc, cap 50.
+          #  3. Strip is_sample, refresh generated_at.
+          jq --slurpfile new /tmp/new-entry.json '
+            (if .is_sample == true then .builds = [] else . end)
+            | .builds = (
+                [$new[0]] + (.builds // [])
+                | unique_by(.platform + "@" + .version)
+                | sort_by(.built_at) | reverse
+                | .[0:50]
+              )
+            | del(.is_sample)
+            | .schema_version = 1
+            | .generated_at = (now | todate)
+          ' /tmp/current.json > dist/qa/builds.json
+
+          echo "::group::Merged builds.json (head)"
+          jq '{schema_version, generated_at, total: (.builds|length), builds: (.builds[0:5])}' dist/qa/builds.json
+          echo "::endgroup::"
+
+      - name: Publish to onym.app/qa/
+        # Composite action lives in the onym-website repo. delete_stale
+        # MUST be false: dist/qa/ contains only this run's APK + the
+        # merged builds.json, so deletion would wipe iOS uploads under
+        # /var/www/onym/qa/ios/ and previous Android builds under
+        # /var/www/onym/qa/android/<other>/.
+        uses: onymchat/onym-website/.github/actions/deploy@main
+        with:
+          source_path: dist/qa
+          target_subpath: qa
+          ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
+          host: ${{ secrets.DEPLOY_HOST }}
+          delete_stale: false
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          KIND:    ${{ steps.ver.outputs.kind }}
+          BRANCH:  ${{ steps.ver.outputs.branch }}
+          HOST:    ${{ secrets.DEPLOY_HOST }}
+        run: |
+          {
+            echo "## QA build published"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Version | \`$VERSION\` |"
+            echo "| Kind | $KIND |"
+            echo "| Branch | \`$BRANCH\` |"
+            echo "| APK | https://${HOST}/qa/android/${VERSION}/onym.apk |"
+            echo "| Dashboard | https://${HOST}/qa/?platform=android |"
+          } >> "$GITHUB_STEP_SUMMARY"
