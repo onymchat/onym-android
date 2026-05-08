@@ -3,6 +3,7 @@ package chat.onym.android.group
 import chat.onym.android.chain.AnarchyCreateGroupPayload
 import chat.onym.android.chain.AnchorSelectionKey
 import chat.onym.android.chain.CanonicalFr
+import chat.onym.android.chain.ContractNetwork
 import chat.onym.android.chain.ContractsRepository
 import chat.onym.android.chain.GovernanceType
 import chat.onym.android.chain.GroupCreateProof
@@ -242,6 +243,21 @@ open class CreateGroupInteractor(
                 )
                 else -> throw CreateGroupError.UnsupportedGroupType(groupType)
             }
+        } catch (e: SepContractError.BadStatus) {
+            // Relayer rejects an un-allowlisted contract with HTTP 400 +
+            // a JSON body containing "is not allowlisted". Surface a
+            // distinct, actionable error so the user knows to switch
+            // versions in Settings → Anchors instead of staring at the
+            // raw transport text. Issue #117.
+            if (NOT_ALLOWLISTED_MARKER in e.body) {
+                throw CreateGroupError.AnchorContractNotAllowlisted(
+                    contractId = binding.contractId,
+                    governance = governanceType,
+                    network = activeNetwork.contractNetwork,
+                    release = binding.release,
+                )
+            }
+            throw CreateGroupError.AnchorTransport(e.message ?: "transport error")
         } catch (e: SepContractError) {
             throw CreateGroupError.AnchorTransport(e.message ?: "transport error")
         } catch (e: CreateGroupError) {
@@ -250,6 +266,18 @@ open class CreateGroupInteractor(
             throw CreateGroupError.AnchorTransport(e.message ?: "unknown")
         }
         if (!response.accepted) {
+            // Some relayer versions / proxies may swallow the 400 and
+            // pass the same `{accepted:false, message:"…not allowlisted…"}`
+            // body through with HTTP 200. Mirror the BadStatus handling
+            // so the user gets the same actionable error either way.
+            if (response.message?.contains(NOT_ALLOWLISTED_MARKER) == true) {
+                throw CreateGroupError.AnchorContractNotAllowlisted(
+                    contractId = binding.contractId,
+                    governance = governanceType,
+                    network = activeNetwork.contractNetwork,
+                    release = binding.release,
+                )
+            }
             throw CreateGroupError.AnchorRejected(response.message)
         }
 
@@ -399,6 +427,14 @@ open class CreateGroupInteractor(
             ))
         }
 
+        /** Substring the relayer's rejection body always contains for
+         *  the un-allowlisted-contract case (matches `handler.rs:182`
+         *  in `onym-relayer`: `format!("contractID {} is not
+         *  allowlisted for {} on {}", …)`). Stable across the relayer's
+         *  history — the wording is the public-facing operator
+         *  contract. */
+        const val NOT_ALLOWLISTED_MARKER = "is not allowlisted"
+
         /** Same derivation as `Identity.inboxTag` — duplicated here
          *  because the helper is tied to a specific identity, and we
          *  need it for arbitrary recipient pubkeys. */
@@ -480,6 +516,29 @@ sealed class CreateGroupError(message: String) : Exception(message) {
 
     class AnchorRejected(val serverMessage: String?) :
         CreateGroupError("Relayer rejected the create: ${serverMessage ?: "(no message)"}")
+
+    /**
+     * Distinct rejection variant for the relayer's "contractID … is not
+     * allowlisted for <type> on <network>" response. Carved out of the
+     * generic [AnchorTransport] / [AnchorRejected] paths because it has
+     * a clear remediation — switch to a different release in Settings →
+     * Anchors — and the user shouldn't have to parse the raw HTTP body
+     * to find it.
+     *
+     * See `app/src/main/kotlin/chat/onym/android/chain/ContractsRepository.kt`
+     * for how releases are picked, and `RootScreen` → Settings →
+     * Anchors for the UI that lets the user switch.
+     */
+    class AnchorContractNotAllowlisted(
+        val contractId: String,
+        val governance: GovernanceType,
+        val network: ContractNetwork,
+        /** Release tag the rejected contract came from (e.g. `"v0.0.11"`). */
+        val release: String,
+    ) : CreateGroupError(
+        "The ${governance.wireValue} contract from $release isn't allowlisted on the relayer for ${network.wireValue} yet. " +
+            "Open Settings → Anchors and pick an earlier release for ${governance.wireValue}/${network.wireValue}."
+    )
 
     object InvitationEncodingFailed :
         CreateGroupError("Couldn't encode the invitation payload") {

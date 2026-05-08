@@ -299,6 +299,56 @@ class CreateGroupInteractorTest {
     }
 
     @Test
+    fun create_anchorRejected_notAllowlistedBody_throwsContractNotAllowlisted() = runBlocking {
+        // The relayer rejects an un-allowlisted contract with HTTP 400
+        // and a body of the shape:
+        //   {"accepted":false,"message":"contractID C… is not allowlisted for tyranny on testnet"}
+        // Issue #117 — the user should see a distinct, actionable error
+        // rather than the raw transport message.
+        contractTransport.setBehavior(
+            ConfigurableContractTransport.Behavior.Throws(
+                SepContractError.BadStatus(
+                    code = 400,
+                    body = "{\"accepted\":false,\"message\":\"contractID CAFXTEST is not allowlisted for tyranny on testnet\"}",
+                ),
+            ),
+        )
+        try {
+            makeInteractor().create(name = "G", invitees = emptyList())
+            error("expected AnchorContractNotAllowlisted")
+        } catch (e: CreateGroupError.AnchorContractNotAllowlisted) {
+            assertEquals(GovernanceType.Tyranny, e.governance)
+            assertEquals(ContractNetwork.Testnet, e.network)
+            assertTrue(
+                "message should hint at Settings → Anchors",
+                e.message!!.contains("Anchors"),
+            )
+        }
+    }
+
+    @Test
+    fun create_anchorRejectedWith200_notAllowlistedMessage_throwsContractNotAllowlisted() = runBlocking {
+        // Defensive: same JSON body but delivered as HTTP 200 (proxy
+        // that swallows the 400) — should resolve to the same error.
+        contractTransport.setBehavior(
+            ConfigurableContractTransport.Behavior.Response(
+                SepSubmissionResponse(
+                    accepted = false,
+                    transactionHash = null,
+                    message = "contractID CAFXTEST is not allowlisted for tyranny on testnet",
+                ),
+            ),
+        )
+        try {
+            makeInteractor().create(name = "G", invitees = emptyList())
+            error("expected AnchorContractNotAllowlisted")
+        } catch (e: CreateGroupError.AnchorContractNotAllowlisted) {
+            assertEquals(GovernanceType.Tyranny, e.governance)
+            assertEquals(ContractNetwork.Testnet, e.network)
+        }
+    }
+
+    @Test
     fun create_anchorRejected_throws() = runBlocking {
         contractTransport.setBehavior(
             ConfigurableContractTransport.Behavior.Response(
