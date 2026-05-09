@@ -85,6 +85,11 @@ fun SettingsScreen(
      *  → "Use Mainnet" Switch. */
     useMainnet: Boolean,
     onToggleMainnet: (Boolean) -> Unit,
+    /** Settings → Transport → Nostr Relays entry. PR 87. */
+    onNostrRelaysClick: (() -> Unit)? = null,
+    /** Live count of configured Nostr relays — drives the Settings
+     *  row's subtitle. */
+    nostrRelaysCount: Int = 0,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
         rememberTopAppBarState()
@@ -162,6 +167,26 @@ fun SettingsScreen(
                         isLast = true,
                         modifier = Modifier.testTag("settings.privacy_row"),
                     )
+                }
+            }
+
+            // ─── TRANSPORT ─────────────────────────────────────────
+            if (onNostrRelaysClick != null) {
+                item { SettingsSectionLabel("TRANSPORT") }
+                item {
+                    SettingsCard {
+                        SettingsRow(
+                            leading = {
+                                SettingsTileBox(Icons.Filled.Cloud, SettingsTile.Indigo)
+                            },
+                            title = "Nostr Relays",
+                            subtitle = if (nostrRelaysCount == 1) "1 configured"
+                            else "$nostrRelaysCount configured",
+                            onClick = onNostrRelaysClick,
+                            isLast = true,
+                            modifier = Modifier.testTag("settings.nostr_relays_row"),
+                        )
+                    }
                 }
             }
 

@@ -81,6 +81,15 @@ private val Context.networkPreferenceDataStore: DataStore<Preferences> by prefer
 )
 
 /**
+ * DataStore Preferences for Nostr relay configuration. Separate
+ * from [relayerDataStore] (which holds chain-relayer URLs) — different
+ * domain, different lifecycle.
+ */
+private val Context.nostrRelaysDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "chat.onym.android.nostr_relays_prefs",
+)
+
+/**
  * Composition root. Two responsibilities:
  *
  *  - Register the BouncyCastle JCE provider once at process start
@@ -301,10 +310,40 @@ class OnymApplication : Application() {
         groupRepository.start()
         applicationScope.launch { groupRepository.reload() }
 
+        // PR 87: Nostr relays configuration + first-launch seed. The
+        // inbox transport reads endpoints once at boot — no live
+        // re-connect on Settings changes (a banner explains this).
+        // Without this seed the user sees "send: not connected" on
+        // every send attempt, since nothing else wires endpoints
+        // into NostrInboxTransport at startup.
+        val nostrRelaysRepository = chat.onym.android.transport.nostr.NostrRelaysRepository(
+            store = chat.onym.android.transport.nostr.DataStoreNostrRelaysSelectionStore(
+                dataStore = applicationContext.nostrRelaysDataStore,
+            ),
+        )
+        applicationScope.launch { nostrRelaysRepository.bootstrap() }
+
         // Inbox transport for invitation send. Constructed once;
         // CreateGroupInteractor.create blocks on `send` (which
         // connects on first use via `NostrInboxTransport`).
         val inboxTransport = NostrInboxTransport(signerProvider = nostrSignerProvider)
+        applicationScope.launch {
+            // Bootstrap above writes _snapshots; this read happens on
+            // the same scope so it observes the bootstrap result.
+            nostrRelaysRepository.bootstrap()
+            val endpoints = nostrRelaysRepository.currentEndpoints()
+            if (endpoints.isNotEmpty()) {
+                runCatching {
+                    inboxTransport.connect(
+                        endpoints.map { endpoint ->
+                            chat.onym.android.transport.TransportEndpoint(
+                                java.net.URI(endpoint.url),
+                            )
+                        },
+                    )
+                }
+            }
+        }
 
         // Multi-identity inbox fan-out (PR-4) + per-identity
         // decryption routing (PR-6). Subscribes to every identity's
@@ -489,6 +528,12 @@ class OnymApplication : Application() {
                 )
             },
             approveRequestsViewModel = approveRequestsViewModel,
+            makeNostrRelaySettingsViewModel = {
+                chat.onym.android.settings.NostrRelaySettingsViewModel(
+                    repository = nostrRelaysRepository,
+                )
+            },
+            nostrRelaysFlow = nostrRelaysRepository.snapshots,
             makeJoinViewModel = { capability ->
                 // Suggest the active identity's display name as the
                 // initial label. Falls back to a generic "Anonymous"
