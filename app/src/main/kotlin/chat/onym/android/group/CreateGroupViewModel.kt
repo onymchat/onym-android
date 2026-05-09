@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.net.URI
+import java.util.Base64
 import java.util.UUID
 
 /**
@@ -259,6 +261,24 @@ class CreateGroupViewModel(
         _state.value = _state.value.copy(inviteeInput = text, inviteeError = null)
     }
 
+    /**
+     * Drop a scanned QR payload into [CreateGroupState.inviteeInput].
+     * Strips known URL wrappers via [canonicalizeInviteKey] so the
+     * field shows the raw 64-char hex (or whatever the payload
+     * canonicalises to) and the user can review before tapping
+     * Add invitee. Validation stays in [tappedAddInvitee] — a
+     * malformed scan surfaces the same inline error as a malformed
+     * paste.
+     *
+     * Mirrors `tappedScannedKey` from onym-ios PR #117.
+     */
+    fun tappedScannedKey(raw: String) {
+        _state.value = _state.value.copy(
+            inviteeInput = canonicalizeInviteKey(raw),
+            inviteeError = null,
+        )
+    }
+
     fun tappedAddInvitee() {
         val cleaned = _state.value.inviteeInput.replace(WHITESPACE_REGEX, "")
         if (cleaned.isEmpty()) {
@@ -495,6 +515,55 @@ sealed class CreateCtaLabel {
 }
 
 private val WHITESPACE_REGEX = Regex("\\s+")
+
+/**
+ * Pull a candidate inbox key out of a raw scanned/pasted string.
+ * Recognises:
+ *  - bare hex (returned trimmed; lowercased only when wrapped in a
+ *    `payload` URL — bare hex passes through as-is so the visible
+ *    field matches what the user pasted/scanned)
+ *  - `https://onym.chat/i?k=<urlsafe-base64>` — the cross-platform
+ *    Android identity invite from
+ *    [chat.onym.android.identity.inviteUrl] (`IdentityInviteUrl.kt`)
+ *  - `https://onym.chat?payload=<hex>` — the legacy iOS Settings QR
+ *    (`SettingsQRCode.swift`)
+ *
+ * Falls back to the trimmed raw input otherwise so the existing
+ * validation in [CreateGroupViewModel.tappedAddInvitee] surfaces a
+ * meaningful error.
+ *
+ * Mirrors `CreateGroupFlow.canonicalizeInviteKey(_:)` from
+ * onym-ios PR #117 — same three input shapes, same fallback.
+ */
+internal fun canonicalizeInviteKey(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return trimmed
+    val uri = try { URI(trimmed) } catch (_: Throwable) { return trimmed }
+    val query = uri.rawQuery ?: return trimmed
+    var payload: String? = null
+    var k: String? = null
+    for (part in query.split('&')) {
+        val eq = part.indexOf('=')
+        if (eq < 0) continue
+        val name = part.substring(0, eq)
+        val value = part.substring(eq + 1)
+        if (value.isEmpty()) continue
+        when (name) {
+            "payload" -> payload = value
+            "k" -> k = value
+        }
+    }
+    payload?.let { return it.lowercase() }
+    k?.let { encoded ->
+        val decoded = try {
+            Base64.getUrlDecoder().decode(encoded)
+        } catch (_: IllegalArgumentException) {
+            return trimmed
+        }
+        return decoded.joinToString("") { b -> "%02x".format(b) }
+    }
+    return trimmed
+}
 
 /** Lenient hex → bytes. Returns `null` on any non-hex char or odd
  *  length. Package-private so [CreateGroupState] and

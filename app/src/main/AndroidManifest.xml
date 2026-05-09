@@ -13,6 +13,19 @@
     -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+        Required by `QrCodeScannerView` (Create Group → Invite by
+        Inbox Key → Scan QR) so the inviter can capture an invitee's
+        invite-key QR with the camera instead of typing 64 hex chars.
+        Requested at first scan via `ActivityResultContracts.RequestPermission`;
+        denied path falls back to an inline "Open Settings" affordance.
+        The frame is decoded on-device via ZXing — no bytes leave the
+        process.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera"
+                  android:required="false" />
+
     <application
         android:name=".OnymApplication"
         android:label="@string/app_name"

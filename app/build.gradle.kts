@@ -156,12 +156,21 @@ dependencies {
 
     implementation(libs.bouncycastle)
 
-    // ZXing core — pure-Java QR encoder. Used by `OnymQrCode` to turn
-    // an invite URL into a 1-bit module grid; the Compose Canvas does
-    // the actual drawing (so we get rounded modules + center logo
-    // overlay matching the iOS design without ZXing's stock bitmap
-    // renderer).
+    // ZXing core — pure-Java QR encoder + decoder. Used by `OnymQrCode`
+    // to turn an invite URL into a 1-bit module grid (Compose Canvas
+    // does the actual drawing — rounded modules + centre logo overlay
+    // matching the iOS design without ZXing's stock bitmap renderer),
+    // and by `QrCodeScannerView`'s ImageAnalysis pipeline to decode
+    // QR codes from CameraX frames at scan time.
     implementation(libs.zxing.core)
+
+    // CameraX — preview surface + ImageAnalysis pipeline for the
+    // Create Group → Invite by Inbox Key → Scan QR flow. Pure
+    // AndroidX (no Google Play Services dependency).
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
 
     implementation(libs.onym.sdk)
 

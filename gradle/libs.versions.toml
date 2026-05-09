@@ -43,11 +43,21 @@ onym-sdk = "0.0.2"
 # Crypto
 bouncycastle = "1.78.1"
 
-# ZXing — pure-Java QR encoder (Apache 2.0). The `core` artifact is
-# free of any Android dependency; we render the resulting BitMatrix
-# ourselves on a Compose `Canvas`, so the heavier `zxing-android`
-# extras (camera, intent integrators) stay out of the APK.
+# ZXing — pure-Java QR encoder + decoder (Apache 2.0). The `core`
+# artifact is free of any Android dependency; we render the resulting
+# BitMatrix ourselves on a Compose `Canvas` (encode side, `OnymQrCode`)
+# and feed CameraX `ImageProxy` Y-plane bytes through
+# `MultiFormatReader` (decode side, `QrCodeScannerView`), so the
+# heavier `zxing-android` extras (Camera1 integrators) stay out of
+# the APK.
 zxing-core = "3.5.3"
+
+# CameraX — modern AndroidX camera API (no Google Play Services
+# dependency). Used by `QrCodeScannerView` to drive the live preview
+# + `ImageAnalysis` use case that hands frames to ZXing for QR
+# decoding. 1.4.0 is the first stable that pairs cleanly with AGP
+# 8.7 + compileSdk 35 without the Compose-interop preview hack.
+androidx-camera = "1.4.0"
 
 # Room — Kotlin-coroutines DAO (`suspend` queries) + KSP-generated
 # bindings. 2.6.1 is the newest stable that pairs cleanly with AGP
@@ -123,9 +133,17 @@ androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref =
 # BouncyCastle — Curve25519 (Ed25519 + X25519) raw-key APIs not in the JDK
 bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 
-# ZXing core — QR-bit-matrix generator. Drawn by `OnymQrCode` onto a
-# Compose Canvas; no Android-side ZXing artifact needed.
+# ZXing core — QR-bit-matrix generator + reader. Drawn by `OnymQrCode`
+# onto a Compose Canvas (encode); fed CameraX Y-plane bytes by
+# `QrCodeScannerView` (decode). No Android-side ZXing artifact needed.
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing-core" }
+
+# CameraX — preview surface + frame-analysis pipeline for the
+# Create Group → Invite by Inbox Key → Scan QR flow.
+androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "androidx-camera" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "androidx-camera" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "androidx-camera" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "androidx-camera" }
 
 # Test
 junit = { module = "junit:junit", version.ref = "junit" }

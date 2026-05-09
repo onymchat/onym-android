@@ -210,6 +210,99 @@ class CreateGroupViewModelTest {
         assertEquals(1, vm.state.value.invitees.size)
     }
 
+    // ─── Scanned QR payload canonicalisation ─────────────────────
+    //
+    // Mirrors the `canonicalizeInviteKey` test cases from
+    // onym-ios PR #117 (`CreateGroupFlowTests.swift`).
+
+    @Test
+    fun canonicalizeInviteKey_bareHex_returnsTrimmed() {
+        val hex = "ab".repeat(32)
+        assertEquals(hex, canonicalizeInviteKey(hex))
+    }
+
+    @Test
+    fun canonicalizeInviteKey_trimsSurroundingWhitespace() {
+        val hex = "ab".repeat(32)
+        assertEquals(hex, canonicalizeInviteKey("  \n$hex\t "))
+    }
+
+    @Test
+    fun canonicalizeInviteKey_legacyPayloadURL_extractsHex() {
+        val hex = "ab".repeat(32)
+        assertEquals(hex, canonicalizeInviteKey("https://onym.chat?payload=$hex"))
+    }
+
+    @Test
+    fun canonicalizeInviteKey_androidIdentityURL_decodesBase64ToHex() {
+        // Mirrors `IdentityInviteUrl.kt` — URL-safe base64 of a
+        // 32-byte X25519 pubkey, no padding.
+        val bytes = ByteArray(32) { it.toByte() }
+        val expectedHex = bytes.joinToString("") { "%02x".format(it) }
+        val b64 = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        assertEquals(expectedHex, canonicalizeInviteKey("https://onym.chat/i?k=$b64"))
+    }
+
+    @Test
+    fun canonicalizeInviteKey_unknownPayload_returnsTrimmedRaw() {
+        // Garbage in → garbage out (trimmed). The downstream
+        // validator surfaces the inline "doesn't look like a valid
+        // inbox key" error so the user sees what was scanned.
+        assertEquals("hello world", canonicalizeInviteKey(" hello world "))
+    }
+
+    @Test
+    fun canonicalizeInviteKey_kWithBadBase64_fallsBackToTrimmed() {
+        // `k=` present but not valid URL-safe base64 — fall back to
+        // trimmed raw so the user sees what was scanned.
+        val raw = "https://onym.chat/i?k=!!!"
+        assertEquals(raw, canonicalizeInviteKey(raw))
+    }
+
+    @Test
+    fun tappedScannedKey_legacyPayloadURL_endToEnd_addsInvitee() = runTest {
+        val vm = makeViewModel()
+        vm.tappedInviteByKey()
+        val hex = "cd".repeat(32)
+        vm.tappedScannedKey("https://onym.chat?payload=$hex")
+        assertEquals(hex, vm.state.value.inviteeInput)
+        assertNull(vm.state.value.inviteeError)
+        vm.tappedAddInvitee()
+        assertEquals(1, vm.state.value.invitees.size)
+        assertArrayEquals(
+            ByteArray(32) { 0xCD.toByte() },
+            vm.state.value.invitees.single().inboxPublicKey,
+        )
+    }
+
+    @Test
+    fun tappedScannedKey_androidIdentityURL_endToEnd_addsInvitee() = runTest {
+        // Closes the producer/consumer loop between
+        // `IdentityInviteUrl.inviteUrl()` (Settings → Invite Key QR)
+        // and the InviteByKey paste validator: the producer's URL
+        // canonicalises to a 64-char hex that the existing
+        // `tappedAddInvitee` path accepts.
+        val vm = makeViewModel()
+        vm.tappedInviteByKey()
+        val bytes = ByteArray(32) { (it xor 0x5A).toByte() }
+        val b64 = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        vm.tappedScannedKey("https://onym.chat/i?k=$b64")
+        vm.tappedAddInvitee()
+        assertEquals(1, vm.state.value.invitees.size)
+        assertArrayEquals(bytes, vm.state.value.invitees.single().inboxPublicKey)
+    }
+
+    @Test
+    fun tappedScannedKey_clearsStaleInviteeError() = runTest {
+        val vm = makeViewModel()
+        // Force a stale error.
+        vm.tappedAddInvitee()
+        assertNotNull(vm.state.value.inviteeError)
+
+        vm.tappedScannedKey("anything")
+        assertNull(vm.state.value.inviteeError)
+    }
+
     @Test
     fun removeInvitee_removesByIndex() = runTest {
         val vm = makeViewModel()
