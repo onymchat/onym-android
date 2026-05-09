@@ -554,16 +554,18 @@ class OnymApplication : Application() {
             },
             nostrRelaysFlow = nostrRelaysRepository.snapshots,
             makeJoinViewModel = { capability ->
-                // Suggest the active identity's display name as the
-                // initial label. Falls back to a generic "Anonymous"
-                // if no identity is selected (the VM will error out
-                // on send anyway, but the UI shouldn't show a blank
-                // field).
+                // PR 92: prefill the display-name field from the
+                // active identity's alias. Empty when the identity
+                // hasn't resolved yet — the field renders its
+                // placeholder rather than a stale or hardcoded
+                // default. (Bob's report: tapping the deeplink used
+                // to show "alice" because the field defaulted to a
+                // hardcoded value.)
                 val activeId = identityRepository.currentIdentityId.value
                 val suggested = identityRepository.identities.value
                     .firstOrNull { it.id == activeId }
                     ?.name
-                    ?: "Anonymous"
+                    .orEmpty()
                 chat.onym.android.group.JoinViewModel(
                     capability = capability,
                     submitRequest = joinRequestSender::send,
