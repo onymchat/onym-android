@@ -3,18 +3,24 @@ package chat.onym.android.inbox
 import chat.onym.android.chain.SepGroupType
 import chat.onym.android.chain.SepTier
 import chat.onym.android.group.ChatGroup
+import chat.onym.android.group.GovernanceMember
+import chat.onym.android.group.GroupInvitationPayload
 import chat.onym.android.group.GroupRepository
 import chat.onym.android.group.GroupStore
 import chat.onym.android.group.MemberAnnouncementPayload
+import chat.onym.android.group.MemberProfile
 import chat.onym.android.identity.ActiveIdentityProvider
 import chat.onym.android.identity.DecryptedEnvelope
 import chat.onym.android.identity.IdentityId
+import chat.onym.android.identity.IdentitySummary
 import chat.onym.android.identity.InvitationEnvelopeDecrypter
 import chat.onym.android.persistence.InMemoryInvitationStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.junit.Assert.assertNotNull
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -155,6 +161,110 @@ class IncomingMessageDispatcherTest {
         dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(0x01), Instant.EPOCH)
         invitationsRepository.bootstrap()
         assertEquals(1, invitationsRepository.invitations.value.size)
+    }
+
+    @Test
+    fun invitation_materializesGroupAndAddsSelfProfile() = runTest {
+        // Build an invitation with one wire-shipped profile (the
+        // inviter), targeting a group that's NOT yet on the device.
+        val newGroupId = ByteArray(32) { 0xEE.toByte() }
+        val inviterBls = ByteArray(48) { 0x11 }
+        val inviterInbox = ByteArray(32) { 0x22 }
+        val inviterKey = inviterBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val invitation = GroupInvitationPayload(
+            version = 1,
+            groupId = newGroupId,
+            groupSecret = ByteArray(32) { 0x33 },
+            name = "From Wire",
+            members = listOf(
+                GovernanceMember(
+                    publicKeyCompressed = inviterBls,
+                    leafHash = ByteArray(32) { 0x44 },
+                ),
+            ),
+            epoch = 0uL,
+            salt = ByteArray(32) { 0x55 },
+            commitment = ByteArray(32) { 0x66 },
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = inviterKey,
+            memberProfiles = mapOf(
+                inviterKey to MemberProfile(alias = "Alice", inboxPublicKey = inviterInbox),
+            ),
+        )
+        val plaintext = Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
+            .toByteArray(Charsets.UTF_8)
+
+        // Mock identitiesFlow so the dispatcher can backfill self.
+        val selfBls = ByteArray(48) { 0xAA.toByte() }
+        val selfInbox = ByteArray(32) { 0xBB.toByte() }
+        val identitiesFlow = MutableStateFlow(
+            listOf(
+                IdentitySummary(
+                    id = ownerIdentity,
+                    name = "Bob",
+                    blsPublicKey = selfBls,
+                    inboxPublicKey = selfInbox,
+                ),
+            ),
+        )
+
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = ByteArray(32)),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            identitiesFlow = identitiesFlow.asStateFlow(),
+        )
+
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        // Group materialized + listed under owner; legacy queue empty.
+        val group = groupRepository.snapshots.value.firstOrNull {
+            it.groupIdBytes.contentEquals(newGroupId)
+        }
+        assertNotNull("invitation must materialize a group row", group)
+        assertEquals("From Wire", group!!.name)
+        assertTrue(group.isPublishedOnChain)
+        // Wire-shipped inviter + self both present in the directory.
+        val selfKey = selfBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        assertEquals(2, group.memberProfiles.size)
+        assertEquals("Alice", group.memberProfiles[inviterKey]?.alias)
+        assertEquals("Bob", group.memberProfiles[selfKey]?.alias)
+        invitationsRepository.bootstrap()
+        assertTrue(
+            "invitation must NOT land in the legacy queue",
+            invitationsRepository.invitations.value.isEmpty(),
+        )
+    }
+
+    @Test
+    fun invitation_redeliveryIsIdempotent() = runTest {
+        val newGroupId = ByteArray(32) { 0xEE.toByte() }
+        val invitation = GroupInvitationPayload(
+            version = 1,
+            groupId = newGroupId,
+            groupSecret = ByteArray(32) { 0x33 },
+            name = "G",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32) { 0x55 },
+            commitment = null,
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+        )
+        val plaintext = Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
+            .toByteArray(Charsets.UTF_8)
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = null),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+        )
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        dispatcher.dispatch("m2", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        val groups = groupRepository.snapshots.value.filter {
+            it.groupIdBytes.contentEquals(newGroupId)
+        }
+        assertEquals("re-delivery must not mint a duplicate", 1, groups.size)
     }
 
     @Test

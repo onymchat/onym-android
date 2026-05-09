@@ -325,6 +325,7 @@ class OnymApplication : Application() {
             envelopeDecrypter = identityRepository,
             groupRepository = groupRepository,
             invitationsRepository = invitationsRepository,
+            identitiesFlow = identityRepository.identities,
         )
         val invitationsInteractor = chat.onym.android.inbox.IncomingInvitationsInteractor(
             inboxTransport = inboxTransport,
