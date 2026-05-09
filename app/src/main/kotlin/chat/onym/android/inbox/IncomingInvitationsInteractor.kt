@@ -32,13 +32,26 @@ import kotlinx.coroutines.launch
 class IncomingInvitationsInteractor(
     private val inboxTransport: InboxTransport,
     private val repository: IncomingInvitationsRepository,
+    /**
+     * Optional receive-side dispatcher (PR 80+). When set, every
+     * inbound message is handed to the dispatcher before falling
+     * back to the legacy invitations queue. The dispatcher decrypts
+     * once at receive time + routes:
+     *  - `MemberAnnouncementPayload` → applied to the local group.
+     *  - `GroupInvitationPayload` → materialized into a new group (PR 83).
+     *  - Anything else → falls through into [repository.recordIncoming].
+     *
+     * Null preserves pre-PR-80 behavior (always queue).
+     */
+    private val dispatcher: IncomingMessageDispatcher? = null,
 ) {
 
     /**
      * Subscribe to [inbox] and forward each delivered message into
-     * the repository, stamping each record with [ownerIdentityId]
-     * so PR-6's per-identity decrypt path can route to the right
-     * X25519 private key.
+     * the dispatcher (when wired) or directly into the repository.
+     * Each record is stamped with [ownerIdentityId] so the
+     * per-identity decrypt path can route to the right X25519
+     * private key.
      *
      * Suspends for the lifetime of the subscription; cancellation
      * of the calling scope unsubscribes upstream (production
@@ -47,12 +60,21 @@ class IncomingInvitationsInteractor(
      */
     suspend fun run(inbox: TransportInboxId, ownerIdentityId: IdentityId) {
         inboxTransport.subscribe(inbox).collect { inbound ->
-            repository.recordIncoming(
-                id = inbound.messageId,
-                payload = inbound.payload,
-                receivedAt = inbound.receivedAt,
-                ownerIdentityId = ownerIdentityId,
-            )
+            if (dispatcher != null) {
+                dispatcher.dispatch(
+                    messageId = inbound.messageId,
+                    ownerIdentityId = ownerIdentityId,
+                    payload = inbound.payload,
+                    receivedAt = inbound.receivedAt,
+                )
+            } else {
+                repository.recordIncoming(
+                    id = inbound.messageId,
+                    payload = inbound.payload,
+                    receivedAt = inbound.receivedAt,
+                    ownerIdentityId = ownerIdentityId,
+                )
+            }
         }
     }
 
