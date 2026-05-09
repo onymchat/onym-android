@@ -211,6 +211,30 @@ class CreateGroupViewModelTest {
     }
 
     @Test
+    fun addInvitee_duplicateKey_setsError_doesNotAppend() = runTest {
+        // Issue #122: pasting the same 64-char key multiple times
+        // used to inflate the invitee list and send N sealed copies
+        // of the same invitation. The second add now surfaces an
+        // inline error instead.
+        val vm = makeViewModel()
+        vm.tappedInviteByKey()
+        vm.setInviteeInput("ab".repeat(32))
+        vm.tappedAddInvitee()
+        assertEquals(1, vm.state.value.invitees.size)
+        // Re-enter and try to add the same key — possibly with
+        // different surrounding whitespace and case to confirm the
+        // dedup compares decoded bytes, not the raw string.
+        vm.tappedInviteByKey()
+        vm.setInviteeInput("  " + "AB".repeat(32) + "  ")
+        vm.tappedAddInvitee()
+        val state = vm.state.value
+        assertEquals(1, state.invitees.size)
+        assertNotNull(state.inviteeError)
+        // Stays on InviteByKey so the user sees the inline error.
+        assertEquals(CreateGroupRoute.InviteByKey, state.route)
+    }
+
+    @Test
     fun removeInvitee_removesByIndex() = runTest {
         val vm = makeViewModel()
         vm.setInviteeInput("aa".repeat(32))

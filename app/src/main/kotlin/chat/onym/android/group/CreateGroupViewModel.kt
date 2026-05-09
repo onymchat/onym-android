@@ -278,6 +278,17 @@ class CreateGroupViewModel(
             )
             return
         }
+        // Reject the same inbox key being added more than once. Without
+        // this guard the user can paste a key N times and the create
+        // pipeline sends N sealed copies of the same invitation —
+        // inflating the "Create with N participants" CTA and the
+        // "Invitations sent: N" tally on the Success screen.
+        if (_state.value.invitees.any { it.inboxPublicKey.contentEquals(raw) }) {
+            _state.value = _state.value.copy(
+                inviteeError = "That participant is already on the list.",
+            )
+            return
+        }
         val prefix = cleaned.take(6)
         val suffix = cleaned.takeLast(4)
         val invitee = OnymInvitee(
