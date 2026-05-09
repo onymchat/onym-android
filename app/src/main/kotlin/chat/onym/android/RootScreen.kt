@@ -162,6 +162,14 @@ fun RootScreen(
                 ChatsScreen(
                     viewModel = vm,
                     onCreateGroup = { navController.navigate(ROUTE_CREATE_GROUP) },
+                    approveRequestsViewModel = dependencies.approveRequestsViewModel,
+                    onOpenApproveRequests = { navController.navigate(ROUTE_APPROVE_REQUESTS) },
+                )
+            }
+            composable(ROUTE_APPROVE_REQUESTS) {
+                chat.onym.android.group.ApproveRequestsScreen(
+                    viewModel = dependencies.approveRequestsViewModel,
+                    onClose = { navController.popBackStack() },
                 )
             }
             composable(Tab.Settings.route) {
@@ -469,4 +477,5 @@ private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_RUN_RELAYER = "run_relayer"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
+private const val ROUTE_APPROVE_REQUESTS = "approve_requests"
 private val TAB_ROUTES = setOf(Tab.Chats.route, Tab.Settings.route, Tab.Search.route)

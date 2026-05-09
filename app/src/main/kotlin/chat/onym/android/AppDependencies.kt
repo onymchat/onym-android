@@ -53,4 +53,10 @@ class AppDependencies(
      *  Takes the decoded capability so the same factory works for
      *  both `https://onym.chat/join` and `onym://join` intents. */
     val makeJoinViewModel: (chat.onym.android.group.IntroCapability) -> chat.onym.android.group.JoinViewModel,
+    /** Approver UI for incoming join requests. Single shared
+     *  instance — the toolbar badge on the chats screen and the
+     *  modal screen both consume the same flow so a request that
+     *  lands on the relay shows up in the badge before the modal
+     *  is opened. */
+    val approveRequestsViewModel: chat.onym.android.group.ApproveRequestsViewModel,
 )

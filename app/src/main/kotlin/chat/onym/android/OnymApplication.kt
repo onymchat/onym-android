@@ -382,6 +382,25 @@ class OnymApplication : Application() {
             inboxTransport = inboxTransport,
         )
 
+        // Approver-side: turn raw IntroRequests into UI-renderable
+        // pending requests + ship sealed GroupInvitationPayloads on
+        // user approval. Single instance — the toolbar badge + the
+        // modal screen share state via [ApproveRequestsViewModel].
+        val joinRequestApprover = chat.onym.android.group.JoinRequestApprover(
+            identity = identityRepository,
+            introKeyStore = introKeyStore,
+            introRequestStore = introRequestStore,
+            groupRepository = groupRepository,
+            inboxTransport = inboxTransport,
+            scope = applicationScope,
+        )
+        val approveRequestsViewModel = chat.onym.android.group.ApproveRequestsViewModel(
+            approver = joinRequestApprover,
+        )
+        // Kick the collector at app start so requests landing while
+        // the chats screen isn't open still drive the badge count.
+        approveRequestsViewModel.start()
+
         // App-wide network preference (PR-C follow-up). Defaults to
         // testnet; the Settings → Network → "Use Mainnet" Switch
         // flips it. CreateGroupInteractor reads `current()` per call
@@ -455,6 +474,7 @@ class OnymApplication : Application() {
                     groupRepository = groupRepository,
                 )
             },
+            approveRequestsViewModel = approveRequestsViewModel,
             makeJoinViewModel = { capability ->
                 // Suggest the active identity's display name as the
                 // initial label. Falls back to a generic "Anonymous"

@@ -36,14 +36,28 @@ import kotlinx.serialization.json.Json
  *  4. On Decline → drop the request, revoke the intro key. No
  *     NACK to the joiner; their JoinScreen times out gracefully.
  */
-class JoinRequestApprover(
+/**
+ * Test seam consumed by [ApproveRequestsViewModel]. The production
+ * conformer is [JoinRequestApprover] itself; tests inject a stub
+ * instead of standing up the full keychain + transport stack just to
+ * exercise the VM's bookkeeping. Mirrors `JoinRequestApproving.swift`
+ * from onym-ios.
+ */
+interface JoinRequestApproving {
+    val pending: StateFlow<List<JoinRequestApprover.PendingRequest>>
+    fun start()
+    suspend fun approve(requestId: String): JoinRequestApprover.ApproveOutcome
+    suspend fun decline(requestId: String)
+}
+
+open class JoinRequestApprover(
     private val identity: IdentityRepository,
     private val introKeyStore: IntroKeyStore,
     private val introRequestStore: IntroRequestStore,
     private val groupRepository: GroupRepository,
     private val inboxTransport: InboxTransport,
     private val scope: CoroutineScope,
-) {
+) : JoinRequestApproving {
     /** UI-renderable view of one decrypted, awaiting-action request. */
     data class PendingRequest(
         /** Stable id == [IntroRequest.id]. Approve / Decline use it
@@ -86,7 +100,7 @@ class JoinRequestApprover(
 
     private val mutex = Mutex()
     private val _pending = MutableStateFlow<List<PendingRequest>>(emptyList())
-    val pending: StateFlow<List<PendingRequest>> = _pending.asStateFlow()
+    override val pending: StateFlow<List<PendingRequest>> = _pending.asStateFlow()
 
     /** Internal counter for decrypt failures — drives a future
      *  diagnostic surface (e.g., Settings → Diagnostics shows
@@ -102,7 +116,7 @@ class JoinRequestApprover(
      * in sync. Idempotent — safe to call once at app start. The
      * collector lives for [scope]'s lifetime.
      */
-    fun start() {
+    override fun start() {
         scope.launch {
             introRequestStore.requests.collectLatest { raw ->
                 val decoded = raw.mapNotNull { decode(it) }
@@ -126,7 +140,7 @@ class JoinRequestApprover(
      * ship via Nostr, then revoke the intro slot + drop the
      * pending entry.
      */
-    suspend fun approve(requestId: String): ApproveOutcome = mutex.withLock {
+    override suspend fun approve(requestId: String): ApproveOutcome = mutex.withLock {
         val req = _pending.value.firstOrNull { it.id == requestId }
             ?: return@withLock ApproveOutcome.UnknownRequest
         val activeIdentity = identity.currentIdentity()
@@ -180,7 +194,7 @@ class JoinRequestApprover(
 
     /** Decline a pending request: drop it + revoke the intro slot.
      *  No NACK to the joiner — their JoinScreen times out. */
-    suspend fun decline(requestId: String) = mutex.withLock {
+    override suspend fun decline(requestId: String): Unit = mutex.withLock {
         revokeAndConsume(introPub = findIntroPubFor(requestId), requestId = requestId)
     }
 
