@@ -130,8 +130,9 @@ class CreateGroupAnarchyE2ETest {
     /**
      * Happy path with zero invitees. Verifies the group anchors on
      * chain and `get_commitment` round-trips the same commitment
-     * back. Anarchy tolerates a creator-only roster (the contract's
-     * `member_count` is informational; passing `1` is fine).
+     * back. Anarchy tolerates a creator-only roster; production sends
+     * `member_count = 0` (the contract's documented "not tracked"
+     * sentinel) so the chain only learns the tier.
      */
     @Test
     fun create_zeroInvitees_anchorsOnTestnet() = runBlocking {
