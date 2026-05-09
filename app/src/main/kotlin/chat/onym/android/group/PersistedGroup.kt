@@ -58,6 +58,13 @@ data class PersistedGroup(
     val encryptedSalt: ByteArray,
     val encryptedCommitment: ByteArray? = null,
     val encryptedAdminPubkeyHex: ByteArray? = null,
+    /**
+     * Optional so Room's auto-migration can land an extra column on
+     * existing rows without a wipe. `null` decodes to an empty map at
+     * the [RoomGroupStore] boundary. Stores the encrypted JSON of
+     * `Map<String, MemberProfile>` keyed by lowercase BLS pubkey hex.
+     */
+    val encryptedMemberProfilesJson: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -74,7 +81,8 @@ data class PersistedGroup(
             encryptedMembersJson.contentEquals(other.encryptedMembersJson) &&
             encryptedSalt.contentEquals(other.encryptedSalt) &&
             (encryptedCommitment?.contentEquals(other.encryptedCommitment) ?: (other.encryptedCommitment == null)) &&
-            (encryptedAdminPubkeyHex?.contentEquals(other.encryptedAdminPubkeyHex) ?: (other.encryptedAdminPubkeyHex == null))
+            (encryptedAdminPubkeyHex?.contentEquals(other.encryptedAdminPubkeyHex) ?: (other.encryptedAdminPubkeyHex == null)) &&
+            (encryptedMemberProfilesJson?.contentEquals(other.encryptedMemberProfilesJson) ?: (other.encryptedMemberProfilesJson == null))
     }
 
     override fun hashCode(): Int {
@@ -91,6 +99,7 @@ data class PersistedGroup(
         h = 31 * h + encryptedSalt.contentHashCode()
         h = 31 * h + (encryptedCommitment?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedAdminPubkeyHex?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedMemberProfilesJson?.contentHashCode() ?: 0)
         return h
     }
 }

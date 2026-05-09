@@ -22,6 +22,7 @@ import chat.onym.android.chain.relayerFetchErrorMessageResolver
 import chat.onym.android.group.CreateGroupInteractor
 import chat.onym.android.group.CreateGroupViewModel
 import chat.onym.android.group.GroupDatabase
+import chat.onym.android.group.GroupDatabaseMigrations
 import chat.onym.android.group.GroupRepository
 import chat.onym.android.group.RoomGroupStore
 import chat.onym.android.identity.IdentityRepository
@@ -273,6 +274,11 @@ class OnymApplication : Application() {
                 // no production data to preserve — drop the table on
                 // the version mismatch instead of authoring a one-shot
                 // CASE migration.
+                //
+                // PR 75 (member-profiles) added a non-destructive v3→v4
+                // migration that introduces the nullable
+                // `encryptedMemberProfilesJson` column.
+                .addMigrations(GroupDatabaseMigrations.MIGRATION_3_4)
                 .fallbackToDestructiveMigration()
                 .build()
         } catch (e: Throwable) {

@@ -40,6 +40,22 @@ data class ChatGroup(
     val createdAtMillis: Long,
 
     val members: List<GovernanceMember>,
+    /**
+     * View-facing directory of people the local user has interacted
+     * with through this group, keyed by lowercase BLS pubkey hex
+     * (96 chars). Populated for the creator at group-create time and
+     * extended as joiners are admitted (post-PR fanout).
+     *
+     * Independent of [members]: V1 group rosters are static on-chain
+     * (`update_commitment` is post-V1 in the SEP contracts), so a
+     * joiner is "in the group" at the app level — receiving messages,
+     * listed in the chat detail — without yet being a
+     * [GovernanceMember] in the cryptographic Merkle tree.
+     * [members] is the on-chain truth; [memberProfiles] is the
+     * app-level "who am I talking to" directory. They may diverge.
+     */
+    @SerialName("member_profiles")
+    val memberProfiles: Map<String, MemberProfile> = emptyMap(),
     val epoch: ULong,
     @Serializable(with = Base64ByteArraySerializer::class)
     val salt: ByteArray,
@@ -98,6 +114,7 @@ data class ChatGroup(
             groupSecret.contentEquals(other.groupSecret) &&
             createdAtMillis == other.createdAtMillis &&
             members == other.members &&
+            memberProfiles == other.memberProfiles &&
             epoch == other.epoch &&
             salt.contentEquals(other.salt) &&
             (commitment?.contentEquals(other.commitment) ?: (other.commitment == null)) &&
@@ -114,6 +131,7 @@ data class ChatGroup(
         h = 31 * h + groupSecret.contentHashCode()
         h = 31 * h + createdAtMillis.hashCode()
         h = 31 * h + members.hashCode()
+        h = 31 * h + memberProfiles.hashCode()
         h = 31 * h + epoch.hashCode()
         h = 31 * h + salt.contentHashCode()
         h = 31 * h + (commitment?.contentHashCode() ?: 0)

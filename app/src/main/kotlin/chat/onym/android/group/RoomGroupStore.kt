@@ -8,6 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
 /**
@@ -79,6 +81,12 @@ class RoomGroupStore(
 
     private fun encode(group: ChatGroup): PersistedGroup {
         val membersJson = jsonFormat.encodeToString(membersSerializer, group.members)
+        val memberProfilesEncrypted: ByteArray? = if (group.memberProfiles.isEmpty()) {
+            null
+        } else {
+            val json = jsonFormat.encodeToString(memberProfilesSerializer, group.memberProfiles)
+            encryption.encrypt(json.toByteArray(Charsets.UTF_8))
+        }
         return PersistedGroup(
             id = group.id,
             createdAt = group.createdAtMillis,
@@ -95,6 +103,7 @@ class RoomGroupStore(
             encryptedSalt = encryption.encrypt(group.salt),
             encryptedCommitment = group.commitment?.let(encryption::encrypt),
             encryptedAdminPubkeyHex = group.adminPubkeyHex?.let(encryption::encrypt),
+            encryptedMemberProfilesJson = memberProfilesEncrypted,
         )
     }
 
@@ -119,6 +128,19 @@ class RoomGroupStore(
         val groupType = SepGroupType.fromWire(row.groupTypeRaw) ?: return null
         val commitment = row.encryptedCommitment?.let { tryDecrypt(it) }
         val adminPubkeyHex = row.encryptedAdminPubkeyHex?.let { tryDecryptString(it) }
+        val memberProfiles: Map<String, MemberProfile> = row.encryptedMemberProfilesJson
+            ?.let { tryDecrypt(it) }
+            ?.let { bytes ->
+                try {
+                    jsonFormat.decodeFromString(
+                        memberProfilesSerializer,
+                        bytes.toString(Charsets.UTF_8),
+                    )
+                } catch (_: SerializationException) {
+                    emptyMap()
+                }
+            }
+            ?: emptyMap()
 
         return ChatGroup(
             id = row.id,
@@ -126,6 +148,7 @@ class RoomGroupStore(
             groupSecret = groupSecret,
             createdAtMillis = row.createdAt,
             members = members,
+            memberProfiles = memberProfiles,
             // Long → ULong via bit pattern recovers the original
             // 64-bit value. Serializer on SepPublicInputs uses ULong
             // when this round-trips back to JSON.
@@ -151,5 +174,9 @@ class RoomGroupStore(
     private companion object {
         private val jsonFormat = Json { encodeDefaults = true; ignoreUnknownKeys = true }
         private val membersSerializer = ListSerializer(GovernanceMember.serializer())
+        private val memberProfilesSerializer = MapSerializer(
+            String.serializer(),
+            MemberProfile.serializer(),
+        )
     }
 }
