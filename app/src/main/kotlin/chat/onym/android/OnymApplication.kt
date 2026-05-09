@@ -278,7 +278,10 @@ class OnymApplication : Application() {
                 // PR 75 (member-profiles) added a non-destructive v3→v4
                 // migration that introduces the nullable
                 // `encryptedMemberProfilesJson` column.
-                .addMigrations(GroupDatabaseMigrations.MIGRATION_3_4)
+                .addMigrations(
+                    GroupDatabaseMigrations.MIGRATION_3_4,
+                    GroupDatabaseMigrations.MIGRATION_4_5,
+                )
                 .fallbackToDestructiveMigration()
                 .build()
         } catch (e: Throwable) {

@@ -65,6 +65,12 @@ data class PersistedGroup(
      * `Map<String, MemberProfile>` keyed by lowercase BLS pubkey hex.
      */
     val encryptedMemberProfilesJson: ByteArray? = null,
+    /**
+     * Optional Ed25519 pubkey of the admin (PR 84). `null` on rows
+     * migrated from the pre-PR-84 schema, or for governance models
+     * without an admin (Anarchy / OneOnOne).
+     */
+    val encryptedAdminEd25519PubkeyHex: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -82,7 +88,8 @@ data class PersistedGroup(
             encryptedSalt.contentEquals(other.encryptedSalt) &&
             (encryptedCommitment?.contentEquals(other.encryptedCommitment) ?: (other.encryptedCommitment == null)) &&
             (encryptedAdminPubkeyHex?.contentEquals(other.encryptedAdminPubkeyHex) ?: (other.encryptedAdminPubkeyHex == null)) &&
-            (encryptedMemberProfilesJson?.contentEquals(other.encryptedMemberProfilesJson) ?: (other.encryptedMemberProfilesJson == null))
+            (encryptedMemberProfilesJson?.contentEquals(other.encryptedMemberProfilesJson) ?: (other.encryptedMemberProfilesJson == null)) &&
+            (encryptedAdminEd25519PubkeyHex?.contentEquals(other.encryptedAdminEd25519PubkeyHex) ?: (other.encryptedAdminEd25519PubkeyHex == null))
     }
 
     override fun hashCode(): Int {
@@ -100,6 +107,7 @@ data class PersistedGroup(
         h = 31 * h + (encryptedCommitment?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedAdminPubkeyHex?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedMemberProfilesJson?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedAdminEd25519PubkeyHex?.contentHashCode() ?: 0)
         return h
     }
 }
