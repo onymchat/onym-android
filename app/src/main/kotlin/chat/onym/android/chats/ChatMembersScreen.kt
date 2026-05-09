@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.onym.android.chain.SepGroupType
 import chat.onym.android.group.ChatGroup
 import chat.onym.android.group.MemberProfile
 import chat.onym.android.identity.IdentitiesViewModel
@@ -72,6 +73,26 @@ fun ChatMembersScreen(
 
     val group = groups.firstOrNull { it.id == groupId }
 
+    // PR 94: only the cryptographic admin of a Tyranny group should
+    // see the Share Invite button. A non-admin's minted invite would
+    // surface join requests in their inbox but never approve on chain
+    // (sep-tyranny gates `update_commitment` on the admin's BLS
+    // secret) — dead-end UX.
+    //
+    // Anarchy / OneOnOne never show it (admit ceremonies aren't wired
+    // in V1; OneOnOne is a fixed 2-party group).
+    //
+    // The check uses the BLS pubkey, NOT ownerIdentityId. The latter
+    // is per-device — on a joiner-side group it points at the joiner,
+    // so it would falsely report "you own this" everywhere.
+    val canShareInvite = remember(group, identityRows, activeBlsHex) {
+        val g = group ?: return@remember false
+        if (g.groupType != SepGroupType.TYRANNY) return@remember false
+        val storedAdminHex = g.adminPubkeyHex?.lowercase() ?: return@remember false
+        activeBlsHex != null && activeBlsHex.lowercase() == storedAdminHex
+    }
+    val showShareInvite = onShareInviteClick != null && canShareInvite
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -85,10 +106,11 @@ fun ChatMembersScreen(
                     }
                 },
                 actions = {
-                    // PR 86 wires the share-invite toolbar into this slot.
-                    if (onShareInviteClick != null) {
+                    // PR 86 wires the share-invite toolbar; PR 94
+                    // hides it for non-admins.
+                    if (showShareInvite) {
                         IconButton(
-                            onClick = onShareInviteClick,
+                            onClick = onShareInviteClick!!,
                             modifier = Modifier.testTag("members.share_invite_button"),
                         ) {
                             Icon(
