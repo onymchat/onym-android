@@ -75,6 +75,7 @@ fun ChatsScreen(
     onCreateGroup: () -> Unit,
     approveRequestsViewModel: ApproveRequestsViewModel? = null,
     onOpenApproveRequests: (() -> Unit)? = null,
+    onOpenChat: (groupId: String) -> Unit = {},
 ) {
     val groups by viewModel.groups.collectAsStateWithLifecycle()
     val pending by (approveRequestsViewModel?.pending?.collectAsStateWithLifecycle()
@@ -139,7 +140,7 @@ fun ChatsScreen(
                     .fillMaxSize(),
             ) {
                 items(groups, key = { it.id }) { group ->
-                    ChatsRow(group = group, onClick = { /* TODO: chat screen */ })
+                    ChatsRow(group = group, onClick = { onOpenChat(group.id) })
                     HorizontalDivider(thickness = 0.5.dp)
                 }
             }
@@ -262,6 +263,12 @@ private fun subtitleFor(group: ChatGroup): String {
         SepGroupType.DEMOCRACY -> "Democracy"
         SepGroupType.OLIGARCHY -> "Oligarchy"
     }
+    val memberCount = group.memberProfiles.size
+    val membersLabel = when (memberCount) {
+        0 -> ""
+        1 -> "1 member"
+        else -> "$memberCount members"
+    }
     val now = System.currentTimeMillis()
     val relative = DateUtils.getRelativeTimeSpanString(
         group.createdAtMillis,
@@ -269,5 +276,6 @@ private fun subtitleFor(group: ChatGroup): String {
         DateUtils.MINUTE_IN_MILLIS,
         DateUtils.FORMAT_ABBREV_RELATIVE,
     ).toString()
-    return "$label · $relative"
+    return if (membersLabel.isEmpty()) "$label · $relative"
+    else "$label · $membersLabel · $relative"
 }

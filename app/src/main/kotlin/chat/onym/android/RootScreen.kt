@@ -164,6 +164,28 @@ fun RootScreen(
                     onCreateGroup = { navController.navigate(ROUTE_CREATE_GROUP) },
                     approveRequestsViewModel = dependencies.approveRequestsViewModel,
                     onOpenApproveRequests = { navController.navigate(ROUTE_APPROVE_REQUESTS) },
+                    onOpenChat = { groupId ->
+                        navController.navigate("chat_members/$groupId")
+                    },
+                )
+            }
+            composable("chat_members/{groupId}") { entry ->
+                val groupId = entry.arguments?.getString("groupId") ?: return@composable
+                val chatsVm: ChatsViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeChatsViewModel() }
+                    },
+                )
+                val identitiesVm: IdentitiesViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeIdentitiesViewModel() }
+                    },
+                )
+                chat.onym.android.chats.ChatMembersScreen(
+                    groupId = groupId,
+                    chatsViewModel = chatsVm,
+                    identityViewModel = identitiesVm,
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(ROUTE_APPROVE_REQUESTS) {
