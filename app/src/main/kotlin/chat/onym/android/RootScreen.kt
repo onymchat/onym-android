@@ -186,6 +186,13 @@ fun RootScreen(
                     chatsViewModel = chatsVm,
                     identityViewModel = identitiesVm,
                     onBack = { navController.popBackStack() },
+                    onShareInviteClick = {
+                        // Reuse the existing share-invite surface —
+                        // ShareInviteScreen + ShareInviteViewModel
+                        // already know how to mint a fresh
+                        // IntroCapability + render the deeplink URL.
+                        navController.navigate("share_invite/$groupId")
+                    },
                 )
             }
             composable(ROUTE_APPROVE_REQUESTS) {
