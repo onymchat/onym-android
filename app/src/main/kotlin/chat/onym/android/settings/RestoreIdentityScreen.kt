@@ -151,7 +151,7 @@ fun RestoreIdentityScreen(
                 singleLine = false,
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.None,
-                    autoCorrect = false,
+                    autoCorrectEnabled = false,
                     imeAction = ImeAction.Next,
                 ),
             )
