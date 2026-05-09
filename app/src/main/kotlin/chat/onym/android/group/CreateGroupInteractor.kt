@@ -226,11 +226,15 @@ open class CreateGroupInteractor(
                         groupId = groupId,
                         commitment = proof.commitment,
                         tier = tier.rawValue,
-                        // Send the actual roster size so the contract's
-                        // informational `member_count` reflects reality.
-                        // The relayer would default to `0` ("not tracked")
-                        // if absent, but accurate state is cheap to send.
-                        memberCount = members.size,
+                        // `member_count` is informational and the contract
+                        // accepts `0` as the documented "not tracked"
+                        // sentinel (per `sep-anarchy`'s `create_group` doc —
+                        // "Operators who don't want to publish a count
+                        // pass `0`"). Pass the sentinel so chain observers
+                        // see only the tier, not the exact roster size at
+                        // create time. The accurate count lives in the
+                        // local model.
+                        memberCount = 0,
                         proof = proof.proof,
                         publicInputs = proof.publicInputs,
                     ),
