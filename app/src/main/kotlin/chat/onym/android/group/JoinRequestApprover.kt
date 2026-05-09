@@ -171,6 +171,11 @@ open class JoinRequestApprover(
             tierRaw = group.tier.rawValue,
             groupTypeRaw = group.groupType.wireValue,
             adminPubkeyHex = group.adminPubkeyHex,
+            // Ship the directory-as-known so the joiner sees existing
+            // peers + admin by name from the moment they land. The
+            // joiner's own profile gets backfilled by the receiver's
+            // materializer (PR 83) from their active identity.
+            memberProfiles = group.memberProfiles.takeIf { it.isNotEmpty() },
         )
         val payloadBytes = try {
             jsonFormat.encodeToString(GroupInvitationPayload.serializer(), invitePayload)

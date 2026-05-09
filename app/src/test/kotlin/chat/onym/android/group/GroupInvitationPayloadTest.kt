@@ -56,6 +56,49 @@ class GroupInvitationPayloadTest {
     }
 
     @Test
+    fun roundtrip_memberProfilesField_preservesEntries() {
+        val profile = MemberProfile(alias = "Alice", inboxPublicKey = ByteArray(32) { 0xAB.toByte() })
+        val original = GroupInvitationPayload(
+            version = 1,
+            groupId = ByteArray(32),
+            groupSecret = ByteArray(32),
+            name = "G",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32),
+            commitment = ByteArray(32),
+            tierRaw = 0,
+            groupTypeRaw = "tyranny",
+            memberProfiles = mapOf("aa".repeat(48) to profile),
+        )
+        val encoded = json.encodeToString(GroupInvitationPayload.serializer(), original)
+        val decoded = json.decodeFromString(GroupInvitationPayload.serializer(), encoded)
+        assertEquals(original, decoded)
+        val obj = json.parseToJsonElement(encoded).jsonObject
+        assertNotNull(obj["member_profiles"])
+    }
+
+    @Test
+    fun roundtrip_decode_pre_pr82_payload_without_member_profiles() {
+        val original = GroupInvitationPayload(
+            version = 1,
+            groupId = ByteArray(32),
+            groupSecret = ByteArray(32),
+            name = "G",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32),
+            commitment = null,
+            tierRaw = 0,
+            groupTypeRaw = "tyranny",
+            memberProfiles = null,
+        )
+        val encoded = json.encodeToString(GroupInvitationPayload.serializer(), original)
+        val decoded = json.decodeFromString(GroupInvitationPayload.serializer(), encoded)
+        assertNull(decoded.memberProfiles)
+    }
+
+    @Test
     fun roundtrip_oneOnOneShape_carriesInviteeBlsSecretAsBase64() {
         val sk1 = ByteArray(32) { 0x99.toByte() }
         val original = GroupInvitationPayload(

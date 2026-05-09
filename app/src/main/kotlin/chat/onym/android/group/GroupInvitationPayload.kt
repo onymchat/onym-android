@@ -72,6 +72,18 @@ data class GroupInvitationPayload(
     @SerialName("invitee_bls_secret_key")
     @Serializable(with = Base64ByteArraySerializer::class)
     val inviteeBlsSecretKey: ByteArray? = null,
+    /**
+     * Snapshot of the sender's [ChatGroup.memberProfiles] at send
+     * time. The joiner's receive-side materializer (PR 83) uses this
+     * to populate their local directory at the same time the group
+     * lands locally — no waiting for follow-up announcements just to
+     * render existing peers by name.
+     *
+     * Default null so older receivers / senders still round-trip.
+     * Map ordering is not load-bearing; the wire format is unordered.
+     */
+    @SerialName("member_profiles")
+    val memberProfiles: Map<String, MemberProfile>? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -88,7 +100,8 @@ data class GroupInvitationPayload(
             groupTypeRaw == other.groupTypeRaw &&
             adminPubkeyHex == other.adminPubkeyHex &&
             (inviteeBlsSecretKey?.contentEquals(other.inviteeBlsSecretKey)
-                ?: (other.inviteeBlsSecretKey == null))
+                ?: (other.inviteeBlsSecretKey == null)) &&
+            memberProfiles == other.memberProfiles
     }
 
     override fun hashCode(): Int {
@@ -104,6 +117,7 @@ data class GroupInvitationPayload(
         h = 31 * h + groupTypeRaw.hashCode()
         h = 31 * h + (adminPubkeyHex?.hashCode() ?: 0)
         h = 31 * h + (inviteeBlsSecretKey?.contentHashCode() ?: 0)
+        h = 31 * h + (memberProfiles?.hashCode() ?: 0)
         return h
     }
 }

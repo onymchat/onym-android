@@ -311,6 +311,11 @@ open class CreateGroupInteractor(
                     groupTypeRaw = groupType.wireValue,
                     adminPubkeyHex = adminPubkeyHex,
                     inviteeBlsSecretKey = secondaryBlsSecret,
+                    // Ship the creator's directory so the invitee
+                    // sees the inviter by alias from the moment the
+                    // group materializes (PR 83). takeIf-not-empty
+                    // matches iOS; pre-PR-82 senders shipped null.
+                    memberProfiles = group.memberProfiles.takeIf { it.isNotEmpty() },
                 )
                 val payloadBytes = try {
                     jsonFormat.encodeToString(
