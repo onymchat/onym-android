@@ -44,6 +44,15 @@ data class JoinRequestPayload(
     @SerialName("joiner_bls_pub")
     @Serializable(with = Base64ByteArraySerializer::class)
     val joinerBlsPublicKey: ByteArray? = null,
+    /**
+     * 32-byte Poseidon leaf hash (PR 88). Required for the admin to
+     * generate the on-chain `update_commitment` proof. `null` for
+     * pre-PR-88 joiners — those requests can't be approved on-chain
+     * and surface as `OutdatedJoinerClient`.
+     */
+    @SerialName("joiner_leaf_hash")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val joinerLeafHash: ByteArray? = null,
     @SerialName("joiner_display_label")
     val joinerDisplayLabel: String,
     @SerialName("group_id")
@@ -59,6 +68,11 @@ data class JoinRequestPayload(
                 "joinerBlsPublicKey: expected 48 bytes, got ${it.size}"
             }
         }
+        joinerLeafHash?.let {
+            require(it.size == 32) {
+                "joinerLeafHash: expected 32 bytes, got ${it.size}"
+            }
+        }
         require(groupId.size == 32) {
             "groupId: expected 32 bytes, got ${groupId.size}"
         }
@@ -70,6 +84,8 @@ data class JoinRequestPayload(
         return joinerInboxPublicKey.contentEquals(other.joinerInboxPublicKey) &&
             (joinerBlsPublicKey?.contentEquals(other.joinerBlsPublicKey)
                 ?: (other.joinerBlsPublicKey == null)) &&
+            (joinerLeafHash?.contentEquals(other.joinerLeafHash)
+                ?: (other.joinerLeafHash == null)) &&
             joinerDisplayLabel == other.joinerDisplayLabel &&
             groupId.contentEquals(other.groupId)
     }
@@ -77,6 +93,7 @@ data class JoinRequestPayload(
     override fun hashCode(): Int {
         var h = joinerInboxPublicKey.contentHashCode()
         h = 31 * h + (joinerBlsPublicKey?.contentHashCode() ?: 0)
+        h = 31 * h + (joinerLeafHash?.contentHashCode() ?: 0)
         h = 31 * h + joinerDisplayLabel.hashCode()
         h = 31 * h + groupId.contentHashCode()
         return h

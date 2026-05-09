@@ -1,10 +1,26 @@
 package chat.onym.android.group
 
+import chat.onym.android.chain.AnchorSelectionKey
+import chat.onym.android.chain.ContractsRepository
+import chat.onym.android.chain.GovernanceType
+import chat.onym.android.chain.GroupProofGenerator
+import chat.onym.android.chain.GroupProofGeneratorError
+import chat.onym.android.chain.GroupProofUpdateInput
+import chat.onym.android.chain.NetworkPreferenceProvider
+import chat.onym.android.chain.OkHttpSepContractTransport
+import chat.onym.android.chain.OnymGroupProofGenerator
+import chat.onym.android.chain.RelayerRepository
+import chat.onym.android.chain.SepContractClient
+import chat.onym.android.chain.SepContractError
+import chat.onym.android.chain.SepContractTransport
+import chat.onym.android.chain.SepGroupType
+import chat.onym.android.chain.TyrannyUpdateCommitmentPayload
 import chat.onym.android.identity.IdentityRepository
 import chat.onym.android.identity.InvitationDecryptError
 import chat.onym.android.transport.InboxTransport
 import chat.onym.android.transport.TransportInboxId
 import kotlinx.coroutines.CoroutineScope
+import okhttp3.OkHttpClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,6 +73,19 @@ open class JoinRequestApprover(
     private val groupRepository: GroupRepository,
     private val inboxTransport: InboxTransport,
     private val scope: CoroutineScope,
+    /** Chain-relayer dependencies for the on-chain anchor flow. PR 88
+     *  drives [anchorTyrannyJoin] through these. Optional so existing
+     *  unit tests that don't need the anchor leg can keep working. */
+    private val relayers: RelayerRepository? = null,
+    private val contracts: ContractsRepository? = null,
+    private val networkPreference: NetworkPreferenceProvider? = null,
+    private val proofGenerator: GroupProofGenerator = OnymGroupProofGenerator(),
+    /** Builds a [SepContractTransport] from the relayer URL chosen
+     *  per-call. Injected so tests can swap a fake without touching
+     *  OkHttp. */
+    private val makeContractTransport: (String) -> SepContractTransport = { url ->
+        OkHttpSepContractTransport(httpClient = OkHttpClient(), endpointUrl = url)
+    },
 ) : JoinRequestApproving {
     /** UI-renderable view of one decrypted, awaiting-action request. */
     data class PendingRequest(
@@ -70,6 +99,11 @@ open class JoinRequestApprover(
          *  back, but skips the local roster update because there's
          *  no stable cross-device key to record under. */
         val joinerBlsPublicKey: ByteArray?,
+        /** 32-byte Poseidon leaf hash. Required for the on-chain
+         *  Tyranny `update_commitment` proof (PR 88). `null` from
+         *  pre-PR-88 clients — those approve attempts surface as
+         *  [ApproveOutcome.OutdatedJoinerClient]. */
+        val joinerLeafHash: ByteArray? = null,
         val joinerDisplayLabel: String,
         val groupId: ByteArray,
         /** Looked up from the local [GroupRepository]. Null if the
@@ -84,6 +118,8 @@ open class JoinRequestApprover(
                 joinerInboxPublicKey.contentEquals(other.joinerInboxPublicKey) &&
                 (joinerBlsPublicKey?.contentEquals(other.joinerBlsPublicKey)
                     ?: (other.joinerBlsPublicKey == null)) &&
+                (joinerLeafHash?.contentEquals(other.joinerLeafHash)
+                    ?: (other.joinerLeafHash == null)) &&
                 joinerDisplayLabel == other.joinerDisplayLabel &&
                 groupId.contentEquals(other.groupId) &&
                 groupName == other.groupName)
@@ -92,6 +128,7 @@ open class JoinRequestApprover(
             var h = id.hashCode()
             h = 31 * h + joinerInboxPublicKey.contentHashCode()
             h = 31 * h + (joinerBlsPublicKey?.contentHashCode() ?: 0)
+            h = 31 * h + (joinerLeafHash?.contentHashCode() ?: 0)
             h = 31 * h + joinerDisplayLabel.hashCode()
             h = 31 * h + groupId.contentHashCode()
             h = 31 * h + (groupName?.hashCode() ?: 0)
@@ -105,6 +142,21 @@ open class JoinRequestApprover(
         object UnknownRequest : ApproveOutcome()
         object NoIdentityLoaded : ApproveOutcome()
         class TransportFailed(val reason: String) : ApproveOutcome()
+        /** Joiner shipped a pre-PR-88 request without
+         *  `joiner_leaf_hash`. Admin can't extend the on-chain tree
+         *  without it; user must ask the joiner to update. */
+        object OutdatedJoinerClient : ApproveOutcome()
+        /** [RelayerRepository.selectUrl] returned null. */
+        object NoActiveRelayer : ApproveOutcome()
+        /** No deployed Tyranny contract for the active network. */
+        object NoContractBinding : ApproveOutcome()
+        /** Active identity isn't this group's admin (PR 93). */
+        object NotAdminOfThisGroup : ApproveOutcome()
+        /** `Tyranny.proveUpdate` failed — corrupted roster, wrong
+         *  tier depth, SDK FFI error, etc. */
+        class ProofFailed(val reason: String) : ApproveOutcome()
+        /** Relayer accepted the POST but the contract rejected. */
+        class AnchorRejected(val reason: String) : ApproveOutcome()
     }
 
     private val mutex = Mutex()
@@ -159,23 +211,39 @@ open class JoinRequestApprover(
             it.groupIdBytes.contentEquals(req.groupId)
         } ?: return@withLock ApproveOutcome.UnknownGroup
 
+        // PR 88 admin-anchor leg — Tyranny only. Other governance
+        // types fall through to the pre-PR-88 ship-only flow below.
+        var anchored = group
+        if (group.groupType == SepGroupType.TYRANNY) {
+            when (val outcome = anchorTyrannyJoin(req, group)) {
+                is AnchorOutcome.Failed -> return@withLock outcome.outcome
+                is AnchorOutcome.Ok -> {
+                    anchored = outcome.group
+                    // Persist the advanced state immediately so a
+                    // subsequent crash before seal+ship doesn't lose
+                    // the chain transition.
+                    groupRepository.insert(anchored)
+                }
+            }
+        }
+
         val invitePayload = GroupInvitationPayload(
             version = 1,
-            groupId = group.groupIdBytes,
-            groupSecret = group.groupSecret,
-            name = group.name,
-            members = group.members,
-            epoch = group.epoch,
-            salt = group.salt,
-            commitment = group.commitment,
-            tierRaw = group.tier.rawValue,
-            groupTypeRaw = group.groupType.wireValue,
-            adminPubkeyHex = group.adminPubkeyHex,
+            groupId = anchored.groupIdBytes,
+            groupSecret = anchored.groupSecret,
+            name = anchored.name,
+            members = anchored.members,
+            epoch = anchored.epoch,
+            salt = anchored.salt,
+            commitment = anchored.commitment,
+            tierRaw = anchored.tier.rawValue,
+            groupTypeRaw = anchored.groupType.wireValue,
+            adminPubkeyHex = anchored.adminPubkeyHex,
             // Ship the directory-as-known so the joiner sees existing
             // peers + admin by name from the moment they land. The
             // joiner's own profile gets backfilled by the receiver's
             // materializer (PR 83) from their active identity.
-            memberProfiles = group.memberProfiles.takeIf { it.isNotEmpty() },
+            memberProfiles = anchored.memberProfiles.takeIf { it.isNotEmpty() },
         )
         val payloadBytes = try {
             jsonFormat.encodeToString(GroupInvitationPayload.serializer(), invitePayload)
@@ -201,17 +269,19 @@ open class JoinRequestApprover(
         // Record the joiner in the local group's view-facing roster
         // (alias / inbox-pub) so the admin sees them by alias in the
         // UI. Skipped when the joiner shipped a pre-PR-78 request —
-        // no stable cross-device key under which to record.
+        // no stable cross-device key under which to record. Use the
+        // post-anchor group snapshot so PR-88's `commitment + epoch`
+        // ship in the announcement.
         val blsPub = req.joinerBlsPublicKey
         if (blsPub != null) {
             recordJoiner(
-                group = group,
+                group = anchored,
                 blsPub = blsPub,
                 inboxPub = req.joinerInboxPublicKey,
                 alias = req.joinerDisplayLabel,
             )
             broadcastJoin(
-                group = group,
+                group = anchored,
                 joinerBlsPub = blsPub,
                 joinerInboxPub = req.joinerInboxPublicKey,
                 joinerAlias = req.joinerDisplayLabel,
@@ -286,11 +356,16 @@ open class JoinRequestApprover(
                     alias = joinerAlias,
                 ),
                 adminAlias = adminAlias,
-                // PR 88 fills these for Tyranny anchors. Until then,
-                // ship without — receivers fall back to best-effort
-                // acceptance for non-Tyranny / pre-PR-88 announcements.
-                commitment = null,
-                epoch = null,
+                // PR 88: ship the post-anchor commitment + epoch so
+                // PR 89's receivers can verify against
+                // SEPContractClient.getCommitment. Null only when
+                // the calling group hasn't been anchored (legacy /
+                // non-Tyranny path) — receivers fall back to
+                // best-effort acceptance in that case.
+                commitment = group.commitment.takeIf {
+                    group.groupType == SepGroupType.TYRANNY
+                },
+                epoch = if (group.groupType == SepGroupType.TYRANNY) group.epoch else null,
             )
         } catch (_: Throwable) {
             // Wrong-sized BLS / inbox pub shouldn't happen — caller
@@ -379,6 +454,7 @@ open class JoinRequestApprover(
             id = raw.id,
             joinerInboxPublicKey = payload.joinerInboxPublicKey,
             joinerBlsPublicKey = payload.joinerBlsPublicKey,
+            joinerLeafHash = payload.joinerLeafHash,
             joinerDisplayLabel = payload.joinerDisplayLabel,
             groupId = payload.groupId,
             groupName = groupName,
@@ -398,8 +474,161 @@ open class JoinRequestApprover(
         introRequestStore.consume(requestId)
     }
 
+    /** Outcome shape for [anchorTyrannyJoin]. */
+    private sealed class AnchorOutcome {
+        data class Ok(val group: ChatGroup) : AnchorOutcome()
+        data class Failed(val outcome: ApproveOutcome) : AnchorOutcome()
+    }
+
+    /**
+     * On-chain anchor leg of [approve] — Tyranny only. Returns the
+     * updated [ChatGroup] (post-anchor) on success, or an
+     * [ApproveOutcome] describing the failure on any short-circuit.
+     * Pure: never mutates local state. Caller persists.
+     *
+     * Mirrors `anchorTyrannyJoin` from onym-ios PR #88.
+     */
+    private suspend fun anchorTyrannyJoin(
+        req: PendingRequest,
+        group: ChatGroup,
+    ): AnchorOutcome {
+        val joinerBlsPub = req.joinerBlsPublicKey
+        val joinerLeafHash = req.joinerLeafHash
+        if (joinerBlsPub == null || joinerLeafHash == null) {
+            return AnchorOutcome.Failed(ApproveOutcome.OutdatedJoinerClient)
+        }
+        val adminPubkeyHex = group.adminPubkeyHex
+            ?: return AnchorOutcome.Failed(
+                ApproveOutcome.TransportFailed("group missing adminPubkeyHex"),
+            )
+        val relayerUrl = relayers?.selectUrl()
+            ?: return AnchorOutcome.Failed(ApproveOutcome.NoActiveRelayer)
+        val networkPref = networkPreference?.current()
+            ?: return AnchorOutcome.Failed(ApproveOutcome.NoContractBinding)
+        val contractsRepo = contracts
+            ?: return AnchorOutcome.Failed(ApproveOutcome.NoContractBinding)
+        val key = AnchorSelectionKey(
+            network = networkPref.contractNetwork,
+            type = GovernanceType.Tyranny,
+        )
+        val binding = contractsRepo.snapshots.value.binding(key)
+            ?: return AnchorOutcome.Failed(ApproveOutcome.NoContractBinding)
+
+        // Resolve admin's index in the OLD member roster.
+        val adminBytes = ChatGroup.bytesFromHex(adminPubkeyHex)
+        val adminIndexOld = group.members.indexOfFirst {
+            it.publicKeyCompressed.contentEquals(adminBytes)
+        }
+        if (adminIndexOld < 0) {
+            return AnchorOutcome.Failed(
+                ApproveOutcome.TransportFailed("admin not in members roster"),
+            )
+        }
+
+        // Build new lex-sorted member list including the joiner.
+        // Compute the new Poseidon root over the new tree.
+        val joinerMember = GovernanceMember(
+            publicKeyCompressed = joinerBlsPub,
+            leafHash = joinerLeafHash,
+        )
+        val newMembers = (group.members + joinerMember)
+            .sortedWith(compareBy(byteArrayLexComparator()) { it.publicKeyCompressed })
+        val memberRootNew = try {
+            GroupCommitmentBuilder.computeMerkleRoot(
+                members = newMembers,
+                tier = group.tier,
+            )
+        } catch (e: Throwable) {
+            return AnchorOutcome.Failed(ApproveOutcome.ProofFailed("merkle_root: ${e.message ?: e}"))
+        }
+        val saltNew = GroupCommitmentBuilder.generateSalt()
+
+        val blsSecret = try {
+            // onym:allow-secret-read
+            identity.blsSecretKey()
+        } catch (e: Throwable) {
+            return AnchorOutcome.Failed(
+                ApproveOutcome.TransportFailed("bls_secret: ${e.message ?: e}"),
+            )
+        }
+
+        val proofInput = GroupProofUpdateInput(
+            groupType = SepGroupType.TYRANNY,
+            tier = group.tier,
+            oldMembers = group.members,
+            adminBlsSecretKey = blsSecret,
+            adminIndexOld = adminIndexOld,
+            epochOld = group.epoch,
+            memberRootNew = memberRootNew,
+            groupId = group.groupIdBytes,
+            saltOld = group.salt,
+            saltNew = saltNew,
+        )
+        val proof = try {
+            proofGenerator.proveUpdate(proofInput)
+        } catch (e: GroupProofGeneratorError) {
+            return AnchorOutcome.Failed(
+                ApproveOutcome.ProofFailed(e.message ?: e.javaClass.simpleName),
+            )
+        } catch (e: Throwable) {
+            return AnchorOutcome.Failed(
+                ApproveOutcome.ProofFailed(e.message ?: e.toString()),
+            )
+        }
+
+        val transport = makeContractTransport(relayerUrl)
+        val client = SepContractClient(
+            contractID = binding.contractId,
+            contractType = SepGroupType.TYRANNY,
+            network = networkPref.sepNetwork,
+            transport = transport,
+        )
+        val payload = TyrannyUpdateCommitmentPayload(
+            groupId = group.groupIdBytes,
+            proof = proof.proof,
+            publicInputs = proof.publicInputs,
+        )
+        val response = try {
+            client.updateCommitmentTyranny(payload)
+        } catch (e: SepContractError) {
+            return AnchorOutcome.Failed(
+                ApproveOutcome.TransportFailed("anchor: ${e.message ?: e}"),
+            )
+        } catch (e: Throwable) {
+            return AnchorOutcome.Failed(
+                ApproveOutcome.TransportFailed("anchor: ${e.message ?: e}"),
+            )
+        }
+        if (!response.accepted) {
+            return AnchorOutcome.Failed(
+                ApproveOutcome.AnchorRejected(response.message ?: "(no message)"),
+            )
+        }
+
+        return AnchorOutcome.Ok(
+            group.copy(
+                members = newMembers,
+                commitment = proof.commitmentNew,
+                epoch = group.epoch + 1uL,
+                salt = saltNew,
+            ),
+        )
+    }
+
     private companion object {
         private val jsonFormat = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+
+        /** Lex comparator over [ByteArray]; matches the canonical
+         *  member ordering already used in [CreateGroupInteractor]. */
+        private fun byteArrayLexComparator(): Comparator<ByteArray> =
+            Comparator { a, b ->
+                val len = minOf(a.size, b.size)
+                for (i in 0 until len) {
+                    val cmp = (a[i].toInt() and 0xFF) - (b[i].toInt() and 0xFF)
+                    if (cmp != 0) return@Comparator cmp
+                }
+                a.size - b.size
+            }
 
         /** Lowercase hex of a [ByteArray]. Lives here so the
          *  approver doesn't have to import the persistence /
