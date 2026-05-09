@@ -20,6 +20,7 @@ import chat.onym.android.chain.SepContractTransport
 import chat.onym.android.chain.SepGroupType
 import chat.onym.android.chain.SepTier
 import chat.onym.android.chain.TyrannyCreateGroupPayload
+import chat.onym.android.chain.decorateContractErrorMessage
 import chat.onym.android.identity.IdentityRepository
 import chat.onym.android.transport.InboxTransport
 import chat.onym.android.transport.TransportInboxId
@@ -242,7 +243,8 @@ open class CreateGroupInteractor(
                 else -> throw CreateGroupError.UnsupportedGroupType(groupType)
             }
         } catch (e: SepContractError) {
-            throw CreateGroupError.AnchorTransport(e.message ?: "transport error")
+            val raw = e.message ?: "transport error"
+            throw CreateGroupError.AnchorTransport(decorateContractErrorMessage(raw, groupType))
         } catch (e: CreateGroupError) {
             throw e
         } catch (e: Throwable) {
