@@ -3,6 +3,7 @@ package chat.onym.android.group
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -86,6 +87,7 @@ class ApproveRequestsViewModel(
                     val trimmed = joinerAlias?.trim().orEmpty()
                     val label = if (trimmed.isEmpty()) "this person" else trimmed
                     _lastSuccessMessage.value = "$label is now in the group."
+                    scheduleSuccessDismiss()
                 }
                 else -> {
                     _lastSuccessMessage.value = null
@@ -107,6 +109,21 @@ class ApproveRequestsViewModel(
 
     fun dismissError() {
         _lastError.value = null
+    }
+
+    /**
+     * Auto-clear the success banner after ~3s. The "only zero out
+     * if still equal" check protects against a fresh approve
+     * overwriting the snapshot before the delay completes.
+     */
+    private fun scheduleSuccessDismiss() {
+        val snapshot = _lastSuccessMessage.value
+        viewModelScope.launch {
+            delay(3_000)
+            if (_lastSuccessMessage.value == snapshot) {
+                _lastSuccessMessage.value = null
+            }
+        }
     }
 
     private companion object {

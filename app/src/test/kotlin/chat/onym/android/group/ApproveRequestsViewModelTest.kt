@@ -7,8 +7,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -95,9 +97,18 @@ class ApproveRequestsViewModelTest {
         vm.approve("r1")
         advanceUntilIdle()
         approver.gate.complete(JoinRequestApprover.ApproveOutcome.Sent)
-        advanceUntilIdle()
+        // PR 91: the success banner auto-dismisses after 3s. Run
+        // current work without advancing the virtual clock past
+        // the dismiss timer so the banner is still set when we
+        // assert.
+        runCurrent()
         assertNull(vm.lastError.value)
         assertNotNull(vm.lastSuccessMessage.value)
+
+        // After the timer fires, the banner clears.
+        advanceTimeBy(3_001)
+        runCurrent()
+        assertNull(vm.lastSuccessMessage.value)
     }
 
     @Test
