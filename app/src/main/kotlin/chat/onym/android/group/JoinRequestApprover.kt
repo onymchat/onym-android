@@ -64,6 +64,12 @@ open class JoinRequestApprover(
          *  as the dedupe key. */
         val id: String,
         val joinerInboxPublicKey: ByteArray,
+        /** 48-byte BLS pubkey when the joiner sent it (post-PR-78
+         *  builds always do). `null` when the request came from a
+         *  pre-PR-78 client; the approver still ships the invitation
+         *  back, but skips the local roster update because there's
+         *  no stable cross-device key to record under. */
+        val joinerBlsPublicKey: ByteArray?,
         val joinerDisplayLabel: String,
         val groupId: ByteArray,
         /** Looked up from the local [GroupRepository]. Null if the
@@ -76,6 +82,8 @@ open class JoinRequestApprover(
             (other is PendingRequest &&
                 id == other.id &&
                 joinerInboxPublicKey.contentEquals(other.joinerInboxPublicKey) &&
+                (joinerBlsPublicKey?.contentEquals(other.joinerBlsPublicKey)
+                    ?: (other.joinerBlsPublicKey == null)) &&
                 joinerDisplayLabel == other.joinerDisplayLabel &&
                 groupId.contentEquals(other.groupId) &&
                 groupName == other.groupName)
@@ -83,6 +91,7 @@ open class JoinRequestApprover(
         override fun hashCode(): Int {
             var h = id.hashCode()
             h = 31 * h + joinerInboxPublicKey.contentHashCode()
+            h = 31 * h + (joinerBlsPublicKey?.contentHashCode() ?: 0)
             h = 31 * h + joinerDisplayLabel.hashCode()
             h = 31 * h + groupId.contentHashCode()
             h = 31 * h + (groupName?.hashCode() ?: 0)
@@ -184,12 +193,47 @@ open class JoinRequestApprover(
             return@withLock ApproveOutcome.TransportFailed("no relay accepted the invitation")
         }
 
+        // Record the joiner in the local group's view-facing roster
+        // (alias / inbox-pub) so the admin sees them by alias in the
+        // UI. Skipped when the joiner shipped a pre-PR-78 request —
+        // no stable cross-device key under which to record.
+        val blsPub = req.joinerBlsPublicKey
+        if (blsPub != null) {
+            recordJoiner(
+                group = group,
+                blsPub = blsPub,
+                inboxPub = req.joinerInboxPublicKey,
+                alias = req.joinerDisplayLabel,
+            )
+        }
+
         // Best-effort cleanup. Both calls run regardless of failures
         // because the request is conceptually consumed at this point;
         // a leaked intro key is benign (sender ignores future
         // requests on it via UnknownGroup or just not approving).
         revokeAndConsume(introPub = findIntroPubFor(requestId), requestId = requestId)
         ApproveOutcome.Sent
+    }
+
+    /**
+     * Insert / update the joiner's [MemberProfile] on the local
+     * group. Idempotent — re-approving for the same `(blsPub, group)`
+     * overwrites the entry (alias, inbox-pub) rather than minting a
+     * duplicate. Goes through [GroupRepository.insert] which
+     * delegates to [RoomGroupStore.insertOrUpdate].
+     */
+    private suspend fun recordJoiner(
+        group: ChatGroup,
+        blsPub: ByteArray,
+        inboxPub: ByteArray,
+        alias: String,
+    ) {
+        val key = blsPub.toHexLowercase()
+        val updated = group.copy(
+            memberProfiles = group.memberProfiles +
+                (key to MemberProfile(alias = alias, inboxPublicKey = inboxPub)),
+        )
+        groupRepository.insert(updated)
     }
 
     /** Decline a pending request: drop it + revoke the intro slot.
@@ -243,6 +287,7 @@ open class JoinRequestApprover(
         return PendingRequest(
             id = raw.id,
             joinerInboxPublicKey = payload.joinerInboxPublicKey,
+            joinerBlsPublicKey = payload.joinerBlsPublicKey,
             joinerDisplayLabel = payload.joinerDisplayLabel,
             groupId = payload.groupId,
             groupName = groupName,
@@ -264,5 +309,13 @@ open class JoinRequestApprover(
 
     private companion object {
         private val jsonFormat = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+
+        /** Lowercase hex of a [ByteArray]. Lives here so the
+         *  approver doesn't have to import the persistence /
+         *  transport layer's privates. Mirrors the
+         *  `String(format: "%02x", $0)` map used on iOS. */
+        fun ByteArray.toHexLowercase(): String = buildString(size * 2) {
+            for (b in this@toHexLowercase) append("%02x".format(b.toInt() and 0xFF))
+        }
     }
 }

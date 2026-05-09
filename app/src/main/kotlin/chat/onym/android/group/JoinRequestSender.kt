@@ -49,6 +49,10 @@ class JoinRequestSender(
         val activeIdentity = identity.currentIdentity() ?: return@withContext Outcome.NoIdentityLoaded()
         val payload = JoinRequestPayload(
             joinerInboxPublicKey = activeIdentity.inboxPublicKey,
+            // Stable cross-device identifier — the admin keys the
+            // joiner into the local roster under this. Pre-PR-78
+            // joiners shipped without it; post-PR-78 ships it always.
+            joinerBlsPublicKey = activeIdentity.blsPublicKey,
             joinerDisplayLabel = joinerDisplayLabel,
             groupId = capability.groupId,
         )

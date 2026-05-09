@@ -30,6 +30,20 @@ data class JoinRequestPayload(
     @SerialName("joiner_inbox_pub")
     @Serializable(with = Base64ByteArraySerializer::class)
     val joinerInboxPublicKey: ByteArray,
+    /**
+     * 48-byte arkworks-compressed BLS12-381 G1 pubkey. Optional —
+     * pre-PR-78 joiners shipped requests without it. The admin uses
+     * this as the **stable cross-device key** under which to record
+     * the joiner in [ChatGroup.memberProfiles] (and, post-PR-88, as
+     * the joiner's on-chain Merkle leaf input).
+     *
+     * Default null so older joiners' wire payloads still decode. The
+     * approver short-circuits the local-roster mutation (and the
+     * Tyranny anchor flow, post-PR-88) when this is missing.
+     */
+    @SerialName("joiner_bls_pub")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val joinerBlsPublicKey: ByteArray? = null,
     @SerialName("joiner_display_label")
     val joinerDisplayLabel: String,
     @SerialName("group_id")
@@ -40,6 +54,11 @@ data class JoinRequestPayload(
         require(joinerInboxPublicKey.size == 32) {
             "joinerInboxPublicKey: expected 32 bytes, got ${joinerInboxPublicKey.size}"
         }
+        joinerBlsPublicKey?.let {
+            require(it.size == 48) {
+                "joinerBlsPublicKey: expected 48 bytes, got ${it.size}"
+            }
+        }
         require(groupId.size == 32) {
             "groupId: expected 32 bytes, got ${groupId.size}"
         }
@@ -49,12 +68,15 @@ data class JoinRequestPayload(
         if (this === other) return true
         if (other !is JoinRequestPayload) return false
         return joinerInboxPublicKey.contentEquals(other.joinerInboxPublicKey) &&
+            (joinerBlsPublicKey?.contentEquals(other.joinerBlsPublicKey)
+                ?: (other.joinerBlsPublicKey == null)) &&
             joinerDisplayLabel == other.joinerDisplayLabel &&
             groupId.contentEquals(other.groupId)
     }
 
     override fun hashCode(): Int {
         var h = joinerInboxPublicKey.contentHashCode()
+        h = 31 * h + (joinerBlsPublicKey?.contentHashCode() ?: 0)
         h = 31 * h + joinerDisplayLabel.hashCode()
         h = 31 * h + groupId.contentHashCode()
         return h
