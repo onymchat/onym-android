@@ -185,14 +185,19 @@ jobs:
 
           BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          # Resolve issue title (best-effort; gh failure -> empty title)
+          # Resolve issue title + body (best-effort; gh failure -> empty
+          # strings). `body` powers the Test Plan section on the build
+          # details page (public/qa/build/ in onym-website) without the
+          # page having to hit the GitHub API at view time.
           ISSUE_OBJ='null'
           if [ -n "$ISSUE" ]; then
-            TITLE=$(gh issue view "$ISSUE" --repo "$REPO" --json title -q .title 2>/dev/null || echo "")
+            ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json title,body 2>/dev/null || echo '{}')
+            TITLE=$(printf '%s' "$ISSUE_JSON" | jq -r '.title // ""')
+            BODY=$(printf  '%s' "$ISSUE_JSON" | jq -r '.body  // ""')
             ISSUE_OBJ=$(jq -n \
-              --arg n "$ISSUE" --arg t "$TITLE" \
+              --arg n "$ISSUE" --arg t "$TITLE" --arg b "$BODY" \
               --arg url "https://github.com/$REPO/issues/$ISSUE" \
-              '{number: ($n|tonumber), title: $t, url: $url}')
+              '{number: ($n|tonumber), title: $t, url: $url, body: $b}')
           fi
 
           # The dashboard's contract -- see public/qa/builds.json on
@@ -296,6 +301,7 @@ jobs:
             echo "| Kind | $KIND |"
             echo "| Branch | \`$BRANCH\` |"
             echo "| APK | https://${HOST}/qa/android/${VERSION}/onym.apk |"
+            echo "| Build details | https://${HOST}/qa/build/?platform=android&version=${VERSION} |"
             echo "| Dashboard | https://${HOST}/qa/?platform=android |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -349,7 +355,7 @@ jobs:
           QA build \`${VERSION}\` published.
 
           - APK (side-load on Android): https://${HOST}/qa/android/${VERSION}/onym.apk
-          - Dashboard: https://${HOST}/qa/?platform=android
+          - Build details (test plan, install, metadata): https://${HOST}/qa/build/?platform=android&version=${VERSION}
           MSG
 
           if ! gh pr comment "$target_pr" --repo "$REPO" --body-file "$BODY_FILE"; then
