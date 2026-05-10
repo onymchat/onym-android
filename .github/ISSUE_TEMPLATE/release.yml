@@ -17,10 +17,14 @@ body:
     id: tag
     attributes:
       label: Release tag
-      description: Must match `vX.Y.Z`. The Release workflow validates this and aborts if the tag already exists.
-      placeholder: v0.0.8
+      description: |
+        `vX.Y.Z`. Leave blank to auto-bump the patch version from the latest
+        existing `v*` tag — the `release-from-issue` workflow rewrites this
+        field in the issue body with the resolved tag before dispatching
+        Release. Submitting an explicit tag that already exists fails.
+      placeholder: v0.0.8 (or leave blank to auto-bump)
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: notes
