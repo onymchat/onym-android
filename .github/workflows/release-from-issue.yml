@@ -38,12 +38,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          # Tag history is needed so the auto-bump branch can resolve
-          # the latest patch version when the issue's Tag field is left
-          # blank. `fetch-tags` is lighter than `fetch-depth: 0`.
-          fetch-tags: true
         # No `lfs: true` — this job runs python3 over text only.
+        # Auto-bump queries tags via `git ls-remote --tags origin`
+        # below, so we don't rely on this checkout having fetched
+        # tags locally. (The pinned SHA above is checkout v4.0.0,
+        # which predates the `fetch-tags` input — that input was
+        # added in v4.1.0 and is silently ignored here. Querying the
+        # remote sidesteps the version coupling entirely.)
 
       - name: Discover instrumented test classes
         id: discover
@@ -68,17 +69,30 @@ jobs:
           TAG=$(printf '%s' "$BODY" | python3 scripts/release_issue.py parse-tag)
 
           if [ -z "$TAG" ]; then
-            # Auto-bump patch from the latest reachable v-tag. `git tag
-            # --sort=-v:refname` puts highest first; filter to vX.Y.Z to
-            # ignore stray rc/build tags.
-            LATEST=$(git tag --sort=-v:refname \
+            # Query origin for v-tags via `git ls-remote` instead of
+            # the local `git tag` list. The pinned `actions/checkout`
+            # SHA is v4.0.0, which predates the `fetch-tags: true`
+            # input — it's silently ignored, so the local tag list
+            # is empty and `git tag` would always fall through to
+            # the v0.0.1 baseline (issue #128). `ls-remote` is also
+            # a fresher source-of-truth than locally-fetched refs.
+            #
+            # `--refs` strips the peeled `^{}` entries; `sort -V`
+            # is version-aware so v0.0.10 sorts after v0.0.9.
+            LATEST=$(git ls-remote --tags --refs origin \
+                       | awk '{print $2}' \
+                       | sed 's|refs/tags/||' \
                        | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-                       | head -1)
+                       | sort -V \
+                       | tail -1)
             if [ -z "$LATEST" ]; then
               # First-ever release on a fresh repo — start at v0.0.1.
               TAG="v0.0.1"
-              echo "::notice::No existing v* tags; defaulting to $TAG"
+              echo "::notice::No existing v* tags on origin; defaulting to $TAG"
             else
+              # Here-string (`<<<`) avoids a multi-line heredoc
+              # whose `EOF` terminator at column 0 would break YAML's
+              # `run: |` block scalar — same fix landed in onym-ios.
               IFS='.' read -r MAJOR MINOR PATCH <<<"${LATEST#v}"
               TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
               echo "::notice::Tag field blank; auto-bumping ${LATEST} → ${TAG}"
@@ -88,12 +102,14 @@ jobs:
             echo "auto_bumped=0" >> "$GITHUB_OUTPUT"
           fi
 
-          # Refuse to dispatch on a tag that already exists. The
-          # auto-bump path is collision-free by construction; this only
-          # protects an explicit user-typed tag that collides with a
-          # previous release.
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "::error::Tag '$TAG' already exists"
+          # Refuse to dispatch on a tag that already exists on origin.
+          # `git rev-parse` would only see locally-fetched tags and
+          # could falsely green-light a collision in this checkout
+          # configuration; query the remote via `ls-remote --exit-code`
+          # instead. The auto-bump path is collision-free by
+          # construction; this only catches a hand-typed tag.
+          if git ls-remote --tags --refs --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag '$TAG' already exists on origin"
             gh issue comment ${{ github.event.issue.number }} \
               --repo ${{ github.repository }} \
               --body "❌ Tag \`$TAG\` already exists on the repo. Pick a higher patch version or leave the Release tag field blank to auto-bump."
