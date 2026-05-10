@@ -23,16 +23,26 @@ import kotlinx.coroutines.flow.StateFlow
  * Owner-scoping: every entry carries an [IdentityId]. Removing an
  * identity (multi-identity PR-3) cascades a [deleteForOwner] so
  * we don't leak intro privkeys past the identity that minted them.
+ *
+ * Time-based expiry: entries older than [IntroKeyEntry.LIFETIME_MILLIS]
+ * (24h) are treated as revoked at this boundary — [find] returns
+ * null for them, [listForOwner] and [entriesFlow] omit them.
+ * Implementations lazy-purge expired rows on each read so the
+ * underlying blob stays bounded without a background sweeper, and
+ * re-emit on [entriesFlow] so [IntroInboxPump] can cancel relayer
+ * subscriptions for expired slots.
  */
 interface IntroKeyStore {
-    /** Hot stream of every entry across every owner. Emits the
-     *  current snapshot on subscribe, then a fresh value after
-     *  every [save] / [revoke] / [deleteForOwner].
+    /** Hot stream of every active (non-expired) entry across every
+     *  owner. Emits the current snapshot on subscribe, then a fresh
+     *  value after every [save] / [revoke] / [deleteForOwner], and
+     *  whenever a read lazy-purges expired rows.
      *
      *  Drives the inbox fan-out (PR-3): the wiring layer maps
      *  this → list of intro inbox tags → feeds into the request
      *  pump. New entry → new subscription within the next
-     *  emission window. */
+     *  emission window. Expired entry → subscription gets cancelled
+     *  on the next emission. */
     val entriesFlow: StateFlow<List<IntroKeyEntry>>
 
     /** Persist a freshly-minted intro entry. Idempotent on
@@ -43,13 +53,15 @@ interface IntroKeyStore {
 
     /** Look up an entry by its public key. Returns null when the
      *  pubkey is unknown — happens when an old entry was
-     *  [revoke]d, or when a request envelope targets a pubkey
-     *  this device never minted (probably a forged link). */
+     *  [revoke]d, has aged past [IntroKeyEntry.LIFETIME_MILLIS], or
+     *  when a request envelope targets a pubkey this device never
+     *  minted (probably a forged link). */
     suspend fun find(introPublicKey: ByteArray): IntroKeyEntry?
 
-    /** Every entry minted by [ownerIdentityId]. Sorted newest
-     *  first by [IntroKeyEntry.createdAtMillis]. UI's "Active
-     *  invites" list reads here. */
+    /** Every entry minted by [ownerIdentityId] that has not aged
+     *  past [IntroKeyEntry.LIFETIME_MILLIS]. Sorted newest first
+     *  by [IntroKeyEntry.createdAtMillis]. UI's "Active invites"
+     *  list reads here. */
     suspend fun listForOwner(ownerIdentityId: IdentityId): List<IntroKeyEntry>
 
     /** Single-entry deletion. Called after a request is accepted

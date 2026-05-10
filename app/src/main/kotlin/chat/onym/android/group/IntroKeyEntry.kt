@@ -19,8 +19,11 @@ import chat.onym.android.identity.IdentityId
  * - [groupId] is the on-chain `group_id` the invite is for —
  *   needed when the inviter's app surfaces "Bob wants to join
  *   <group>?" so it can render the group's name.
- * - [createdAtMillis] drives optional expiration UI (PR-7+ may
- *   prune invites older than N days).
+ * - [createdAtMillis] drives time-based expiry. Entries older than
+ *   [LIFETIME_MILLIS] are treated as revoked at the [IntroKeyStore]
+ *   boundary ([IntroKeyStore.find] returns null,
+ *   [IntroKeyStore.listForOwner] and [IntroKeyStore.entriesFlow]
+ *   omit them) and lazily purged on the next read.
  */
 data class IntroKeyEntry(
     val introPublicKey: ByteArray,
@@ -39,6 +42,16 @@ data class IntroKeyEntry(
         require(groupId.size == 32) {
             "groupId: expected 32 bytes, got ${groupId.size}"
         }
+    }
+
+    fun isExpired(atMillis: Long, lifetimeMillis: Long = LIFETIME_MILLIS): Boolean =
+        atMillis - createdAtMillis >= lifetimeMillis
+
+    companion object {
+        /** How long an invite link is honored after minting. Issue
+         *  onymchat/onym-ios#111 — rotate every 24 hours to shrink
+         *  the leak window of a forwarded or screenshotted link. */
+        const val LIFETIME_MILLIS: Long = 24L * 60L * 60L * 1000L
     }
 
     override fun equals(other: Any?): Boolean {
