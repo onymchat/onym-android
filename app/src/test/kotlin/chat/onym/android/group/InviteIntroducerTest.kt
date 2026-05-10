@@ -147,8 +147,11 @@ class InviteIntroducerTest {
 
     @Test
     fun mint_clockProvider_stampsCreatedAt() = runTest {
-        val store = InMemoryIntroKeyStore()
         val frozenNow = 1_700_000_000_000L
+        // Sync the store's clock with the introducer's so the lazy
+        // expiry sweep doesn't drop a freshly-minted 2023-dated
+        // entry against today's wall clock (issue onymchat/onym-ios#111).
+        val store = InMemoryIntroKeyStore(clock = { frozenNow })
         val introducer = InviteIntroducer(
             store = store,
             ioDispatcher = Dispatchers.Unconfined,

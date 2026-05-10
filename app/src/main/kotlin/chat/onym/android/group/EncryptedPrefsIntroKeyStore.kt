@@ -30,6 +30,7 @@ import kotlinx.serialization.json.Json
 class EncryptedPrefsIntroKeyStore(
     private val context: Context,
     private val prefsFileName: String = DEFAULT_PREFS_FILE_NAME,
+    private val clock: () -> Long = { System.currentTimeMillis() },
 ) : IntroKeyStore {
 
     private val mutex = Mutex()
@@ -68,12 +69,14 @@ class EncryptedPrefsIntroKeyStore(
         // sees the on-disk state without needing an explicit reload.
         // EncryptedSharedPreferences read is lazy via the `prefs`
         // delegate, so this only does work if a previous session
-        // wrote something.
-        _entriesFlow.value = loadAllUnlocked().map { it.toEntry() }
+        // wrote something. Routes through loadActiveUnlocked so
+        // entries that aged past the lifetime while the app was
+        // closed are pruned at boot.
+        _entriesFlow.value = loadActiveUnlocked().map { it.toEntry() }
     }
 
     override suspend fun save(entry: IntroKeyEntry) = mutex.withLock {
-        val current = loadAllUnlocked().toMutableList()
+        val current = loadActiveUnlocked().toMutableList()
         val existingIdx = current.indexOfFirst {
             it.introPub.contentEquals(entry.introPublicKey)
         }
@@ -90,26 +93,26 @@ class EncryptedPrefsIntroKeyStore(
     }
 
     override suspend fun find(introPublicKey: ByteArray): IntroKeyEntry? = mutex.withLock {
-        loadAllUnlocked()
+        loadActiveUnlocked()
             .firstOrNull { it.introPub.contentEquals(introPublicKey) }
             ?.toEntry()
     }
 
     override suspend fun listForOwner(ownerIdentityId: IdentityId): List<IntroKeyEntry> = mutex.withLock {
-        loadAllUnlocked()
+        loadActiveUnlocked()
             .filter { it.ownerIdentityId == ownerIdentityId.value }
             .sortedByDescending { it.createdAtMillis }
             .map { it.toEntry() }
     }
 
     override suspend fun revoke(introPublicKey: ByteArray) = mutex.withLock {
-        val current = loadAllUnlocked()
+        val current = loadActiveUnlocked()
         val filtered = current.filterNot { it.introPub.contentEquals(introPublicKey) }
         if (filtered.size != current.size) saveAllUnlocked(filtered)
     }
 
     override suspend fun deleteForOwner(ownerIdentityId: IdentityId): Int = mutex.withLock {
-        val current = loadAllUnlocked()
+        val current = loadActiveUnlocked()
         val filtered = current.filterNot { it.ownerIdentityId == ownerIdentityId.value }
         val removed = current.size - filtered.size
         if (removed > 0) saveAllUnlocked(filtered)
@@ -117,6 +120,21 @@ class EncryptedPrefsIntroKeyStore(
     }
 
     // ─── private ──────────────────────────────────────────────────
+
+    /** Load the blob, drop rows older than
+     *  [IntroKeyEntry.LIFETIME_MILLIS], and rewrite if anything was
+     *  pruned. Every read funnels through here so expired keys are
+     *  invisible to callers and the blob stays bounded without a
+     *  background timer. When rows are pruned, [_entriesFlow]
+     *  re-emits so [IntroInboxPump] cancels relayer subscriptions
+     *  for expired slots. */
+    private fun loadActiveUnlocked(): List<StoredIntroKey> {
+        val all = loadAllUnlocked()
+        val cutoffMillis = clock() - IntroKeyEntry.LIFETIME_MILLIS
+        val active = all.filter { it.createdAtMillis > cutoffMillis }
+        if (active.size != all.size) saveAllUnlocked(active)
+        return active
+    }
 
     private fun loadAllUnlocked(): List<StoredIntroKey> {
         val raw = prefs.getString(KEY_BLOB, null) ?: return emptyList()

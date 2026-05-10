@@ -16,7 +16,9 @@ import kotlinx.coroutines.sync.withLock
  * `InviteIntroducer` / future request-flow interactors that don't
  * want to stand up the Keystore.
  */
-class InMemoryIntroKeyStore : IntroKeyStore {
+class InMemoryIntroKeyStore(
+    private val clock: () -> Long = { System.currentTimeMillis() },
+) : IntroKeyStore {
 
     private val mutex = Mutex()
     private val entries = mutableListOf<IntroKeyEntry>()
@@ -25,16 +27,19 @@ class InMemoryIntroKeyStore : IntroKeyStore {
     override val entriesFlow: StateFlow<List<IntroKeyEntry>> = _entriesFlow.asStateFlow()
 
     override suspend fun save(entry: IntroKeyEntry) = mutex.withLock {
+        purgeExpiredUnlocked()
         entries.removeAll { it.introPublicKey.contentEquals(entry.introPublicKey) }
         entries += entry
         _entriesFlow.value = entries.toList()
     }
 
     override suspend fun find(introPublicKey: ByteArray): IntroKeyEntry? = mutex.withLock {
+        purgeExpiredUnlocked()
         entries.firstOrNull { it.introPublicKey.contentEquals(introPublicKey) }
     }
 
     override suspend fun listForOwner(ownerIdentityId: IdentityId): List<IntroKeyEntry> = mutex.withLock {
+        purgeExpiredUnlocked()
         entries
             .filter { it.ownerIdentityId == ownerIdentityId }
             .sortedByDescending { it.createdAtMillis }
@@ -53,5 +58,17 @@ class InMemoryIntroKeyStore : IntroKeyStore {
         val removed = before - entries.size
         if (removed > 0) _entriesFlow.value = entries.toList()
         removed
+    }
+
+    /** Drop entries whose [IntroKeyEntry.createdAtMillis] is older
+     *  than [IntroKeyEntry.LIFETIME_MILLIS] relative to the
+     *  injected [clock] and re-emit [entriesFlow] so the
+     *  [chat.onym.android.group.IntroInboxPump] reconciler can
+     *  cancel relayer subscriptions for expired slots. */
+    private fun purgeExpiredUnlocked() {
+        val nowMillis = clock()
+        val before = entries.size
+        entries.removeAll { it.isExpired(nowMillis) }
+        if (entries.size != before) _entriesFlow.value = entries.toList()
     }
 }
