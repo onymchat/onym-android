@@ -8,11 +8,19 @@ Subcommands:
                              the dynamic checklist in the release issue.
 
     parse-tag                Read an issue body on stdin, print the
-                             `vX.Y.Z` tag the user typed in the form.
+                             `vX.Y.Z` tag the user typed in the form,
+                             or print nothing (exit 0) when the field
+                             was left blank — caller auto-bumps from
+                             the latest reachable `v*` tag in that
+                             case. Malformed values still abort with a
+                             clear error.
 
     hydrate    --tests F     Read issue body on stdin; replace the
                              UI_TESTS section with `- [ ] <FQN>` lines
-                             from F (one FQN per line).
+                             from F (one FQN per line). Optionally
+                             rewrites the `### Release tag` value via
+                             `--tag vX.Y.Z` so an auto-bumped tag
+                             shows in the issue body.
 
     tick       --results D   Read issue body on stdin; tick UI_TESTS
                              checkboxes for classes whose JUnit XML in D
@@ -101,7 +109,15 @@ def parse_tag(body: str) -> str:
         v0.0.8
 
     We grab the first non-blank line after the `### Release tag` heading,
-    strip whitespace, and validate the shape.
+    strip whitespace, and validate the shape. Two non-error cases return
+    the empty string for the caller to auto-bump:
+
+      * the heading is present but has no value (the form was submitted
+        without filling the field — the field is now optional);
+      * the value is GitHub's "_No response_" placeholder (issue forms
+        render an unfilled `input` field that way).
+
+    Malformed values (e.g. `0.0.8` without the `v`) still abort.
     """
     lines = body.splitlines()
     in_section = False
@@ -112,14 +128,16 @@ def parse_tag(body: str) -> str:
                 in_section = True
             continue
         if stripped.startswith("###"):
-            break  # next section, no tag found
+            return ""  # next section, value left blank
         if stripped:
+            if stripped == "_No response_":
+                return ""
             if not re.fullmatch(r"v\d+\.\d+\.\d+", stripped):
                 raise SystemExit(
                     f"tag `{stripped}` does not match vX.Y.Z — fix the issue body and reopen"
                 )
             return stripped
-    raise SystemExit("no `Release tag` field found in issue body")
+    return ""  # heading missing entirely (also treated as auto-bump)
 
 
 # ─── body editing ─────────────────────────────────────────────────────
@@ -143,11 +161,36 @@ def _split_body(body: str) -> tuple[str, str, str]:
     return body[:start_idx], body[start_idx:end_idx], body[end_idx:]
 
 
-def hydrate(body: str, fqns: list[str]) -> str:
-    """Replace the UI_TESTS section with a fresh `- [ ] FQN` checklist."""
+def hydrate(body: str, fqns: list[str], tag: str | None = None) -> str:
+    """Replace the UI_TESTS section with a fresh `- [ ] FQN` checklist.
+
+    Optionally also overwrites the `### Release tag` field's value with
+    `tag` — used when the workflow auto-bumped the patch version because
+    the field was blank, so the issue itself reflects the dispatched
+    tag. Idempotent for the explicit case (the existing value matches).
+    """
+    if tag:
+        body = _rewrite_tag(body, tag)
     prefix, _, suffix = _split_body(body)
     lines = ["", *(f"- [ ] {fqn}" for fqn in fqns), ""]
     return prefix + "\n" + "\n".join(lines) + "\n" + suffix
+
+
+# Match `### Release tag` (or `### Tag`) heading + the next non-blank
+# line — the value the user typed (or `_No response_` for a blank
+# submit). MULTILINE so `^`/`$` anchor at line bounds; IGNORECASE so
+# the heading text variants stay tolerated.
+_TAG_FIELD_RE = re.compile(
+    r"^(### (?:Release tag|Tag))\s*\n\n([^\n]+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _rewrite_tag(body: str, tag: str) -> str:
+    """Overwrite the `### Release tag` field's value with `tag`. Returns
+    the body unchanged when the heading isn't found — `parse-tag`
+    already abort-or-warned about that path."""
+    return _TAG_FIELD_RE.sub(lambda m: f"{m.group(1)}\n\n{tag}", body, count=1)
 
 
 def tick(body: str, results: dict[str, bool]) -> str:
@@ -258,6 +301,11 @@ def main(argv: list[str]) -> int:
 
     p_hydrate = sub.add_parser("hydrate", help="seed UI_TESTS section with discovered FQNs")
     p_hydrate.add_argument("--tests", required=True, help="file with one FQN per line")
+    p_hydrate.add_argument(
+        "--tag",
+        default=None,
+        help="optional resolved tag (e.g. auto-bumped vX.Y.Z); rewrites the `### Release tag` value",
+    )
 
     p_tick = sub.add_parser("tick", help="mark UI_TESTS boxes from JUnit results")
     p_tick.add_argument("--results", required=True, help="dir with TEST-*.xml under it")
@@ -282,7 +330,7 @@ def main(argv: list[str]) -> int:
             for line in pathlib.Path(args.tests).read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        sys.stdout.write(hydrate(body, fqns))
+        sys.stdout.write(hydrate(body, fqns, tag=args.tag))
         return 0
     if args.cmd == "tick":
         body = sys.stdin.read()
