@@ -528,8 +528,7 @@ in shape, ported to Compose + StateFlow + AndroidX BiometricPrompt.
 .intro
   │ tappedContinueFromIntro → authenticate()
   ├─► .authFailed(reason) ── dismissedAuthError → .intro
-  └─► .reveal(phrase, revealed: false)
-        │ tappedReveal     → revealed: true
+  └─► .reveal(phrase)
         │ tappedCopyPhrase → clipboard write + 60s auto-clear
         │ tappedContinueFromReveal
         ▼

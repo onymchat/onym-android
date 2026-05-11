@@ -5,8 +5,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -124,36 +122,20 @@ class RecoveryPhraseBackupScreenTest {
     // ─── Reveal ────────────────────────────────────────────────────
 
     @Test
-    fun reveal_unrevealed_shows_tap_to_reveal_overlay() {
+    fun reveal_shows_words_and_enables_actions_immediately() {
         setContent()
         runBlocking { advanceToReveal() }
-        composeRule.onNodeWithText(string(R.string.tap_to_reveal))
-            .assertIsDisplayed()
-        // Continue + Copy disabled until the user taps to reveal.
-        composeRule.onNodeWithText(string(R.string.ive_written_it_down))
-            .assertIsNotEnabled()
-        composeRule.onNodeWithText(string(R.string.copy))
-            .assertIsNotEnabled()
-    }
 
-    @Test
-    fun reveal_tap_shows_words_and_enables_actions() {
-        setContent()
-        runBlocking { advanceToReveal() }
-        composeRule.onNodeWithText(string(R.string.tap_to_reveal)).performClick()
-
-        // Tap-to-reveal overlay disappears + at least one early + late
-        // word is now visible to the user. The test mnemonic repeats
-        // "legal" / "winner" / "thank" by design (BIP39 spec vector),
-        // so the assertion targets the first / last positions that are
-        // unique in the phrase — `onNodeWithText` (singular) requires
-        // a unique match.
-        composeRule.onNodeWithText(string(R.string.tap_to_reveal))
-            .assertIsNotDisplayed()
+        // Words rendered immediately — no tap-to-reveal gate after the
+        // biometric step (issue #82). The test mnemonic repeats "legal"
+        // / "winner" / "thank" by design (BIP39 spec vector), so the
+        // assertion targets the first / last positions that are unique
+        // in the phrase — `onNodeWithText` (singular) requires a unique
+        // match.
         composeRule.onNodeWithText(testWords[3], substring = true).assertExists()  // "year"
         composeRule.onNodeWithText(testWords.last(), substring = true).assertExists()  // "yellow"
 
-        // Actions enabled.
+        // Actions enabled from the start.
         composeRule.onNodeWithText(string(R.string.ive_written_it_down))
             .assertIsEnabled()
         composeRule.onNodeWithText(string(R.string.copy))
@@ -164,7 +146,6 @@ class RecoveryPhraseBackupScreenTest {
     fun reveal_copy_writes_to_clipboard_and_shows_dialog() {
         setContent()
         runBlocking { advanceToReveal() }
-        composeRule.onNodeWithText(string(R.string.tap_to_reveal)).performClick()
         composeRule.onNodeWithText(string(R.string.copy)).performClick()
 
         // Confirmation dialog visible.
@@ -179,7 +160,6 @@ class RecoveryPhraseBackupScreenTest {
     fun reveal_continue_advances_to_verify_step() {
         setContent()
         runBlocking { advanceToReveal() }
-        composeRule.onNodeWithText(string(R.string.tap_to_reveal)).performClick()
         composeRule.onNodeWithText(string(R.string.ive_written_it_down)).performClick()
 
         // Verify step prompt visible.
@@ -308,7 +288,6 @@ class RecoveryPhraseBackupScreenTest {
 
     private suspend fun advanceToVerify() {
         advanceToReveal()
-        viewModel.tappedReveal()
         viewModel.tappedContinueFromReveal()
         composeRule.waitUntil(timeoutMillis = 1_000) {
             viewModel.step.value is RecoveryPhraseBackupViewModel.Step.Verify
