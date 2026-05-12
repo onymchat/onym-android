@@ -539,6 +539,9 @@ class OnymApplication : Application() {
             makeIdentitiesViewModel = {
                 chat.onym.android.identity.IdentitiesViewModel(identity = identityRepository)
             },
+            makeRestoreIdentityViewModel = {
+                chat.onym.android.identity.RestoreIdentityViewModel(identity = identityRepository)
+            },
             makeShareInviteViewModel = {
                 chat.onym.android.group.ShareInviteViewModel(
                     identity = identityRepository,

@@ -158,7 +158,22 @@
     <string name="identities_screen_footer">Видимы только чаты активной личности. Переключайтесь между личностями, чтобы увидеть разные входящие.</string>
     <string name="identities_section_your">Ваши личности</string>
     <string name="identities_add_button">Добавить личность</string>
+    <string name="identities_restore_button">Восстановить из фразы восстановления</string>
     <string name="identity_unnamed">Безымянная личность</string>
+
+    <!-- ─── Restore identity (Настройки → Личности → Восстановить) ─── -->
+    <string name="restore_identity_screen_title">Восстановить личность</string>
+    <string name="restore_identity_intro">Введите фразу восстановления из 12 слов, чтобы восстановить личность на этом устройстве. Существующие личности не будут затронуты.</string>
+    <string name="restore_identity_phrase_label">Фраза восстановления</string>
+    <string name="restore_identity_phrase_placeholder">Введите 12 слов через пробел</string>
+    <string name="restore_identity_word_count_hint">12 или 24 слова, разделённых пробелами.</string>
+    <string name="restore_identity_invalid">Неверная фраза. Проверьте написание и порядок слов.</string>
+    <string name="restore_identity_valid">Фраза корректна.</string>
+    <string name="restore_identity_name_label">Имя (необязательно)</string>
+    <string name="restore_identity_name_placeholder">например, Личное</string>
+    <string name="restore_identity_action">Восстановить личность</string>
+    <string name="restore_identity_restoring">Восстановление…</string>
+    <string name="restore_identity_footnote">Восстановление воссоздаёт те же ключи из вашей фразы. Восстановленная личность станет активной.</string>
 
     <!-- ─── Identity detail ──────────────────────────────────────── -->
     <string name="identity_detail_title">Личность</string>
