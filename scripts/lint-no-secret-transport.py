@@ -14,7 +14,7 @@ Two rules:
 
 1. **Transport barrier**: identity / per-dialog / group secret names
    may not appear (as identifiers) inside
-   `app/src/main/kotlin/chat/onym/android/transport/`. Every match
+   `app/src/main/kotlin/app/onym/android/transport/`. Every match
    in production code under that path is a violation unless suppressed.
 
 2. **Send-arg shape**: `<anything>.send(<arg>, ...)` calls must not
@@ -68,7 +68,7 @@ SEND_ARG_FORBIDDEN: set[str] = IDENTITY_SECRET_NAMES | {
 
 # Production-only barrier — tests are free to construct secret
 # fixtures and call into the transport layer with raw bytes.
-TRANSPORT_BARRIER_DIR = "app/src/main/kotlin/chat/onym/android/transport/"
+TRANSPORT_BARRIER_DIR = "app/src/main/kotlin/app/onym/android/transport/"
 SUPPRESSION = "onym:allow-secret-transport"
 
 COMMENT_LINE = re.compile(r"^\s*//")
@@ -103,7 +103,7 @@ def is_comment_line(line: str) -> bool:
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     sources = sorted(
-        root.glob("app/src/main/kotlin/chat/onym/android/**/*.kt"),
+        root.glob("app/src/main/kotlin/app/onym/android/**/*.kt"),
     )
 
     violations: list[tuple[str, int, str, str]] = []
