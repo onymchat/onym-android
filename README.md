@@ -289,7 +289,7 @@ mutation, multi-subscriber safe) with less ceremony.
 │   │   ├── res/xml/{backup_rules,data_extraction_rules}.xml
 │   │   ├── res/values/strings.xml
 │   │   ├── resources/bip39-english.txt              ← 2048-word English wordlist (load via classpath)
-│   │   └── kotlin/chat/onym/android/
+│   │   └── kotlin/app/onym/android/
 │   │       ├── OnymApplication.kt                   ← BC provider + AppDependencies wiring
 │   │       ├── AppDependencies.kt                   ← composition-root handle (factory closures)
 │   │       ├── MainActivity.kt                      ← FragmentActivity host; reads AppDependencies
@@ -306,24 +306,24 @@ mutation, multi-subscriber safe) with less ceremony.
 │   │       └── transport/
 │   │           ├── Transport.kt                     ← MessageTransport / InboxTransport interfaces
 │   │           └── nostr/                           ← Nostr adapter (NIP-01 framing, OkHttp WS)
-│   ├── src/test/kotlin/chat/onym/android/identity/
+│   ├── src/test/kotlin/app/onym/android/identity/
 │   │   ├── CrossPlatformFixtureTest.kt              ← derivation locks (no FFI needed)
 │   │   ├── Bip39Test.kt                             ← wordlist SHA-256 + round-trip + edge cases
 │   │   └── StellarStrKeyTest.kt                    ← known-vector StrKey encodings
-│   └── src/androidTest/kotlin/chat/onym/android/identity/
+│   └── src/androidTest/kotlin/app/onym/android/identity/
 │       └── IdentityRepositoryTest.kt                ← real EncryptedSharedPreferences + FFI
 └── .github/workflows/ci.yml                         ← JVM unit tests on PR/push
 ```
 
-`applicationId` is `chat.onym.android`. EncryptedSharedPreferences
-file is `chat.onym.android.identity.xml` (excluded from auto-backup
+`applicationId` is `app.onym.android`. EncryptedSharedPreferences
+file is `app.onym.android.identity.xml` (excluded from auto-backup
 and device-to-device transfer — see
 `app/src/main/res/xml/data_extraction_rules.xml`).
 
 ## Identity persistence
 
 One [`EncryptedSharedPreferences`](https://developer.android.com/reference/androidx/security/crypto/EncryptedSharedPreferences)
-file (default name `chat.onym.android.identity`) holds a JSON-encoded
+file (default name `app.onym.android.identity`) holds a JSON-encoded
 `StoredSnapshot`:
 
 ```kotlin
@@ -362,15 +362,15 @@ other.
 | Step                  | Input          | Salt                      | Info                       | Algorithm                       |
 |-----------------------|----------------|---------------------------|----------------------------|---------------------------------|
 | Seed                  | mnemonic       | `"mnemonic"+passphrase`   | —                          | PBKDF2-HMAC-SHA512, 2048 iters  |
-| Nostr secret          | seed           | `chat.onym.bip39`         | `nostr-secp256k1-v1`       | HKDF-SHA256, 32B                |
-| BLS secret            | seed           | `chat.onym.bip39`         | `bls12-381-v1`             | HKDF-SHA256, 32B                |
-| Stellar Ed25519 seed  | nostr secret   | `chat.onym.ios`           | `stellar-ed25519-v1`       | HKDF-SHA256, 32B                |
-| X25519 seed (inbox)   | nostr secret   | `chat.onym.ios`           | `x25519-key-agreement-v1`  | HKDF-SHA256, 32B                |
+| Nostr secret          | seed           | `app.onym.bip39`          | `nostr-secp256k1-v1`       | HKDF-SHA256, 32B                |
+| BLS secret            | seed           | `app.onym.bip39`          | `bls12-381-v1`             | HKDF-SHA256, 32B                |
+| Stellar Ed25519 seed  | nostr secret   | `app.onym.ios`            | `stellar-ed25519-v1`       | HKDF-SHA256, 32B                |
+| X25519 seed (inbox)   | nostr secret   | `app.onym.ios`            | `x25519-key-agreement-v1`  | HKDF-SHA256, 32B                |
 | Inbox tag             | X25519 pubkey  | —                         | prefix `sep-inbox-v1`      | SHA-256, hex(prefix(8))         |
 | Stellar account ID    | Ed25519 pubkey | —                         | version byte `6 << 3 = 48` | StrKey (CRC16-XMODEM + base32)  |
 
-The salt difference between the two HKDF stages — `chat.onym.bip39`
-for derivations off the BIP39 seed, `chat.onym.ios` for derivations
+The salt difference between the two HKDF stages — `app.onym.bip39`
+for derivations off the BIP39 seed, `app.onym.ios` for derivations
 off the nostr secret — is a quirk of the reference impl. Note the
 "ios" in the second stage is preserved on Android too, intentionally;
 it's a constant string, not a platform marker.
@@ -452,10 +452,10 @@ The allowlist (in the script itself; adding to it requires
 justification in code review):
 
 ```
-app/src/main/kotlin/chat/onym/android/identity/IdentityRepository.kt
-app/src/main/kotlin/chat/onym/android/identity/StoredSnapshot.kt
-app/src/main/kotlin/chat/onym/android/identity/Identity.kt
-app/src/androidTest/kotlin/chat/onym/android/identity/IdentityRepositoryTest.kt
+app/src/main/kotlin/app/onym/android/identity/IdentityRepository.kt
+app/src/main/kotlin/app/onym/android/identity/StoredSnapshot.kt
+app/src/main/kotlin/app/onym/android/identity/Identity.kt
+app/src/androidTest/kotlin/app/onym/android/identity/IdentityRepositoryTest.kt
 ```
 
 Note `IdentitySecretStore.kt` is **not** allowlisted — kotlinx.serialization
@@ -520,7 +520,7 @@ See [`keystore/README.md`](keystore/README.md) for keystore management
 ## Recovery-phrase backup flow
 
 The app's only screen today is the
-[`RecoveryPhraseBackupScreen`](app/src/main/kotlin/chat/onym/android/recovery/RecoveryPhraseBackupScreen.kt)
+[`RecoveryPhraseBackupScreen`](app/src/main/kotlin/app/onym/android/recovery/RecoveryPhraseBackupScreen.kt)
 flow — Intro → Reveal → Verify → Done. Mirrors onym-ios PR #4 1:1
 in shape, ported to Compose + StateFlow + AndroidX BiometricPrompt.
 
@@ -552,10 +552,10 @@ round; second pick during the in-flight 450 ms advance is ignored.
 - **`BiometricAuthenticator`** — interface + `AndroidBiometricAuthenticator`
   backed by [`BiometricPrompt`](https://developer.android.com/reference/androidx/biometric/BiometricPrompt).
   Requires a [`FragmentActivity`](https://developer.android.com/reference/androidx/fragment/app/FragmentActivity)
-  host (so [`MainActivity`](app/src/main/kotlin/chat/onym/android/MainActivity.kt)
+  host (so [`MainActivity`](app/src/main/kotlin/app/onym/android/MainActivity.kt)
   extends `FragmentActivity`, not `ComponentActivity`). Takes an
   *activity provider thunk* rather than a captured Activity reference
-  so the long-lived [`RecoveryPhraseBackupViewModel`](app/src/main/kotlin/chat/onym/android/recovery/RecoveryPhraseBackupViewModel.kt)
+  so the long-lived [`RecoveryPhraseBackupViewModel`](app/src/main/kotlin/app/onym/android/recovery/RecoveryPhraseBackupViewModel.kt)
   doesn't pin an Activity past configuration change. If the device has
   no enrolled biometric and no device credential, returns success
   without prompting (matches iOS `canEvaluatePolicy == false`
@@ -579,7 +579,7 @@ the recents preview on backgrounding) — Android's flag covers both.
 
 ### Tests
 
-[`app/src/androidTest/.../RecoveryPhraseBackupViewModelTest.kt`](app/src/androidTest/kotlin/chat/onym/android/recovery/RecoveryPhraseBackupViewModelTest.kt)
+[`app/src/androidTest/.../RecoveryPhraseBackupViewModelTest.kt`](app/src/androidTest/kotlin/app/onym/android/recovery/RecoveryPhraseBackupViewModelTest.kt)
 ports all 13 iOS XCTest cases against a real
 `IdentityRepository` (per-test unique prefs file), a fake
 `BiometricAuthenticator`, and a fake `ClipboardWriter`. Lives in
@@ -611,12 +611,12 @@ Text(pluralStringResource(R.plurals.write_down_words_in_order, count = words.siz
 
 ### Outside Composables: `StringProvider`
 
-[`RecoveryPhraseBackupViewModel`](app/src/main/kotlin/chat/onym/android/recovery/RecoveryPhraseBackupViewModel.kt)
+[`RecoveryPhraseBackupViewModel`](app/src/main/kotlin/app/onym/android/recovery/RecoveryPhraseBackupViewModel.kt)
 holds no `Context` reference. The two strings it needs to resolve at
 runtime — the [`BiometricPrompt`](https://developer.android.com/reference/androidx/biometric/BiometricPrompt)
 title shown deep inside `authenticate()`, and the localized "recovery
 phrase unavailable" error — go through a small
-[`StringProvider`](app/src/main/kotlin/chat/onym/android/recovery/StringProvider.kt)
+[`StringProvider`](app/src/main/kotlin/app/onym/android/recovery/StringProvider.kt)
 seam:
 
 ```kotlin
@@ -669,14 +669,14 @@ For now the app honours the device language.
 To smoke-test Russian without changing the device language:
 
 ```sh
-adb shell am start -n chat.onym.android/.MainActivity \
+adb shell am start -n app.onym.android/.MainActivity \
   --es android.intent.extra.LOCALE ru-RU
 ```
 
 ## App shell
 
-Sole entry point: [`MainActivity`](app/src/main/kotlin/chat/onym/android/MainActivity.kt)
-mounts [`RootScreen`](app/src/main/kotlin/chat/onym/android/RootScreen.kt) —
+Sole entry point: [`MainActivity`](app/src/main/kotlin/app/onym/android/MainActivity.kt)
+mounts [`RootScreen`](app/src/main/kotlin/app/onym/android/RootScreen.kt) —
 a `Scaffold` with Material 3 [`NavigationBar`](https://developer.android.com/reference/kotlin/androidx/compose/material3/package-summary#NavigationBar(androidx.compose.ui.Modifier,androidx.compose.ui.graphics.Color,androidx.compose.ui.graphics.Color,androidx.compose.ui.unit.Dp,androidx.compose.foundation.layout.WindowInsets,kotlin.Function1))
 across the bottom and a [`NavHost`](https://developer.android.com/reference/kotlin/androidx/navigation/compose/package-summary)
 for the content slot.

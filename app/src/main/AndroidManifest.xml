@@ -48,7 +48,7 @@
                 deeplinks (PR-6/7 in the deeplink-invite stack).
 
                 `autoVerify="true"`: Android fetches
-                https://onym.chat/.well-known/assetlinks.json on
+                https://onym.app/.well-known/assetlinks.json on
                 install; if the SHA-256 cert fingerprint matches our
                 signing cert (40:AD:4E:78:…:CAD), the system opens
                 the link directly in onym-android without the
@@ -65,7 +65,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https"
-                      android:host="onym.chat"
+                      android:host="onym.app"
                       android:pathPrefix="/join" />
             </intent-filter>
 

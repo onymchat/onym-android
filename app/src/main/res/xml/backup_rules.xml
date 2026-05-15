@@ -6,6 +6,6 @@
     aliases from auto-backup.
 -->
 <full-backup-content>
-    <exclude domain="sharedpref" path="chat.onym.android.identity.xml" />
+    <exclude domain="sharedpref" path="app.onym.android.identity.xml" />
     <exclude domain="sharedpref" path="_androidx_security_crypto_encrypted_keys.xml" />
 </full-backup-content>

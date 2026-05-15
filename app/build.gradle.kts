@@ -9,11 +9,11 @@ plugins {
 }
 
 android {
-    namespace = "chat.onym.android"
+    namespace = "app.onym.android"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "chat.onym.android"
+        applicationId = "app.onym.android"
         // EncryptedSharedPreferences requires API 23+. Picking 26 (O)
         // also unlocks AEAD ciphers + the keystore-backed master key
         // path with no compatibility shims.
@@ -101,7 +101,7 @@ android {
 
     // Shared test source set — fakes / fixtures / encryptors that
     // both `test/` (JVM unit) and `androidTest/` (instrumented) can
-    // consume from the same `chat.onym.android.support` package.
+    // consume from the same `app.onym.android.support` package.
     // Mirrors the iOS pattern of a single `Tests/OnymIOSTests/Support/`
     // directory available to every XCTest target.
     sourceSets {

@@ -57,10 +57,10 @@ from pathlib import Path
 # requires a justification in code review — these are the only files
 # that legitimately need to touch raw secret material.
 ALLOWED: set[str] = {
-    "app/src/main/kotlin/chat/onym/android/identity/IdentityRepository.kt",
-    "app/src/main/kotlin/chat/onym/android/identity/StoredSnapshot.kt",
-    "app/src/main/kotlin/chat/onym/android/identity/Identity.kt",
-    "app/src/androidTest/kotlin/chat/onym/android/identity/IdentityRepositoryTest.kt",
+    "app/src/main/kotlin/app/onym/android/identity/IdentityRepository.kt",
+    "app/src/main/kotlin/app/onym/android/identity/StoredSnapshot.kt",
+    "app/src/main/kotlin/app/onym/android/identity/Identity.kt",
+    "app/src/androidTest/kotlin/app/onym/android/identity/IdentityRepositoryTest.kt",
 }
 
 # Field-access patterns that read identity secrets. The `.` prefix
