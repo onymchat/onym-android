@@ -396,6 +396,13 @@ open class CreateGroupInteractor(
             return mapOf(key to MemberProfile(
                 alias = alias,
                 inboxPublicKey = identitySnapshot.inboxPublicKey,
+                // PR A3: stamp the admin's Ed25519 envelope-signing
+                // key into their own profile so every joiner learns
+                // it on day one via the GroupInvitationPayload's
+                // memberProfiles directory. PR A4 uses this to
+                // verify the admin's announcement signatures the
+                // moment the joiner materializes the group.
+                sendingPubkey = identitySnapshot.stellarPublicKey,
             ))
         }
 

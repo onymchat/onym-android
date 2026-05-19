@@ -99,6 +99,16 @@ data class MemberAnnouncementPayload(
         @Serializable(with = Base64ByteArraySerializer::class)
         val inboxPub: ByteArray,
         val alias: String,
+        /**
+         * 32-byte Ed25519 envelope-signing pubkey. Same key the
+         * sealed-envelope signature is verified against. Required
+         * on the wire so PR A4's chat dispatcher can verify any
+         * subsequent chat message from this member with one direct
+         * equality check.
+         */
+        @SerialName("sending_pub")
+        @Serializable(with = Base64ByteArraySerializer::class)
+        val sendingPub: ByteArray,
     ) {
         init {
             require(blsPub.size == 48) {
@@ -107,18 +117,23 @@ data class MemberAnnouncementPayload(
             require(inboxPub.size == 32) {
                 "inboxPub: expected 32 bytes, got ${inboxPub.size}"
             }
+            require(sendingPub.size == 32) {
+                "sendingPub: expected 32 bytes, got ${sendingPub.size}"
+            }
         }
 
         override fun equals(other: Any?): Boolean = this === other ||
             (other is AnnouncedMember &&
                 blsPub.contentEquals(other.blsPub) &&
                 inboxPub.contentEquals(other.inboxPub) &&
-                alias == other.alias)
+                alias == other.alias &&
+                sendingPub.contentEquals(other.sendingPub))
 
         override fun hashCode(): Int {
             var h = blsPub.contentHashCode()
             h = 31 * h + inboxPub.contentHashCode()
             h = 31 * h + alias.hashCode()
+            h = 31 * h + sendingPub.contentHashCode()
             return h
         }
     }
