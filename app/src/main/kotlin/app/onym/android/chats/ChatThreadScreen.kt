@@ -105,6 +105,7 @@ fun ChatThreadScreen(
             ChatThreadBody(
                 messages = messages,
                 padding = padding,
+                onSend = viewModel::send,
             )
         }
     }
@@ -114,6 +115,7 @@ fun ChatThreadScreen(
 private fun ChatThreadBody(
     messages: List<ChatMessage>,
     padding: PaddingValues,
+    onSend: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     // Defensive sort. The repository's contract is ascending by
@@ -192,11 +194,14 @@ private fun ChatThreadBody(
             }
         }
         HorizontalDivider(thickness = 0.5.dp)
-        // PR A7 wires the input panel UI but not the send path —
-        // tap clears the field, the body is discarded. Next PR
-        // swaps the closure for `viewModel.send` (already wired on
-        // the VM from PR A5).
-        ChatInputPanel(onSend = { _ -> })
+        // PR A8 wires the Send button end-to-end. The VM's send
+        // does the trim guard + optimistic insert + status flip
+        // through SendMessageInteractor (PR A4). SendMessageError
+        // routes into viewModel.lastSendError, which the UI doesn't
+        // surface yet — network / fan-out failures land as
+        // MessageStatus.FAILED on the bubble (visual indicator
+        // lands in a later PR).
+        ChatInputPanel(onSend = onSend)
     }
 }
 
