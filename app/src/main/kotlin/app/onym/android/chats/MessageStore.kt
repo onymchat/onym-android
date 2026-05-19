@@ -19,6 +19,11 @@ interface MessageStore {
      *  the chat-thread read path. */
     suspend fun listForGroup(ownerIdentityId: String, groupId: String): List<ChatMessage>
 
+    /** Single-message lookup by id. Returns `null` for unknown ids.
+     *  Drives the retry-on-failed path on
+     *  [app.onym.android.chats.SendMessageInteractor.retry]. */
+    suspend fun findById(id: UUID): ChatMessage?
+
     /** Idempotent insert on [ChatMessage.id]. Returns `true` on a
      *  fresh write, `false` when the row already exists. Nostr
      *  re-delivery of the same wire `messageId` becomes a no-op at

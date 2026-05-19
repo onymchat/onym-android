@@ -586,6 +586,7 @@ class OnymApplication : Application() {
                     groupRepository = groupRepository,
                     messageRepository = messageRepository,
                     sendMessage = sender::send,
+                    retryMessage = sender::retry,
                 )
             },
             makeIdentitiesViewModel = {

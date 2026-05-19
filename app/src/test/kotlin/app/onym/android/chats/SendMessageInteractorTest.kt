@@ -218,6 +218,117 @@ class SendMessageInteractorTest {
         assertEquals(SepGroupType.ANARCHY, err.type)
     }
 
+    // ─── retry on FAILED ─────────────────────────────────────────
+
+    @Test
+    fun retry_failedMessage_flipsToSentOnRelayAcceptance() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+        val failed = makePersisted(status = MessageStatus.FAILED, body = "first try")
+        fixture.messageStore.preload(listOf(failed))
+
+        fixture.interactor.retry(groupIdHex, failed.id)
+
+        val refreshed = fixture.messageStore.findById(failed.id)!!
+        assertEquals(MessageStatus.SENT, refreshed.status)
+        // The wire payload re-used the original messageId so the
+        // receiver dedups against any prior delivery — assert the
+        // ConfigurableInboxTransport saw exactly one send for the
+        // peer (the retry shouldn't double-ship).
+        assertEquals(1, fixture.transport.sends().size)
+    }
+
+    @Test
+    fun retry_failedMessage_staysFailedWhenRelaysReject() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+        fixture.transport.setReceiptAcceptedBy(0)  // every relay refuses
+        val failed = makePersisted(status = MessageStatus.FAILED, body = "x")
+        fixture.messageStore.preload(listOf(failed))
+
+        fixture.interactor.retry(groupIdHex, failed.id)
+        assertEquals(
+            MessageStatus.FAILED,
+            fixture.messageStore.findById(failed.id)!!.status,
+        )
+    }
+
+    @Test
+    fun retry_unknownMessageId_isNoOp() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+        // Don't preload anything — retry on an unknown id must not
+        // throw and must not ship anything.
+        fixture.interactor.retry(groupIdHex, UUID.randomUUID())
+        assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    @Test
+    fun retry_sentMessage_isNoOp_preventsDoubleDelivery() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+        val sent = makePersisted(status = MessageStatus.SENT, body = "already delivered")
+        fixture.messageStore.preload(listOf(sent))
+
+        fixture.interactor.retry(groupIdHex, sent.id)
+
+        // Status unchanged; no envelope shipped.
+        assertEquals(
+            MessageStatus.SENT,
+            fixture.messageStore.findById(sent.id)!!.status,
+        )
+        assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    @Test
+    fun retry_pendingMessage_isNoOp_preventsDoubleDelivery() = runTest {
+        // An in-flight pending row could still resolve to SENT; retry
+        // would double-ship. Same gate as the SENT case.
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+        val pending = makePersisted(status = MessageStatus.PENDING, body = "in flight")
+        fixture.messageStore.preload(listOf(pending))
+
+        fixture.interactor.retry(groupIdHex, pending.id)
+        assertEquals(
+            MessageStatus.PENDING,
+            fixture.messageStore.findById(pending.id)!!.status,
+        )
+        assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    @Test
+    fun retry_incomingMessage_isNoOp() = runTest {
+        // Incoming rows don't have an outgoing send to retry.
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+        val incoming = makePersisted(
+            status = MessageStatus.FAILED,
+            direction = MessageDirection.INCOMING,
+            body = "received but somehow failed",
+        )
+        fixture.messageStore.preload(listOf(incoming))
+
+        fixture.interactor.retry(groupIdHex, incoming.id)
+        assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    private fun makePersisted(
+        status: MessageStatus,
+        direction: MessageDirection = MessageDirection.OUTGOING,
+        body: String,
+    ): ChatMessage = ChatMessage(
+        id = UUID.randomUUID(),
+        groupId = groupIdHex,
+        ownerIdentityId = activeId.value,
+        senderBlsPubkeyHex = selfBlsHex,
+        body = body,
+        sentAtMillis = 1_699_000_000_000L,
+        direction = direction,
+        status = status,
+        groupType = SepGroupType.TYRANNY,
+    )
+
     // ─── optimistic insert visible before fan-out completes ──────
 
     @Test
