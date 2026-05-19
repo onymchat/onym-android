@@ -190,6 +190,7 @@ class IncomingMessageDispatcher(
         return key to MemberProfile(
             alias = me.name,
             inboxPublicKey = me.inboxPublicKey,
+            sendingPubkey = me.sendingPublicKey,
         )
     }
 
@@ -265,6 +266,7 @@ class IncomingMessageDispatcher(
             memberProfiles = group.memberProfiles + (key to MemberProfile(
                 alias = payload.newMember.alias,
                 inboxPublicKey = payload.newMember.inboxPub,
+                sendingPubkey = payload.newMember.sendingPub,
             )),
         )
         groupRepository.insert(updated)

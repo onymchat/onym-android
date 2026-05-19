@@ -106,7 +106,10 @@ class IncomingMessageDispatcherTest {
             version = 1,
             groupId = ByteArray(32) { 0xFF.toByte() },  // not on this device
             newMember = MemberAnnouncementPayload.AnnouncedMember(
-                blsPub = newMemberBlsPub, inboxPub = newMemberInbox, alias = "Bob",
+                blsPub = newMemberBlsPub,
+                inboxPub = newMemberInbox,
+                alias = "Bob",
+                sendingPub = ByteArray(32) { 0x77 },
             ),
             adminAlias = "Alice",
         )
@@ -189,7 +192,11 @@ class IncomingMessageDispatcherTest {
             groupTypeRaw = SepGroupType.TYRANNY.wireValue,
             adminPubkeyHex = inviterKey,
             memberProfiles = mapOf(
-                inviterKey to MemberProfile(alias = "Alice", inboxPublicKey = inviterInbox),
+                inviterKey to MemberProfile(
+                    alias = "Alice",
+                    inboxPublicKey = inviterInbox,
+                    sendingPubkey = ByteArray(32) { 0x88.toByte() },
+                ),
             ),
         )
         val plaintext = Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
@@ -205,6 +212,7 @@ class IncomingMessageDispatcherTest {
                     name = "Bob",
                     blsPublicKey = selfBls,
                     inboxPublicKey = selfInbox,
+                    sendingPublicKey = ByteArray(32) { 0x99.toByte() },
                 ),
             ),
         )
@@ -328,7 +336,10 @@ class IncomingMessageDispatcherTest {
         version = 1,
         groupId = groupId,
         newMember = MemberAnnouncementPayload.AnnouncedMember(
-            blsPub = newMemberBlsPub, inboxPub = newMemberInbox, alias = "Bob",
+            blsPub = newMemberBlsPub,
+            inboxPub = newMemberInbox,
+            alias = "Bob",
+            sendingPub = ByteArray(32) { 0x77 },
         ),
         adminAlias = "Alice",
     )

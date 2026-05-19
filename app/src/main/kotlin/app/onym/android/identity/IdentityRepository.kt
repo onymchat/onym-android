@@ -332,6 +332,7 @@ class IdentityRepository(
                     throw IdentityError.SdkFailure(e.message ?: "publicKey", e)
                 },
                 inboxPublicKey = inboxPublicKey(snap.nostrSecretKey),
+                sendingPublicKey = stellarPublicKey(snap.nostrSecretKey),
             )
         }
     }

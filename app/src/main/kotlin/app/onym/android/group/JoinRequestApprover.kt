@@ -104,6 +104,11 @@ open class JoinRequestApprover(
          *  pre-PR-88 clients — those approve attempts surface as
          *  [ApproveOutcome.OutdatedJoinerClient]. */
         val joinerLeafHash: ByteArray? = null,
+        /** 32-byte Ed25519 envelope-signing pubkey from the joiner.
+         *  PR A3 hard-cutover: required on every request so the
+         *  admin can stamp it into the joiner's [MemberProfile] for
+         *  PR A4's chat-signature verification path. */
+        val joinerSendingPublicKey: ByteArray,
         val joinerDisplayLabel: String,
         val groupId: ByteArray,
         /** Looked up from the local [GroupRepository]. Null if the
@@ -120,6 +125,7 @@ open class JoinRequestApprover(
                     ?: (other.joinerBlsPublicKey == null)) &&
                 (joinerLeafHash?.contentEquals(other.joinerLeafHash)
                     ?: (other.joinerLeafHash == null)) &&
+                joinerSendingPublicKey.contentEquals(other.joinerSendingPublicKey) &&
                 joinerDisplayLabel == other.joinerDisplayLabel &&
                 groupId.contentEquals(other.groupId) &&
                 groupName == other.groupName)
@@ -129,6 +135,7 @@ open class JoinRequestApprover(
             h = 31 * h + joinerInboxPublicKey.contentHashCode()
             h = 31 * h + (joinerBlsPublicKey?.contentHashCode() ?: 0)
             h = 31 * h + (joinerLeafHash?.contentHashCode() ?: 0)
+            h = 31 * h + joinerSendingPublicKey.contentHashCode()
             h = 31 * h + joinerDisplayLabel.hashCode()
             h = 31 * h + groupId.contentHashCode()
             h = 31 * h + (groupName?.hashCode() ?: 0)
@@ -278,12 +285,14 @@ open class JoinRequestApprover(
                 group = anchored,
                 blsPub = blsPub,
                 inboxPub = req.joinerInboxPublicKey,
+                sendingPub = req.joinerSendingPublicKey,
                 alias = req.joinerDisplayLabel,
             )
             broadcastJoin(
                 group = anchored,
                 joinerBlsPub = blsPub,
                 joinerInboxPub = req.joinerInboxPublicKey,
+                joinerSendingPub = req.joinerSendingPublicKey,
                 joinerAlias = req.joinerDisplayLabel,
             )
         }
@@ -307,12 +316,17 @@ open class JoinRequestApprover(
         group: ChatGroup,
         blsPub: ByteArray,
         inboxPub: ByteArray,
+        sendingPub: ByteArray,
         alias: String,
     ) {
         val key = blsPub.toHexLowercase()
         val updated = group.copy(
             memberProfiles = group.memberProfiles +
-                (key to MemberProfile(alias = alias, inboxPublicKey = inboxPub)),
+                (key to MemberProfile(
+                    alias = alias,
+                    inboxPublicKey = inboxPub,
+                    sendingPubkey = sendingPub,
+                )),
         )
         groupRepository.insert(updated)
     }
@@ -335,6 +349,7 @@ open class JoinRequestApprover(
         group: ChatGroup,
         joinerBlsPub: ByteArray,
         joinerInboxPub: ByteArray,
+        joinerSendingPub: ByteArray,
         joinerAlias: String,
     ) {
         // Identity has no display-name field on Android — the
@@ -354,6 +369,7 @@ open class JoinRequestApprover(
                     blsPub = joinerBlsPub,
                     inboxPub = joinerInboxPub,
                     alias = joinerAlias,
+                    sendingPub = joinerSendingPub,
                 ),
                 adminAlias = adminAlias,
                 // PR 88: ship the post-anchor commitment + epoch so
@@ -455,6 +471,7 @@ open class JoinRequestApprover(
             joinerInboxPublicKey = payload.joinerInboxPublicKey,
             joinerBlsPublicKey = payload.joinerBlsPublicKey,
             joinerLeafHash = payload.joinerLeafHash,
+            joinerSendingPublicKey = payload.joinerSendingPublicKey,
             joinerDisplayLabel = payload.joinerDisplayLabel,
             groupId = payload.groupId,
             groupName = groupName,

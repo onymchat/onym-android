@@ -65,6 +65,11 @@ class JoinRequestSender(
             // joiners shipped without it; post-PR-78 ships it always.
             joinerBlsPublicKey = activeIdentity.blsPublicKey,
             joinerLeafHash = leafHash,
+            // PR A3: 32-byte Ed25519 envelope-signing pubkey. Hard-
+            // cutover required; PR A4's chat dispatcher needs this on
+            // every join request to verify the joiner's future chat
+            // envelope signatures.
+            joinerSendingPublicKey = activeIdentity.stellarPublicKey,
             joinerDisplayLabel = joinerDisplayLabel,
             groupId = capability.groupId,
         )
