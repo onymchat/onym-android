@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -31,7 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -160,6 +159,7 @@ private fun ChatThreadBody(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
+            .imePadding()  // slides the input panel above the soft keyboard
             .testTag("chat_thread.body"),
     ) {
         if (sortedMessages.isEmpty()) {
@@ -192,7 +192,11 @@ private fun ChatThreadBody(
             }
         }
         HorizontalDivider(thickness = 0.5.dp)
-        InputPanelPlaceholder()
+        // PR A7 wires the input panel UI but not the send path —
+        // tap clears the field, the body is discarded. Next PR
+        // swaps the closure for `viewModel.send` (already wired on
+        // the VM from PR A5).
+        ChatInputPanel(onSend = { _ -> })
     }
 }
 
@@ -233,25 +237,6 @@ private fun EmptyThread(modifier: Modifier = Modifier) {
         Text(
             text = "No messages yet. Say hi.",
             fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun InputPanelPlaceholder() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .padding(horizontal = 16.dp)
-            .testTag("chat_thread.input_panel_placeholder"),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Text(
-            text = "Message input lands in the next PR",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
