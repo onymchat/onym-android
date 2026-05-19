@@ -34,6 +34,10 @@ class InMemoryMessageStore : MessageStore {
             .sortedBy { it.sentAtMillis }
     }
 
+    override suspend fun findById(id: UUID): ChatMessage? = mutex.withLock {
+        rows[id.toString()]
+    }
+
     override suspend fun insert(message: ChatMessage): Boolean = mutex.withLock {
         val key = message.id.toString()
         if (rows.containsKey(key)) return@withLock false

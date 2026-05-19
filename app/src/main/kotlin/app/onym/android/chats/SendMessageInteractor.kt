@@ -113,22 +113,108 @@ class SendMessageInteractor(
         )
         messageRepository.append(pending)
 
+        val recipients = recipientInboxKeysFor(group, myBlsHex)
+        val finalStatus = try {
+            val successCount = fanOut(payload, recipients)
+            if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT
+            else MessageStatus.FAILED
+        } catch (e: EncodingException) {
+            messageRepository.updateStatus(messageId, MessageStatus.FAILED)
+            throw SendMessageError.EncodingFailed(e.message ?: e.javaClass.simpleName)
+        }
+        messageRepository.updateStatus(messageId, finalStatus)
+
+        pending.copy(status = finalStatus)
+    }
+
+    /**
+     * Retry a previously-failed outgoing message. No-op (silent) for
+     * unknown / non-failed / non-outgoing rows — closes the
+     * double-delivery hole where a tap on a row that already flipped
+     * to SENT (status-flip race vs UI) would ship a second envelope.
+     *
+     * On a valid retry:
+     *  1. Flip status to PENDING immediately so the UI glyph swaps
+     *     to the in-flight clock before any network work.
+     *  2. Re-fan-out using the **original** payload fields (same
+     *     messageId + body + sentAtMillis) so receivers' dispatcher
+     *     dedup against any prior delivery
+     *     (`MessageRepository.append`'s id-keyed `IGNORE` strategy
+     *     handles this on the receive side).
+     *  3. Flip to SENT / FAILED on completion.
+     *
+     * Mirrors `SendMessageInteractor.retry(groupID:messageID:)` from
+     * onym-ios PR #155.
+     */
+    suspend fun retry(groupId: String, messageId: java.util.UUID) = withContext(ioDispatcher) {
+        val message = messageRepository.findById(messageId) ?: return@withContext
+        if (message.direction != MessageDirection.OUTGOING) return@withContext
+        if (message.status != MessageStatus.FAILED) return@withContext
+        if (message.groupId != groupId) return@withContext
+
+        val activeIdentityId = activeIdentity.currentIdentityId.value ?: return@withContext
+        val activeSummary = identitiesFlow.value.firstOrNull { it.id == activeIdentityId }
+            ?: return@withContext
+        val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
+            ?: return@withContext
+        val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
+        if (group.memberProfiles[myBlsHex] == null) return@withContext
+
+        // Re-derive the variant from the message's stored group type.
+        // Same governance gating as send — anything but Tyranny is
+        // silently dropped today; retry follows the same posture.
+        val variant: ChatMessageVariant = when (message.groupType) {
+            SepGroupType.TYRANNY -> ChatMessageVariant.Tyranny(body = message.body)
+            else -> return@withContext
+        }
+
+        // Flip to PENDING immediately so the glyph swaps to the
+        // in-flight clock before the network round-trip.
+        messageRepository.updateStatus(messageId, MessageStatus.PENDING)
+
+        // Preserve the original messageId + sentAt so receivers
+        // dedup against any prior delivery via their dispatcher.
+        val payload = ChatMessagePayload(
+            version = 1,
+            messageId = messageId,
+            groupId = group.groupIdBytes,
+            senderBlsPubkeyHex = myBlsHex,
+            sentAtMillis = message.sentAtMillis,
+            variant = variant,
+        )
+        val recipients = recipientInboxKeysFor(group, myBlsHex)
+        val finalStatus = try {
+            val successCount = fanOut(payload, recipients)
+            if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT
+            else MessageStatus.FAILED
+        } catch (_: EncodingException) {
+            MessageStatus.FAILED
+        }
+        messageRepository.updateStatus(messageId, finalStatus)
+    }
+
+    /**
+     * Encode the payload once and seal+ship per recipient. Returns
+     * the count of recipients whose envelope was accepted by at
+     * least one relay. Best-effort per recipient — a thrown
+     * seal/send for one peer is logged-by-silence and the loop
+     * moves on, mirroring [send]'s pre-extraction behavior.
+     *
+     * Throws [EncodingException] if the payload itself can't be
+     * encoded (a programmer error — `Data`-keyed fields can't fail
+     * at JSON encode). Callers flip the message's status to FAILED
+     * and surface the error appropriately.
+     */
+    private suspend fun fanOut(
+        payload: ChatMessagePayload,
+        recipients: List<ByteArray>,
+    ): Int {
         val payloadBytes = try {
             jsonFormat.encodeToString(ChatMessagePayload.serializer(), payload)
                 .toByteArray(Charsets.UTF_8)
         } catch (e: Throwable) {
-            messageRepository.updateStatus(messageId, MessageStatus.FAILED)
-            throw SendMessageError.EncodingFailed(e.message ?: e.javaClass.simpleName)
+            throw EncodingException(e.message ?: e.javaClass.simpleName)
         }
-
-        // Fan out to every member's inbox except our own. Best-effort
-        // per recipient — one failed send doesn't doom the whole
-        // message; we flip to SENT if at least one relay accepted
-        // any envelope.
-        val recipients = group.memberProfiles
-            .filterKeys { it != myBlsHex }
-            .map { (_, profile) -> profile.inboxPublicKey }
-
         var successCount = 0
         for (inboxKey in recipients) {
             val sealed = try {
@@ -144,14 +230,17 @@ class SendMessageInteractor(
             }
             if (receipt.acceptedBy >= 1) successCount++
         }
-
-        val finalStatus =
-            if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT
-            else MessageStatus.FAILED
-        messageRepository.updateStatus(messageId, finalStatus)
-
-        pending.copy(status = finalStatus)
+        return successCount
     }
+
+    private fun recipientInboxKeysFor(
+        group: app.onym.android.group.ChatGroup,
+        selfBlsHex: String,
+    ): List<ByteArray> = group.memberProfiles
+        .filterKeys { it != selfBlsHex }
+        .map { (_, profile) -> profile.inboxPublicKey }
+
+    private class EncodingException(message: String) : Exception(message)
 
     private companion object {
         private val jsonFormat = Json { encodeDefaults = true }

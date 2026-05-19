@@ -32,6 +32,7 @@ class ChatThreadViewModel(
     private val groupRepository: GroupRepository,
     private val messageRepository: MessageRepository,
     private val sendMessage: suspend (groupId: String, body: String) -> Unit,
+    private val retryMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
 ) : ViewModel() {
 
     /** Latest snapshot of the [ChatGroup] this thread renders.
@@ -92,4 +93,23 @@ class ChatThreadViewModel(
     }
 
     fun clearError() { _lastSendError.value = null }
+
+    /**
+     * Fire-and-forget retry on a previously-failed outgoing message.
+     * No-op (silent) for unknown / non-failed / non-outgoing ids —
+     * the interactor's [SendMessageInteractor.retry] enforces the
+     * same gates. Failures during the retry's network round-trip
+     * land back as `MessageStatus.FAILED` on the same row, which the
+     * bubble's status glyph reflects naturally.
+     */
+    fun retry(messageId: java.util.UUID) {
+        viewModelScope.launch {
+            try {
+                retryMessage(groupId, messageId)
+            } catch (_: Throwable) {
+                // Retry is silent — any thrown error from the
+                // interactor surfaces as FAILED on the row instead.
+            }
+        }
+    }
 }
