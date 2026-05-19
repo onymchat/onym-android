@@ -3,6 +3,12 @@ package app.onym.android.inbox
 import app.onym.android.chain.ChainStateReading
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
+import app.onym.android.chats.ChatMessage
+import app.onym.android.chats.ChatMessagePayload
+import app.onym.android.chats.ChatMessageVariant
+import app.onym.android.chats.MessageDirection
+import app.onym.android.chats.MessageRepository
+import app.onym.android.chats.MessageStatus
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupCommitmentBuilder
 import app.onym.android.group.GroupInvitationPayload
@@ -46,6 +52,14 @@ class IncomingMessageDispatcher(
     private val envelopeDecrypter: InvitationEnvelopeDecrypter,
     private val groupRepository: GroupRepository,
     private val invitationsRepository: IncomingInvitationsRepository,
+    /** Persistence target for incoming chat messages. The dispatcher
+     *  looks up the sender's [MemberProfile.sendingPubkey], verifies
+     *  the envelope's Ed25519 signer matches, and persists via
+     *  [MessageRepository.append] (idempotent on
+     *  [ChatMessage.id] so Nostr re-delivery is a no-op).
+     *  Optional so existing dispatcher tests that don't exercise the
+     *  chat-message path can keep their construction sites unchanged. */
+    private val messageRepository: MessageRepository? = null,
     /** Receiver's own identities, keyed by [IdentityId]. The PR-83
      *  invitation fast-path looks up the recipient's
      *  [IdentitySummary] here to backfill their own
@@ -96,6 +110,21 @@ class IncomingMessageDispatcher(
         val invitation = tryDecodeInvitation(envelope.plaintext)
         if (invitation != null) {
             materializeGroup(invitation, ownerIdentityId, envelope.senderEd25519PublicKey)
+            return
+        }
+
+        // Fast path: ChatMessagePayload — body of the chat thread.
+        // Verifies the envelope's Ed25519 signer matches the claimed
+        // sender's [MemberProfile.sendingPubkey] (insider-spoof
+        // defense, PR A3) then persists via [messageRepository].
+        val chatMessage = tryDecodeChatMessage(envelope.plaintext)
+        if (chatMessage != null) {
+            persistChatMessage(
+                payload = chatMessage,
+                ownerIdentityId = ownerIdentityId,
+                senderEd25519PublicKey = envelope.senderEd25519PublicKey,
+                receivedAt = receivedAt,
+            )
             return
         }
 
@@ -279,6 +308,87 @@ class IncomingMessageDispatcher(
         )
     } catch (_: Throwable) {
         null
+    }
+
+    private fun tryDecodeChatMessage(bytes: ByteArray): ChatMessagePayload? = try {
+        permissiveJson.decodeFromString(
+            ChatMessagePayload.serializer(),
+            bytes.toString(Charsets.UTF_8),
+        )
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
+     * Persist an inbound chat message after running the full trust
+     * chain. Drops silently (no fall-through) on any failure — the
+     * envelope decrypted to a well-formed chat payload, so it isn't
+     * a legacy-queue safety-net candidate.
+     *
+     * Trust chain:
+     *   1. Envelope must have been signed
+     *      ([senderEd25519PublicKey] non-null). Anonymous chat
+     *      messages aren't part of the V1 trust model.
+     *   2. Group lookup: payload's `groupId` must map to a local
+     *      [ChatGroup] owned by [ownerIdentityId]. Goes through
+     *      [GroupRepository.findForOwner] so the lookup is correct
+     *      even when [ownerIdentityId] isn't the currently-active
+     *      identity (multi-identity inbox fan-out delivers messages
+     *      to each identity's tag independently).
+     *   3. Sender lookup: payload's `senderBlsPubkeyHex` must
+     *      resolve to a known [MemberProfile] on the group.
+     *   4. Insider-spoof check: the envelope's verified Ed25519
+     *      signer must bytes-equal that member's stored
+     *      [MemberProfile.sendingPubkey]. Closes the gap PR A3 set
+     *      up; without this, any group member could write another
+     *      member's BLS hex into the payload and the receiver would
+     *      mis-attribute.
+     *   5. Variant gate: the payload's variant must match the
+     *      group's [ChatGroup.groupType] — a Tyranny group can't
+     *      receive a 1-on-1-shaped variant.
+     *   6. Persist via [MessageRepository.append] — idempotent on
+     *      [ChatMessage.id] so Nostr re-delivery of the same wire
+     *      `messageId` is a no-op.
+     */
+    private suspend fun persistChatMessage(
+        payload: ChatMessagePayload,
+        ownerIdentityId: IdentityId,
+        senderEd25519PublicKey: ByteArray?,
+        receivedAt: Instant,
+    ) {
+        val messages = messageRepository ?: return
+        val signerPubkey = senderEd25519PublicKey ?: return
+        val groupIdHex = payload.groupId.toHexLowercase()
+        val group = groupRepository.findForOwner(ownerIdentityId.value, groupIdHex) ?: return
+        val claimedSenderHex = payload.senderBlsPubkeyHex.lowercase()
+        val profile = group.memberProfiles[claimedSenderHex] ?: return
+        if (!profile.sendingPubkey.contentEquals(signerPubkey)) return
+        if (!variantMatchesGroup(payload.variant, group.groupType)) return
+
+        val body = payload.variant.body
+        val message = ChatMessage(
+            id = payload.messageId,
+            groupId = groupIdHex,
+            ownerIdentityId = ownerIdentityId.value,
+            senderBlsPubkeyHex = claimedSenderHex,
+            body = body,
+            sentAtMillis = payload.sentAtMillis,
+            direction = MessageDirection.INCOMING,
+            status = MessageStatus.RECEIVED,
+            groupType = group.groupType,
+        )
+        // Use the receivedAt timestamp only for the "ordering by
+        // arrival" UI follow-up — wire `sentAtMillis` is the
+        // canonical sort key today.
+        @Suppress("UNUSED_VARIABLE") val _receivedAt = receivedAt
+        messages.append(message)
+    }
+
+    private fun variantMatchesGroup(
+        variant: ChatMessageVariant,
+        groupType: SepGroupType,
+    ): Boolean = when (variant) {
+        is ChatMessageVariant.Tyranny -> groupType == SepGroupType.TYRANNY
     }
 
     /**

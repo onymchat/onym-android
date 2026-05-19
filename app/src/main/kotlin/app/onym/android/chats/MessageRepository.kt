@@ -95,12 +95,19 @@ class MessageRepository(
 
     /**
      * Persist [message] and emit on the corresponding group's
-     * cached flow. No-op (other than the store write) if no
-     * subscriber has ever opened [snapshots] for this group.
+     * cached flow. Idempotent on [ChatMessage.id] — a re-delivery
+     * (same wire `messageId`) is a no-op: returns `false`, skips the
+     * cache refresh, no subscriber re-emission. Returns `true` on a
+     * fresh insert.
+     *
+     * Cache refresh is conditional so a duplicate-arrival storm
+     * doesn't spam every chat-thread subscriber with redundant
+     * StateFlow emissions.
      */
-    suspend fun append(message: ChatMessage) = mutex.withLock {
-        store.insert(message)
-        refreshGroupLocked(message.ownerIdentityId, message.groupId)
+    suspend fun append(message: ChatMessage): Boolean = mutex.withLock {
+        val inserted = store.insert(message)
+        if (inserted) refreshGroupLocked(message.ownerIdentityId, message.groupId)
+        inserted
     }
 
     /**
