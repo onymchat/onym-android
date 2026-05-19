@@ -34,13 +34,11 @@ class InMemoryMessageStore : MessageStore {
             .sortedBy { it.sentAtMillis }
     }
 
-    override suspend fun insert(message: ChatMessage) {
-        mutex.withLock {
-            check(!rows.containsKey(message.id.toString())) {
-                "duplicate message id ${message.id}"
-            }
-            rows[message.id.toString()] = message
-        }
+    override suspend fun insert(message: ChatMessage): Boolean = mutex.withLock {
+        val key = message.id.toString()
+        if (rows.containsKey(key)) return@withLock false
+        rows[key] = message
+        true
     }
 
     override suspend fun updateStatus(id: UUID, status: MessageStatus) {

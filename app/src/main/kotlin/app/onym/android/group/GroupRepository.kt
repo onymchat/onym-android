@@ -114,6 +114,20 @@ class GroupRepository(
         refreshLocked(identity.currentIdentityId.value)
     }
 
+    /**
+     * Cross-identity lookup. Returns the [ChatGroup] owned by
+     * [ownerIdentityId] with hex [groupId] (matched against
+     * [ChatGroup.id]), or `null` if no such row exists. Reads
+     * directly from the store — bypasses the active-identity filter
+     * on [snapshots] so an inbox dispatcher can route an incoming
+     * payload to the correct identity's group even when that
+     * identity isn't the currently-selected one.
+     */
+    suspend fun findForOwner(ownerIdentityId: String, groupId: String): ChatGroup? =
+        mutex.withLock {
+            store.listForOwner(ownerIdentityId).firstOrNull { it.id == groupId }
+        }
+
     private suspend fun refreshLocked(activeId: IdentityId?) {
         _snapshots.value = if (activeId == null) {
             emptyList()
