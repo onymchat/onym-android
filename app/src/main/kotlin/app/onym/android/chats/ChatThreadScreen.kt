@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Info
@@ -19,36 +22,38 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * Compose chat-thread screen. Tapping a group in the Chats tab
- * opens this destination; the members list moves one tap deeper
- * behind the info action in the top bar.
+ * opens this destination; the members list is one tap deeper behind
+ * the info action in the top bar.
  *
- * Skeleton only — the message list and input panel are placeholders
- * that the next PR fills in (custom bubble cells, auto-scroll,
- * keyboard avoidance, send wiring through [ChatThreadViewModel.send]).
+ * Read-only message scrollback lands in this PR: bubble-rendered
+ * messages stream from [ChatThreadViewModel.messages] through a
+ * `LazyColumn` keyed by message id, with cold-open scroll-to-bottom
+ * and only-when-near-bottom auto-scroll on new arrivals so reading
+ * older messages doesn't get hijacked. Input panel + send button
+ * stays a placeholder — that's the next PR.
  *
- * The data plumbing is already in place via [ChatThreadViewModel]:
- * the screen collects [ChatThreadViewModel.messages] and
- * [ChatThreadViewModel.group] so when the rendering lands later it's
- * a UI-only diff.
- *
- * Mirrors `ChatThreadView.swift` from onym-ios PR #151 — same nav
- * surface (back + group name + info), same placeholder posture.
- * Diverges from iOS in being a single Compose composable rather
- * than a UIViewControllerRepresentable wrapping a UIKit
- * controller — Compose's nav-bar primitives + diffable LazyColumn
- * cover what iOS needed UIKit for, with no SwiftUI/UIKit-bridge tax.
+ * Mirrors `ChatThreadView.swift` from onym-ios PR #152. iOS uses a
+ * UIKit controller + `UITableViewDiffableDataSource`; Compose's
+ * `LazyColumn(items, key = ...)` covers the same data-diff
+ * concerns. The "scroll on cold open + only when near bottom"
+ * heuristic mirrors the iOS controller's logic in
+ * [shouldAutoScrollOnAppend].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,49 +104,137 @@ fun ChatThreadScreen(
             MissingGroup(padding = padding)
         } else {
             ChatThreadBody(
-                messageCount = messages.size,
+                messages = messages,
                 padding = padding,
             )
         }
     }
 }
 
-/** Empty placeholder body — message rendering + input panel land in
- *  the next PR. Surfaces the message count so the data plumbing is
- *  visibly wired through to the screen during the skeleton slice. */
 @Composable
 private fun ChatThreadBody(
-    messageCount: Int,
+    messages: List<ChatMessage>,
     padding: PaddingValues,
 ) {
+    val listState = rememberLazyListState()
+    // Defensive sort. The repository's contract is ascending by
+    // sentAtMillis, but a future caller / test stub regressing
+    // the order shouldn't surface as a visibly-misordered chat.
+    // Mirrors the iOS PR #152 fixup that added the same guard at
+    // the controller boundary.
+    val sortedMessages = remember(messages) {
+        messages.sortedBy { it.sentAtMillis }
+    }
+
+    // Auto-scroll behavior:
+    //   - cold open: jump to the latest message (no animation).
+    //   - subsequent appends: only scroll if the user was already
+    //     near the bottom (otherwise reading older messages would
+    //     get hijacked).
+    var hasInitialScrolled by remember { mutableStateOf(false) }
+    val nearBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val total = info.totalItemsCount
+            val lastVisibleIndex = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            isNearBottom(
+                totalItems = total,
+                lastVisibleIndex = lastVisibleIndex,
+            )
+        }
+    }
+    LaunchedEffect(sortedMessages.size) {
+        if (sortedMessages.isEmpty()) return@LaunchedEffect
+        val lastIndex = sortedMessages.lastIndex
+        if (!hasInitialScrolled) {
+            listState.scrollToItem(lastIndex)
+            hasInitialScrolled = true
+            return@LaunchedEffect
+        }
+        if (nearBottom) {
+            listState.animateScrollToItem(lastIndex)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
             .testTag("chat_thread.body"),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = if (messageCount == 0) {
-                    "No messages yet. Bubbles render in the next PR."
-                } else {
-                    "$messageCount message${if (messageCount == 1) "" else "s"} — rendering lands in the next PR."
-                },
-                fontSize = 13.sp,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        if (sortedMessages.isEmpty()) {
+            EmptyThread(
                 modifier = Modifier
-                    .padding(horizontal = 32.dp)
-                    .testTag("chat_thread.placeholder_text"),
+                    .fillMaxWidth()
+                    .weight(1f),
             )
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .testTag("chat_thread.message_list"),
+                contentPadding = PaddingValues(vertical = 8.dp),
+            ) {
+                // key = { it.id } keeps slot identity stable across
+                // recompositions; status flips re-render the bubble
+                // body because ChatMessage's equals() compares all
+                // fields. The iOS twin needed an explicit
+                // diffable-identity widen via reconfigureItems for
+                // the same property — Compose gives it for free.
+                items(
+                    items = sortedMessages,
+                    key = { it.id },
+                ) { message ->
+                    ChatBubble(message = message)
+                }
+            }
         }
         HorizontalDivider(thickness = 0.5.dp)
         InputPanelPlaceholder()
+    }
+}
+
+/**
+ * Heuristic for "is the user effectively scrolled to the bottom"
+ * — true when the last visible item index is within the threshold
+ * of the last item, or when the list is empty. Pure function so a
+ * unit test exercises the policy without standing up a
+ * `LazyListState` (which requires Compose's compositor).
+ *
+ * Wire-equivalent to the iOS controller's
+ * `contentOffset.y + frame.height >= contentSize.height - 100`
+ * check — same threshold semantics, expressed in item indices
+ * since Compose's LazyListState doesn't expose pixel offsets at
+ * the public API.
+ */
+internal fun isNearBottom(
+    totalItems: Int,
+    lastVisibleIndex: Int,
+    nearBottomThreshold: Int = NEAR_BOTTOM_INDEX_THRESHOLD,
+): Boolean {
+    if (totalItems == 0) return true
+    if (lastVisibleIndex < 0) return false
+    return lastVisibleIndex >= totalItems - nearBottomThreshold
+}
+
+/** Items-from-bottom window that counts as "near the bottom" for
+ *  the auto-scroll heuristic. 2 = the user is reading the last or
+ *  second-to-last message. */
+internal const val NEAR_BOTTOM_INDEX_THRESHOLD = 2
+
+@Composable
+private fun EmptyThread(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.testTag("chat_thread.empty"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "No messages yet. Say hi.",
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
