@@ -94,6 +94,13 @@ class MessageRepository(
     }
 
     /**
+     * Look up one message by id. Goes through the store, not the
+     * cache, so the retry-on-failed path doesn't depend on the chat
+     * thread being currently subscribed.
+     */
+    suspend fun findById(id: UUID): ChatMessage? = store.findById(id)
+
+    /**
      * Persist [message] and emit on the corresponding group's
      * cached flow. Idempotent on [ChatMessage.id] — a re-delivery
      * (same wire `messageId`) is a no-op: returns `false`, skips the

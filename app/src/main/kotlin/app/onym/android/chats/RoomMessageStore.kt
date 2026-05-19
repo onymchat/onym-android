@@ -31,6 +31,10 @@ class RoomMessageStore(
         dao.listForOwnerAndGroup(ownerIdentityId, groupId).mapNotNull(::decode)
     }
 
+    override suspend fun findById(id: UUID): ChatMessage? = withContext(ioDispatcher) {
+        dao.findById(id.toString())?.let(::decode)
+    }
+
     override suspend fun insert(message: ChatMessage): Boolean =
         withContext(ioDispatcher) {
             // OnConflictStrategy.IGNORE returns -1 on a PK clash.

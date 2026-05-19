@@ -106,6 +106,7 @@ fun ChatThreadScreen(
                 messages = messages,
                 padding = padding,
                 onSend = viewModel::send,
+                onRetry = viewModel::retry,
             )
         }
     }
@@ -116,6 +117,7 @@ private fun ChatThreadBody(
     messages: List<ChatMessage>,
     padding: PaddingValues,
     onSend: (String) -> Unit,
+    onRetry: (java.util.UUID) -> Unit,
 ) {
     val listState = rememberLazyListState()
     // Defensive sort. The repository's contract is ascending by
@@ -189,7 +191,10 @@ private fun ChatThreadBody(
                     items = sortedMessages,
                     key = { it.id },
                 ) { message ->
-                    ChatBubble(message = message)
+                    ChatBubble(
+                        message = message,
+                        onRetry = { onRetry(message.id) },
+                    )
                 }
             }
         }
