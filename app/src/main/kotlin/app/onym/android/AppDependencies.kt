@@ -2,6 +2,7 @@ package app.onym.android
 
 import androidx.fragment.app.FragmentActivity
 import app.onym.android.chain.NetworkPreferenceProvider
+import app.onym.android.chats.ChatThreadViewModel
 import app.onym.android.chats.ChatsViewModel
 import app.onym.android.group.CreateGroupViewModel
 import app.onym.android.recovery.RecoveryPhraseBackupViewModel
@@ -45,6 +46,12 @@ class AppDependencies(
     /** Chats tab — read-only view over [app.onym.android.group.GroupRepository.snapshots].
      *  Mirrors `makeChatsFlow` from onym-ios PR #30. */
     val makeChatsViewModel: () -> ChatsViewModel,
+    /** Chat-thread screen factory — takes the path-arg `groupId` so
+     *  the VM can subscribe to that group's [app.onym.android.chats.MessageRepository.snapshots]
+     *  stream and dispatch sends via the captured [SendMessageInteractor].
+     *  Mirrors the UIViewControllerRepresentable bridge factory from
+     *  onym-ios PR #151, Android-idiomatic types. */
+    val makeChatThreadViewModel: (groupId: String) -> ChatThreadViewModel,
     /** Settings → Identities — multi-identity management (PR-5). */
     val makeIdentitiesViewModel: () -> app.onym.android.identity.IdentitiesViewModel,
     /** Post-create deeplink invite share (deeplink-invite PR-5). */
