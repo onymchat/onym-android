@@ -165,6 +165,24 @@ fun RootScreen(
                     approveRequestsViewModel = dependencies.approveRequestsViewModel,
                     onOpenApproveRequests = { navController.navigate(ROUTE_APPROVE_REQUESTS) },
                     onOpenChat = { groupId ->
+                        // PR A5: chats list now opens the thread,
+                        // not the members roster. Members move one
+                        // tap deeper behind the thread's info button.
+                        navController.navigate("chat_thread/$groupId")
+                    },
+                )
+            }
+            composable("chat_thread/{groupId}") { entry ->
+                val groupId = entry.arguments?.getString("groupId") ?: return@composable
+                val vm: app.onym.android.chats.ChatThreadViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeChatThreadViewModel(groupId) }
+                    },
+                )
+                app.onym.android.chats.ChatThreadScreen(
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onShowMembers = {
                         navController.navigate("chat_members/$groupId")
                     },
                 )
