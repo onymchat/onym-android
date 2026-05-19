@@ -68,9 +68,9 @@ fun ChatThreadScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = group?.name ?: "Chat",
-                        modifier = Modifier.testTag("chat_thread.title"),
+                    ChatThreadTitle(
+                        name = group?.name ?: "Chat",
+                        memberCount = group?.memberProfiles?.size ?: 0,
                     )
                 },
                 navigationIcon = {
@@ -250,6 +250,50 @@ private fun EmptyThread(modifier: Modifier = Modifier) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/**
+ * Two-line nav title: group name on top, "N members" subtitle
+ * below. Subtitle is hidden when [memberCount] is `<= 1` — singleton
+ * groups (just the creator) and not-yet-loaded groups would render
+ * an awkward "0 members" / "1 member" otherwise. Same hide-gate as
+ * iOS PR #156.
+ */
+@Composable
+private fun ChatThreadTitle(
+    name: String,
+    memberCount: Int,
+) {
+    val subtitle = memberCountSubtitle(memberCount)
+    Column(
+        modifier = Modifier.testTag("chat_thread.title"),
+    ) {
+        Text(
+            text = name,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        if (subtitle != null) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("chat_thread.title_subtitle"),
+            )
+        }
+    }
+}
+
+/**
+ * Subtitle string for the chat-thread nav. Pluralized as "N members"
+ * because the `<= 1` gate guarantees we never render the singular
+ * form. Pure function so the unit test pins the gate + format
+ * without standing up Compose.
+ *
+ * Mirrors `subtitle(forMemberCount:)` from onym-ios PR #156.
+ */
+internal fun memberCountSubtitle(memberCount: Int): String? = when {
+    memberCount <= 1 -> null
+    else -> "$memberCount members"
 }
 
 @Composable
