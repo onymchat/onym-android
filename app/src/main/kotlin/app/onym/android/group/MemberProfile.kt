@@ -35,11 +35,39 @@ data class MemberProfile(
     @SerialName("inbox_public_key")
     @Serializable(with = Base64ByteArraySerializer::class)
     val inboxPublicKey: ByteArray,
+    /**
+     * 32-byte Ed25519 envelope-signing pubkey. Matches
+     * [app.onym.android.identity.Identity.stellarPublicKey] — the
+     * key the receiver verifies sealed envelopes against. Plumbed
+     * end-to-end through the join + invite flows (PR A3) so PR A4's
+     * chat dispatcher can match a chat envelope's signature against
+     * the claimed [senderBlsPubkeyHex] member with one direct
+     * equality check, closing the insider-spoofing gap a malicious
+     * group member could otherwise exploit.
+     */
+    @SerialName("sending_pubkey")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val sendingPubkey: ByteArray,
 ) {
+    init {
+        require(inboxPublicKey.size == 32) {
+            "inboxPublicKey: expected 32 bytes, got ${inboxPublicKey.size}"
+        }
+        require(sendingPubkey.size == 32) {
+            "sendingPubkey: expected 32 bytes, got ${sendingPubkey.size}"
+        }
+    }
+
     override fun equals(other: Any?): Boolean = this === other ||
         (other is MemberProfile &&
             alias == other.alias &&
-            inboxPublicKey.contentEquals(other.inboxPublicKey))
+            inboxPublicKey.contentEquals(other.inboxPublicKey) &&
+            sendingPubkey.contentEquals(other.sendingPubkey))
 
-    override fun hashCode(): Int = 31 * alias.hashCode() + inboxPublicKey.contentHashCode()
+    override fun hashCode(): Int {
+        var h = alias.hashCode()
+        h = 31 * h + inboxPublicKey.contentHashCode()
+        h = 31 * h + sendingPubkey.contentHashCode()
+        return h
+    }
 }

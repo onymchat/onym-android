@@ -21,9 +21,9 @@ class ChatGroupMemberProfilesTest {
 
     @Test
     fun equalityConsidersMemberProfiles() {
-        val a = makeGroup(memberProfiles = mapOf("aa" to MemberProfile("X", ByteArray(32))))
-        val b = makeGroup(memberProfiles = mapOf("aa" to MemberProfile("Y", ByteArray(32))))
-        val c = makeGroup(memberProfiles = mapOf("aa" to MemberProfile("X", ByteArray(32))))
+        val a = makeGroup(memberProfiles = mapOf("aa" to MemberProfile("X", ByteArray(32), ByteArray(32))))
+        val b = makeGroup(memberProfiles = mapOf("aa" to MemberProfile("Y", ByteArray(32), ByteArray(32))))
+        val c = makeGroup(memberProfiles = mapOf("aa" to MemberProfile("X", ByteArray(32), ByteArray(32))))
         assertNotEquals(a, b)
         assertEquals(a, c)
         assertEquals(a.hashCode(), c.hashCode())

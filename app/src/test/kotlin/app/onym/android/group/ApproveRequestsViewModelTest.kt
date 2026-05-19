@@ -131,6 +131,7 @@ class ApproveRequestsViewModelTest {
         id = id,
         joinerInboxPublicKey = ByteArray(32),
         joinerBlsPublicKey = null,
+        joinerSendingPublicKey = ByteArray(32),
         joinerDisplayLabel = "Bob",
         groupId = ByteArray(32),
         groupName = "Family",

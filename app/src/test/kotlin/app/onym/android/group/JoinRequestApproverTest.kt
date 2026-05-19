@@ -85,6 +85,7 @@ class JoinRequestApproverTest {
         id = id,
         joinerInboxPublicKey = ByteArray(32) { 0x22 },
         joinerBlsPublicKey = blsPub,
+        joinerSendingPublicKey = ByteArray(32) { 0x55 },
         joinerDisplayLabel = "Bob",
         groupId = ByteArray(32) { 0x33 },
         groupName = groupName,

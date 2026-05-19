@@ -57,7 +57,11 @@ class GroupInvitationPayloadTest {
 
     @Test
     fun roundtrip_memberProfilesField_preservesEntries() {
-        val profile = MemberProfile(alias = "Alice", inboxPublicKey = ByteArray(32) { 0xAB.toByte() })
+        val profile = MemberProfile(
+            alias = "Alice",
+            inboxPublicKey = ByteArray(32) { 0xAB.toByte() },
+            sendingPubkey = ByteArray(32) { 0xCD.toByte() },
+        )
         val original = GroupInvitationPayload(
             version = 1,
             groupId = ByteArray(32),

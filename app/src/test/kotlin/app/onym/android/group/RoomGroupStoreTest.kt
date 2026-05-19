@@ -216,6 +216,7 @@ class RoomGroupStoreTest {
         val profile = MemberProfile(
             alias = "Alice",
             inboxPublicKey = ByteArray(32) { 0x77 },
+            sendingPubkey = ByteArray(32) { 0x66 },
         )
         val group = makeGroup(
             id = "fa".repeat(32),

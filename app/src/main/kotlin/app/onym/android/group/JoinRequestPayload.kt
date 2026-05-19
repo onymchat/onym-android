@@ -53,6 +53,18 @@ data class JoinRequestPayload(
     @SerialName("joiner_leaf_hash")
     @Serializable(with = Base64ByteArraySerializer::class)
     val joinerLeafHash: ByteArray? = null,
+    /**
+     * 32-byte Ed25519 envelope-signing pubkey
+     * (== [app.onym.android.identity.Identity.stellarPublicKey]).
+     * **Required, hard-cutover** — no migration window for chat
+     * (no installed base of join requests). The admin records this
+     * on the joiner's [MemberProfile] so PR A4's chat dispatcher
+     * can verify the joiner's chat envelope signatures against the
+     * claimed BLS sender, closing the insider-spoofing gap.
+     */
+    @SerialName("joiner_sending_pub")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val joinerSendingPublicKey: ByteArray,
     @SerialName("joiner_display_label")
     val joinerDisplayLabel: String,
     @SerialName("group_id")
@@ -73,6 +85,9 @@ data class JoinRequestPayload(
                 "joinerLeafHash: expected 32 bytes, got ${it.size}"
             }
         }
+        require(joinerSendingPublicKey.size == 32) {
+            "joinerSendingPublicKey: expected 32 bytes, got ${joinerSendingPublicKey.size}"
+        }
         require(groupId.size == 32) {
             "groupId: expected 32 bytes, got ${groupId.size}"
         }
@@ -86,6 +101,7 @@ data class JoinRequestPayload(
                 ?: (other.joinerBlsPublicKey == null)) &&
             (joinerLeafHash?.contentEquals(other.joinerLeafHash)
                 ?: (other.joinerLeafHash == null)) &&
+            joinerSendingPublicKey.contentEquals(other.joinerSendingPublicKey) &&
             joinerDisplayLabel == other.joinerDisplayLabel &&
             groupId.contentEquals(other.groupId)
     }
@@ -94,6 +110,7 @@ data class JoinRequestPayload(
         var h = joinerInboxPublicKey.contentHashCode()
         h = 31 * h + (joinerBlsPublicKey?.contentHashCode() ?: 0)
         h = 31 * h + (joinerLeafHash?.contentHashCode() ?: 0)
+        h = 31 * h + joinerSendingPublicKey.contentHashCode()
         h = 31 * h + joinerDisplayLabel.hashCode()
         h = 31 * h + groupId.contentHashCode()
         return h
