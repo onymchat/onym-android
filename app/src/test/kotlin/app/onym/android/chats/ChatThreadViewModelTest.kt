@@ -176,6 +176,36 @@ class ChatThreadViewModelTest {
         assertNull(vm.lastSendError.value)
     }
 
+    // ─── retry action ────────────────────────────────────────────
+
+    @Test
+    fun retry_delegatesToInteractorClosureWithGroupIdAndMessageId() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val captured = mutableListOf<Pair<String, UUID>>()
+        val vm = fixture.makeViewModel(
+            retry = { gid, id -> captured.add(gid to id) },
+        )
+
+        val targetId = UUID.randomUUID()
+        vm.retry(targetId)
+
+        assertEquals(1, captured.size)
+        assertEquals(groupIdHex to targetId, captured.single())
+    }
+
+    @Test
+    fun retry_swallowsInteractorErrors() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val vm = fixture.makeViewModel(
+            retry = { _, _ -> throw RuntimeException("transport down") },
+        )
+        // Must not propagate — retry surfaces failures as
+        // MessageStatus.FAILED on the row, not via thrown exceptions.
+        vm.retry(UUID.randomUUID())
+    }
+
     // ─── helpers ─────────────────────────────────────────────────
 
     private fun sampleMessage(groupIdHex: String, body: String): ChatMessage = ChatMessage(
@@ -246,11 +276,13 @@ class ChatThreadViewModelTest {
 
         fun makeViewModel(
             send: suspend (String, String) -> Unit = { _, _ -> },
+            retry: suspend (String, UUID) -> Unit = { _, _ -> },
         ) = ChatThreadViewModel(
             groupId = groupIdHex,
             groupRepository = groupRepository,
             messageRepository = messageRepository,
             sendMessage = send,
+            retryMessage = retry,
         )
     }
 }
