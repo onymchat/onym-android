@@ -1,9 +1,12 @@
 package app.onym.android.group
 
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.MissingFieldException
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Base64
@@ -15,6 +18,7 @@ import java.util.Base64
  *
  * Mirrors `MemberAnnouncementPayloadTests.swift` from onym-ios.
  */
+@OptIn(ExperimentalSerializationApi::class)
 class MemberAnnouncementPayloadTest {
 
     private val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }
@@ -22,6 +26,7 @@ class MemberAnnouncementPayloadTest {
     private val groupId = ByteArray(32) { 0xAA.toByte() }
     private val blsPub = ByteArray(48) { 0xBB.toByte() }
     private val inboxPub = ByteArray(32) { 0xCC.toByte() }
+    private val sendingPub = ByteArray(32) { 0xDE.toByte() }
 
     @Test
     fun decode_v1WithoutCommitment() {
@@ -32,7 +37,8 @@ class MemberAnnouncementPayloadTest {
               "new_member": {
                 "bls_pub": "${b64(blsPub)}",
                 "inbox_pub": "${b64(inboxPub)}",
-                "alias": "Bob"
+                "alias": "Bob",
+                "sending_pub": "${b64(sendingPub)}"
               },
               "admin_alias": "Alice"
             }
@@ -44,6 +50,7 @@ class MemberAnnouncementPayloadTest {
         assertArrayEquals(groupId, decoded.groupId)
         assertArrayEquals(blsPub, decoded.newMember.blsPub)
         assertArrayEquals(inboxPub, decoded.newMember.inboxPub)
+        assertArrayEquals(sendingPub, decoded.newMember.sendingPub)
         assertEquals("Bob", decoded.newMember.alias)
         assertEquals("Alice", decoded.adminAlias)
         assertNull(decoded.commitment)
@@ -60,7 +67,8 @@ class MemberAnnouncementPayloadTest {
               "new_member": {
                 "bls_pub": "${b64(blsPub)}",
                 "inbox_pub": "${b64(inboxPub)}",
-                "alias": "Bob"
+                "alias": "Bob",
+                "sending_pub": "${b64(sendingPub)}"
               },
               "admin_alias": "Alice",
               "commitment": "${b64(commitment)}",
@@ -79,13 +87,14 @@ class MemberAnnouncementPayloadTest {
             version = 1,
             groupId = groupId,
             newMember = MemberAnnouncementPayload.AnnouncedMember(
-                blsPub = blsPub, inboxPub = inboxPub, alias = "Bob",
+                blsPub = blsPub, inboxPub = inboxPub, alias = "Bob", sendingPub = sendingPub,
             ),
             adminAlias = "Alice",
         )
         val text = json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
         assertTrue("snake_case key", text.contains("\"group_id\":"))
         assertTrue("snake_case bls", text.contains("\"bls_pub\":"))
+        assertTrue("snake_case sending_pub", text.contains("\"sending_pub\":"))
         assertTrue("commitment omitted", !text.contains("\"commitment\""))
         assertTrue("epoch omitted", !text.contains("\"epoch\""))
     }
@@ -97,7 +106,7 @@ class MemberAnnouncementPayloadTest {
             version = 1,
             groupId = groupId,
             newMember = MemberAnnouncementPayload.AnnouncedMember(
-                blsPub = blsPub, inboxPub = inboxPub, alias = "Bob",
+                blsPub = blsPub, inboxPub = inboxPub, alias = "Bob", sendingPub = sendingPub,
             ),
             adminAlias = "Alice",
             commitment = commitment,
@@ -114,7 +123,7 @@ class MemberAnnouncementPayloadTest {
             version = 1,
             groupId = ByteArray(31),
             newMember = MemberAnnouncementPayload.AnnouncedMember(
-                blsPub = blsPub, inboxPub = inboxPub, alias = "Bob",
+                blsPub = blsPub, inboxPub = inboxPub, alias = "Bob", sendingPub = sendingPub,
             ),
             adminAlias = "",
         )
@@ -123,15 +132,63 @@ class MemberAnnouncementPayloadTest {
     @Test(expected = IllegalArgumentException::class)
     fun rejectsBlsPubOfWrongLength() {
         MemberAnnouncementPayload.AnnouncedMember(
-            blsPub = ByteArray(47), inboxPub = inboxPub, alias = "Bob",
+            blsPub = ByteArray(47), inboxPub = inboxPub, alias = "Bob", sendingPub = sendingPub,
         )
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun rejectsInboxPubOfWrongLength() {
         MemberAnnouncementPayload.AnnouncedMember(
-            blsPub = blsPub, inboxPub = ByteArray(33), alias = "Bob",
+            blsPub = blsPub, inboxPub = ByteArray(33), alias = "Bob", sendingPub = sendingPub,
         )
+    }
+
+    // ─── sending_pub validation (PR A3) ───────────────────────────
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsSendingPubOfWrongLength() {
+        MemberAnnouncementPayload.AnnouncedMember(
+            blsPub = blsPub, inboxPub = inboxPub, alias = "Bob", sendingPub = ByteArray(31),
+        )
+    }
+
+    @Test
+    fun decode_rejectsMissingSendingPub() {
+        val text = """
+            {
+              "version": 1,
+              "group_id": "${b64(groupId)}",
+              "new_member": {
+                "bls_pub": "${b64(blsPub)}",
+                "inbox_pub": "${b64(inboxPub)}",
+                "alias": "Bob"
+              },
+              "admin_alias": "Alice"
+            }
+        """.trimIndent()
+        assertThrows(MissingFieldException::class.java) {
+            json.decodeFromString(MemberAnnouncementPayload.serializer(), text)
+        }
+    }
+
+    @Test
+    fun decode_rejectsWrongSizedSendingPub() {
+        val text = """
+            {
+              "version": 1,
+              "group_id": "${b64(groupId)}",
+              "new_member": {
+                "bls_pub": "${b64(blsPub)}",
+                "inbox_pub": "${b64(inboxPub)}",
+                "alias": "Bob",
+                "sending_pub": "${b64(ByteArray(31))}"
+              },
+              "admin_alias": "Alice"
+            }
+        """.trimIndent()
+        assertThrows(IllegalArgumentException::class.java) {
+            json.decodeFromString(MemberAnnouncementPayload.serializer(), text)
+        }
     }
 
     @Test
@@ -143,7 +200,8 @@ class MemberAnnouncementPayloadTest {
               "new_member": {
                 "bls_pub": "${b64(blsPub)}",
                 "inbox_pub": "${b64(inboxPub)}",
-                "alias": "Bob"
+                "alias": "Bob",
+                "sending_pub": "${b64(sendingPub)}"
               },
               "admin_alias": "Alice",
               "future_field_we_do_not_know": 99

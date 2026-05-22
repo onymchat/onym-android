@@ -22,14 +22,36 @@ data class IdentitySummary(
     /** 32-byte X25519 inbox pubkey. Same shape as
      *  [Identity.inboxPublicKey]. */
     val inboxPublicKey: ByteArray,
+    /**
+     * 32-byte Ed25519 envelope-signing pubkey. Same shape as
+     * [Identity.stellarPublicKey] — same key the receiver verifies
+     * sealed envelopes against. Plumbed into every wire-shipped
+     * profile so PR A4's chat dispatcher can match a chat envelope's
+     * sender to the claimed [app.onym.android.group.MemberProfile]
+     * with one direct equality check.
+     */
+    val sendingPublicKey: ByteArray,
 ) {
+    init {
+        require(blsPublicKey.size == 48) {
+            "blsPublicKey: expected 48 bytes, got ${blsPublicKey.size}"
+        }
+        require(inboxPublicKey.size == 32) {
+            "inboxPublicKey: expected 32 bytes, got ${inboxPublicKey.size}"
+        }
+        require(sendingPublicKey.size == 32) {
+            "sendingPublicKey: expected 32 bytes, got ${sendingPublicKey.size}"
+        }
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is IdentitySummary) return false
         return id == other.id &&
             name == other.name &&
             blsPublicKey.contentEquals(other.blsPublicKey) &&
-            inboxPublicKey.contentEquals(other.inboxPublicKey)
+            inboxPublicKey.contentEquals(other.inboxPublicKey) &&
+            sendingPublicKey.contentEquals(other.sendingPublicKey)
     }
 
     override fun hashCode(): Int {
@@ -37,6 +59,7 @@ data class IdentitySummary(
         h = 31 * h + name.hashCode()
         h = 31 * h + blsPublicKey.contentHashCode()
         h = 31 * h + inboxPublicKey.contentHashCode()
+        h = 31 * h + sendingPublicKey.contentHashCode()
         return h
     }
 }
