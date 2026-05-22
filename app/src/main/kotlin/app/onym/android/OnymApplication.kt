@@ -310,6 +310,36 @@ class OnymApplication : Application() {
         groupRepository.start()
         applicationScope.launch { groupRepository.reload() }
 
+        // Message persistence (PR A2 + A4). Separate @Database from
+        // GroupDatabase so a schema bump in either domain doesn't
+        // force a wipe of the other — exact mirror of the
+        // GroupDatabase comment's prediction. Same in-memory fallback
+        // posture as the groups DB: a corrupt on-disk file degrades
+        // to ephemeral storage rather than refusing to launch.
+        val messageDatabase = try {
+            androidx.room.Room.databaseBuilder(
+                applicationContext,
+                app.onym.android.chats.MessageDatabase::class.java,
+                "app.onym.android.messages",
+            )
+                .fallbackToDestructiveMigration()
+                .build()
+        } catch (_: Throwable) {
+            androidx.room.Room.inMemoryDatabaseBuilder(
+                applicationContext,
+                app.onym.android.chats.MessageDatabase::class.java,
+            ).build()
+        }
+        val messageRepository = app.onym.android.chats.MessageRepository(
+            store = app.onym.android.chats.RoomMessageStore(
+                dao = messageDatabase.messageDao(),
+                encryption = storageEncryption,
+            ),
+            identity = identityRepository,
+            scope = applicationScope,
+        )
+        messageRepository.start()
+
         // App-wide network preference (PR-C follow-up). Constructed
         // here (early) so PR-89's chainStateReader can read it.
         val networkPreference = DataStoreNetworkPreferenceProvider(
@@ -385,6 +415,7 @@ class OnymApplication : Application() {
             envelopeDecrypter = identityRepository,
             groupRepository = groupRepository,
             invitationsRepository = invitationsRepository,
+            messageRepository = messageRepository,
             identitiesFlow = identityRepository.identities,
             chainState = chainStateReader,
         )

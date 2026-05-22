@@ -19,10 +19,11 @@ interface MessageStore {
      *  the chat-thread read path. */
     suspend fun listForGroup(ownerIdentityId: String, groupId: String): List<ChatMessage>
 
-    /** Insert one row. Caller is responsible for upstream dedup —
-     *  the DAO throws on PK conflict because re-delivery dedup is a
-     *  dispatcher-side concern (lands in PR A4). */
-    suspend fun insert(message: ChatMessage)
+    /** Idempotent insert on [ChatMessage.id]. Returns `true` on a
+     *  fresh write, `false` when the row already exists. Nostr
+     *  re-delivery of the same wire `messageId` becomes a no-op at
+     *  this seam — dispatchers don't need their own dedup. */
+    suspend fun insert(message: ChatMessage): Boolean
 
     /** Hot path for the outgoing send pipeline (pending → sent /
      *  failed) — skips the encryption round-trip the full row would

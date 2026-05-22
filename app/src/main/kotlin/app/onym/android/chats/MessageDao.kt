@@ -39,12 +39,14 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): PersistedMessage?
 
-    /** Pure insert. Throws on PK conflict — the store's caller has
-     *  already routed through dedup (the [PersistedMessage.id] is
-     *  the wire-stable message UUID, so re-delivery must be filtered
-     *  upstream of this DAO). */
-    @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun insert(record: PersistedMessage)
+    /** Idempotent on [PersistedMessage.id]: a re-delivery of the
+     *  same wire message is a silent no-op rather than a thrown
+     *  exception, mirroring the dispatcher's "drop duplicates"
+     *  contract. Returns the row id on insert and `-1` when the
+     *  conflict strategy ignored the write — callers expose that as
+     *  `Boolean` at the [MessageStore] seam. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(record: PersistedMessage): Long
 
     /** Hot path: flip `PENDING` → `SENT` / `FAILED` (or any other
      *  status transition) without re-encrypting the body. Skipping
