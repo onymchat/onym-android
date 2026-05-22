@@ -567,6 +567,27 @@ class OnymApplication : Application() {
             makeChatsViewModel = {
                 app.onym.android.chats.ChatsViewModel(repository = groupRepository)
             },
+            makeChatThreadViewModel = { groupId ->
+                // PR A5: per-thread VM. The SendMessageInteractor is
+                // built fresh per VM — it's stateless and capturing
+                // the closure here keeps the interactor's
+                // dependencies (identity, transport, message repo)
+                // out of the VM's own constructor.
+                val sender = app.onym.android.chats.SendMessageInteractor(
+                    activeIdentity = identityRepository,
+                    identitiesFlow = identityRepository.identities,
+                    envelopeSealer = identityRepository,
+                    groupRepository = groupRepository,
+                    messageRepository = messageRepository,
+                    inboxTransport = inboxTransport,
+                )
+                app.onym.android.chats.ChatThreadViewModel(
+                    groupId = groupId,
+                    groupRepository = groupRepository,
+                    messageRepository = messageRepository,
+                    sendMessage = sender::send,
+                )
+            },
             makeIdentitiesViewModel = {
                 app.onym.android.identity.IdentitiesViewModel(identity = identityRepository)
             },
