@@ -164,6 +164,8 @@ fun RootScreen(
                     onCreateGroup = { navController.navigate(ROUTE_CREATE_GROUP) },
                     approveRequestsViewModel = dependencies.approveRequestsViewModel,
                     onOpenApproveRequests = { navController.navigate(ROUTE_APPROVE_REQUESTS) },
+                    pendingInvitesViewModel = dependencies.pendingInvitesViewModel,
+                    onOpenInvitations = { navController.navigate(ROUTE_PENDING_INVITES) },
                     onOpenChat = { groupId ->
                         // PR A5: chats list now opens the thread,
                         // not the members roster. Members move one
@@ -216,6 +218,12 @@ fun RootScreen(
             composable(ROUTE_APPROVE_REQUESTS) {
                 app.onym.android.group.ApproveRequestsScreen(
                     viewModel = dependencies.approveRequestsViewModel,
+                    onClose = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_PENDING_INVITES) {
+                app.onym.android.inbox.PendingInvitesScreen(
+                    viewModel = dependencies.pendingInvitesViewModel,
                     onClose = { navController.popBackStack() },
                 )
             }
@@ -540,4 +548,5 @@ private const val ROUTE_RUN_RELAYER = "run_relayer"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
 private const val ROUTE_APPROVE_REQUESTS = "approve_requests"
+private const val ROUTE_PENDING_INVITES = "pending_invites"
 private val TAB_ROUTES = setOf(Tab.Chats.route, Tab.Settings.route, Tab.Search.route)

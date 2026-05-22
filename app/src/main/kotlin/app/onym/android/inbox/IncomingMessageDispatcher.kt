@@ -12,7 +12,9 @@ import app.onym.android.chats.MessageStatus
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupCommitmentBuilder
 import app.onym.android.group.GroupInvitationPayload
+import app.onym.android.group.GroupInviteOfferPayload
 import app.onym.android.group.GroupRepository
+import app.onym.android.group.GroupStateRefreshRequest
 import app.onym.android.group.MemberAnnouncementPayload
 import app.onym.android.group.MemberProfile
 import app.onym.android.identity.DecryptedEnvelope
@@ -71,6 +73,23 @@ class IncomingMessageDispatcher(
      *  When null (test / V1 best-effort), Tyranny payloads still
      *  apply with admin-Ed25519 + envelope-signature gating only. */
     private val chainState: ChainStateReading? = null,
+    /** Receive-side sink for decoded [GroupInviteOfferPayload]s — the
+     *  push counterpart to the deeplink join flow. An offer lands here
+     *  as a [PendingInvite] awaiting the user's explicit Accept (which
+     *  ships a [app.onym.android.group.JoinRequestPayload]) or dismiss.
+     *  It grants nothing and never materializes a group: membership
+     *  only follows the invitee's accept + the admin's explicit
+     *  on-chain approve. Defaulted to a fresh store so the many
+     *  existing dispatcher tests that don't exercise the offer path
+     *  keep their construction sites unchanged; production
+     *  ([app.onym.android.OnymApplication]) passes the shared store. */
+    private val pendingInvites: PendingInvitesRecording = PendingInvitesStore(),
+    /** Seam for the verify-at-current state machine (Option 2, PR 159).
+     *  A stale Tyranny snapshot (chain advanced past its epoch) is
+     *  deferred here on the invitee side; inbound
+     *  [GroupStateRefreshRequest]s are answered here on the admin side.
+     *  Defaulted to a no-op for the same reason as [pendingInvites]. */
+    private val groupStateRefresher: GroupStateRefreshing = NoopGroupStateRefresher(),
 ) {
 
     suspend fun dispatch(
@@ -93,6 +112,35 @@ class IncomingMessageDispatcher(
             // (ciphertext might be addressed to a different identity
             // and decryptable later).
             fallThrough(messageId, ownerIdentityId, payload, receivedAt)
+            return
+        }
+
+        // Fast path 0: GroupInviteOfferPayload — a push invitation.
+        // Decoded + queued for the user's explicit Accept; it carries
+        // no epoch / commitment / roster, so it never materializes a
+        // group or touches the on-chain commitment. Tried first because
+        // its required `inviter_alias` + `intro_pub` + `offer_version`
+        // keys are unique to this type — no other inbox payload decodes
+        // as one.
+        val offer = tryDecodeOffer(envelope.plaintext)
+        if (offer != null) {
+            recordOffer(offer, messageId, ownerIdentityId, receivedAt)
+            return
+        }
+
+        // Fast path 0.5: GroupStateRefreshRequest — a member asking the
+        // admin for the current group state (Option 2 verify-at-current,
+        // PR 159). Admin-side; delegated to the verifier, which gates on
+        // the requester being a current member before disclosing the
+        // salt. Its required `refresh_group_id` + `requester_inbox_pub`
+        // keys are unique, so the trial-decode is unambiguous.
+        val refresh = tryDecodeRefreshRequest(envelope.plaintext)
+        if (refresh != null) {
+            groupStateRefresher.handleRefreshRequest(
+                refresh,
+                ownerIdentityId,
+                envelope.senderEd25519PublicKey,
+            )
             return
         }
 
@@ -158,15 +206,26 @@ class IncomingMessageDispatcher(
         val tier = SepTier.entries.firstOrNull { it.rawValue == invitation.tierRaw } ?: return
         val groupType = SepGroupType.fromWire(invitation.groupTypeRaw) ?: return
 
-        // PR 89: receiver-side commitment verification. For Tyranny
-        // groups, the payload's `commitment` MUST match both the
-        // recomputed Poseidon root over the wire-shipped members AND
-        // the on-chain state. Either mismatch is treated as a forged
-        // invitation — drop silently.
-        if (groupType == SepGroupType.TYRANNY &&
-            !verifyTyrannyInvitation(invitation, tier)
-        ) {
-            return
+        // Receiver-side verification (Option 2, PR 159). For Tyranny
+        // groups the snapshot's commitment must match the recomputed
+        // Poseidon root AND the on-chain commitment at an EXACT epoch.
+        // When the chain has advanced past the snapshot, we can't
+        // byte-verify it — so rather than trust an unverifiable snapshot
+        // (which would let a self-consistent fake of a young group
+        // materialize) we defer to the verifier, which asks the admin
+        // for the current state and surfaces a "couldn't verify" state
+        // if the admin is unreachable. Non-Tyranny groups skip
+        // verification (no admin-anchored update path; trust falls back
+        // to the sender's envelope signature).
+        if (groupType == SepGroupType.TYRANNY) {
+            when (verifyTyrannyInvitation(invitation, tier)) {
+                TyrannyInvitationVerification.VERIFIED -> {} // materialize below
+                TyrannyInvitationVerification.REJECT -> return
+                TyrannyInvitationVerification.STALE_NEEDS_REFRESH -> {
+                    groupStateRefresher.deferVerification(invitation, ownerIdentityId)
+                    return
+                }
+            }
         }
 
         // Wire-shipped profiles first; receiver's own entry overwrites
@@ -230,6 +289,50 @@ class IncomingMessageDispatcher(
         )
     } catch (_: Throwable) {
         null
+    }
+
+    private fun tryDecodeOffer(bytes: ByteArray): GroupInviteOfferPayload? = try {
+        permissiveJson.decodeFromString(
+            GroupInviteOfferPayload.serializer(),
+            bytes.toString(Charsets.UTF_8),
+        )
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun tryDecodeRefreshRequest(bytes: ByteArray): GroupStateRefreshRequest? = try {
+        permissiveJson.decodeFromString(
+            GroupStateRefreshRequest.serializer(),
+            bytes.toString(Charsets.UTF_8),
+        )
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
+     * Queue a decoded push offer for the user's explicit Accept. Keyed
+     * by the inbound Nostr event id so a re-delivered offer (replaceable
+     * events are re-fetched on every relaunch) is idempotent in the
+     * store. Never materializes a group — that only follows the
+     * invitee's accept + the admin's explicit on-chain approve.
+     */
+    private suspend fun recordOffer(
+        offer: GroupInviteOfferPayload,
+        messageId: String,
+        ownerIdentityId: IdentityId,
+        receivedAt: Instant,
+    ) {
+        pendingInvites.record(
+            PendingInvite(
+                id = messageId,
+                ownerIdentityId = ownerIdentityId,
+                introPublicKey = offer.introPublicKey,
+                groupId = offer.groupId,
+                groupName = offer.groupName,
+                inviterAlias = offer.inviterAlias,
+                receivedAt = receivedAt,
+            ),
+        )
     }
 
     private suspend fun fallThrough(
@@ -412,21 +515,20 @@ class IncomingMessageDispatcher(
      * the chain anchor verification still catches forgeries via the
      * second branch.
      *
-     * Mirrors `verifyTyrannyInvitation` from onym-ios PR #89.
+     * Mirrors `verifyTyrannyInvitation` from onym-ios PR #159.
      */
     private suspend fun verifyTyrannyInvitation(
         invitation: app.onym.android.group.GroupInvitationPayload,
         tier: SepTier,
-    ): Boolean {
+    ): TyrannyInvitationVerification {
         // Without a chain reader we treat Tyranny as best-effort;
         // V1 never reaches the on-chain branch in tests.
-        val reader = chainState ?: return true
-        val claimed = invitation.commitment ?: return false
-        // Internal consistency: recompute the FULL Poseidon
-        // commitment from `(members, epoch, salt)` and compare. The
-        // commitment is `Poseidon(Poseidon(root, epoch), salt)` —
-        // NOT just the merkle root. PR 89's original implementation
-        // compared the root, which always failed; PR 91 fixes that.
+        val reader = chainState ?: return TyrannyInvitationVerification.VERIFIED
+        val claimed = invitation.commitment ?: return TyrannyInvitationVerification.REJECT
+        // Internal consistency: recompute the FULL Poseidon commitment
+        // from `(members, epoch, salt)` and compare. The commitment is
+        // `Poseidon(Poseidon(root, epoch), salt)` — NOT just the merkle
+        // root.
         val recomputed = try {
             val root = GroupCommitmentBuilder.computeMerkleRoot(invitation.members, tier)
             GroupCommitmentBuilder.computePoseidonCommitment(
@@ -435,18 +537,51 @@ class IncomingMessageDispatcher(
                 salt = invitation.salt,
             )
         } catch (_: Throwable) {
-            return false
+            return TyrannyInvitationVerification.REJECT
         }
-        if (!recomputed.contentEquals(claimed)) return false
-        // External anchor.
+        if (!recomputed.contentEquals(claimed)) return TyrannyInvitationVerification.REJECT
+        // Verify at current chain state (Option 2). The chain stores only
+        // the LATEST (commitment, epoch), so a snapshot is only
+        // byte-verifiable when the chain is exactly at its epoch.
+        //   - chain behind the snapshot → impossible for a real anchored
+        //     snapshot; reject.
+        //   - chain EXACTLY at the snapshot's epoch → byte-verify the
+        //     committed roster. Strong anti-forgery: reproducing
+        //     `Poseidon(Poseidon(root, epoch), salt)` needs the random
+        //     `salt`, which is never on chain — only a legitimate
+        //     invitation carries it.
+        //   - chain AHEAD → can't byte-verify here; defer and ask the
+        //     admin for the current state rather than trusting (and
+        //     thereby letting a self-consistent fake materialize).
         val onchain = try {
             reader.tyrannyCommitment(invitation.groupId)
         } catch (_: Throwable) {
-            return false
+            return TyrannyInvitationVerification.REJECT
         }
-        if (!onchain.commitment.contentEquals(claimed)) return false
-        if (onchain.epoch != invitation.epoch) return false
-        return true
+        if (onchain.epoch < invitation.epoch) return TyrannyInvitationVerification.REJECT
+        if (onchain.epoch == invitation.epoch) {
+            return if (onchain.commitment.contentEquals(claimed)) {
+                TyrannyInvitationVerification.VERIFIED
+            } else {
+                TyrannyInvitationVerification.REJECT
+            }
+        }
+        return TyrannyInvitationVerification.STALE_NEEDS_REFRESH
+    }
+
+    /** Outcome of receiver-side Tyranny invitation verification (PR 159). */
+    private enum class TyrannyInvitationVerification {
+        /** Internally consistent AND matches the on-chain commitment at
+         *  an exact epoch — safe to materialize. */
+        VERIFIED,
+
+        /** Internally consistent and the group exists on chain, but the
+         *  chain has advanced past the snapshot's epoch, so it can't be
+         *  byte-verified. Needs a current-state refresh from the admin. */
+        STALE_NEEDS_REFRESH,
+
+        /** Forged / unverifiable — drop. */
+        REJECT,
     }
 
     /**
@@ -475,8 +610,18 @@ class IncomingMessageDispatcher(
         } catch (_: Throwable) {
             return false
         }
-        if (!onchain.commitment.contentEquals(claimedCommitment)) return false
-        if (onchain.epoch != claimedEpoch) return false
+        // Same converge-forward gate as the invitation verifier. The
+        // announcement is already admin-Ed25519-signed (checked by the
+        // caller), so a stale-but-signed roster delta is a legitimate
+        // update we may have missed — accept when the chain is at or
+        // ahead of the claimed epoch, byte-verifying only on an exact
+        // epoch match.
+        if (onchain.epoch < claimedEpoch) return false
+        if (onchain.epoch == claimedEpoch &&
+            !onchain.commitment.contentEquals(claimedCommitment)
+        ) {
+            return false
+        }
         return true
     }
 
