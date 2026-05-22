@@ -21,6 +21,7 @@ import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
 import app.onym.android.chain.TyrannyCreateGroupPayload
 import app.onym.android.identity.Identity
+import app.onym.android.identity.IdentityId
 import app.onym.android.identity.IdentityRepository
 import app.onym.android.transport.InboxTransport
 import app.onym.android.transport.TransportInboxId
@@ -53,14 +54,20 @@ import java.security.SecureRandom
  *  7. Insert the group locally via [GroupRepository.insert] then
  *     [GroupRepository.markPublished] so a subscriber sees
  *     `isPublishedOnChain = true` immediately.
- *  8. For each invitee: encode + seal the [GroupInvitationPayload],
- *     send via [InboxTransport.send], require `acceptedBy >= 1`. The
- *     group is already saved on disk at this point — invitation
- *     failures throw [CreateGroupError.InvitationSendFailed] but
- *     leave the group durable so a future "retry invites" UI can
- *     pick it up.
+ *  8. Reach each invitee. **Tyranny** ships a durable
+ *     [GroupInviteOfferPayload] (a fresh per-invite intro key + display
+ *     context) instead of an epoch-pinned snapshot: the creator stays
+ *     the only on-chain member until the invitee explicitly accepts
+ *     (ships a [JoinRequestPayload]) and the admin explicitly approves
+ *     (`update_commitment`). **OneOnOne / Anarchy** keep shipping the
+ *     [GroupInvitationPayload] membership grant — OneOnOne bakes both
+ *     parties into the founding commitment at epoch 0 (the snapshot is
+ *     valid forever) and Anarchy has no admin-approval anchor flow.
+ *     Either way the group is already saved on disk — send failures
+ *     throw [CreateGroupError.InvitationSendFailed] but leave the
+ *     group durable so a future "retry invites" UI can pick it up.
  *
- * Mirrors `CreateGroupInteractor` from onym-ios PR #26.
+ * Mirrors `CreateGroupInteractor` from onym-ios PR #26 + #158.
  */
 open class CreateGroupInteractor(
     private val identity: IdentityRepository,
@@ -70,6 +77,11 @@ open class CreateGroupInteractor(
     private val networkPreference: NetworkPreferenceProvider,
     private val proofGenerator: GroupProofGenerator = OnymGroupProofGenerator(),
     private val inboxTransport: InboxTransport,
+    /** Mints a per-invitee intro key for each create-time invite offer
+     *  (Tyranny). That intro key is the reply channel the invitee seals
+     *  their [JoinRequestPayload] to when they accept — the same
+     *  machinery the deeplink share-invite flow uses, just pushed. */
+    private val introducer: InviteIntroducer,
     /** Builds a [SepContractTransport] from the relayer URL chosen
      *  per-call. Injected so tests can swap in a fake without
      *  touching OkHttp. */
@@ -302,56 +314,36 @@ open class CreateGroupInteractor(
         groups.insert(group)
         groups.markPublished(group.id, proof.commitment)
 
-        // 8. Send invitations. For OneOnOne the (sole) invitee gets
-        //    the ephemeral `secondaryBlsSecret` so they can act as
-        //    the second party of the immutable group.
+        // 8. Reach each invitee. Tyranny pushes durable invite offers;
+        //    every other type ships the membership-grant snapshot
+        //    (OneOnOne's sole invitee gets the ephemeral
+        //    `secondaryBlsSecret` so they can act as the second party
+        //    of the immutable group).
         if (invitees.isNotEmpty()) {
             onProgress(CreateGroupProgress.SendingInvitations(invitees.size))
-            for ((index, inboxKey) in invitees.withIndex()) {
-                val invitePayload = GroupInvitationPayload(
-                    version = 1,
+            if (groupType == SepGroupType.TYRANNY) {
+                sendOffers(
+                    invitees = invitees,
+                    ownerIdentityId = ownerId,
+                    groupId = groupId,
+                    groupName = trimmedName,
+                    inviterAlias = creatorAlias,
+                )
+            } else {
+                sendInvitations(
+                    invitees = invitees,
                     groupId = groupId,
                     groupSecret = groupSecret,
                     name = trimmedName,
                     members = members,
-                    epoch = 0uL,
                     salt = salt,
                     commitment = proof.commitment,
-                    tierRaw = tier.rawValue,
-                    groupTypeRaw = groupType.wireValue,
+                    tier = tier,
+                    groupType = groupType,
                     adminPubkeyHex = adminPubkeyHex,
                     inviteeBlsSecretKey = secondaryBlsSecret,
-                    // Ship the creator's directory so the invitee
-                    // sees the inviter by alias from the moment the
-                    // group materializes (PR 83). takeIf-not-empty
-                    // matches iOS; pre-PR-82 senders shipped null.
                     memberProfiles = group.memberProfiles.takeIf { it.isNotEmpty() },
                 )
-                val payloadBytes = try {
-                    jsonFormat.encodeToString(
-                        GroupInvitationPayload.serializer(),
-                        invitePayload,
-                    ).toByteArray(Charsets.UTF_8)
-                } catch (_: Throwable) {
-                    throw CreateGroupError.InvitationEncodingFailed
-                }
-                val sealed = try {
-                    identity.sealInvitation(payloadBytes, inboxKey)
-                } catch (e: Throwable) {
-                    throw CreateGroupError.InvitationSendFailed(index, e.message ?: e.toString())
-                }
-                val tag = inboxTagFor(inboxKey)
-                val receipt = try {
-                    inboxTransport.send(sealed, TransportInboxId(tag))
-                } catch (e: Throwable) {
-                    throw CreateGroupError.InvitationSendFailed(index, e.message ?: e.toString())
-                }
-                if (receipt.acceptedBy < 1) {
-                    throw CreateGroupError.InvitationSendFailed(
-                        index,
-                        "no relay accepted the invitation",
-                    )
-                }
             }
         }
 
@@ -359,6 +351,142 @@ open class CreateGroupInteractor(
         // the caller sees `isPublishedOnChain = true`.
         return groups.snapshots.value.firstOrNull { it.id == group.id }
             ?: group.copy(isPublishedOnChain = true)
+    }
+
+    /**
+     * Tyranny invite-offer send loop. Mint a per-invitee intro key and
+     * ship a durable [GroupInviteOfferPayload] to each invitee's inbox.
+     * Reuses the inbox seal+send path, but the payload grants nothing:
+     * it carries only the reply channel + display context, so it never
+     * expires and never anchors anyone. The invitee turns it into a
+     * join request on accept; the admin anchors only on explicit
+     * approve.
+     *
+     * Mirrors `CreateGroupInteractor.sendOffers` from onym-ios PR #158.
+     */
+    private suspend fun sendOffers(
+        invitees: List<ByteArray>,
+        ownerIdentityId: IdentityId,
+        groupId: ByteArray,
+        groupName: String,
+        inviterAlias: String,
+    ) {
+        for ((index, inboxKey) in invitees.withIndex()) {
+            // One fresh intro key per invitee → granular revoke and a
+            // clean 1:1 mapping from an inbound join request back to the
+            // person the admin meant to invite.
+            val capability = try {
+                introducer.mint(
+                    ownerIdentityId = ownerIdentityId,
+                    groupId = groupId,
+                    groupName = groupName,
+                )
+            } catch (e: Throwable) {
+                throw CreateGroupError.InvitationSendFailed(index, "mint intro key: ${e.message ?: e}")
+            }
+            val offer = try {
+                GroupInviteOfferPayload(
+                    introPublicKey = capability.introPublicKey,
+                    groupId = groupId,
+                    groupName = groupName,
+                    inviterAlias = inviterAlias,
+                )
+            } catch (e: Throwable) {
+                throw CreateGroupError.InvitationSendFailed(index, "build offer: ${e.message ?: e}")
+            }
+            val payloadBytes = try {
+                jsonFormat.encodeToString(GroupInviteOfferPayload.serializer(), offer)
+                    .toByteArray(Charsets.UTF_8)
+            } catch (_: Throwable) {
+                throw CreateGroupError.InvitationEncodingFailed
+            }
+            val sealed = try {
+                identity.sealInvitation(payloadBytes, inboxKey)
+            } catch (e: Throwable) {
+                throw CreateGroupError.InvitationSendFailed(index, e.message ?: e.toString())
+            }
+            val tag = inboxTagFor(inboxKey)
+            val receipt = try {
+                inboxTransport.send(sealed, TransportInboxId(tag))
+            } catch (e: Throwable) {
+                throw CreateGroupError.InvitationSendFailed(index, e.message ?: e.toString())
+            }
+            if (receipt.acceptedBy < 1) {
+                throw CreateGroupError.InvitationSendFailed(
+                    index,
+                    "no relay accepted the invite offer",
+                )
+            }
+        }
+    }
+
+    /**
+     * Membership-grant send loop for non-Tyranny groups (OneOnOne /
+     * Anarchy). Encode + seal the [GroupInvitationPayload] and send via
+     * [InboxTransport.send]. OneOnOne's invitee receives the ephemeral
+     * [inviteeBlsSecretKey] so they can act as the immutable group's
+     * second party.
+     */
+    private suspend fun sendInvitations(
+        invitees: List<ByteArray>,
+        groupId: ByteArray,
+        groupSecret: ByteArray,
+        name: String,
+        members: List<GovernanceMember>,
+        salt: ByteArray,
+        commitment: ByteArray,
+        tier: SepTier,
+        groupType: SepGroupType,
+        adminPubkeyHex: String?,
+        inviteeBlsSecretKey: ByteArray?,
+        memberProfiles: Map<String, MemberProfile>?,
+    ) {
+        for ((index, inboxKey) in invitees.withIndex()) {
+            val invitePayload = GroupInvitationPayload(
+                version = 1,
+                groupId = groupId,
+                groupSecret = groupSecret,
+                name = name,
+                members = members,
+                epoch = 0uL,
+                salt = salt,
+                commitment = commitment,
+                tierRaw = tier.rawValue,
+                groupTypeRaw = groupType.wireValue,
+                adminPubkeyHex = adminPubkeyHex,
+                inviteeBlsSecretKey = inviteeBlsSecretKey,
+                // Ship the creator's directory so the invitee sees the
+                // inviter by alias from the moment the group
+                // materializes (PR 83). takeIf-not-empty matches iOS;
+                // pre-PR-82 senders shipped null.
+                memberProfiles = memberProfiles,
+            )
+            val payloadBytes = try {
+                jsonFormat.encodeToString(
+                    GroupInvitationPayload.serializer(),
+                    invitePayload,
+                ).toByteArray(Charsets.UTF_8)
+            } catch (_: Throwable) {
+                throw CreateGroupError.InvitationEncodingFailed
+            }
+            val sealed = try {
+                identity.sealInvitation(payloadBytes, inboxKey)
+            } catch (e: Throwable) {
+                throw CreateGroupError.InvitationSendFailed(index, e.message ?: e.toString())
+            }
+            val tag = inboxTagFor(inboxKey)
+            val receipt = try {
+                inboxTransport.send(sealed, TransportInboxId(tag))
+            } catch (e: Throwable) {
+                throw CreateGroupError.InvitationSendFailed(index, e.message ?: e.toString())
+            }
+            if (receipt.acceptedBy < 1) {
+                throw CreateGroupError.InvitationSendFailed(
+                    index,
+                    "no relay accepted the invitation",
+                )
+            }
+        }
     }
 
     /** Bridge the wire-typed [SepGroupType] to the binding-key

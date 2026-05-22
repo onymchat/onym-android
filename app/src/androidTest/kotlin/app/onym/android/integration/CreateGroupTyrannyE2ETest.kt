@@ -23,6 +23,7 @@ import app.onym.android.chain.SepNetwork
 import app.onym.android.chain.SepTier
 import app.onym.android.chain.StaticNetworkPreferenceProvider
 import app.onym.android.group.CreateGroupInteractor
+import app.onym.android.group.InviteIntroducer
 import app.onym.android.group.GroupRepository
 import app.onym.android.identity.IdentityRepository
 import app.onym.android.identity.IdentitySecretStore
@@ -30,6 +31,7 @@ import app.onym.android.support.ConfigurableInboxTransport
 import app.onym.android.support.FakeKnownRelayersFetcher
 import app.onym.android.support.InMemoryAnchorSelectionStore
 import app.onym.android.support.InMemoryGroupStore
+import app.onym.android.support.InMemoryIntroKeyStore
 import app.onym.android.support.InMemoryRelayerSelectionStore
 import app.onym.android.transport.InboxTransport
 import kotlinx.coroutines.runBlocking
@@ -230,6 +232,7 @@ class CreateGroupTyrannyE2ETest {
                 networkPreference = networkPreference,
                 proofGenerator = proofGenerator,
                 inboxTransport = inboxTransport,
+                introducer = InviteIntroducer(InMemoryIntroKeyStore()),
                 makeContractTransport = makeContractTransport,
             )
     }

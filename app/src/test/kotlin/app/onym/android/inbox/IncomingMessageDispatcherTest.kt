@@ -1,11 +1,15 @@
 package app.onym.android.inbox
 
+import app.onym.android.chain.ChainStateReading
+import app.onym.android.chain.SepCommitmentEntry
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GovernanceMember
 import app.onym.android.group.GroupInvitationPayload
+import app.onym.android.group.GroupInviteOfferPayload
 import app.onym.android.group.GroupRepository
+import app.onym.android.group.GroupStateRefreshRequest
 import app.onym.android.group.GroupStore
 import app.onym.android.group.MemberAnnouncementPayload
 import app.onym.android.group.MemberProfile
@@ -332,6 +336,175 @@ class IncomingMessageDispatcherTest {
         assertEquals(1, invitationsRepository.invitations.value.size)
     }
 
+    // ─── Invite offers (PR 158 handshake) ────────────────────────
+
+    @Test
+    fun offer_isQueuedForAcceptAndDoesNotMaterializeGroup() = runTest {
+        // A push offer must NOT materialize a group or land in the
+        // opaque invitations queue — it's queued as a structured
+        // PendingInvite for the user's explicit Accept. Membership only
+        // follows accept + the admin's explicit approve.
+        val offerGroupId = ByteArray(32) { 0x42 }
+        val offer = GroupInviteOfferPayload(
+            introPublicKey = ByteArray(32) { 0x44 },
+            groupId = offerGroupId,
+            groupName = "Maple Garden",
+            inviterAlias = "Alice",
+        )
+        val plaintext = Json.encodeToString(GroupInviteOfferPayload.serializer(), offer)
+            .toByteArray(Charsets.UTF_8)
+        val spy = SpyPendingInvites()
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = ByteArray(32)),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            pendingInvites = spy,
+        )
+
+        dispatcher.dispatch("msg-offer", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        // No group materialized for the offer's group id.
+        assertNull(
+            "an offer must NOT materialize a group",
+            groupRepository.snapshots.value.firstOrNull {
+                it.groupIdBytes.contentEquals(offerGroupId)
+            },
+        )
+        // Not an opaque invitation either.
+        invitationsRepository.bootstrap()
+        assertTrue(invitationsRepository.invitations.value.isEmpty())
+        // Queued as a structured pending invite.
+        assertEquals(1, spy.recorded.size)
+        val rec = spy.recorded.single()
+        assertEquals("msg-offer", rec.id)
+        assertEquals(ownerIdentity, rec.ownerIdentityId)
+        assertEquals("Alice", rec.inviterAlias)
+        assertEquals("Maple Garden", rec.groupName)
+        assertTrue(rec.introPublicKey.contentEquals(ByteArray(32) { 0x44 }))
+        assertTrue(rec.groupId.contentEquals(offerGroupId))
+    }
+
+    // ─── Verify-at-current refresh routing (PR 159) ───────────────
+
+    @Test
+    fun refreshRequest_routedToVerifier() = runTest {
+        // An inbound GroupStateRefreshRequest is delegated to the
+        // verifier (admin side) and never materializes / queues anything.
+        val refreshGroupId = ByteArray(32) { 0x42 }
+        val req = GroupStateRefreshRequest(
+            groupId = refreshGroupId,
+            requesterInboxPublicKey = ByteArray(32) { 0x01 },
+            requesterBlsPublicKey = ByteArray(48) { 0x02 },
+        )
+        val plaintext = Json.encodeToString(GroupStateRefreshRequest.serializer(), req)
+            .toByteArray(Charsets.UTF_8)
+        val refresher = SpyGroupStateRefresher()
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = ByteArray(32) { 0xAB.toByte() }),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            groupStateRefresher = refresher,
+        )
+
+        dispatcher.dispatch("msg-refresh", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        assertEquals(listOf(refreshGroupId.toList()), refresher.handled.map { it.toList() })
+        assertTrue(refresher.deferred.isEmpty())
+        // Only the seeded group remains; nothing materialized.
+        assertEquals(1, groupRepository.snapshots.value.size)
+        invitationsRepository.bootstrap()
+        assertTrue(invitationsRepository.invitations.value.isEmpty())
+    }
+
+    // ─── Converge-forward verification (PR 158) ───────────────────
+
+    @Test
+    fun announcement_convergeForward_appliedWhenChainEpochAheadOfClaim() = runTest {
+        // Converge-forward: a stale-but-signed roster delta (claimed
+        // epoch 0) must still apply when the chain has moved past it
+        // (another join anchored first → chain at epoch 5 with a
+        // different commitment). Pre-relaxation `== epoch` dropped this.
+        val storedAdmin = ByteArray(32) { 0x10 }
+        val storedAdminHex = storedAdmin.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        groupStore.replaceForTest(makeGroup(groupId).copy(adminEd25519PubkeyHex = storedAdminHex))
+        groupRepository.reload()
+
+        val payload = MemberAnnouncementPayload(
+            version = 1,
+            groupId = groupId,
+            newMember = MemberAnnouncementPayload.AnnouncedMember(
+                blsPub = newMemberBlsPub,
+                inboxPub = newMemberInbox,
+                alias = "Bob",
+                sendingPub = ByteArray(32) { 0x77 },
+            ),
+            adminAlias = "Alice",
+            commitment = ByteArray(32) { 0x01 },  // snapshot commitment
+            epoch = 0uL,
+        )
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
+            .toByteArray(Charsets.UTF_8)
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = storedAdmin),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            // Chain ahead (epoch 5) with a DIFFERENT commitment.
+            chainState = FakeChainState(
+                SepCommitmentEntry(commitment = ByteArray(32) { 0x99.toByte() }, epoch = 5uL),
+            ),
+        )
+
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        assertEquals(
+            "stale-but-valid announcement should still apply when the chain is ahead",
+            1,
+            groupRepository.snapshots.value.single().memberProfiles.size,
+        )
+    }
+
+    @Test
+    fun announcement_droppedWhenChainEpochBehindClaim() = runTest {
+        // The mirror case: a claimed epoch the chain hasn't reached is
+        // impossible for a real anchored update — drop it.
+        val storedAdmin = ByteArray(32) { 0x10 }
+        val storedAdminHex = storedAdmin.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        groupStore.replaceForTest(makeGroup(groupId).copy(adminEd25519PubkeyHex = storedAdminHex))
+        groupRepository.reload()
+
+        val payload = MemberAnnouncementPayload(
+            version = 1,
+            groupId = groupId,
+            newMember = MemberAnnouncementPayload.AnnouncedMember(
+                blsPub = newMemberBlsPub,
+                inboxPub = newMemberInbox,
+                alias = "Bob",
+                sendingPub = ByteArray(32) { 0x77 },
+            ),
+            adminAlias = "Alice",
+            commitment = ByteArray(32) { 0x01 },
+            epoch = 5uL,  // claims epoch 5
+        )
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
+            .toByteArray(Charsets.UTF_8)
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = storedAdmin),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            // Chain BEHIND (epoch 3) the claimed epoch 5.
+            chainState = FakeChainState(
+                SepCommitmentEntry(commitment = ByteArray(32) { 0x01 }, epoch = 3uL),
+            ),
+        )
+
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        assertTrue(
+            "an announcement ahead of the chain must be dropped",
+            groupRepository.snapshots.value.single().memberProfiles.isEmpty(),
+        )
+    }
+
     private fun announcementPayload() = MemberAnnouncementPayload(
         version = 1,
         groupId = groupId,
@@ -424,4 +597,34 @@ private class InMemoryGroupStore : GroupStore {
 private class ConstantIdentity(private val id: IdentityId) : ActiveIdentityProvider {
     override val currentIdentityId: StateFlow<IdentityId?> = MutableStateFlow(id)
     override fun registerRemovalListener(listener: (suspend (IdentityId) -> Unit)?) {}
+}
+
+private class SpyPendingInvites : PendingInvitesRecording {
+    val recorded = mutableListOf<PendingInvite>()
+    override suspend fun record(invite: PendingInvite) {
+        recorded.add(invite)
+    }
+}
+
+private class FakeChainState(private val entry: SepCommitmentEntry) : ChainStateReading {
+    override suspend fun tyrannyCommitment(groupId: ByteArray): SepCommitmentEntry = entry
+}
+
+private class SpyGroupStateRefresher : GroupStateRefreshing {
+    val deferred = mutableListOf<ByteArray>()
+    val handled = mutableListOf<ByteArray>()
+    override suspend fun deferVerification(
+        invitation: app.onym.android.group.GroupInvitationPayload,
+        ownerIdentityId: IdentityId,
+    ) {
+        deferred.add(invitation.groupId)
+    }
+
+    override suspend fun handleRefreshRequest(
+        request: GroupStateRefreshRequest,
+        ownerIdentityId: IdentityId,
+        requesterEd25519: ByteArray?,
+    ) {
+        handled.add(request.groupId)
+    }
 }

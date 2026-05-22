@@ -411,6 +411,29 @@ class OnymApplication : Application() {
                 OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url)
             },
         )
+        // PR 158: invitee-side push invitations. The dispatcher records
+        // decoded GroupInviteOfferPayloads here (never materializing a
+        // group); the PendingInvitesViewModel drives the Chats
+        // "Invitations" surface and, on explicit Accept, ships a
+        // JoinRequestPayload to the offer's intro key via the same
+        // JoinRequestSender the deeplink join path uses.
+        val pendingInvitesStore = app.onym.android.inbox.PendingInvitesStore()
+        // PR 159 verify-at-current: a stale Tyranny snapshot defers here;
+        // the verifier asks the admin for the current state and surfaces
+        // a "couldn't verify" state if the admin is offline.
+        val pendingVerificationStore = app.onym.android.inbox.PendingVerificationStore()
+        val groupStateVerifier = app.onym.android.inbox.GroupStateVerifier(
+            sealer = identityRepository,
+            inboxTransport = inboxTransport,
+            groupRepository = groupRepository,
+            store = pendingVerificationStore,
+            identities = identityRepository.identities,
+            activeIdentityId = identityRepository.currentIdentityId,
+            scope = applicationScope,
+        )
+        // Resolve a pending verification the moment its fresh snapshot
+        // materializes its group (and cancel the timeout).
+        groupStateVerifier.start()
         val incomingDispatcher = app.onym.android.inbox.IncomingMessageDispatcher(
             envelopeDecrypter = identityRepository,
             groupRepository = groupRepository,
@@ -418,7 +441,22 @@ class OnymApplication : Application() {
             messageRepository = messageRepository,
             identitiesFlow = identityRepository.identities,
             chainState = chainStateReader,
+            pendingInvites = pendingInvitesStore,
+            groupStateRefresher = groupStateVerifier,
         )
+        // Filter the invites surface to the active identity, and cascade
+        // a wipe on identity removal — mirrors the per-identity wiring
+        // GroupRepository / IncomingInvitationsRepository already do.
+        applicationScope.launch {
+            identityRepository.currentIdentityId.collect { id ->
+                pendingInvitesStore.setCurrentIdentity(id)
+                pendingVerificationStore.setCurrentIdentity(id)
+            }
+        }
+        identityRepository.registerRemovalListener { id ->
+            pendingInvitesStore.removeForOwner(id)
+            pendingVerificationStore.removeForOwner(id)
+        }
         val invitationsInteractor = app.onym.android.inbox.IncomingInvitationsInteractor(
             inboxTransport = inboxTransport,
             repository = invitationsRepository,
@@ -444,6 +482,12 @@ class OnymApplication : Application() {
         // re-subscribes for the new one.
         val introKeyStore: app.onym.android.group.IntroKeyStore =
             app.onym.android.group.EncryptedPrefsIntroKeyStore(applicationContext)
+        // Shared minter for both the deeplink share-invite flow and the
+        // create-time invite-offer handshake (PR 158). Both persist into
+        // the same per-identity IntroKeyStore so the admin's IntroInboxPump
+        // listens on every minted intro tag regardless of which path
+        // produced it.
+        val inviteIntroducer = app.onym.android.group.InviteIntroducer(introKeyStore)
         val introRequestStore: app.onym.android.group.IntroRequestStore =
             app.onym.android.group.InMemoryIntroRequestStore()
         val introInboxPump = app.onym.android.group.IntroInboxPump(
@@ -513,6 +557,27 @@ class OnymApplication : Application() {
         // the chats screen isn't open still drive the badge count.
         approveRequestsViewModel.start()
 
+        // Invitee-side counterpart (PR 158). On explicit Accept it ships
+        // a JoinRequestPayload to the offer's intro key via the same
+        // shared JoinRequestSender; the admin still has to explicitly
+        // approve before anyone is anchored. Started eagerly so the
+        // Chats "Invitations" badge reflects offers from app start.
+        val pendingInvitesViewModel = app.onym.android.inbox.PendingInvitesViewModel(
+            store = pendingInvitesStore,
+            verificationStore = pendingVerificationStore,
+            groupRepository = groupRepository,
+            submitJoin = joinRequestSender::send,
+            displayLabel = {
+                val activeId = identityRepository.currentIdentityId.value
+                identityRepository.identities.value
+                    .firstOrNull { it.id == activeId }
+                    ?.name
+                    .orEmpty()
+            },
+            retryVerification = { groupIdHex -> groupStateVerifier.retry(groupIdHex) },
+        )
+        pendingInvitesViewModel.start()
+
         return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
@@ -552,6 +617,7 @@ class OnymApplication : Application() {
                         )
                     },
                     inboxTransport = inboxTransport,
+                    introducer = inviteIntroducer,
                 )
                 CreateGroupViewModel(
                     createGroup = { name, invitees, groupType, onProgress ->
@@ -595,11 +661,12 @@ class OnymApplication : Application() {
             makeShareInviteViewModel = {
                 app.onym.android.group.ShareInviteViewModel(
                     identity = identityRepository,
-                    introducer = app.onym.android.group.InviteIntroducer(introKeyStore),
+                    introducer = inviteIntroducer,
                     groupRepository = groupRepository,
                 )
             },
             approveRequestsViewModel = approveRequestsViewModel,
+            pendingInvitesViewModel = pendingInvitesViewModel,
             makeNostrRelaySettingsViewModel = {
                 app.onym.android.settings.NostrRelaySettingsViewModel(
                     repository = nostrRelaysRepository,

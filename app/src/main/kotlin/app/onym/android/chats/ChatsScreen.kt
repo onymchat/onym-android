@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.runtime.collectAsState
 import app.onym.android.R
@@ -57,6 +58,8 @@ import app.onym.android.group.ApproveRequestsViewModel
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.OnymAccent
 import app.onym.android.group.OnymGroupAvatar
+import app.onym.android.inbox.PendingInvitesToolbarBadge
+import app.onym.android.inbox.PendingInvitesViewModel
 
 /**
  * Chats tab — root list of groups the user has created. PR-C only
@@ -75,11 +78,18 @@ fun ChatsScreen(
     onCreateGroup: () -> Unit,
     approveRequestsViewModel: ApproveRequestsViewModel? = null,
     onOpenApproveRequests: (() -> Unit)? = null,
+    pendingInvitesViewModel: PendingInvitesViewModel? = null,
+    onOpenInvitations: (() -> Unit)? = null,
     onOpenChat: (groupId: String) -> Unit = {},
 ) {
     val groups by viewModel.groups.collectAsStateWithLifecycle()
     val pending by (approveRequestsViewModel?.pending?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(emptyList<app.onym.android.group.JoinRequestApprover.PendingRequest>()) })
+    val pendingInvites by (pendingInvitesViewModel?.pending?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(emptyList<app.onym.android.inbox.PendingInvite>()) })
+    val verifyingInvites by (pendingInvitesViewModel?.verifying?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(emptyList<app.onym.android.inbox.PendingGroupVerification>()) })
+    val inviteBadgeCount = pendingInvites.size + verifyingInvites.size
 
     Scaffold(
         topBar = {
@@ -107,6 +117,31 @@ fun ChatsScreen(
                                         .offset(x = (-4).dp, y = 6.dp),
                                 ) {
                                     ApproveRequestsToolbarBadge(pending.size)
+                                }
+                            }
+                        }
+                    }
+                    // Invitations received by this identity (push offers).
+                    // Same always-rendered + badge-on-nonempty treatment as
+                    // the join-requests button.
+                    if (pendingInvitesViewModel != null && onOpenInvitations != null) {
+                        Box(modifier = Modifier.padding(end = 4.dp)) {
+                            IconButton(
+                                onClick = onOpenInvitations,
+                                modifier = Modifier.testTag("pending_invites.toolbar_button"),
+                            ) {
+                                Icon(
+                                    Icons.Filled.MailOutline,
+                                    contentDescription = "Invitations",
+                                )
+                            }
+                            if (inviteBadgeCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = (-4).dp, y = 6.dp),
+                                ) {
+                                    PendingInvitesToolbarBadge(inviteBadgeCount)
                                 }
                             }
                         }

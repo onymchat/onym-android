@@ -66,6 +66,11 @@ class AppDependencies(
      *  lands on the relay shows up in the badge before the modal
      *  is opened. */
     val approveRequestsViewModel: app.onym.android.group.ApproveRequestsViewModel,
+    /** Invitee-side push-invitation surface (PR 158). Single shared
+     *  instance — the Chats toolbar "Invitations" badge and the modal
+     *  list both consume the same flow, so an offer that lands on the
+     *  relay shows up in the badge before the modal is opened. */
+    val pendingInvitesViewModel: app.onym.android.inbox.PendingInvitesViewModel,
     /** Settings → Transport → Nostr Relays. */
     val makeNostrRelaySettingsViewModel: () -> app.onym.android.settings.NostrRelaySettingsViewModel,
     /** Live snapshot of configured Nostr relays — drives the

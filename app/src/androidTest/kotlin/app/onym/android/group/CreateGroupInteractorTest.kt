@@ -22,6 +22,7 @@ import app.onym.android.support.FakeContractsManifestFetcher
 import app.onym.android.support.FakeKnownRelayersFetcher
 import app.onym.android.support.InMemoryAnchorSelectionStore
 import app.onym.android.support.InMemoryGroupStore
+import app.onym.android.support.InMemoryIntroKeyStore
 import app.onym.android.support.InMemoryRelayerSelectionStore
 import app.onym.android.support.StubGroupProofGenerator
 import kotlinx.coroutines.runBlocking
@@ -219,6 +220,7 @@ class CreateGroupInteractorTest {
             ),
             proofGenerator = StubGroupProofGenerator(),
             inboxTransport = inboxTransport,
+            introducer = InviteIntroducer(InMemoryIntroKeyStore()),
             makeContractTransport = { contractTransport },
         )
 
@@ -251,6 +253,7 @@ class CreateGroupInteractorTest {
             ),
             proofGenerator = StubGroupProofGenerator(),
             inboxTransport = inboxTransport,
+            introducer = InviteIntroducer(InMemoryIntroKeyStore()),
             makeContractTransport = { contractTransport },
         )
 
@@ -529,6 +532,7 @@ class CreateGroupInteractorTest {
         networkPreference = networkPreference,
         proofGenerator = StubGroupProofGenerator(),
         inboxTransport = inboxTransport,
+        introducer = InviteIntroducer(InMemoryIntroKeyStore()),
         makeContractTransport = { contractTransport },
     )
 
