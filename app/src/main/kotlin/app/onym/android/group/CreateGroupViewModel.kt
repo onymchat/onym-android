@@ -91,10 +91,12 @@ data class CreateGroupState(
      *  screen content. */
     val createdGroup: ChatGroup? = null,
 ) {
-    /** True when the selected governance type is wired to the chain
-     *  layer. All three flavours (Tyranny / 1-on-1 / Anarchy) are
-     *  wired today. The name no longer gates advance — submit falls
-     *  back to [generatedName] when the field is empty. */
+    /** True when the selected governance type is offered by the picker
+     *  ([OnymUIGovernance.isAvailable]). Only Tyranny is offered today,
+     *  and it's the default, so this is effectively always true — the
+     *  guard stays so a future not-yet-offered default would block
+     *  advance. The name no longer gates advance — submit falls back to
+     *  [generatedName] when the field is empty. */
     val canAdvanceToStep2: Boolean
         get() = governance.isAvailable
 
@@ -452,8 +454,9 @@ class CreateGroupViewModel(
 
 /**
  * UI-side mirror of the design's three governance cards. Maps to
- * [SepGroupType] for the actual chain call. All three flavours are
- * wired post-Anarchy — `isAvailable` returns true for every entry.
+ * [SepGroupType] for the actual chain call. Only Tyranny is offered
+ * today; OneOnOne and Anarchy render with a "Soon" badge and can't be
+ * selected (see [isAvailable]), matching the iOS create-group picker.
  *
  * Display strings (card label, sub-line, tooltip, Step-2 hint) live
  * in the `res/values*` localized `strings.xml` files and are resolved
@@ -468,11 +471,15 @@ enum class OnymUIGovernance {
     Anarchy,
     ;
 
-    /** All three governance flavours are wired to the chain layer:
-     *  Tyranny (`@RunWith` PR #36), OneOnOne (#36/47/48 stack),
-     *  Anarchy (#50/51/this-PR stack). Future flavours
-     *  (Democracy, Oligarchy) flip on as they wire. */
-    val isAvailable: Boolean get() = true
+    /** Whether the picker offers this flavour. Only Tyranny is
+     *  selectable for now; OneOnOne and Anarchy show a "Soon" badge and
+     *  are non-interactive — matching the iOS create-group picker. Flip
+     *  each on as its create-group UX is finished. */
+    val isAvailable: Boolean
+        get() = when (this) {
+            Tyranny -> true
+            OneOnOne, Anarchy -> false
+        }
 
     val sepGroupType: SepGroupType
         get() = when (this) {
