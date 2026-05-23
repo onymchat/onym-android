@@ -2,6 +2,7 @@ package app.onym.android.chats
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,18 +27,32 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /**
  * Chat-thread bubble. Two visual modes driven by [ChatMessage.direction]:
  *
- *  - [MessageDirection.OUTGOING] — `colorScheme.primary` fill,
- *    `colorScheme.onPrimary` text, trailing-aligned. Status glyph
+ *  - [MessageDirection.OUTGOING] — filled with the sender's accent
+ *    ([ChatSenderDisplay.accent], which for own messages hashes to the
+ *    user's own color), `onAccent` text, trailing-aligned. Status glyph
  *    below the trailing edge (clock / check / red bang).
- *  - [MessageDirection.INCOMING] — `colorScheme.surfaceVariant`
- *    fill, `colorScheme.onSurfaceVariant` text, leading-aligned.
- *    No status indicator (the message arriving is proof of
+ *  - [MessageDirection.INCOMING] — tinted with the sender's accent at
+ *    [INCOMING_TINT_ALPHA], `onSurface` text for readability,
+ *    leading-aligned, optionally topped by an accent-colored name
+ *    header. No status indicator (the message arriving is proof of
  *    delivery).
+ *
+ * Sender differentiation (onym-ios PR #162): there are no avatars, so
+ * consecutive incoming messages from one person are grouped under a
+ * single accent-colored name header ([ChatSenderDisplay.showNameHeader],
+ * decided by the screen's run-grouping pass) and the bubble carries
+ * that sender's accent. The accent is a hash of the BLS pubkey, not the
+ * alias, so it doubles as a cheap visual fingerprint an alias-spoofer
+ * can't forge. The bubble stays a dumb renderer — it receives a
+ * resolved [ChatSenderDisplay] and never looks up aliases or hashes
+ * pubkeys itself.
  *
  * Bubble max width is capped at [maxWidthFraction] of the parent
  * row (default 75%) so a long monologue doesn't reach the opposite
@@ -61,20 +76,32 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ChatBubble(
     message: ChatMessage,
+    sender: ChatSenderDisplay = ChatSenderDisplay.Unknown,
     modifier: Modifier = Modifier,
     maxWidthFraction: Float = 0.75f,
     onRetry: (() -> Unit)? = null,
 ) {
     val isOutgoing = message.direction == MessageDirection.OUTGOING
+    // The Chats tab is Material-themed (no OnymTheme provider), so we
+    // resolve the accent against the system theme directly — the no-arg
+    // OnymAccent.color() would always return the dark variant here.
+    val darkTheme = isSystemInDarkTheme()
+    val accentColor: Color = sender.accent.color(darkTheme)
     val fill: Color = if (isOutgoing) {
-        MaterialTheme.colorScheme.primary
+        // Own messages: solid fill in the user's own accent (so "your
+        // color" is consistent with the members list and every group).
+        accentColor
     } else {
-        MaterialTheme.colorScheme.surfaceVariant
+        // Others' messages: low-opacity tint in the sender's accent —
+        // distinguishable per person while keeping body text readable.
+        accentColor.copy(alpha = INCOMING_TINT_ALPHA)
     }
     val textColor: Color = if (isOutgoing) {
-        MaterialTheme.colorScheme.onPrimary
+        // White on the darker light-variant fills, black on the bright
+        // dark-variant fills — mirrors OnymTokens.onAccent.
+        if (darkTheme) Color.Black else Color.White
     } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
+        MaterialTheme.colorScheme.onSurface
     }
     val retryEnabled = canRetry(message) && onRetry != null
 
@@ -93,6 +120,24 @@ fun ChatBubble(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.widthIn(max = bubbleMaxWidth),
             ) {
+                // Accent-colored sender name at the start of an incoming
+                // run. Suppressed mid-run, on outgoing rows, and in
+                // 1-on-1 groups — the screen's run-grouping pass decides
+                // via ChatSenderDisplay.showNameHeader.
+                if (sender.showNameHeader) {
+                    Text(
+                        text = sender.name,
+                        color = accentColor,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .padding(start = 4.dp)
+                            .testTag("chat_thread.sender.${message.id}"),
+                    )
+                }
                 BubbleBody(
                     body = message.body,
                     fill = fill,
@@ -219,3 +264,8 @@ internal enum class ChatStatusTint { Muted, Error }
 
 private val BUBBLE_RADIUS = 16.dp
 private val STATUS_ICON_SIZE = 14.dp
+
+/** Incoming-bubble tint opacity over the background. Low enough that
+ *  the body text stays readable on top, high enough that the sender's
+ *  accent reads at a glance. Mirrors iOS's `incomingTintAlpha` (0.20). */
+private const val INCOMING_TINT_ALPHA = 0.20f

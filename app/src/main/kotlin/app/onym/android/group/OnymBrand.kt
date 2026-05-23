@@ -145,6 +145,48 @@ enum class OnymAccent(private val light: Color, private val dark: Color) {
     @ReadOnlyComposable
     fun color(): Color =
         if (LocalOnymTokens.current === OnymTokens.Dark) dark else light
+
+    /** Resolve against an explicit dark/light flag. For call sites
+     *  *outside* an [OnymTheme] scope — e.g. the Chats tab, which is
+     *  Material-themed and reads `isSystemInDarkTheme()` directly —
+     *  that still want the accent to track the system theme. (The
+     *  no-arg [color] would always return [dark] there, since
+     *  [LocalOnymTokens] defaults to [OnymTokens.Dark] without an
+     *  [OnymTheme] provider.) */
+    fun color(darkTheme: Boolean): Color = if (darkTheme) dark else light
+
+    companion object {
+        /**
+         * Deterministic accent for a chat sender, keyed off their BLS
+         * pubkey hex.
+         *
+         * Color keys on the *load-bearing* identity (the pubkey), never
+         * the self-asserted [MemberProfile.alias] — so two members who
+         * both claim "Alice" still get different colors, and an impostor
+         * can't steal the original's color by copying their name. The
+         * mapping is a pure function of the hex bytes (FNV-1a, not the
+         * per-process-seeded [hashCode]), so the same person resolves to
+         * the same color on every device, in every group, across
+         * launches.
+         *
+         * Byte-for-byte identical to `OnymAccent.forSender(blsPubkeyHex:)`
+         * in onym-ios PR #162: same FNV-1a constants, same UTF-8 byte
+         * input, same `% entries.size` into the same palette order
+         * (orange, blue, green, purple, pink, yellow). Do not change the
+         * constants or the enum declaration order without coordinating
+         * with iOS — a person must read as the same color on both
+         * platforms.
+         */
+        fun forSender(blsPubkeyHex: String): OnymAccent {
+            var hash = 0xcbf2_9ce4_8422_2325uL // FNV-1a 64-bit offset basis
+            for (byte in blsPubkeyHex.encodeToByteArray()) {
+                hash = hash xor byte.toUByte().toULong()
+                hash *= 0x0000_0100_0000_01b3uL // FNV-1a 64-bit prime
+            }
+            val all = entries
+            return all[(hash % all.size.toULong()).toInt()]
+        }
+    }
 }
 
 // ─── Theme scope ─────────────────────────────────────────────────
