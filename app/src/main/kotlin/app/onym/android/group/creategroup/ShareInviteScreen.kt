@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.onym.android.R
 import app.onym.android.group.IntroCapability
 import app.onym.android.group.ShareInviteViewModel
+import app.onym.android.settings.OnymQrCode
 
 /**
  * Post-create surface. The just-created group is identified by hex
@@ -121,6 +122,23 @@ fun ShareInviteScreen(
                 is ShareInviteViewModel.State.Ready -> {
                     val chooserTitle = stringResource(R.string.share_invite_link_chooser)
                     val clipboardLabel = stringResource(R.string.share_invite_clipboard_label)
+                    // Same brand-anchored QR component the identity
+                    // invite-key screen uses. Encodes the *exact* link
+                    // string the Share / Copy buttons hand out, so a
+                    // scanned QR and a tapped link decode identically.
+                    OnymQrCode(
+                        value = s.link,
+                        size = 220.dp,
+                        modifier = Modifier.testTag("share_invite.qr"),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(R.string.share_invite_qr_caption),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(20.dp))
                     Button(
                         onClick = {
                             val sendIntent = Intent().apply {

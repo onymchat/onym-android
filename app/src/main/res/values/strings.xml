@@ -399,6 +399,7 @@
     <string name="share_invite_copied">Copied!</string>
     <string name="share_invite_failed">Couldn\'t generate an invite: %1$s</string>
     <string name="share_invite_skip">I\'ll do this later</string>
+    <string name="share_invite_qr_caption">Have them scan this with their camera to join.</string>
 
     <!-- ─── Create group — Step 1 ─────────────────────────────── -->
     <string name="create_group_step1_title">New Group</string>
@@ -436,6 +437,10 @@
     <!-- QR scanner (Create Group → Invite by inbox key → Scan QR) -->
     <string name="qr_scanner_hint">Point your camera at an Onym invite QR code.</string>
     <string name="qr_scanner_permission_denied">Camera access is off. Enable it in Settings, then come back to scan.</string>
+
+    <!-- Scan to join (Chats → scan an invite QR) -->
+    <string name="chats_scan_to_join">Scan to join</string>
+    <string name="scan_join_not_onym">Not an Onym invite.</string>
 
     <!-- ─── Create group — Step 2 CTA labels ──────────────────── -->
     <string name="create_group_cta_empty">Create empty group</string>

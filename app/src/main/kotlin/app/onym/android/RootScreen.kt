@@ -37,6 +37,7 @@ import app.onym.android.group.CreateGroupViewModel
 import app.onym.android.group.IntroCapability
 import app.onym.android.group.JoinScreen
 import app.onym.android.group.JoinViewModel
+import app.onym.android.group.ScanToJoinScreen
 import app.onym.android.group.ShareInviteViewModel
 import app.onym.android.group.creategroup.CreateGroupScreen
 import app.onym.android.group.creategroup.ShareInviteScreen
@@ -189,6 +190,21 @@ fun RootScreen(
                         // tap deeper behind the thread's info button.
                         navController.navigate("chat_thread/$groupId")
                     },
+                    onScanToJoin = { navController.navigate(ROUTE_SCAN_JOIN) },
+                )
+            }
+            composable(ROUTE_SCAN_JOIN) {
+                ScanToJoinScreen(
+                    onCapability = { capability ->
+                        // Route a scanned invite through the exact join
+                        // destination the tapped-link path uses; drop the
+                        // scanner from the back stack so Back from Join
+                        // returns to Chats, not the live camera.
+                        navController.navigate("join_invite/${capability.encode()}") {
+                            popUpTo(ROUTE_SCAN_JOIN) { inclusive = true }
+                        }
+                    },
+                    onCancel = { navController.popBackStack() },
                 )
             }
             composable("chat_thread/{groupId}") { entry ->
@@ -566,4 +582,5 @@ private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
 private const val ROUTE_APPROVE_REQUESTS = "approve_requests"
 private const val ROUTE_PENDING_INVITES = "pending_invites"
+private const val ROUTE_SCAN_JOIN = "scan_join"
 private val TAB_ROUTES = setOf(Tab.Chats.route, Tab.Settings.route, Tab.Search.route)
