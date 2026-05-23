@@ -105,6 +105,7 @@ class RoomGroupStore(
             encryptedAdminPubkeyHex = group.adminPubkeyHex?.let(encryption::encrypt),
             encryptedMemberProfilesJson = memberProfilesEncrypted,
             encryptedAdminEd25519PubkeyHex = group.adminEd25519PubkeyHex?.let(encryption::encrypt),
+            encryptedAvatar = group.avatar?.let(encryption::encrypt),
         )
     }
 
@@ -130,6 +131,7 @@ class RoomGroupStore(
         val commitment = row.encryptedCommitment?.let { tryDecrypt(it) }
         val adminPubkeyHex = row.encryptedAdminPubkeyHex?.let { tryDecryptString(it) }
         val adminEd25519PubkeyHex = row.encryptedAdminEd25519PubkeyHex?.let { tryDecryptString(it) }
+        val avatar = row.encryptedAvatar?.let { tryDecrypt(it) }
         val memberProfiles: Map<String, MemberProfile> = row.encryptedMemberProfilesJson
             ?.let { tryDecrypt(it) }
             ?.let { bytes ->
@@ -163,6 +165,7 @@ class RoomGroupStore(
             adminEd25519PubkeyHex = adminEd25519PubkeyHex,
             isPublishedOnChain = row.isPublishedOnChain,
             ownerIdentityId = row.ownerIdentityId,
+            avatar = avatar,
         )
     }
 

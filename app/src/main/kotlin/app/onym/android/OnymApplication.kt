@@ -290,6 +290,7 @@ class OnymApplication : Application() {
                 .addMigrations(
                     GroupDatabaseMigrations.MIGRATION_3_4,
                     GroupDatabaseMigrations.MIGRATION_4_5,
+                    GroupDatabaseMigrations.MIGRATION_5_6,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -631,7 +632,16 @@ class OnymApplication : Application() {
                 )
             },
             makeChatsViewModel = {
-                app.onym.android.chats.ChatsViewModel(repository = groupRepository)
+                app.onym.android.chats.ChatsViewModel(
+                    repository = groupRepository,
+                    avatarBroadcaster = app.onym.android.group.GroupAvatarBroadcaster(
+                        activeIdentity = identityRepository,
+                        identitiesFlow = identityRepository.identities,
+                        envelopeSealer = identityRepository,
+                        groupRepository = groupRepository,
+                        inboxTransport = inboxTransport,
+                    ),
+                )
             },
             makeChatThreadViewModel = { groupId ->
                 // PR A5: per-thread VM. The SendMessageInteractor is

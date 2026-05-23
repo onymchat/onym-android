@@ -251,6 +251,11 @@ open class JoinRequestApprover(
             // joiner's own profile gets backfilled by the receiver's
             // materializer (PR 83) from their active identity.
             memberProfiles = anchored.memberProfiles.takeIf { it.isNotEmpty() },
+            // Carry the group photo so a create-time member sees it the
+            // moment the snapshot lands — the only delivery path for
+            // members who join via the full snapshot rather than a later
+            // GroupAvatarPayload. `null` when the group has no photo.
+            avatar = anchored.avatar,
         )
         val payloadBytes = try {
             jsonFormat.encodeToString(GroupInvitationPayload.serializer(), invitePayload)

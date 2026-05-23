@@ -137,6 +137,76 @@ class GroupInvitationPayloadTest {
         assertArrayEquals(sk1, decoded.inviteeBlsSecretKey)
     }
 
+    // ─── avatar field (iOS #165 parity) ───────────────────────────
+
+    @Test
+    fun roundtrip_withAvatar_preservesBytes() {
+        val avatar = ByteArray(64) { (it * 7).toByte() }
+        val original = GroupInvitationPayload(
+            version = 1,
+            groupId = ByteArray(32) { 0x11 },
+            groupSecret = ByteArray(32) { 0x22 },
+            name = "Friends",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32) { 0x33 },
+            commitment = ByteArray(32) { 0x44 },
+            tierRaw = 0,
+            groupTypeRaw = "tyranny",
+            avatar = avatar,
+        )
+        val encoded = json.encodeToString(GroupInvitationPayload.serializer(), original)
+        // Wire key is "avatar", base64-encoded (matches Swift Data).
+        val obj = json.parseToJsonElement(encoded).jsonObject
+        assertArrayEquals(avatar, Base64.getDecoder().decode(obj["avatar"]!!.jsonPrimitive.content))
+        val decoded = json.decodeFromString(GroupInvitationPayload.serializer(), encoded)
+        assertEquals(original, decoded)
+        assertArrayEquals(avatar, decoded.avatar)
+    }
+
+    @Test
+    fun decode_legacyEnvelopeWithoutAvatar_decodesWithNullField() {
+        // A pre-avatar sender omits the key entirely — must not fail
+        // decode, and avatar falls back to null (no photo).
+        val legacyJson = """
+            {
+              "version": 1,
+              "group_id": "${b64(ByteArray(32) { 0x10 })}",
+              "group_secret": "${b64(ByteArray(32) { 0x20 })}",
+              "name": "legacy",
+              "members": [],
+              "epoch": 0,
+              "salt": "${b64(ByteArray(32) { 0x30 })}",
+              "tier_raw": 0,
+              "group_type_raw": "tyranny"
+            }
+        """.trimIndent()
+        val decoded = json.decodeFromString(GroupInvitationPayload.serializer(), legacyJson)
+        assertNull(decoded.avatar)
+    }
+
+    @Test
+    fun encode_omitsAvatarKeyWhenNil() {
+        // With encodeDefaults = false the null avatar drops off the wire
+        // entirely (the type supports the iOS "omit when nil" shape so
+        // photo-less invites stay small).
+        val lean = Json { encodeDefaults = false }
+        val original = GroupInvitationPayload(
+            version = 1,
+            groupId = ByteArray(32),
+            groupSecret = ByteArray(32),
+            name = "G",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32),
+            tierRaw = 0,
+            groupTypeRaw = "tyranny",
+            avatar = null,
+        )
+        val encoded = lean.encodeToString(GroupInvitationPayload.serializer(), original)
+        assertTrue("avatar key must be omitted when nil", !encoded.contains("\"avatar\""))
+    }
+
     @Test
     fun decode_legacyEnvelopeWithoutInviteeBlsSecretKey_decodesWithNullField() {
         // Envelopes from a pre-PR-2 sender don't include the new field.

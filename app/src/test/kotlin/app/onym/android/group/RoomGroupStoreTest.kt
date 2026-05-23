@@ -242,6 +242,32 @@ class RoomGroupStoreTest {
         assertEquals(emptyMap<String, MemberProfile>(), store.list().single().memberProfiles)
     }
 
+    // ─── avatar ───────────────────────────────────────────────────
+
+    @Test
+    fun avatar_roundTripsThroughEncryptedColumn() = runTest {
+        val avatar = ByteArray(64) { (it * 5).toByte() }
+        val group = makeGroup(id = "fc".repeat(32), name = "G").copy(avatar = avatar)
+        store.insertOrUpdate(group)
+
+        val raw = db.groupDao().findById(group.id)!!
+        assertNotEquals(
+            "encryptedAvatar must not contain the plaintext JPEG bytes",
+            avatar.toList(),
+            raw.encryptedAvatar?.toList(),
+        )
+        assertArrayEquals(avatar, store.list().single().avatar)
+    }
+
+    @Test
+    fun avatar_nullPersistsAsNullColumn() = runTest {
+        val group = makeGroup(id = "fd".repeat(32), name = "G")
+        store.insertOrUpdate(group)
+        val raw = db.groupDao().findById(group.id)!!
+        assertNull(raw.encryptedAvatar)
+        assertNull(store.list().single().avatar)
+    }
+
     // ─── helpers ──────────────────────────────────────────────────
 
     private fun makeGroup(

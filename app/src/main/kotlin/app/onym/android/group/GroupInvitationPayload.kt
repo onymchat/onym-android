@@ -84,6 +84,25 @@ data class GroupInvitationPayload(
      */
     @SerialName("member_profiles")
     val memberProfiles: Map<String, MemberProfile>? = null,
+    /**
+     * Raw JPEG bytes of the group avatar at send time, base64 on the
+     * wire (matches Swift `Data` Codable, which base64-encodes in
+     * JSON). Optional with "if present" semantics: a pre-avatar sender
+     * omits the key entirely and the receiver falls back to no photo —
+     * the default keeps such envelopes decoding. Senders include it
+     * only when the group actually has an avatar, and omit the key when
+     * nil so photo-less invites stay small.
+     *
+     * This is the only path that delivers the photo to **create-time**
+     * members (esp. Tyranny, where the full snapshot is sent at
+     * join-approval, not at create). Later changes ride the dedicated
+     * [GroupAvatarPayload].
+     *
+     * Mirrors `GroupInvitationPayload.avatar` from onym-ios PR #165.
+     */
+    @SerialName("avatar")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val avatar: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -101,7 +120,8 @@ data class GroupInvitationPayload(
             adminPubkeyHex == other.adminPubkeyHex &&
             (inviteeBlsSecretKey?.contentEquals(other.inviteeBlsSecretKey)
                 ?: (other.inviteeBlsSecretKey == null)) &&
-            memberProfiles == other.memberProfiles
+            memberProfiles == other.memberProfiles &&
+            (avatar?.contentEquals(other.avatar) ?: (other.avatar == null))
     }
 
     override fun hashCode(): Int {
@@ -118,6 +138,7 @@ data class GroupInvitationPayload(
         h = 31 * h + (adminPubkeyHex?.hashCode() ?: 0)
         h = 31 * h + (inviteeBlsSecretKey?.contentHashCode() ?: 0)
         h = 31 * h + (memberProfiles?.hashCode() ?: 0)
+        h = 31 * h + (avatar?.contentHashCode() ?: 0)
         return h
     }
 }
