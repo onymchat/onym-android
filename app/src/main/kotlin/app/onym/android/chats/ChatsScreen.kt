@@ -1,6 +1,8 @@
 package app.onym.android.chats
 
+import android.graphics.BitmapFactory
 import android.text.format.DateUtils
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +42,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -257,11 +261,9 @@ private fun ChatsRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Reuse the broken-ring brand mark as the per-chat avatar —
-        // same identity the user saw on the Create Group hero. Once
-        // group avatars / uploads ship, this becomes the
-        // image-or-mark fallback.
-        OnymGroupAvatar(size = 44.dp, accent = OnymAccent.Blue.color())
+        // Group photo when set, else the broken-ring brand mark — same
+        // identity the user saw on the Create Group hero.
+        ChatsRowAvatar(group = group, size = 44.dp)
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -286,6 +288,31 @@ private fun ChatsRow(
                 modifier = Modifier.size(18.dp),
             )
         }
+    }
+}
+
+/**
+ * Per-chat avatar: the group's photo ([ChatGroup.avatar], the raw JPEG)
+ * decoded + clipped to a circle when set, otherwise the broken-ring
+ * brand mark. `remember(group.avatar)` re-decodes only when the bytes
+ * change, so an admin's photo update re-renders the row immediately.
+ */
+@Composable
+private fun ChatsRowAvatar(group: ChatGroup, size: androidx.compose.ui.unit.Dp) {
+    val bitmap = remember(group.avatar) {
+        group.avatar?.let { bytes ->
+            runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+        }
+    }
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(size).clip(CircleShape),
+        )
+    } else {
+        OnymGroupAvatar(size = size, accent = OnymAccent.Blue.color())
     }
 }
 
