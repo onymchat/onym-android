@@ -5,7 +5,10 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -104,7 +107,19 @@ class MainActivity : FragmentActivity() {
                 onDispose { removeOnNewIntentListener(listener) }
             }
 
-            MaterialTheme {
+            // Follow the OS light/dark setting app-wide. A bare
+            // `MaterialTheme {}` pins `lightColorScheme()`, which left
+            // the shell (Chats / Settings) always-light while the
+            // Create Group route — wrapped in `OnymTheme`, which reads
+            // `isSystemInDarkTheme()` — flipped to dark on its own,
+            // making it look like a stray dark scene in a light app.
+            // Providing the scheme here is what RootScreen already
+            // assumes ("Chats / Settings adapt via Material's
+            // colorScheme").
+            MaterialTheme(
+                colorScheme = if (isSystemInDarkTheme()) darkColorScheme()
+                else lightColorScheme(),
+            ) {
                 RootScreen(
                     dependencies = dependencies,
                     pendingCapability = pending,

@@ -29,7 +29,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -97,11 +96,7 @@ fun ContractDetailScreen(
                         modifier = Modifier
                             .size(56.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(Color(0xFFFEF0E0), Color(0xFFFFE0C0)),
-                                )
-                            ),
+                            .background(Color(0xFFD14B00).copy(alpha = 0.14f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         OnymMark(size = 32.dp, color = Color(0xFFD14B00))

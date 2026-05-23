@@ -38,7 +38,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
@@ -303,11 +302,7 @@ private fun ActiveIdentityHero(
                 modifier = Modifier
                     .size(56.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFFEEF5FF), Color(0xFFE0EEFE)),
-                        )
-                    ),
+                    .background(SettingsTile.Blue.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center,
             ) {
                 OnymMark(size = 36.dp, color = SettingsTile.Blue)
