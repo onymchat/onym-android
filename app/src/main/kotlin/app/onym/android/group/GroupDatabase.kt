@@ -21,7 +21,9 @@ import androidx.room.RoomDatabase
     // column on top of v4's `encryptedMemberProfilesJson`. Both
     // migrations are non-destructive — existing rows decode to null
     // at the store boundary.
-    version = 5,
+    // v6 (group avatar): adds nullable `encryptedAvatar` column —
+    // iOS #164–#166 parity. Existing rows decode to a null avatar.
+    version = 6,
     exportSchema = false,
 )
 abstract class GroupDatabase : RoomDatabase() {
@@ -54,6 +56,16 @@ object GroupDatabaseMigrations {
     val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE groups ADD COLUMN encryptedAdminEd25519PubkeyHex BLOB")
+        }
+    }
+
+    /**
+     * v5 → v6: introduce `encryptedAvatar` (nullable BLOB) for the
+     * group photo. Existing rows decode to a null avatar (no photo).
+     */
+    val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE groups ADD COLUMN encryptedAvatar BLOB")
         }
     }
 }

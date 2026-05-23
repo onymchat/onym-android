@@ -3,10 +3,12 @@ package app.onym.android.chats
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.onym.android.group.ChatGroup
+import app.onym.android.group.GroupAvatarBroadcaster
 import app.onym.android.group.GroupRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * Read-only ViewModel for the Chats tab. Drains
@@ -24,9 +26,15 @@ import kotlinx.coroutines.flow.stateIn
  * Mirrors `ChatsFlow` from onym-ios PR #30 (the iOS twin uses an
  * `Observable @MainActor` driver pumping `AsyncStream`; same role,
  * Android-idiomatic types).
+ *
+ * The single mutating intent — the admin's group-photo change — is
+ * delegated to [GroupAvatarBroadcaster] (apply locally + fan out). The
+ * row UI itself stays read-only; [groups] re-emits once the change
+ * persists.
  */
 class ChatsViewModel(
     private val repository: GroupRepository,
+    private val avatarBroadcaster: GroupAvatarBroadcaster? = null,
 ) : ViewModel() {
 
     val groups: StateFlow<List<ChatGroup>> = repository.snapshots.stateIn(
@@ -34,4 +42,18 @@ class ChatsViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = repository.snapshots.value,
     )
+
+    /**
+     * Admin-only: set ([avatar] non-null) or clear ([avatar] == null)
+     * the group photo and broadcast the change. No-op when the
+     * broadcaster wasn't wired (e.g. lightweight test/preview VMs). The
+     * broadcaster itself enforces the admin gate; non-admin callers are
+     * dropped there.
+     */
+    fun setGroupAvatar(groupId: String, avatar: ByteArray?) {
+        val broadcaster = avatarBroadcaster ?: return
+        viewModelScope.launch {
+            broadcaster.setAvatar(groupId, avatar)
+        }
+    }
 }

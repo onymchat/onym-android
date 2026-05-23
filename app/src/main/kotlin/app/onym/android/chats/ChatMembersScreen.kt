@@ -1,6 +1,13 @@
 package app.onym.android.chats
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PersonOutline
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -24,14 +32,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -41,8 +54,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.ChatGroup
+import app.onym.android.group.GroupAvatarImage
 import app.onym.android.group.MemberProfile
 import app.onym.android.identity.IdentitiesViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Roster screen drilled into from a chat row. Renders one row per
@@ -93,6 +110,27 @@ fun ChatMembersScreen(
     }
     val showShareInvite = onShareInviteClick != null && canShareInvite
 
+    // Only the cryptographic admin may change the group photo — same
+    // gate as Share Invite (the receive-side trust check rejects a
+    // non-admin's avatar message anyway, so a non-admin's edit would be
+    // a dead-end). Non-admins get the read-only display below.
+    val canEditAvatar = canShareInvite
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        val g = group ?: return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                decodeAndEncodeAvatar(context, uri)
+            } ?: return@launch
+            chatsViewModel.setGroupAvatar(g.id, bytes)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -130,6 +168,15 @@ fun ChatMembersScreen(
             ChatMembersBody(
                 group = group,
                 activeBlsHex = activeBlsHex,
+                canEditAvatar = canEditAvatar,
+                onPickPhoto = {
+                    photoPicker.launch(
+                        PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly,
+                        ),
+                    )
+                },
+                onRemovePhoto = { chatsViewModel.setGroupAvatar(group.id, null) },
                 modifier = Modifier.padding(padding).fillMaxSize(),
             )
         }
@@ -140,6 +187,9 @@ fun ChatMembersScreen(
 private fun ChatMembersBody(
     group: ChatGroup,
     activeBlsHex: String?,
+    canEditAvatar: Boolean,
+    onPickPhoto: () -> Unit,
+    onRemovePhoto: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val rows = remember(group.memberProfiles, activeBlsHex) {
@@ -155,6 +205,12 @@ private fun ChatMembersBody(
     }
 
     Column(modifier = modifier) {
+        GroupAvatarHeader(
+            group = group,
+            canEdit = canEditAvatar,
+            onPickPhoto = onPickPhoto,
+            onRemovePhoto = onRemovePhoto,
+        )
         if (rows.isEmpty()) {
             EmptyState(modifier = Modifier.fillMaxSize())
         } else {
@@ -308,6 +364,92 @@ private fun MissingGroupState(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Group-photo header. Renders the avatar (the stored JPEG, or a
+ * monogram placeholder) above the roster. Admins ([canEdit]) get a
+ * "Change photo" affordance — tapping the avatar or the button opens
+ * the system photo picker — plus "Remove" when a photo is set.
+ * Non-admins see the same image, read-only.
+ */
+@Composable
+private fun GroupAvatarHeader(
+    group: ChatGroup,
+    canEdit: Boolean,
+    onPickPhoto: () -> Unit,
+    onRemovePhoto: () -> Unit,
+) {
+    val avatarBitmap = remember(group.avatar) {
+        group.avatar?.let { bytes ->
+            runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp, bottom = 8.dp)
+            .testTag("members.avatar_header"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        val circle = Modifier
+            .size(96.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .then(if (canEdit) Modifier.clickable(onClick = onPickPhoto) else Modifier)
+            .testTag("members.avatar_image")
+        Box(modifier = circle, contentAlignment = Alignment.Center) {
+            if (avatarBitmap != null) {
+                Image(
+                    bitmap = avatarBitmap.asImageBitmap(),
+                    contentDescription = "Group photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                val letter = group.name.firstOrNull()?.uppercase().orEmpty()
+                if (letter.isNotEmpty()) {
+                    Text(
+                        text = letter,
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.PersonOutline,
+                        contentDescription = null,
+                        modifier = Modifier.size(44.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+        if (canEdit) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = onPickPhoto,
+                    modifier = Modifier.testTag("members.avatar_change"),
+                ) {
+                    Icon(
+                        Icons.Filled.PhotoCamera,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Text(if (group.avatar == null) "Add photo" else "Change photo")
+                }
+                if (group.avatar != null) {
+                    TextButton(
+                        onClick = onRemovePhoto,
+                        modifier = Modifier.testTag("members.avatar_remove"),
+                    ) {
+                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+}
+
 internal data class MemberRow(
     val blsHex: String,
     val blsPrefix: String,
@@ -317,4 +459,38 @@ internal data class MemberRow(
 
 private fun ByteArray.toHexLowercase(): String = buildString(size * 2) {
     for (b in this@toHexLowercase) append("%02x".format(b.toInt() and 0xFF))
+}
+
+/**
+ * Decode the picked image [uri] into a downsampled [Bitmap] and run it
+ * through [GroupAvatarImage.encode] to get budget-bounded JPEG bytes.
+ * Returns `null` on any decode failure. Call off the main thread.
+ */
+private fun decodeAndEncodeAvatar(
+    context: android.content.Context,
+    uri: android.net.Uri,
+): ByteArray? {
+    val resolver = context.contentResolver
+    // Pass 1: bounds only, so a huge source doesn't OOM on decode.
+    // `decodeStream` returns null in this mode by design (it just fills
+    // outWidth/outHeight), so the null guard MUST be on `openInputStream`
+    // — not on the decode result, or we'd bail out on every image.
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    val boundsStream = resolver.openInputStream(uri) ?: return null
+    boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
+    val minEdge = minOf(bounds.outWidth, bounds.outHeight)
+    if (minEdge <= 0) return null
+
+    // Downsample so the smaller edge is at least 2× the target — enough
+    // detail for the centre-crop + 256² scale without decoding full res.
+    var sample = 1
+    while (minEdge / (sample * 2) >= GroupAvatarImage.SIZE * 2) {
+        sample *= 2
+    }
+    val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+    val bitmap = resolver.openInputStream(uri)?.use {
+        BitmapFactory.decodeStream(it, null, decodeOpts)
+    } ?: return null
+
+    return runCatching { GroupAvatarImage.encode(bitmap) }.getOrNull()
 }

@@ -113,6 +113,24 @@ data class ChatGroup(
      */
     @SerialName("owner_identity_id")
     val ownerIdentityId: String,
+    /**
+     * Raw JPEG bytes of the group's avatar (square, centre-cropped,
+     * 256×256, encoded under a 16 KB budget by
+     * [GroupAvatarImage.encode]). `null` for groups without a photo —
+     * the UI falls back to the monogram placeholder.
+     *
+     * Set on the creator/admin side via [GroupAvatarBroadcaster], and
+     * on the receiver side either from a [GroupInvitationPayload.avatar]
+     * at materialize time (create-time members, esp. Tyranny) or from a
+     * dedicated [GroupAvatarPayload] (later changes). Stored on the wire
+     * as base64 — same `Data` encoding iOS uses — so an avatar set on
+     * either platform renders on the other.
+     *
+     * Mirrors `ChatGroup.avatar` from onym-ios PR #164.
+     */
+    @SerialName("avatar")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val avatar: ByteArray? = null,
 ) {
     /** Strongly-typed accessor — same value as [ownerIdentityId] but
      *  wrapped so callers don't carry stringly-typed identity ids
@@ -141,7 +159,8 @@ data class ChatGroup(
             adminPubkeyHex == other.adminPubkeyHex &&
             adminEd25519PubkeyHex == other.adminEd25519PubkeyHex &&
             isPublishedOnChain == other.isPublishedOnChain &&
-            ownerIdentityId == other.ownerIdentityId
+            ownerIdentityId == other.ownerIdentityId &&
+            (avatar?.contentEquals(other.avatar) ?: (other.avatar == null))
     }
 
     override fun hashCode(): Int {
@@ -160,6 +179,7 @@ data class ChatGroup(
         h = 31 * h + (adminEd25519PubkeyHex?.hashCode() ?: 0)
         h = 31 * h + isPublishedOnChain.hashCode()
         h = 31 * h + ownerIdentityId.hashCode()
+        h = 31 * h + (avatar?.contentHashCode() ?: 0)
         return h
     }
 

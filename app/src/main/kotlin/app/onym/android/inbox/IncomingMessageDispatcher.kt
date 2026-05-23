@@ -10,6 +10,7 @@ import app.onym.android.chats.MessageDirection
 import app.onym.android.chats.MessageRepository
 import app.onym.android.chats.MessageStatus
 import app.onym.android.group.ChatGroup
+import app.onym.android.group.GroupAvatarPayload
 import app.onym.android.group.GroupCommitmentBuilder
 import app.onym.android.group.GroupInvitationPayload
 import app.onym.android.group.GroupInviteOfferPayload
@@ -161,6 +162,17 @@ class IncomingMessageDispatcher(
             return
         }
 
+        // Fast path: GroupAvatarPayload — admin-signed group-photo
+        // change. Decoded BEFORE the chat-message branch; its unique
+        // `avatar_*` keys keep it from colliding with a chat message in
+        // either direction. Applies (or clears) the local group's photo
+        // after the admin-Ed25519 trust gate.
+        val avatarUpdate = tryDecodeGroupAvatar(envelope.plaintext)
+        if (avatarUpdate != null) {
+            applyAvatar(avatarUpdate, envelope.senderEd25519PublicKey)
+            return
+        }
+
         // Fast path: ChatMessagePayload — body of the chat thread.
         // Verifies the envelope's Ed25519 signer matches the claimed
         // sender's [MemberProfile.sendingPubkey] (insider-spoof
@@ -265,6 +277,9 @@ class IncomingMessageDispatcher(
             // by the time it lands the group is on chain.
             isPublishedOnChain = true,
             ownerIdentityId = ownerIdentityId.value,
+            // "If present" semantics: a pre-avatar sender omits the key
+            // and the group materializes photo-less.
+            avatar = invitation.avatar,
         )
         groupRepository.insert(group)
     }
@@ -407,6 +422,64 @@ class IncomingMessageDispatcher(
     private fun tryDecodeAnnouncement(bytes: ByteArray): MemberAnnouncementPayload? = try {
         permissiveJson.decodeFromString(
             MemberAnnouncementPayload.serializer(),
+            bytes.toString(Charsets.UTF_8),
+        )
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
+     * Apply an inbound [GroupAvatarPayload] to the matching local
+     * group's [ChatGroup.avatar]. No-op when:
+     *
+     *   - The group isn't on this device (drop unknown group ids).
+     *   - The trust gate fails: a group with a stored admin Ed25519 key
+     *     requires the envelope's verified signer to equal it
+     *     (lowercased hex). Skipped (best-effort) only for admin-less
+     *     governance models / legacy rows with no stored admin — same
+     *     rule as [applyAnnouncement]. There is NO on-chain commitment
+     *     check; the avatar isn't part of the cryptographic group state.
+     *   - The stored avatar already equals the incoming bytes
+     *     (idempotent re-delivery).
+     *
+     * Otherwise sets the avatar — or clears it when the payload omits
+     * the photo (absent = removal) — and persists. `avatar_sender_bls_hex`
+     * is informational; never used to authenticate.
+     */
+    private suspend fun applyAvatar(
+        payload: GroupAvatarPayload,
+        senderEd25519PublicKey: ByteArray?,
+    ) {
+        val groups = groupRepository.snapshots.value
+        val group = groups.firstOrNull {
+            it.groupIdBytes.contentEquals(payload.groupId)
+        } ?: return
+
+        // Trust gate (same as member announcements): the change must be
+        // signed by the group's known admin.
+        val storedAdmin = group.adminEd25519PubkeyHex
+        if (storedAdmin != null) {
+            val sender = senderEd25519PublicKey ?: return
+            if (sender.toHexLowercase() != storedAdmin.lowercase()) return
+        }
+
+        // Idempotency: no-op when the stored avatar already matches
+        // (both absent, or byte-equal).
+        val current = group.avatar
+        val incoming = payload.avatar
+        val unchanged = if (current == null || incoming == null) {
+            current == null && incoming == null
+        } else {
+            current.contentEquals(incoming)
+        }
+        if (unchanged) return
+
+        groupRepository.insert(group.copy(avatar = incoming))
+    }
+
+    private fun tryDecodeGroupAvatar(bytes: ByteArray): GroupAvatarPayload? = try {
+        permissiveJson.decodeFromString(
+            GroupAvatarPayload.serializer(),
             bytes.toString(Charsets.UTF_8),
         )
     } catch (_: Throwable) {

@@ -71,6 +71,13 @@ data class PersistedGroup(
      * without an admin (Anarchy / OneOnOne).
      */
     val encryptedAdminEd25519PubkeyHex: ByteArray? = null,
+    /**
+     * Optional AES-GCM-encrypted raw JPEG of the group avatar (PR for
+     * iOS #164–#166 parity). `null` on rows migrated from the pre-avatar
+     * schema or for groups without a photo. Encrypted at rest like the
+     * other sensitive columns — a local avatar can leak who the group is.
+     */
+    val encryptedAvatar: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -89,7 +96,8 @@ data class PersistedGroup(
             (encryptedCommitment?.contentEquals(other.encryptedCommitment) ?: (other.encryptedCommitment == null)) &&
             (encryptedAdminPubkeyHex?.contentEquals(other.encryptedAdminPubkeyHex) ?: (other.encryptedAdminPubkeyHex == null)) &&
             (encryptedMemberProfilesJson?.contentEquals(other.encryptedMemberProfilesJson) ?: (other.encryptedMemberProfilesJson == null)) &&
-            (encryptedAdminEd25519PubkeyHex?.contentEquals(other.encryptedAdminEd25519PubkeyHex) ?: (other.encryptedAdminEd25519PubkeyHex == null))
+            (encryptedAdminEd25519PubkeyHex?.contentEquals(other.encryptedAdminEd25519PubkeyHex) ?: (other.encryptedAdminEd25519PubkeyHex == null)) &&
+            (encryptedAvatar?.contentEquals(other.encryptedAvatar) ?: (other.encryptedAvatar == null))
     }
 
     override fun hashCode(): Int {
@@ -108,6 +116,7 @@ data class PersistedGroup(
         h = 31 * h + (encryptedAdminPubkeyHex?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedMemberProfilesJson?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedAdminEd25519PubkeyHex?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedAvatar?.contentHashCode() ?: 0)
         return h
     }
 }
