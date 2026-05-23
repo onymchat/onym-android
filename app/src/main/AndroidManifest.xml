@@ -13,6 +13,23 @@
     -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+        CAMERA: the invite-QR scanner on the Create Group → "Invite by
+        inbox key" screen (`QrScannerScreen`) reads a contact's
+        `https://onym.app/i?k=…` identity-invite QR via CameraX.
+        Requested at runtime (API 23+) the first time the user taps
+        "Scan QR"; denial degrades to the existing paste-the-key path.
+
+        `uses-feature ... required="false"`: a camera is not essential
+        to the app — devices without one (or where the user declines)
+        still use manual key entry — so we don't want Play Store to
+        filter the listing on camera hardware.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
+
     <application
         android:name=".OnymApplication"
         android:label="@string/app_name"

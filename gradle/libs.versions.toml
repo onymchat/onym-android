@@ -43,11 +43,21 @@ onym-sdk = "0.0.2"
 # Crypto
 bouncycastle = "1.78.1"
 
-# ZXing — pure-Java QR encoder (Apache 2.0). The `core` artifact is
-# free of any Android dependency; we render the resulting BitMatrix
-# ourselves on a Compose `Canvas`, so the heavier `zxing-android`
-# extras (camera, intent integrators) stay out of the APK.
+# ZXing — pure-Java QR encoder + decoder (Apache 2.0). The `core`
+# artifact is free of any Android dependency; we render the encode-
+# side BitMatrix ourselves on a Compose `Canvas`, and on the decode
+# side we feed CameraX luminance frames straight into
+# `MultiFormatReader` (see `QrCodeAnalyzer`). The heavier
+# `zxing-android` extras (their stock camera surface + intent
+# integrators) stay out of the APK — CameraX is the camera layer.
 zxing-core = "3.5.3"
+
+# CameraX — camera preview + frame analysis for the invite-QR
+# scanner (`QrScannerScreen`). 1.4.1 is the current stable line and
+# ships 16-KB-aligned native libs for Android 15+. We pull the four
+# standard artifacts: core + camera2 backend, the lifecycle-aware
+# `ProcessCameraProvider`, and `PreviewView` for the surface.
+androidx-camera = "1.4.1"
 
 # Room — Kotlin-coroutines DAO (`suspend` queries) + KSP-generated
 # bindings. 2.6.1 is the newest stable that pairs cleanly with AGP
@@ -123,9 +133,17 @@ androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref =
 # BouncyCastle — Curve25519 (Ed25519 + X25519) raw-key APIs not in the JDK
 bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 
-# ZXing core — QR-bit-matrix generator. Drawn by `OnymQrCode` onto a
-# Compose Canvas; no Android-side ZXing artifact needed.
+# ZXing core — QR-bit-matrix generator (encode) + `MultiFormatReader`
+# (decode). Drawn by `OnymQrCode` onto a Compose Canvas; decoded from
+# CameraX frames by `QrCodeAnalyzer`. No Android-side ZXing artifact
+# needed.
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing-core" }
+
+# CameraX — preview + image analysis for the invite-QR scanner.
+androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "androidx-camera" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "androidx-camera" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "androidx-camera" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "androidx-camera" }
 
 # Test
 junit = { module = "junit:junit", version.ref = "junit" }

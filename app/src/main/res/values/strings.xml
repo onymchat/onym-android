@@ -420,6 +420,11 @@
     <string name="create_group_invite_by_key_count">(%1$d/64)</string>
     <string name="create_group_invite_by_key_helper">The recipient generates this key on their own device. They can find it in Settings → Identity → Inbox Key.</string>
     <string name="create_group_invite_by_key_add">Add invitee</string>
+    <string name="create_group_invite_by_key_scan">Scan QR code</string>
+
+    <!-- QR scanner (Create Group → Invite by inbox key → Scan QR) -->
+    <string name="qr_scanner_hint">Point your camera at an Onym invite QR code.</string>
+    <string name="qr_scanner_permission_denied">Camera access is off. Enable it in Settings, then come back to scan.</string>
 
     <!-- ─── Create group — Step 2 CTA labels ──────────────────── -->
     <string name="create_group_cta_empty">Create empty group</string>

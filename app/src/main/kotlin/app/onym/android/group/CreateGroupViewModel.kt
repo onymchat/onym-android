@@ -293,6 +293,22 @@ class CreateGroupViewModel(
         )
     }
 
+    /**
+     * Drop a scanned QR payload into [CreateGroupState.inviteeInput].
+     * Strips known URL wrappers (see [canonicalizeInviteKey]) so the
+     * user sees the raw 64-char hex and can review before tapping
+     * "Add invitee" — validation stays in [tappedAddInvitee], so a
+     * malformed scan surfaces the same inline error as a bad paste.
+     *
+     * Mirrors `CreateGroupFlow.tappedScannedKey(_:)` from onym-ios.
+     */
+    fun tappedScannedKey(raw: String) {
+        _state.value = _state.value.copy(
+            inviteeInput = canonicalizeInviteKey(raw),
+            inviteeError = null,
+        )
+    }
+
     fun tappedCancelInviteByKey() {
         _state.value = _state.value.copy(route = CreateGroupRoute.Step2)
     }

@@ -163,6 +163,15 @@ dependencies {
     // renderer).
     implementation(libs.zxing.core)
 
+    // CameraX — preview + image analysis behind the invite-QR scanner
+    // (`QrScannerScreen`). camera-view supplies `PreviewView`; the
+    // analysis frames are decoded with the zxing-core reader above so
+    // we add no ML Kit model to the APK.
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+
     implementation(libs.onym.sdk)
 
     // Room — `suspend` DAO + KSP-generated bindings. PersistenceStore
