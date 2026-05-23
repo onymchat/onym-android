@@ -292,7 +292,7 @@ private fun ChatsRow(
 @Composable
 private fun subtitleFor(group: ChatGroup): String {
     val label = when (group.groupType) {
-        SepGroupType.TYRANNY -> "Tyranny"
+        SepGroupType.TYRANNY -> "Founder"
         SepGroupType.ANARCHY -> "Anarchy"
         SepGroupType.ONE_ON_ONE -> "1-on-1"
         SepGroupType.DEMOCRACY -> "Democracy"

@@ -352,13 +352,13 @@
     <string name="governance_democracy">Democracy</string>
     <string name="governance_oligarchy">Oligarchy</string>
     <string name="governance_oneonone">One-on-one</string>
-    <string name="governance_tyranny">Tyranny</string>
+    <string name="governance_tyranny">Founder</string>
 
     <!-- ─── Governance card copy (CreateGroup Step 1 / Step 2) ─────
          Short pill labels for the picker cards plus the per-flavour
          sub-line, tooltip blurb, and Step-2 banner hint that used
          to live as hardcoded strings inside `OnymUIGovernance`. -->
-    <string name="governance_tyranny_card_label">Tyranny</string>
+    <string name="governance_tyranny_card_label">Founder</string>
     <string name="governance_tyranny_sub">Single admin</string>
     <string name="governance_tyranny_oneline">You control membership and settings.</string>
     <string name="governance_tyranny_step2hint">You\'ll be the only admin.</string>
