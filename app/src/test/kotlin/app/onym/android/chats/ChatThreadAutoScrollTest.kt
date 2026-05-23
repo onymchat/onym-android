@@ -77,4 +77,58 @@ class ChatThreadAutoScrollTest {
         assertFalse(isNearBottom(totalItems = 50, lastVisibleIndex = 44, nearBottomThreshold = 5))
         assertTrue(isNearBottom(totalItems = 50, lastVisibleIndex = 45, nearBottomThreshold = 5))
     }
+
+    // ─── keyboard-rise re-anchor (#154) ──────────────────────────
+
+    @Test
+    fun shouldGlueToBottomOnImeRise_risingAndAnchored_glues() {
+        // Keyboard growing and the user was at the bottom before it
+        // opened — re-pin the latest message above the input panel.
+        assertTrue(
+            shouldGlueToBottomOnImeRise(
+                rising = true,
+                anchoredBeforeIme = true,
+                hasMessages = true,
+            ),
+        )
+    }
+
+    @Test
+    fun shouldGlueToBottomOnImeRise_falling_doesNotGlue() {
+        // Dismissing the keyboard must never drag a scrolled-up user
+        // back down — only rising frames re-pin.
+        assertFalse(
+            shouldGlueToBottomOnImeRise(
+                rising = false,
+                anchoredBeforeIme = true,
+                hasMessages = true,
+            ),
+        )
+    }
+
+    @Test
+    fun shouldGlueToBottomOnImeRise_scrolledUpBeforeKeyboard_doesNotGlue() {
+        // The user was reading older history when they focused the
+        // input — keep their position instead of yanking to bottom.
+        assertFalse(
+            shouldGlueToBottomOnImeRise(
+                rising = true,
+                anchoredBeforeIme = false,
+                hasMessages = true,
+            ),
+        )
+    }
+
+    @Test
+    fun shouldGlueToBottomOnImeRise_emptyThread_doesNotGlue() {
+        // No messages → nothing to pin to; scrolling would be a no-op
+        // at best and an index error at worst.
+        assertFalse(
+            shouldGlueToBottomOnImeRise(
+                rising = true,
+                anchoredBeforeIme = true,
+                hasMessages = false,
+            ),
+        )
+    }
 }

@@ -3,8 +3,11 @@ package app.onym.android.chats
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -159,10 +163,61 @@ private fun ChatThreadBody(
         }
     }
 
+    // Keyboard-rise re-anchor. `imePadding()` below shrinks this
+    // column frame-by-frame as the soft keyboard animates in, and a
+    // LazyColumn keeps its top pinned — so the bottom messages slide
+    // out of view behind the input panel. A single scroll when the
+    // keyboard *starts* showing gets re-hidden by the rest of the
+    // shrink, so we re-pin on every rising frame of the IME inset
+    // instead, gluing the latest message just above the panel for
+    // the whole animation.
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+
+    // The pin decision must reflect where the user was *before* the
+    // keyboard began shrinking the viewport. Capture `nearBottom`
+    // while the IME is down; it freezes at that value the moment the
+    // keyboard starts rising. Reading it live at the rising edge
+    // would race the relayout and misfire on instant (non-animated)
+    // keyboards.
+    var anchoredBeforeIme by remember { mutableStateOf(true) }
+    LaunchedEffect(nearBottom, imeBottom) {
+        if (imeBottom == 0) anchoredBeforeIme = nearBottom
+    }
+
+    // Only rising frames re-pin. Falling frames (keyboard dismissing)
+    // are left alone, so a user who scrolled up to read history while
+    // typing isn't yanked back to the bottom when they close the
+    // keyboard. Instant scroll (not animated) so the bottom tracks
+    // the rising panel smoothly rather than lagging behind it.
+    var prevImeBottom by remember { mutableStateOf(0) }
+    LaunchedEffect(imeBottom) {
+        val rising = imeBottom > prevImeBottom
+        prevImeBottom = imeBottom
+        if (shouldGlueToBottomOnImeRise(
+                rising = rising,
+                anchoredBeforeIme = anchoredBeforeIme,
+                hasMessages = sortedMessages.isNotEmpty(),
+            )
+        ) {
+            listState.scrollToItem(sortedMessages.lastIndex)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
+            // Consume whatever bottom inset this screen's own Scaffold
+            // already applied before `imePadding()` reads the IME
+            // inset. The IME inset is measured from the screen bottom
+            // and overlaps the navigation-bar band, so without the
+            // consume `imePadding()` would re-add an inset that's
+            // already in `padding` and leave a gap above the keyboard.
+            // (The cross-Scaffold nav-bar double-count from #154 is
+            // handled upstream by `consumeWindowInsets` on RootScreen's
+            // NavHost; this keeps the panel flush even if the screen is
+            // ever hosted without that outer consume — e.g. in a test.)
+            .consumeWindowInsets(padding)
             .imePadding()  // slides the input panel above the soft keyboard
             .testTag("chat_thread.body"),
     ) {
@@ -237,6 +292,24 @@ internal fun isNearBottom(
  *  the auto-scroll heuristic. 2 = the user is reading the last or
  *  second-to-last message. */
 internal const val NEAR_BOTTOM_INDEX_THRESHOLD = 2
+
+/**
+ * Decides whether a frame of the IME-rise animation should re-pin the
+ * message list to the latest message. True only on a *rising* frame
+ * (the keyboard is growing, not dismissing), when the list is
+ * non-empty, and when the user was at the bottom before the keyboard
+ * started — so reading older history while typing isn't yanked down,
+ * and dismissing the keyboard never drags a scrolled-up user back.
+ * Pure function so the policy is unit-tested without standing up a
+ * `LazyListState` or driving a real soft keyboard; the composable
+ * feeds it the rising-edge test on `WindowInsets.ime` and the
+ * captured pre-keyboard `isNearBottom` state.
+ */
+internal fun shouldGlueToBottomOnImeRise(
+    rising: Boolean,
+    anchoredBeforeIme: Boolean,
+    hasMessages: Boolean,
+): Boolean = rising && anchoredBeforeIme && hasMessages
 
 @Composable
 private fun EmptyThread(modifier: Modifier = Modifier) {
