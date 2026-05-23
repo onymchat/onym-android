@@ -404,13 +404,21 @@ class OnymApplication : Application() {
         // branches. Reuses the same OkHttp client (with
         // BearerAuthInterceptor) so the relayer's auth token rides
         // along.
-        val chainStateReader = app.onym.android.chain.SepContractChainStateReader(
-            relayers = relayerRepository,
-            contracts = contractsRepository,
-            networkPreference = networkPreference,
-            makeContractTransport = { url ->
-                OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url)
-            },
+        // Cache + retry around the raw relayer reads. Without this, every
+        // relay reconnect replays the full inbox and each replayed
+        // group-state message fired its own `get_commitment`, storming the
+        // relayer into throttling fresh joins. The raw reader stays
+        // cache-free; the decorator is the single place trading a little
+        // staleness for far fewer relayer calls. See [CachingChainStateReader].
+        val chainStateReader = app.onym.android.chain.CachingChainStateReader(
+            inner = app.onym.android.chain.SepContractChainStateReader(
+                relayers = relayerRepository,
+                contracts = contractsRepository,
+                networkPreference = networkPreference,
+                makeContractTransport = { url ->
+                    OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url)
+                },
+            ),
         )
         // PR 158: invitee-side push invitations. The dispatcher records
         // decoded GroupInviteOfferPayloads here (never materializing a
