@@ -190,14 +190,16 @@ private fun ChatThreadBody(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
-            // The Scaffold's `padding` already carries the bottom
-            // navigation-bar inset. The IME inset is measured from
-            // the screen bottom and overlaps that same nav-bar band,
-            // so applying `imePadding()` on top would count the
-            // nav-bar height twice — the visible gap between the
-            // keyboard and the input panel in #154. Consuming the
-            // scaffold insets first makes `imePadding()` contribute
-            // only the keyboard height beyond what's already padded.
+            // Consume whatever bottom inset this screen's own Scaffold
+            // already applied before `imePadding()` reads the IME
+            // inset. The IME inset is measured from the screen bottom
+            // and overlaps the navigation-bar band, so without the
+            // consume `imePadding()` would re-add an inset that's
+            // already in `padding` and leave a gap above the keyboard.
+            // (The cross-Scaffold nav-bar double-count from #154 is
+            // handled upstream by `consumeWindowInsets` on RootScreen's
+            // NavHost; this keeps the panel flush even if the screen is
+            // ever hosted without that outer consume — e.g. in a test.)
             .consumeWindowInsets(padding)
             .imePadding()  // slides the input panel above the soft keyboard
             .testTag("chat_thread.body"),

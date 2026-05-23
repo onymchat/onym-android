@@ -1,5 +1,6 @@
 package app.onym.android
 
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forum
@@ -151,7 +152,23 @@ fun RootScreen(
         NavHost(
             navController = navController,
             startDestination = Tab.Chats.route,
-            modifier = androidx.compose.ui.Modifier.padding(padding),
+            // `consumeWindowInsets(padding)` is load-bearing, not
+            // decorative: several destinations host their own
+            // `Scaffold` (ChatThreadScreen, SettingsScreen, …). The
+            // outer Scaffold here applies the system-bar insets and
+            // hands them back as `padding`, but does NOT consume them
+            // from the inset tree. Without the consume, a nested
+            // Scaffold reads the full `systemBars` again and re-pads
+            // the bottom navigation-bar inset a second time. On a
+            // scrolling list that doubled inset just looks like extra
+            // bottom padding; on the chat thread's bottom-pinned
+            // input panel it's the visible gap + keyboard-overlap in
+            // #154. Consuming here makes the inner Scaffolds see the
+            // already-applied insets as spent, so `imePadding()`
+            // downstream lands the panel flush on the keyboard.
+            modifier = androidx.compose.ui.Modifier
+                .padding(padding)
+                .consumeWindowInsets(padding),
         ) {
             composable(Tab.Chats.route) {
                 val vm: ChatsViewModel = viewModel(
