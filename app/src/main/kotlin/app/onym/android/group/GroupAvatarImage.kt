@@ -1,6 +1,9 @@
 package app.onym.android.group
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import java.io.ByteArrayOutputStream
 import kotlin.math.min
 
@@ -53,6 +56,40 @@ object GroupAvatarImage {
             encoded = compress(scaled, quality)
         }
         return encoded
+    }
+
+    /**
+     * Decode the photo-picker [uri] into a downsampled [Bitmap] and run
+     * it through [encode], yielding budget-bounded JPEG bytes ready for
+     * [ChatGroup.avatar] / the wire. Returns `null` on any decode
+     * failure. Two-pass (bounds first) so a huge source doesn't OOM.
+     * Call off the main thread — it does blocking IO + decode.
+     */
+    fun decodeFromUri(context: Context, uri: Uri): ByteArray? {
+        val resolver = context.contentResolver
+        // Pass 1: bounds only. `decodeStream` returns null in this mode
+        // by design (it just fills outWidth/outHeight), so the null
+        // guard MUST be on `openInputStream` — not on the decode result,
+        // or we'd bail out on every image.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        val boundsStream = resolver.openInputStream(uri) ?: return null
+        boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
+        val minEdge = min(bounds.outWidth, bounds.outHeight)
+        if (minEdge <= 0) return null
+
+        // Downsample so the smaller edge is at least 2× the target —
+        // enough detail for the centre-crop + 256² scale without
+        // decoding full resolution.
+        var sample = 1
+        while (minEdge / (sample * 2) >= SIZE * 2) {
+            sample *= 2
+        }
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        val bitmap = resolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, opts)
+        } ?: return null
+
+        return runCatching { encode(bitmap) }.getOrNull()
     }
 
     private fun compress(bitmap: Bitmap, quality: Int): ByteArray =

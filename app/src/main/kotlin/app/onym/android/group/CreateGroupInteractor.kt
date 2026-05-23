@@ -103,6 +103,11 @@ open class CreateGroupInteractor(
         name: String,
         invitees: List<ByteArray>,
         groupType: SepGroupType = SepGroupType.TYRANNY,
+        /** Raw JPEG bytes of the group photo (already budget-bounded by
+         *  [GroupAvatarImage.encode]), or `null` for no photo. Stamped
+         *  onto the created [ChatGroup] so it ships in the membership
+         *  snapshot to every invitee. */
+        avatar: ByteArray? = null,
         onProgress: (CreateGroupProgress) -> Unit = {},
     ): ChatGroup {
         // 1. Validate
@@ -310,6 +315,7 @@ open class CreateGroupInteractor(
             adminEd25519PubkeyHex = adminEd25519PubkeyHex,
             isPublishedOnChain = false,
             ownerIdentityId = ownerId.value,
+            avatar = avatar,
         )
         groups.insert(group)
         groups.markPublished(group.id, proof.commitment)
@@ -343,6 +349,7 @@ open class CreateGroupInteractor(
                     adminPubkeyHex = adminPubkeyHex,
                     inviteeBlsSecretKey = secondaryBlsSecret,
                     memberProfiles = group.memberProfiles.takeIf { it.isNotEmpty() },
+                    avatar = avatar,
                 )
             }
         }
@@ -440,6 +447,7 @@ open class CreateGroupInteractor(
         adminPubkeyHex: String?,
         inviteeBlsSecretKey: ByteArray?,
         memberProfiles: Map<String, MemberProfile>?,
+        avatar: ByteArray?,
     ) {
         for ((index, inboxKey) in invitees.withIndex()) {
             val invitePayload = GroupInvitationPayload(
@@ -460,6 +468,7 @@ open class CreateGroupInteractor(
                 // materializes (PR 83). takeIf-not-empty matches iOS;
                 // pre-PR-82 senders shipped null.
                 memberProfiles = memberProfiles,
+                avatar = avatar,
             )
             val payloadBytes = try {
                 jsonFormat.encodeToString(

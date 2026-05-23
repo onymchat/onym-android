@@ -621,11 +621,12 @@ class OnymApplication : Application() {
                     introducer = inviteIntroducer,
                 )
                 CreateGroupViewModel(
-                    createGroup = { name, invitees, groupType, onProgress ->
+                    createGroup = { name, invitees, groupType, avatar, onProgress ->
                         interactor.create(
                             name = name,
                             invitees = invitees,
                             groupType = groupType,
+                            avatar = avatar,
                             onProgress = onProgress,
                         )
                     },

@@ -73,6 +73,12 @@ data class CreateGroupState(
      *  wants to type their own". */
     val nameFieldHasBeenFocused: Boolean = false,
     val accent: OnymAccent = OnymAccent.Blue,
+    /** Raw JPEG bytes of the group photo the user picked, already run
+     *  through [GroupAvatarImage.encode] (256×256, ≤16 KB). `null` =
+     *  no photo (the Success screen + invitations fall back to the
+     *  brand placeholder). Passed straight into [GroupCreator] at
+     *  submit so the created group carries it from the first snapshot. */
+    val avatar: ByteArray? = null,
     /** Always [OnymUIGovernance.Tyranny] in PR-C — the picker
      *  disables the others. */
     val governance: OnymUIGovernance = OnymUIGovernance.Tyranny,
@@ -171,6 +177,7 @@ typealias GroupCreator = suspend (
     name: String,
     invitees: List<ByteArray>,
     groupType: SepGroupType,
+    avatar: ByteArray?,
     onProgress: (CreateGroupProgress) -> Unit,
 ) -> ChatGroup
 
@@ -220,6 +227,16 @@ class CreateGroupViewModel(
 
     fun setAccent(accent: OnymAccent) {
         _state.value = _state.value.copy(accent = accent)
+    }
+
+    /**
+     * Set ([avatar] non-null) or clear ([avatar] == null) the group
+     * photo picked on Step 1. The screen has already decoded the
+     * picked image and run it through [GroupAvatarImage.encode], so
+     * [avatar] is the budget-bounded JPEG ready for the wire.
+     */
+    fun setAvatar(avatar: ByteArray?) {
+        _state.value = _state.value.copy(avatar = avatar)
     }
 
     fun setGovernance(governance: OnymUIGovernance) {
@@ -353,6 +370,7 @@ class CreateGroupViewModel(
                 current.effectiveName,
                 current.invitees.map { it.inboxPublicKey },
                 current.governance.sepGroupType,
+                current.avatar,
             ) { p -> _state.value = _state.value.copy(progress = p) }
             _state.value = _state.value.copy(
                 createdGroup = group,

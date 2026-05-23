@@ -125,7 +125,7 @@ fun ChatMembersScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             val bytes = withContext(Dispatchers.IO) {
-                decodeAndEncodeAvatar(context, uri)
+                GroupAvatarImage.decodeFromUri(context, uri)
             } ?: return@launch
             chatsViewModel.setGroupAvatar(g.id, bytes)
         }
@@ -459,38 +459,4 @@ internal data class MemberRow(
 
 private fun ByteArray.toHexLowercase(): String = buildString(size * 2) {
     for (b in this@toHexLowercase) append("%02x".format(b.toInt() and 0xFF))
-}
-
-/**
- * Decode the picked image [uri] into a downsampled [Bitmap] and run it
- * through [GroupAvatarImage.encode] to get budget-bounded JPEG bytes.
- * Returns `null` on any decode failure. Call off the main thread.
- */
-private fun decodeAndEncodeAvatar(
-    context: android.content.Context,
-    uri: android.net.Uri,
-): ByteArray? {
-    val resolver = context.contentResolver
-    // Pass 1: bounds only, so a huge source doesn't OOM on decode.
-    // `decodeStream` returns null in this mode by design (it just fills
-    // outWidth/outHeight), so the null guard MUST be on `openInputStream`
-    // — not on the decode result, or we'd bail out on every image.
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    val boundsStream = resolver.openInputStream(uri) ?: return null
-    boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
-    val minEdge = minOf(bounds.outWidth, bounds.outHeight)
-    if (minEdge <= 0) return null
-
-    // Downsample so the smaller edge is at least 2× the target — enough
-    // detail for the centre-crop + 256² scale without decoding full res.
-    var sample = 1
-    while (minEdge / (sample * 2) >= GroupAvatarImage.SIZE * 2) {
-        sample *= 2
-    }
-    val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-    val bitmap = resolver.openInputStream(uri)?.use {
-        BitmapFactory.decodeStream(it, null, decodeOpts)
-    } ?: return null
-
-    return runCatching { GroupAvatarImage.encode(bitmap) }.getOrNull()
 }

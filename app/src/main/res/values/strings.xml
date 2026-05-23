@@ -405,6 +405,9 @@
     <string name="create_group_step1_subtitle">Step 1 of 2</string>
     <string name="create_group_name_placeholder">Group name</string>
     <string name="create_group_name_helper">Visible to members. You can change this anytime.</string>
+    <string name="create_group_photo_add">Add photo</string>
+    <string name="create_group_photo_change">Change photo</string>
+    <string name="create_group_photo_remove">Remove</string>
     <string name="create_group_accent_color">Accent color</string>
     <string name="create_group_how_its_run">How it\'s run</string>
     <string name="create_group_soon_badge">Soon</string>
