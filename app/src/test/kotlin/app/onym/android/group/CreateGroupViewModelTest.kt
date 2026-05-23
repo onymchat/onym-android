@@ -337,6 +337,37 @@ class CreateGroupViewModelTest {
     }
 
     @Test
+    fun submit_forwardsPickedAvatarToCreator() = runTest {
+        var receivedAvatar: ByteArray? = null
+        var creatorCalled = false
+        val avatar = ByteArray(32) { 0x7A }
+        val vm = CreateGroupViewModel(
+            createGroup = { _, _, _, a, _ ->
+                creatorCalled = true
+                receivedAvatar = a
+                makeFakeGroup(id = "cd".repeat(32))
+            },
+        )
+
+        vm.setAvatar(avatar)
+        assertArrayEquals(avatar, vm.state.value.avatar)
+
+        vm.submit()
+
+        assertTrue("creator must run", creatorCalled)
+        assertArrayEquals("picked avatar must reach the creator", avatar, receivedAvatar)
+    }
+
+    @Test
+    fun setAvatar_nullClearsThePickedPhoto() = runTest {
+        val vm = makeViewModel()
+        vm.setAvatar(ByteArray(8) { 0x1 })
+        assertNotNull(vm.state.value.avatar)
+        vm.setAvatar(null)
+        assertNull(vm.state.value.avatar)
+    }
+
+    @Test
     fun tappedShareInvite_isNoOpWhenNoGroupCreated() = runTest {
         val vm = makeViewModel()
         var closedCount = 0
@@ -386,7 +417,7 @@ class CreateGroupViewModelTest {
      *  lambda just throws if reached — the screen flow is still fully
      *  exercised via intent dispatch. */
     private fun makeViewModel(): CreateGroupViewModel = CreateGroupViewModel(
-        createGroup = { _, _, _, _ ->
+        createGroup = { _, _, _, _, _ ->
             error("createGroup must not be invoked from VM tests")
         },
     )
@@ -397,7 +428,7 @@ class CreateGroupViewModelTest {
      *  the real interactor. */
     private fun makeViewModelReturning(group: ChatGroup): CreateGroupViewModel =
         CreateGroupViewModel(
-            createGroup = { _, _, _, _ -> group },
+            createGroup = { _, _, _, _, _ -> group },
         )
 
     private fun makeFakeGroup(id: String): ChatGroup = ChatGroup(

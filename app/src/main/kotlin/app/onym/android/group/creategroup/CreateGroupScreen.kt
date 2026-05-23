@@ -1,9 +1,14 @@
 package app.onym.android.group.creategroup
 
+import android.graphics.BitmapFactory
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +48,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -58,12 +67,16 @@ import app.onym.android.group.CreateCtaLabel
 import app.onym.android.group.CreateGroupProgress
 import app.onym.android.group.CreateGroupRoute
 import app.onym.android.group.CreateGroupViewModel
+import app.onym.android.group.GroupAvatarImage
 import app.onym.android.group.OnymAccent
 import app.onym.android.group.OnymGovIcon
 import app.onym.android.group.OnymGroupAvatar
 import app.onym.android.group.LocalOnymTokens
 import app.onym.android.group.OnymUIGovernance
 import app.onym.android.scan.QrScannerScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Top-level screen for the Create Group flow. Switches between the
@@ -108,6 +121,19 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val accent = state.accent.color()
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                GroupAvatarImage.decodeFromUri(context, uri)
+            }
+            if (bytes != null) viewModel.setAvatar(bytes)
+        }
+    }
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxWidth()) {
             OnymNavTitle(
@@ -137,7 +163,18 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(10.dp))
-            OnymGroupAvatar(size = 92.dp, accent = accent)
+            CreateGroupAvatarPicker(
+                avatar = state.avatar,
+                accent = accent,
+                onPick = {
+                    photoPicker.launch(
+                        PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly,
+                        ),
+                    )
+                },
+                onRemove = { viewModel.setAvatar(null) },
+            )
             Spacer(Modifier.height(18.dp))
 
             // Name field — pre-filled with the generated placeholder
@@ -250,6 +287,68 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 enabled = state.canAdvanceToStep2,
                 onClick = viewModel::tappedNext,
             )
+        }
+    }
+}
+
+/**
+ * Editable group-photo slot for Step 1. Tapping opens the system photo
+ * picker; once a photo is chosen it renders in the circle (replacing
+ * the brand mark) with "Change photo" / "Remove" actions below.
+ * [avatar] is the budget-bounded JPEG already produced by
+ * [GroupAvatarImage]; [onPick] launches the picker, [onRemove] clears it.
+ */
+@Composable
+private fun CreateGroupAvatarPicker(
+    avatar: ByteArray?,
+    accent: Color,
+    onPick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val bitmap = remember(avatar) {
+        avatar?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(92.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onPick),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = stringResource(R.string.create_group_photo_change),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                OnymGroupAvatar(size = 92.dp, accent = accent)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(
+                    if (avatar == null) R.string.create_group_photo_add
+                    else R.string.create_group_photo_change,
+                ),
+                color = accent,
+                style = TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.Medium),
+                modifier = Modifier.clickable(onClick = onPick),
+            )
+            if (avatar != null) {
+                Text(
+                    text = stringResource(R.string.create_group_photo_remove),
+                    color = LocalOnymTokens.current.text3,
+                    style = TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.Medium),
+                    modifier = Modifier.clickable(onClick = onRemove),
+                )
+            }
         }
     }
 }

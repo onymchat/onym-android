@@ -397,6 +397,9 @@
     <string name="create_group_step1_subtitle">Шаг 1 из 2</string>
     <string name="create_group_name_placeholder">Название группы</string>
     <string name="create_group_name_helper">Видно участникам. Можно изменить в любое время.</string>
+    <string name="create_group_photo_add">Добавить фото</string>
+    <string name="create_group_photo_change">Изменить фото</string>
+    <string name="create_group_photo_remove">Удалить</string>
     <string name="create_group_accent_color">Акцентный цвет</string>
     <string name="create_group_how_its_run">Как устроена</string>
     <string name="create_group_soon_badge">Скоро</string>
