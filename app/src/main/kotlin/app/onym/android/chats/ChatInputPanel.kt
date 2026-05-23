@@ -105,8 +105,16 @@ fun ChatInputPanel(
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                // Disabled state must visually contrast with the
+                // adjacent text field (also `surfaceVariant`) so the
+                // button reads as "greyed out", not as an extension of
+                // the field. Match M3's standard low-alpha disabled
+                // palette — a tinted overlay against the screen surface
+                // rather than a solid fill that blends with the field.
+                disabledContainerColor = MaterialTheme.colorScheme.onSurface
+                    .copy(alpha = 0.12f),
+                disabledContentColor = MaterialTheme.colorScheme.onSurface
+                    .copy(alpha = 0.38f),
             ),
             modifier = Modifier.testTag("chat_thread.send_button"),
         ) {
