@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Button
@@ -33,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -85,6 +87,7 @@ fun ChatsScreen(
     pendingInvitesViewModel: PendingInvitesViewModel? = null,
     onOpenInvitations: (() -> Unit)? = null,
     onOpenChat: (groupId: String) -> Unit = {},
+    onScanToJoin: () -> Unit = {},
 ) {
     val groups by viewModel.groups.collectAsStateWithLifecycle()
     val pending by (approveRequestsViewModel?.pending?.collectAsStateWithLifecycle()
@@ -100,6 +103,18 @@ fun ChatsScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.chats_title)) },
                 actions = {
+                    // Scan-to-join is always available — a brand-new
+                    // user with no chats still needs a way in, and an
+                    // existing member may want to join another group.
+                    IconButton(
+                        onClick = onScanToJoin,
+                        modifier = Modifier.testTag("chats.scan_to_join_toolbar"),
+                    ) {
+                        Icon(
+                            Icons.Filled.QrCodeScanner,
+                            contentDescription = stringResource(R.string.chats_scan_to_join),
+                        )
+                    }
                     if (approveRequestsViewModel != null && onOpenApproveRequests != null) {
                         Box(modifier = Modifier.padding(end = 4.dp)) {
                             IconButton(
@@ -171,7 +186,11 @@ fun ChatsScreen(
         containerColor = MaterialTheme.colorScheme.surface,
     ) { padding ->
         if (groups.isEmpty()) {
-            EmptyState(padding = padding, onCreateGroup = onCreateGroup)
+            EmptyState(
+                padding = padding,
+                onCreateGroup = onCreateGroup,
+                onScanToJoin = onScanToJoin,
+            )
         } else {
             LazyColumn(
                 modifier = Modifier
@@ -193,6 +212,7 @@ fun ChatsScreen(
 private fun EmptyState(
     padding: PaddingValues,
     onCreateGroup: () -> Unit,
+    onScanToJoin: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -239,6 +259,24 @@ private fun EmptyState(
         ) {
             Text(
                 text = stringResource(R.string.chats_create_group),
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        // Secondary affordance: a first-time user who was sent an
+        // invite QR (and has no chats yet) joins from here.
+        TextButton(
+            onClick = onScanToJoin,
+            modifier = Modifier.testTag("chats.scan_to_join_empty_cta"),
+        ) {
+            Icon(
+                Icons.Filled.QrCodeScanner,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                text = stringResource(R.string.chats_scan_to_join),
                 style = MaterialTheme.typography.titleMedium,
             )
         }
