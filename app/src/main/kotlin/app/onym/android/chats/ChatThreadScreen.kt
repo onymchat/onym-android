@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.onym.android.group.MemberProfile
 
 /**
  * Compose chat-thread screen. Tapping a group in the Chats tab
@@ -108,6 +109,12 @@ fun ChatThreadScreen(
         } else {
             ChatThreadBody(
                 messages = messages,
+                // Member profiles flow from the same live `group`
+                // snapshot the title reads, so a joiner landing or an
+                // alias edit repaints the rendered name headers without
+                // a fresh message arriving (requirement #6) — Compose
+                // recomposes the `remember(memberProfiles)` below.
+                memberProfiles = group?.memberProfiles.orEmpty(),
                 padding = padding,
                 onSend = viewModel::send,
                 onRetry = viewModel::retry,
@@ -119,6 +126,7 @@ fun ChatThreadScreen(
 @Composable
 private fun ChatThreadBody(
     messages: List<ChatMessage>,
+    memberProfiles: Map<String, MemberProfile>,
     padding: PaddingValues,
     onSend: (String) -> Unit,
     onRetry: (java.util.UUID) -> Unit,
@@ -131,6 +139,13 @@ private fun ChatThreadBody(
     // the controller boundary.
     val sortedMessages = remember(messages) {
         messages.sortedBy { it.sentAtMillis }
+    }
+    // Resolve per-message sender presentation (name + accent + whether
+    // to show the run-start header) off the sorted order + the group's
+    // member profiles. Recomputes when either changes — including a
+    // live profile update — so headers repaint in place.
+    val senderDisplays = remember(sortedMessages, memberProfiles) {
+        buildSenderDisplays(sortedMessages, memberProfiles)
     }
 
     // Auto-scroll behavior:
@@ -248,6 +263,7 @@ private fun ChatThreadBody(
                 ) { message ->
                     ChatBubble(
                         message = message,
+                        sender = senderDisplays[message.id] ?: ChatSenderDisplay.Unknown,
                         onRetry = { onRetry(message.id) },
                     )
                 }
