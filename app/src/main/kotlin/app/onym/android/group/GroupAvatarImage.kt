@@ -67,9 +67,13 @@ object GroupAvatarImage {
      */
     fun decodeFromUri(context: Context, uri: Uri): ByteArray? {
         val resolver = context.contentResolver
+        // Pass 1: bounds only. `decodeStream` returns null in this mode
+        // by design (it just fills outWidth/outHeight), so the null
+        // guard MUST be on `openInputStream` — not on the decode result,
+        // or we'd bail out on every image.
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            ?: return null
+        val boundsStream = resolver.openInputStream(uri) ?: return null
+        boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
         val minEdge = min(bounds.outWidth, bounds.outHeight)
         if (minEdge <= 0) return null
 

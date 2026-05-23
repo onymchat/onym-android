@@ -1,12 +1,17 @@
 package app.onym.android.group
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 import kotlin.random.Random
 
 /**
@@ -45,6 +50,30 @@ class GroupAvatarImageTest {
         val decoded = android.graphics.BitmapFactory.decodeByteArray(encoded, 0, encoded.size)
         assertEquals(GroupAvatarImage.SIZE, decoded.width)
         assertEquals(GroupAvatarImage.SIZE, decoded.height)
+    }
+
+    @Test
+    fun decodeFromUri_realImage_returnsBudgetBoundedSquareBytes() {
+        // Regression: the bounds-only first pass returns null by design,
+        // so the helper must NOT key its null check off the decode
+        // result — otherwise every picked photo silently drops and the
+        // avatar never applies (group settings + create flow).
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val source = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888)
+        source.eraseColor(Color.MAGENTA)
+        val file = File.createTempFile("avatar-test", ".jpg", ctx.cacheDir)
+        file.outputStream().use { source.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+
+        try {
+            val bytes = GroupAvatarImage.decodeFromUri(ctx, Uri.fromFile(file))
+            assertNotNull("decodeFromUri must not drop a valid image", bytes)
+            assertTrue(bytes!!.size <= GroupAvatarImage.MAX_BYTES)
+            val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            assertEquals(GroupAvatarImage.SIZE, decoded.width)
+            assertEquals(GroupAvatarImage.SIZE, decoded.height)
+        } finally {
+            file.delete()
+        }
     }
 
     @Test
