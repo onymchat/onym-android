@@ -27,9 +27,15 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +63,7 @@ import app.onym.android.group.OnymGovIcon
 import app.onym.android.group.OnymGroupAvatar
 import app.onym.android.group.LocalOnymTokens
 import app.onym.android.group.OnymUIGovernance
+import app.onym.android.scan.QrScannerScreen
 
 /**
  * Top-level screen for the Create Group flow. Switches between the
@@ -514,6 +521,8 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
 private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val accent = state.accent.color()
+    var showScanner by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
         val groupLabel = state.name.ifEmpty {
             stringResource(R.string.create_group_invite_by_key_default_group_label)
@@ -578,6 +587,41 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
                     )
                 }
             }
+            Spacer(Modifier.height(16.dp))
+            // Scan-QR affordance — reads a contact's identity-invite
+            // QR (https://onym.app/i?k=…) and drops the canonicalised
+            // key into the field above for review.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(accent.copy(alpha = 0.10f))
+                    .border(
+                        width = 1.dp,
+                        color = accent.copy(alpha = 0.30f),
+                        shape = RoundedCornerShape(14.dp),
+                    )
+                    .clickable { showScanner = true }
+                    .padding(vertical = 13.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.QrCodeScanner,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.create_group_invite_by_key_scan),
+                        color = accent,
+                        style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                }
+            }
             Spacer(Modifier.height(20.dp))
             Text(
                 text = stringResource(R.string.create_group_invite_by_key_helper),
@@ -596,6 +640,16 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
             OnymQuietButton(
                 title = stringResource(R.string.cancel),
                 onClick = viewModel::tappedCancelInviteByKey,
+            )
+        }
+    }
+        if (showScanner) {
+            QrScannerScreen(
+                onScanned = { value ->
+                    viewModel.tappedScannedKey(value)
+                    showScanner = false
+                },
+                onCancel = { showScanner = false },
             )
         }
     }
