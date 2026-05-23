@@ -388,6 +388,16 @@ class IncomingMessageDispatcher(
             it.groupIdBytes.contentEquals(payload.groupId)
         } ?: return
 
+        // Dedup BEFORE any chain read. The dedup key is BLS pubkey hex,
+        // mirroring the producer-side dictionary key in
+        // `JoinRequestApprover`. Every relay reconnect replays the full
+        // inbox, so an already-applied announcement is re-delivered on
+        // each launch — bailing here keeps those replays from each firing
+        // a `get_commitment` against the relayer (the launch-time storm).
+        // Cheap, local, and idempotent.
+        val key = payload.newMember.blsPub.toHexLowercase()
+        if (group.memberProfiles[key] != null) return  // dedup
+
         // PR 84 trust check: announcement must be signed by the
         // group's known admin. Skipped (best-effort) when the group
         // has no stored admin Ed25519 — happens for governance
@@ -407,8 +417,6 @@ class IncomingMessageDispatcher(
         // commitment. The chain has the truth.
         if (!verifyTyrannyAnnouncement(payload, group)) return
 
-        val key = payload.newMember.blsPub.toHexLowercase()
-        if (group.memberProfiles[key] != null) return  // dedup
         val updated = group.copy(
             memberProfiles = group.memberProfiles + (key to MemberProfile(
                 alias = payload.newMember.alias,
@@ -613,11 +621,36 @@ class IncomingMessageDispatcher(
             return TyrannyInvitationVerification.REJECT
         }
         if (!recomputed.contentEquals(claimed)) return TyrannyInvitationVerification.REJECT
+
+        // Skip the chain read when we've already verified+materialized
+        // this exact (commitment, epoch). Re-confirming what we confirmed
+        // on a prior pass adds nothing — the recompute above already
+        // rejects a replay that swaps the roster while reusing the
+        // commitment (Poseidon would have to collide). This is the
+        // load-bearing fix for the launch-time `get_commitment` storm:
+        // every relay reconnect replays the full inbox, and without this
+        // each replayed invitation re-hit the relayer, tripping its rate
+        // limit and making fresh joins fail until the burst subsided.
+        val existing = groupRepository.snapshots.value.firstOrNull {
+            it.groupIdBytes.contentEquals(invitation.groupId)
+        }
+        if (existing?.commitment?.contentEquals(claimed) == true &&
+            existing.epoch == invitation.epoch
+        ) {
+            return TyrannyInvitationVerification.VERIFIED
+        }
+
         // Verify at current chain state (Option 2). The chain stores only
         // the LATEST (commitment, epoch), so a snapshot is only
         // byte-verifiable when the chain is exactly at its epoch.
-        //   - chain behind the snapshot → impossible for a real anchored
-        //     snapshot; reject.
+        //   - chain BEHIND the snapshot → our read is lagging the admin's
+        //     just-landed `update_commitment` (relayer/indexer catch-up),
+        //     OR a self-consistent forgery claiming a future epoch. We
+        //     can't tell here, so defer + ask the admin rather than
+        //     reject: deferral never materializes without a later exact-
+        //     epoch match, so a forgery still can't get in, while a real
+        //     lagging read recovers. (Previously a hard reject — the root
+        //     cause of "joiner only sees the chat after a restart".)
         //   - chain EXACTLY at the snapshot's epoch → byte-verify the
         //     committed roster. Strong anti-forgery: reproducing
         //     `Poseidon(Poseidon(root, epoch), salt)` needs the random
@@ -629,9 +662,14 @@ class IncomingMessageDispatcher(
         val onchain = try {
             reader.tyrannyCommitment(invitation.groupId)
         } catch (_: Throwable) {
-            return TyrannyInvitationVerification.REJECT
+            // Couldn't reach / read the relayer (throttled, offline, or
+            // unconfigured). NOT evidence of forgery — never reject. Defer
+            // so the verifier retries via the admin-refresh path and the
+            // group materializes once the read succeeds, instead of being
+            // silently dropped until the next relay replay (a restart).
+            return TyrannyInvitationVerification.STALE_NEEDS_REFRESH
         }
-        if (onchain.epoch < invitation.epoch) return TyrannyInvitationVerification.REJECT
+        if (onchain.epoch < invitation.epoch) return TyrannyInvitationVerification.STALE_NEEDS_REFRESH
         if (onchain.epoch == invitation.epoch) {
             return if (onchain.commitment.contentEquals(claimed)) {
                 TyrannyInvitationVerification.VERIFIED
@@ -648,9 +686,14 @@ class IncomingMessageDispatcher(
          *  an exact epoch — safe to materialize. */
         VERIFIED,
 
-        /** Internally consistent and the group exists on chain, but the
-         *  chain has advanced past the snapshot's epoch, so it can't be
-         *  byte-verified. Needs a current-state refresh from the admin. */
+        /** Internally consistent, but we couldn't byte-verify against the
+         *  chain *right now* — the chain advanced past the snapshot, OR
+         *  our read lagged behind it, OR the relayer read failed
+         *  (throttled / offline / unconfigured). None of these is
+         *  evidence of forgery, so we defer and ask the admin for the
+         *  current state rather than dropping. Deferral never materializes
+         *  a group without a later exact-epoch on-chain match, so forgery
+         *  protection is intact. */
         STALE_NEEDS_REFRESH,
 
         /** Forged / unverifiable — drop. */

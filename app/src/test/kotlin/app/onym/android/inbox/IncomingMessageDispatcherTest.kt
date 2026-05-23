@@ -505,6 +505,62 @@ class IncomingMessageDispatcherTest {
         )
     }
 
+    @Test
+    fun announcement_tyranny_knownMember_skipsChainRead() = runTest {
+        // The launch-time storm fix: a re-delivered announcement for a
+        // member we already have must dedup BEFORE the chain read, so
+        // inbox replays don't each fire a `get_commitment`.
+        val storedAdmin = ByteArray(32) { 0x10 }
+        val storedAdminHex = storedAdmin.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val bobKey = newMemberBlsPub.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        groupStore.replaceForTest(
+            makeGroup(groupId).copy(
+                adminEd25519PubkeyHex = storedAdminHex,
+                memberProfiles = mapOf(
+                    bobKey to MemberProfile(
+                        alias = "Bob",
+                        inboxPublicKey = newMemberInbox,
+                        sendingPubkey = ByteArray(32) { 0x77 },
+                    ),
+                ),
+            ),
+        )
+        groupRepository.reload()
+
+        val payload = MemberAnnouncementPayload(
+            version = 1,
+            groupId = groupId,
+            newMember = MemberAnnouncementPayload.AnnouncedMember(
+                blsPub = newMemberBlsPub,
+                inboxPub = newMemberInbox,
+                alias = "Bob",
+                sendingPub = ByteArray(32) { 0x77 },
+            ),
+            adminAlias = "Alice",
+            commitment = ByteArray(32) { 0x01 },
+            epoch = 0uL,
+        )
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
+            .toByteArray(Charsets.UTF_8)
+        val countingChain = CountingChainState(
+            SepCommitmentEntry(commitment = ByteArray(32) { 0x01 }, epoch = 0uL),
+        )
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = storedAdmin),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            chainState = countingChain,
+        )
+
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        assertEquals(
+            "known-member announcement must dedup before reading the chain",
+            0,
+            countingChain.callCount,
+        )
+    }
+
     private fun announcementPayload() = MemberAnnouncementPayload(
         version = 1,
         groupId = groupId,
@@ -608,6 +664,17 @@ private class SpyPendingInvites : PendingInvitesRecording {
 
 private class FakeChainState(private val entry: SepCommitmentEntry) : ChainStateReading {
     override suspend fun tyrannyCommitment(groupId: ByteArray): SepCommitmentEntry = entry
+}
+
+/** Records how many times the chain was read — for asserting dedup
+ *  short-circuits never reach the relayer. */
+private class CountingChainState(private val entry: SepCommitmentEntry) : ChainStateReading {
+    var callCount = 0
+        private set
+    override suspend fun tyrannyCommitment(groupId: ByteArray): SepCommitmentEntry {
+        callCount += 1
+        return entry
+    }
 }
 
 private class SpyGroupStateRefresher : GroupStateRefreshing {
