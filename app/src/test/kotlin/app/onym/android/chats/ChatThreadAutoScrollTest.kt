@@ -78,54 +78,55 @@ class ChatThreadAutoScrollTest {
         assertTrue(isNearBottom(totalItems = 50, lastVisibleIndex = 45, nearBottomThreshold = 5))
     }
 
-    // ─── keyboard-open re-anchor (#154) ──────────────────────────
+    // ─── keyboard-rise re-anchor (#154) ──────────────────────────
 
     @Test
-    fun shouldAnchorBottomOnImeShow_visibleAndNearBottom_anchors() {
-        // User is at the bottom and the keyboard just rose — keep
-        // the latest message visible above the input panel.
+    fun shouldGlueToBottomOnImeRise_risingAndAnchored_glues() {
+        // Keyboard growing and the user was at the bottom before it
+        // opened — re-pin the latest message above the input panel.
         assertTrue(
-            shouldAnchorBottomOnImeShow(
-                imeVisible = true,
-                nearBottom = true,
+            shouldGlueToBottomOnImeRise(
+                rising = true,
+                anchoredBeforeIme = true,
                 hasMessages = true,
             ),
         )
     }
 
     @Test
-    fun shouldAnchorBottomOnImeShow_imeHidden_doesNotAnchor() {
-        // The keyboard closing must never drive a scroll.
+    fun shouldGlueToBottomOnImeRise_falling_doesNotGlue() {
+        // Dismissing the keyboard must never drag a scrolled-up user
+        // back down — only rising frames re-pin.
         assertFalse(
-            shouldAnchorBottomOnImeShow(
-                imeVisible = false,
-                nearBottom = true,
+            shouldGlueToBottomOnImeRise(
+                rising = false,
+                anchoredBeforeIme = true,
                 hasMessages = true,
             ),
         )
     }
 
     @Test
-    fun shouldAnchorBottomOnImeShow_scrolledUp_doesNotAnchor() {
-        // Focusing the input while reading older history must not
-        // yank the list down to the latest message.
+    fun shouldGlueToBottomOnImeRise_scrolledUpBeforeKeyboard_doesNotGlue() {
+        // The user was reading older history when they focused the
+        // input — keep their position instead of yanking to bottom.
         assertFalse(
-            shouldAnchorBottomOnImeShow(
-                imeVisible = true,
-                nearBottom = false,
+            shouldGlueToBottomOnImeRise(
+                rising = true,
+                anchoredBeforeIme = false,
                 hasMessages = true,
             ),
         )
     }
 
     @Test
-    fun shouldAnchorBottomOnImeShow_emptyThread_doesNotAnchor() {
-        // No messages → nothing to anchor to; scrolling would be a
-        // no-op at best and an index error at worst.
+    fun shouldGlueToBottomOnImeRise_emptyThread_doesNotGlue() {
+        // No messages → nothing to pin to; scrolling would be a no-op
+        // at best and an index error at worst.
         assertFalse(
-            shouldAnchorBottomOnImeShow(
-                imeVisible = true,
-                nearBottom = true,
+            shouldGlueToBottomOnImeRise(
+                rising = true,
+                anchoredBeforeIme = true,
                 hasMessages = false,
             ),
         )
