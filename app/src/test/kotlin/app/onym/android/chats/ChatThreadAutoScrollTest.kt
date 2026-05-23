@@ -77,4 +77,57 @@ class ChatThreadAutoScrollTest {
         assertFalse(isNearBottom(totalItems = 50, lastVisibleIndex = 44, nearBottomThreshold = 5))
         assertTrue(isNearBottom(totalItems = 50, lastVisibleIndex = 45, nearBottomThreshold = 5))
     }
+
+    // ─── keyboard-open re-anchor (#154) ──────────────────────────
+
+    @Test
+    fun shouldAnchorBottomOnImeShow_visibleAndNearBottom_anchors() {
+        // User is at the bottom and the keyboard just rose — keep
+        // the latest message visible above the input panel.
+        assertTrue(
+            shouldAnchorBottomOnImeShow(
+                imeVisible = true,
+                nearBottom = true,
+                hasMessages = true,
+            ),
+        )
+    }
+
+    @Test
+    fun shouldAnchorBottomOnImeShow_imeHidden_doesNotAnchor() {
+        // The keyboard closing must never drive a scroll.
+        assertFalse(
+            shouldAnchorBottomOnImeShow(
+                imeVisible = false,
+                nearBottom = true,
+                hasMessages = true,
+            ),
+        )
+    }
+
+    @Test
+    fun shouldAnchorBottomOnImeShow_scrolledUp_doesNotAnchor() {
+        // Focusing the input while reading older history must not
+        // yank the list down to the latest message.
+        assertFalse(
+            shouldAnchorBottomOnImeShow(
+                imeVisible = true,
+                nearBottom = false,
+                hasMessages = true,
+            ),
+        )
+    }
+
+    @Test
+    fun shouldAnchorBottomOnImeShow_emptyThread_doesNotAnchor() {
+        // No messages → nothing to anchor to; scrolling would be a
+        // no-op at best and an index error at worst.
+        assertFalse(
+            shouldAnchorBottomOnImeShow(
+                imeVisible = true,
+                nearBottom = true,
+                hasMessages = false,
+            ),
+        )
+    }
 }

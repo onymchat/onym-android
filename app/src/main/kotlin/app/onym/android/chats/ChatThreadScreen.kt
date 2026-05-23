@@ -3,9 +3,12 @@ package app.onym.android.chats
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,6 +16,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -112,6 +116,7 @@ fun ChatThreadScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChatThreadBody(
     messages: List<ChatMessage>,
@@ -159,10 +164,41 @@ private fun ChatThreadBody(
         }
     }
 
+    // Keyboard-open re-anchor. `imePadding()` below shrinks this
+    // column when the soft keyboard rises; a LazyColumn keeps its
+    // top pinned, so the bottom messages would slide out of view
+    // behind the input panel. Re-scroll to the latest message when
+    // the IME appears — but only if the user was already near the
+    // bottom, mirroring the append heuristic so reading older
+    // messages while typing isn't hijacked. Reading `nearBottom`
+    // here captures the pre-resize position because the IME inset
+    // animates in over subsequent frames, after this effect's
+    // launch observes the visibility flip.
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (shouldAnchorBottomOnImeShow(
+                imeVisible = imeVisible,
+                nearBottom = nearBottom,
+                hasMessages = sortedMessages.isNotEmpty(),
+            )
+        ) {
+            listState.animateScrollToItem(sortedMessages.lastIndex)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
+            // The Scaffold's `padding` already carries the bottom
+            // navigation-bar inset. The IME inset is measured from
+            // the screen bottom and overlaps that same nav-bar band,
+            // so applying `imePadding()` on top would count the
+            // nav-bar height twice — the visible gap between the
+            // keyboard and the input panel in #154. Consuming the
+            // scaffold insets first makes `imePadding()` contribute
+            // only the keyboard height beyond what's already padded.
+            .consumeWindowInsets(padding)
             .imePadding()  // slides the input panel above the soft keyboard
             .testTag("chat_thread.body"),
     ) {
@@ -237,6 +273,22 @@ internal fun isNearBottom(
  *  the auto-scroll heuristic. 2 = the user is reading the last or
  *  second-to-last message. */
 internal const val NEAR_BOTTOM_INDEX_THRESHOLD = 2
+
+/**
+ * Decides whether the keyboard-open handler should re-anchor the
+ * message list to the latest message. True only when the IME just
+ * became visible, the list is non-empty, and the user was already
+ * near the bottom — so focusing the input while reading older
+ * history doesn't yank the list down. Pure function so the policy
+ * is unit-tested without standing up a `LazyListState` or driving a
+ * real soft keyboard. The composable feeds it `WindowInsets.isImeVisible`
+ * and the same `isNearBottom`-backed `derivedStateOf`.
+ */
+internal fun shouldAnchorBottomOnImeShow(
+    imeVisible: Boolean,
+    nearBottom: Boolean,
+    hasMessages: Boolean,
+): Boolean = imeVisible && nearBottom && hasMessages
 
 @Composable
 private fun EmptyThread(modifier: Modifier = Modifier) {
