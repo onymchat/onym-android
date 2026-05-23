@@ -347,10 +347,10 @@
     <string name="governance_democracy">Демократия</string>
     <string name="governance_oligarchy">Олигархия</string>
     <string name="governance_oneonone">Один на один</string>
-    <string name="governance_tyranny">Тирания</string>
+    <string name="governance_tyranny">Основатель</string>
 
     <!-- ─── Governance card copy (CreateGroup Step 1 / Step 2) ─── -->
-    <string name="governance_tyranny_card_label">Тирания</string>
+    <string name="governance_tyranny_card_label">Основатель</string>
     <string name="governance_tyranny_sub">Один админ</string>
     <string name="governance_tyranny_oneline">Вы управляете участниками и настройками.</string>
     <string name="governance_tyranny_step2hint">Вы будете единственным админом.</string>

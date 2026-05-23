@@ -146,7 +146,7 @@ class ApproveRequestsViewModel(
             is JoinRequestApprover.ApproveOutcome.NoActiveRelayer ->
                 "No chain relayer configured. Set one in Settings → Network → Relayer."
             is JoinRequestApprover.ApproveOutcome.NoContractBinding ->
-                "No Tyranny contract selected for this network. Pick one in Settings → Network → Anchors."
+                "No Founder contract selected for this network. Pick one in Settings → Network → Anchors."
             is JoinRequestApprover.ApproveOutcome.NotAdminOfThisGroup ->
                 "The active identity isn’t this group’s admin. Switch to the identity that created the group, then try again."
             is JoinRequestApprover.ApproveOutcome.ProofFailed ->

@@ -57,20 +57,26 @@ class CreateGroupViewModelTest {
     }
 
     @Test
-    fun allGovernanceTypes_areSelectable() = runTest {
-        // All three flavours (Tyranny / OneOnOne / Anarchy) are wired
-        // post-Anarchy stack — the picker accepts every entry. This
-        // test used to assert Anarchy was a no-op (when only Tyranny
-        // was wired) and then OneOnOne (after the OneOnOne stack);
-        // both invariants are gone now. Kept as a guard against
-        // someone re-introducing an "unavailable" flavour without
-        // also updating the picker UI.
+    fun onlyTyranny_isSelectable_oneOnOneAndAnarchyShowSoon() = runTest {
+        // The picker offers Tyranny only; OneOnOne and Anarchy render a
+        // "Soon" badge and are non-interactive — mirrors the iOS
+        // create-group picker. `setGovernance` enforces the same gate
+        // (a tap on a disabled card is a no-op), so governance stays on
+        // the default. The chain layer still supports all three (see the
+        // CreateGroup*E2ETest suites) — this is purely which flavours
+        // the picker exposes today.
         val vm = makeViewModel()
-        for (g in OnymUIGovernance.entries) {
-            vm.setGovernance(g)
-            assertEquals(g, vm.state.value.governance)
-            assertTrue(vm.state.value.canAdvanceToStep2)
-        }
+
+        vm.setGovernance(OnymUIGovernance.Tyranny)
+        assertEquals(OnymUIGovernance.Tyranny, vm.state.value.governance)
+        assertTrue(vm.state.value.canAdvanceToStep2)
+
+        assertTrue("OneOnOne not offered yet", !OnymUIGovernance.OneOnOne.isAvailable)
+        assertTrue("Anarchy not offered yet", !OnymUIGovernance.Anarchy.isAvailable)
+        vm.setGovernance(OnymUIGovernance.OneOnOne)
+        assertEquals(OnymUIGovernance.Tyranny, vm.state.value.governance)
+        vm.setGovernance(OnymUIGovernance.Anarchy)
+        assertEquals(OnymUIGovernance.Tyranny, vm.state.value.governance)
     }
 
     @Test
@@ -259,45 +265,17 @@ class CreateGroupViewModelTest {
     }
 
     // ─── OneOnOne governance ──────────────────────────────────────
-
-    @Test
-    fun oneOnOne_isSelectable_andAdvancesToStep2() = runTest {
-        val vm = makeViewModel()
-        vm.setGovernance(OnymUIGovernance.OneOnOne)
-        assertEquals(OnymUIGovernance.OneOnOne, vm.state.value.governance)
-        assertTrue(vm.state.value.canAdvanceToStep2)
-    }
-
-    @Test
-    fun oneOnOne_canSubmitOnly_whenInviteeCountIsExactlyOne() = runTest {
-        val vm = makeViewModel()
-        vm.setGovernance(OnymUIGovernance.OneOnOne)
-        // Zero invitees → cannot submit.
-        assertTrue("zero invitees blocks 1-on-1 submit", !vm.state.value.canSubmit)
-        // One invitee → enabled.
-        vm.setInviteeInput("aa".repeat(32))
-        vm.tappedAddInvitee()
-        assertTrue("one invitee enables 1-on-1 submit", vm.state.value.canSubmit)
-        // Two invitees → blocked again.
-        vm.tappedInviteByKey()
-        vm.setInviteeInput("bb".repeat(32))
-        vm.tappedAddInvitee()
-        assertTrue("two invitees blocks 1-on-1 submit", !vm.state.value.canSubmit)
-    }
-
-    @Test
-    fun oneOnOne_ctaLabel_explainsTheGate() = runTest {
-        val vm = makeViewModel()
-        vm.setGovernance(OnymUIGovernance.OneOnOne)
-        assertEquals(CreateCtaLabel.OneOnOneAddOther, vm.state.value.createCtaLabel)
-        vm.setInviteeInput("aa".repeat(32))
-        vm.tappedAddInvitee()
-        assertEquals(CreateCtaLabel.OneOnOneStart, vm.state.value.createCtaLabel)
-        vm.tappedInviteByKey()
-        vm.setInviteeInput("bb".repeat(32))
-        vm.tappedAddInvitee()
-        assertEquals(CreateCtaLabel.OneOnOneTooMany, vm.state.value.createCtaLabel)
-    }
+    //
+    // OneOnOne is gated out of the picker for now (see
+    // `onlyTyranny_isSelectable_oneOnOneAndAnarchyShowSoon`), so its
+    // selected-state behaviour — the exactly-one-invitee submit gate
+    // ([CreateGroupState.canSubmit]) and the OneOnOneAddOther/Start/
+    // TooMany CTA labels ([CreateGroupState.createCtaLabel]) — is
+    // unreachable through the VM's public API while `setGovernance`
+    // refuses unavailable flavours. The logic stays in CreateGroupState
+    // for when the OneOnOne create-group UX is re-enabled; the three
+    // selected-state tests that exercised it were removed alongside the
+    // gate (recoverable from git history when OneOnOne flips back on).
 
     @Test
     fun tyranny_canSubmit_evenWithZeroInvitees() = runTest {
@@ -393,19 +371,9 @@ class CreateGroupViewModelTest {
     @Test
     fun tappedDismissError_clearsErrorAndReturnsToStep2() = runTest {
         val vm = makeViewModel()
-        // Note: this test used to rely on Anarchy being unavailable to
-        // force an error via submit(). Now all flavours are wired, so
-        // we just exercise the error-dismiss path on a clean state.
-        vm.setGovernance(OnymUIGovernance.Anarchy)
-        // Force the unavailable state by reflection-equivalent: there
-        // isn't a direct setter. Instead just observe that submit
-        // with available=Tyranny doesn't set error, then trigger the
-        // error path by manually constructing on the model.
-        // Simpler approach: confirm tappedDismissError clears error
-        // when one is present (the screen sets state via setError-
-        // equivalent indirectly through submit). Skip the synthetic
-        // setup and just call tappedDismissError on a clean state
-        // — it should still flip route to Step2 (covered separately).
+        // There's no direct error setter, so we exercise the dismiss
+        // path on a clean state: tappedDismissError clears any error and
+        // unconditionally lands on Step2.
         vm.tappedDismissError()
         assertEquals(CreateGroupRoute.Step2, vm.state.value.route)
         assertNull(vm.state.value.error)
