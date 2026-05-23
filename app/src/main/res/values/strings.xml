@@ -451,13 +451,13 @@
     <string name="create_group_step_setup">Setting up encrypted group</string>
     <string name="create_group_step_setup_sub">Generating keys on your device</string>
     <string name="create_group_step_admin">Setting up your admin keys</string>
-    <string name="create_group_step_admin_sub">You\'ll be the only admin</string>
+    <string name="create_group_step_admin_sub">You\'ll be the only admin — this can take a minute on older phones</string>
     <string name="create_group_step_invitation">Sending invitation #%1$d</string>
     <string name="create_group_step_invitation_sub">Encrypted, end-to-end</string>
     <string name="create_group_step_anchor">Anchoring on Stellar</string>
     <string name="create_group_step_anchor_sub">So anyone can verify this group is real</string>
     <string name="create_group_error_fallback">Couldn\'t create the group</string>
-    <string name="create_group_helpful_note">This usually takes a few seconds. It\'s safe to close this — we\'ll finish in the background.</string>
+    <string name="create_group_helpful_note">Most steps finish in seconds; the admin-keys step does the heavy crypto and can take a minute or two on older phones. It\'s safe to close this — we\'ll finish in the background.</string>
 
     <!-- ─── Create group — Success ────────────────────────────── -->
     <string name="create_group_anchored_testnet">Anchored on Stellar testnet</string>
