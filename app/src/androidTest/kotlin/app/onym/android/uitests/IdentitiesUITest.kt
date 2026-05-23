@@ -127,14 +127,72 @@ class IdentitiesUITest {
     }
 
     @Test
-    fun addIdentity_appendsRow() {
+    fun addIdentity_blankPhrase_appendsFreshRow() {
+        settings.tapIdentitiesRow()
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
+            identityStore.listIds().size == 1
+        }
+        // "Add Identity" now opens a dialog; leaving the recovery-phrase
+        // field blank mints a fresh identity on confirm.
+        composeRule.onNodeWithTag("identities.add").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identities.add.confirm").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("identities.add.confirm").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            identityStore.listIds().size == 2
+        }
+    }
+
+    @Test
+    fun addIdentity_validPhrase_restoresDeterministicIdentity() {
         settings.tapIdentitiesRow()
         composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 1
         }
         composeRule.onNodeWithTag("identities.add").performClick()
         composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identities.add.mnemonic").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("identities.add.mnemonic").performTextInput(CANONICAL_MNEMONIC)
+        composeRule.onNodeWithTag("identities.add.confirm").performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 2
+        }
+        // The restored identity becomes active. Its persisted entropy
+        // must round-trip to the phrase we typed — proving restore, not
+        // a fresh mint. (Determinism of the derived keys is covered at
+        // the repository level; here we assert the wiring restores the
+        // exact phrase.)
+        val activeId = identityStore.loadCurrent()!!
+        val snapshot = identityStore.load(activeId)!!
+        val restoredPhrase = app.onym.android.identity.Bip39.mnemonicFromEntropy(snapshot.entropy!!)
+        assert(restoredPhrase == CANONICAL_MNEMONIC) {
+            "expected restored phrase to match input, got: $restoredPhrase"
+        }
+    }
+
+    @Test
+    fun addIdentity_invalidPhrase_showsInlineError_andDoesNotAdd() {
+        settings.tapIdentitiesRow()
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
+            identityStore.listIds().size == 1
+        }
+        composeRule.onNodeWithTag("identities.add").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identities.add.mnemonic").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("identities.add.mnemonic").performTextInput("not a real recovery phrase")
+        composeRule.onNodeWithTag("identities.add.confirm").performClick()
+
+        // Inline error appears; the dialog stays open and no identity
+        // is added.
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identities.add.error").fetchSemanticsNodes().isNotEmpty()
+        }
+        assert(identityStore.listIds().size == 1) {
+            "invalid phrase must not add an identity"
         }
     }
 
@@ -148,7 +206,13 @@ class IdentitiesUITest {
         // (removing the only one is allowed but the post-remove state
         // is "no identity" — the bootstrap path would re-add one on
         // the next dependency rebuild, complicating the assertion).
+        // "Add Identity" opens a dialog; confirm with a blank phrase to
+        // mint a fresh "Identity 2".
         composeRule.onNodeWithTag("identities.add").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identities.add.confirm").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("identities.add.confirm").performClick()
         composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 2
         }
@@ -187,4 +251,13 @@ class IdentitiesUITest {
      *  the row-tag scheme stays in one place. */
     private fun app.onym.android.identity.IdentityId.testTagPrefix(): String =
         "identities.row.$value"
+
+    private companion object {
+        /** Canonical BIP-39 test vector (`abandon × 11 + about`) — the
+         *  same fixture `CrossPlatformFixtureTest` / iOS use, so a
+         *  restore here is byte-for-byte reproducible across platforms. */
+        const val CANONICAL_MNEMONIC =
+            "abandon abandon abandon abandon abandon abandon abandon abandon " +
+                "abandon abandon abandon about"
+    }
 }

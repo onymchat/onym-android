@@ -164,6 +164,14 @@
     <string name="identities_add_button">Add Identity</string>
     <string name="identity_unnamed">Unnamed identity</string>
 
+    <!-- ─── Add / restore identity dialog ──────────────────────────── -->
+    <string name="identities_add_dialog_title">Add Identity</string>
+    <string name="identities_add_name_label">Name (optional)</string>
+    <string name="identities_add_mnemonic_label">Recovery phrase</string>
+    <string name="identities_add_mnemonic_hint">Leave blank to create a fresh identity. Paste a 12 or 24-word recovery phrase to restore an existing one.</string>
+    <string name="identities_add_invalid_mnemonic">That doesn\'t look like a valid 12 or 24-word recovery phrase.</string>
+    <string name="identities_add_confirm">Add</string>
+
     <!-- ─── Identity detail ──────────────────────────────────────── -->
     <string name="identity_detail_title">Identity</string>
     <string name="identity_detail_active_marker">Active</string>
