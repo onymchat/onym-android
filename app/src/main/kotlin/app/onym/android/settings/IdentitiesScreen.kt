@@ -319,7 +319,10 @@ private fun IdentityListRow(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(if (row.isActive) Color(0xFFE0EEFE) else Color(0xFFEAEAEE)),
+                    .background(
+                        (if (row.isActive) SettingsTile.Blue else SettingsTile.Gray)
+                            .copy(alpha = 0.14f)
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 OnymMark(

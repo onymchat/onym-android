@@ -37,7 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -110,11 +109,7 @@ fun UseExistingContractScreen(
                         modifier = Modifier
                             .size(52.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(Color(0xFFE5E5FE), Color(0xFFC7C7F4)),
-                                )
-                            ),
+                            .background(SettingsTile.Indigo.copy(alpha = 0.14f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(

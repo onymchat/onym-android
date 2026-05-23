@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.NoPhotography
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -64,9 +65,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  * [app.onym.android.group.canonicalizeInviteKey]. Keeping the parser
  * out of the scanner lets the same surface scan future payload shapes.
  *
- * Android twin of `QRCodeScannerView.swift` from onym-ios: same black
- * chrome, centred viewfinder, top-right cancel, bottom hint, and a
- * one-shot delivery so a held-up code fires [onScanned] exactly once.
+ * Android twin of `QRCodeScannerView.swift` from onym-ios: centred
+ * viewfinder, top-right cancel, bottom hint, and a one-shot delivery
+ * so a held-up code fires [onScanned] exactly once.
+ *
+ * Theming: while the camera is live, the overlay chrome (hint,
+ * viewfinder border, cancel scrim) stays light-on-dark — it sits on
+ * the camera feed, so a fixed dark treatment reads regardless of the
+ * app theme, matching the iOS twin. The *non-camera* surfaces (the
+ * blank/denied background, the permission-denied message, and the
+ * cancel button once the feed is gone) follow the app's light/dark
+ * scheme via [MaterialTheme.colorScheme], which the enclosing
+ * `OnymTheme` provides.
  *
  * Camera permission is requested on first composition. Denial swaps
  * to an inline message — the caller's paste-the-key path is the
@@ -101,7 +111,13 @@ fun QrScannerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            // Black behind the live feed (camera letterboxing reads as
+            // black); the themed surface only shows in the no-camera
+            // states (permission flow / denied / bind failure).
+            .background(
+                if (hasPermission) Color.Black
+                else MaterialTheme.colorScheme.background,
+            ),
     ) {
         if (hasPermission) {
             CameraPreview(onScanned = onScanned)
@@ -127,7 +143,9 @@ fun QrScannerScreen(
             )
         }
 
-        // Top-right cancel.
+        // Top-right cancel — shown in every state. Over the live feed
+        // it keeps the dark scrim + white glyph; on the themed
+        // no-camera surface it switches to the scheme's surface chip.
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -135,14 +153,18 @@ fun QrScannerScreen(
                 .padding(8.dp)
                 .size(44.dp)
                 .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.45f))
+                .background(
+                    if (hasPermission) Color.Black.copy(alpha = 0.45f)
+                    else MaterialTheme.colorScheme.surfaceVariant,
+                )
                 .clickable(onClick = onCancel),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = stringResource(R.string.cancel),
-                tint = Color.White,
+                tint = if (hasPermission) Color.White
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(24.dp),
             )
         }
@@ -245,13 +267,13 @@ private fun BoxScope.PermissionDenied() {
         Icon(
             imageVector = Icons.Filled.NoPhotography,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.85f),
+            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f),
             modifier = Modifier.size(36.dp),
         )
         Spacer(Modifier.height(14.dp))
         Text(
             text = stringResource(R.string.qr_scanner_permission_denied),
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onBackground,
             style = TextStyle(
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,

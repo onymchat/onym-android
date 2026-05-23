@@ -212,7 +212,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                         if (state.accent == a) {
                             Text(
                                 text = "✓",
-                                color = Color.White,
+                                color = LocalOnymTokens.current.onAccent,
                                 style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
                             )
                         }
@@ -855,7 +855,7 @@ private fun StepRow(label: String, sub: String, status: StepStatus, accent: Colo
             when (status) {
                 StepStatus.Done -> Text(
                     text = "✓",
-                    color = Color.Black,
+                    color = LocalOnymTokens.current.onAccent,
                     style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold),
                 )
                 StepStatus.Active -> Text(

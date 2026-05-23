@@ -54,7 +54,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -157,11 +156,8 @@ fun IdentityDetailScreen(
                                 .size(96.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (row.isActive) {
-                                        Brush.linearGradient(listOf(Color(0xFFEEF5FF), Color(0xFFD5E8FE)))
-                                    } else {
-                                        Brush.linearGradient(listOf(Color(0xFFEFEFF2), Color(0xFFEFEFF2)))
-                                    }
+                                    (if (row.isActive) SettingsTile.Blue else SettingsTile.Gray)
+                                        .copy(alpha = 0.14f)
                                 ),
                             contentAlignment = Alignment.Center,
                         ) {
