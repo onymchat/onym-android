@@ -18,9 +18,12 @@ import kotlinx.coroutines.launch
  * the three intents:
  *
  *  - [select] — flip the active identity.
- *  - [add] — append a fresh BIP39-backed identity (V1 bootstrap
- *    only; restore-from-mnemonic UI lives in the recovery flow and
- *    isn't reachable from here).
+ *  - [add] — append an identity alongside the existing ones. With a
+ *    blank mnemonic it mints a fresh BIP39 identity; with a 12/24-word
+ *    phrase it restores an existing one. The outcome lands on
+ *    [addResult] so the Add-Identity dialog can dismiss on success or
+ *    inline an "invalid phrase" message (mirrors the iOS
+ *    `IdentitiesFlow.submitAdd` + `addError` pattern).
  *  - [remove] — gated by a typed-name confirm. The repository's
  *    removal listener (registered by `GroupRepository`) cascades a
  *    delete-by-owner over the identity's chats.
@@ -47,9 +50,20 @@ class IdentitiesViewModel(
         abstract val cause: String
 
         data class Switch(override val cause: String) : Error()
-        data class Add(override val cause: String) : Error()
         data class Remove(override val cause: String) : Error()
         data class Rename(override val cause: String) : Error()
+    }
+
+    /** Outcome of the most recent [add] attempt, or `null` while idle.
+     *  The Add-Identity dialog observes this: [Success] dismisses it,
+     *  [InvalidMnemonic] / [Failure] inline an error so the user can
+     *  fix the phrase without losing their input. Modelling success
+     *  explicitly (rather than iOS's "dismiss if addError == nil"
+     *  optimism) keeps the dismiss off the racy path. */
+    sealed interface AddResult {
+        object Success : AddResult
+        object InvalidMnemonic : AddResult
+        data class Failure(val cause: String) : AddResult
     }
 
     val items: StateFlow<List<Row>> = combine(
@@ -62,6 +76,9 @@ class IdentitiesViewModel(
     private val _error = MutableStateFlow<Error?>(null)
     val error: StateFlow<Error?> = _error.asStateFlow()
 
+    private val _addResult = MutableStateFlow<AddResult?>(null)
+    val addResult: StateFlow<AddResult?> = _addResult.asStateFlow()
+
     fun select(id: IdentityId) {
         viewModelScope.launch {
             try {
@@ -72,14 +89,28 @@ class IdentitiesViewModel(
         }
     }
 
-    fun add(name: String = "") {
+    /** Add an identity. A blank/null [restoreMnemonic] mints a fresh
+     *  BIP39 identity; a 12/24-word phrase restores an existing one.
+     *  The result lands on [addResult] — the dialog reacts; clear it
+     *  with [clearAddResult]. */
+    fun add(name: String = "", restoreMnemonic: String? = null) {
         viewModelScope.launch {
             try {
-                identity.add(name = name)
+                identity.add(
+                    name = name,
+                    restoreMnemonic = restoreMnemonic?.trim()?.ifBlank { null },
+                )
+                _addResult.value = AddResult.Success
+            } catch (e: IdentityError.InvalidMnemonic) {
+                _addResult.value = AddResult.InvalidMnemonic
             } catch (e: Throwable) {
-                _error.value = Error.Add(e.causeText())
+                _addResult.value = AddResult.Failure(e.causeText())
             }
         }
+    }
+
+    fun clearAddResult() {
+        _addResult.value = null
     }
 
     fun remove(id: IdentityId) {

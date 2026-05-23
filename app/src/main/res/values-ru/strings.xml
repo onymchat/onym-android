@@ -160,6 +160,14 @@
     <string name="identities_add_button">Добавить личность</string>
     <string name="identity_unnamed">Безымянная личность</string>
 
+    <!-- ─── Add / restore identity dialog ──────────────────────────── -->
+    <string name="identities_add_dialog_title">Добавить личность</string>
+    <string name="identities_add_name_label">Имя (необязательно)</string>
+    <string name="identities_add_mnemonic_label">Секретная фраза</string>
+    <string name="identities_add_mnemonic_hint">Оставьте поле пустым, чтобы создать новую личность. Вставьте секретную фразу из 12 или 24 слов, чтобы восстановить существующую.</string>
+    <string name="identities_add_invalid_mnemonic">Это не похоже на корректную секретную фразу из 12 или 24 слов.</string>
+    <string name="identities_add_confirm">Добавить</string>
+
     <!-- ─── Identity detail ──────────────────────────────────────── -->
     <string name="identity_detail_title">Личность</string>
     <string name="identity_detail_active_marker">Активная</string>
