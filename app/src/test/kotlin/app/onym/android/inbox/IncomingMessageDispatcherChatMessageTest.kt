@@ -72,9 +72,27 @@ class IncomingMessageDispatcherChatMessageTest {
         assertEquals(MessageDirection.INCOMING, msg.direction)
         assertEquals(MessageStatus.RECEIVED, msg.status)
         assertEquals(senderBlsHex, msg.senderBlsPubkeyHex)
+        assertNull("a non-reply inbound message carries no reply target", msg.replyToMessageId)
         // Legacy queue stays empty — chat messages don't fall through.
         fixture.invitationsRepository.bootstrap()
         assertTrue(fixture.invitationsRepository.invitations.value.isEmpty())
+    }
+
+    @Test
+    fun chatMessage_withReplyRef_persistsTargetId() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(ownerIdentity, withSenderProfile = true)
+
+        val target = UUID.randomUUID()
+        val payload = chatPayload(UUID.randomUUID(), body = "agreed", replyToMessageId = target)
+        fixture.dispatch(ownerIdentity, payload, signer = senderSendingKey)
+
+        val stored = fixture.messageStore.listForGroup(ownerIdentity.value, groupIdHex).single()
+        assertEquals(
+            "an inbound reply must carry its target id onto the persisted message",
+            target,
+            stored.replyToMessageId,
+        )
     }
 
     // ─── trust-chain failures all drop without falling through ───
@@ -215,12 +233,14 @@ class IncomingMessageDispatcherChatMessageTest {
         id: UUID,
         body: String,
         sentAtMillis: Long = 1_700_000_000_000L,
+        replyToMessageId: UUID? = null,
     ) = ChatMessagePayload(
         version = 1,
         messageId = id,
         groupId = groupIdBytes,
         senderBlsPubkeyHex = senderBlsHex,
         sentAtMillis = sentAtMillis,
+        replyToMessageId = replyToMessageId,
         variant = ChatMessageVariant.Tyranny(body = body),
     )
 

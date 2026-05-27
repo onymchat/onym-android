@@ -6,6 +6,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -48,6 +49,92 @@ class ChatMessagePayloadTest {
         val decoded = strictJson.decodeFromString(ChatMessagePayload.serializer(), encoded)
         assertEquals(original, decoded)
         assertEquals("héllo 🌍 ñ 中文", (decoded.variant as ChatMessageVariant.Tyranny).body)
+    }
+
+    // ─── reply reference ──────────────────────────────────────────
+
+    @Test
+    fun roundtrip_replyRef_preservesTargetId() {
+        val target = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val original = samplePayload(body = "agreed", replyToMessageId = target)
+        val encoded = strictJson.encodeToString(ChatMessagePayload.serializer(), original)
+        val decoded = strictJson.decodeFromString(ChatMessagePayload.serializer(), encoded)
+        assertEquals(target, decoded.replyToMessageId)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun wireFormat_replyKeyIsSnakeCaseUppercaseUuid() {
+        val target = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val encoded = strictJson.encodeToString(
+            ChatMessagePayload.serializer(),
+            samplePayload(body = "hi", replyToMessageId = target),
+        )
+        val root = strictJson.parseToJsonElement(encoded).jsonObject
+        assertEquals(
+            "reply target wires under snake_case key as uppercase canonical UUID",
+            "22222222-2222-2222-2222-222222222222",
+            root["reply_to_message_id"]!!.jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun decode_missingReplyKey_isNull() {
+        // Backward compat: a payload from an older sender (pre-replies)
+        // has no `reply_to_message_id` — it must decode to null, not throw.
+        val json = """
+            {
+              "version": 1,
+              "message_id": "11111111-1111-1111-1111-111111111111",
+              "group_id": "${b64ZeroBytes(32)}",
+              "sender_bls_pubkey_hex": "${"ab".repeat(48)}",
+              "sent_at_millis": 0,
+              "variant": { "kind": "tyranny", "body": "hi" }
+            }
+        """.trimIndent()
+        val decoded = strictJson.decodeFromString(ChatMessagePayload.serializer(), json)
+        assertNull(decoded.replyToMessageId)
+    }
+
+    @Test
+    fun decode_explicitNullReplyKey_isNull() {
+        // An explicit `null` (how a non-reply message from a reply-aware
+        // sender wires) must also decode to null.
+        val json = """
+            {
+              "version": 1,
+              "message_id": "11111111-1111-1111-1111-111111111111",
+              "group_id": "${b64ZeroBytes(32)}",
+              "sender_bls_pubkey_hex": "${"ab".repeat(48)}",
+              "sent_at_millis": 0,
+              "reply_to_message_id": null,
+              "variant": { "kind": "tyranny", "body": "hi" }
+            }
+        """.trimIndent()
+        val decoded = strictJson.decodeFromString(ChatMessagePayload.serializer(), json)
+        assertNull(decoded.replyToMessageId)
+    }
+
+    @Test
+    fun decode_replyKey_acceptsLowercaseUuid() {
+        // Decoders accept any case (UUID.fromString); the iOS twin only
+        // ever emits uppercase, but be tolerant on the way in.
+        val json = """
+            {
+              "version": 1,
+              "message_id": "11111111-1111-1111-1111-111111111111",
+              "group_id": "${b64ZeroBytes(32)}",
+              "sender_bls_pubkey_hex": "${"ab".repeat(48)}",
+              "sent_at_millis": 0,
+              "reply_to_message_id": "22222222-2222-2222-2222-222222222222",
+              "variant": { "kind": "tyranny", "body": "hi" }
+            }
+        """.trimIndent()
+        val decoded = strictJson.decodeFromString(ChatMessagePayload.serializer(), json)
+        assertEquals(
+            UUID.fromString("22222222-2222-2222-2222-222222222222"),
+            decoded.replyToMessageId,
+        )
     }
 
     // ─── wire-format pin ──────────────────────────────────────────
@@ -211,12 +298,16 @@ class ChatMessagePayloadTest {
 
     // ─── helpers ──────────────────────────────────────────────────
 
-    private fun samplePayload(body: String): ChatMessagePayload = ChatMessagePayload(
+    private fun samplePayload(
+        body: String,
+        replyToMessageId: UUID? = null,
+    ): ChatMessagePayload = ChatMessagePayload(
         version = 1,
         messageId = UUID.fromString("12345678-1234-1234-1234-123456789ABC"),
         groupId = ByteArray(32) { (it * 7).toByte() },
         senderBlsPubkeyHex = "ab".repeat(48),
         sentAtMillis = 1_700_000_000_000L,
+        replyToMessageId = replyToMessageId,
         variant = ChatMessageVariant.Tyranny(body = body),
     )
 

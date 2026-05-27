@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -73,6 +74,65 @@ class SendMessageInteractorTest {
             sends.single().inbox,
         )
     }
+
+    // ─── reply reference rides the send + survives retry ─────────
+
+    @Test
+    fun send_withReplyTarget_carriesRefOnPayloadAndPersistedRow() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+        val target = UUID.fromString("22222222-2222-2222-2222-222222222222")
+
+        val result = fixture.interactor.send(groupIdHex, "agreed", replyToMessageId = target)
+
+        // The optimistic + persisted row carries the ref.
+        assertEquals(target, result.replyToMessageId)
+        assertEquals(
+            target,
+            fixture.messageStore.listForGroup(activeId.value, groupIdHex).single().replyToMessageId,
+        )
+        // …and it rides the wire payload (RecordingSealer passes the
+        // JSON bytes through untouched).
+        val shipped = decodeShipped(fixture.transport.sends().single().payload)
+        assertEquals(target, shipped.replyToMessageId)
+    }
+
+    @Test
+    fun send_withoutReplyTarget_shipsNullRef() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+
+        fixture.interactor.send(groupIdHex, "plain")
+
+        assertNull(decodeShipped(fixture.transport.sends().single().payload).replyToMessageId)
+    }
+
+    @Test
+    fun retry_preservesReplyTarget() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+        val target = UUID.fromString("33333333-3333-3333-3333-333333333333")
+        val failed = makePersisted(
+            status = MessageStatus.FAILED,
+            body = "first try",
+            replyToMessageId = target,
+        )
+        fixture.messageStore.preload(listOf(failed))
+
+        fixture.interactor.retry(groupIdHex, failed.id)
+
+        // The re-sent message still quotes the same original.
+        val shipped = decodeShipped(fixture.transport.sends().single().payload)
+        assertEquals(target, shipped.replyToMessageId)
+    }
+
+    private val shippedJson = Json { ignoreUnknownKeys = true }
+
+    private fun decodeShipped(bytes: ByteArray): ChatMessagePayload =
+        shippedJson.decodeFromString(
+            ChatMessagePayload.serializer(),
+            bytes.toString(Charsets.UTF_8),
+        )
 
     // ─── self-recipient is skipped ────────────────────────────────
 
@@ -317,6 +377,7 @@ class SendMessageInteractorTest {
         status: MessageStatus,
         direction: MessageDirection = MessageDirection.OUTGOING,
         body: String,
+        replyToMessageId: UUID? = null,
     ): ChatMessage = ChatMessage(
         id = UUID.randomUUID(),
         groupId = groupIdHex,
@@ -326,6 +387,7 @@ class SendMessageInteractorTest {
         sentAtMillis = 1_699_000_000_000L,
         direction = direction,
         status = status,
+        replyToMessageId = replyToMessageId,
         groupType = SepGroupType.TYRANNY,
     )
 

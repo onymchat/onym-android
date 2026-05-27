@@ -31,7 +31,11 @@ class ChatThreadViewModel(
     val groupId: String,
     private val groupRepository: GroupRepository,
     private val messageRepository: MessageRepository,
-    private val sendMessage: suspend (groupId: String, body: String) -> Unit,
+    private val sendMessage: suspend (
+        groupId: String,
+        body: String,
+        replyToMessageId: java.util.UUID?,
+    ) -> Unit,
     private val retryMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
 ) : ViewModel() {
 
@@ -69,18 +73,39 @@ class ChatThreadViewModel(
      *  on the next successful send or via [clearError]. */
     val lastSendError: StateFlow<String?> = _lastSendError.asStateFlow()
 
+    private val _replyingTo = MutableStateFlow<java.util.UUID?>(null)
+    /** The message the composer is currently replying to, if any. Set
+     *  by a swipe-to-reply on a bubble ([armReply]), cleared on cancel
+     *  ([cancelReply]) or after a send. The screen resolves the quoted
+     *  sender + snippet from [messages] and shows the composer banner
+     *  while this is non-null. */
+    val replyingTo: StateFlow<java.util.UUID?> = _replyingTo.asStateFlow()
+
+    /** Arm a reply to [messageId]. The screen reveals the "Replying
+     *  to {name}" banner and focuses the composer. */
+    fun armReply(messageId: java.util.UUID) { _replyingTo.value = messageId }
+
+    /** Disarm the reply (cancel button, or post-send). */
+    fun cancelReply() { _replyingTo.value = null }
+
     /**
      * Fire-and-forget send. The interactor handles the optimistic
      * insert + status flip; the UI gets pending → sent / failed
      * transitions through [messages] without any extra wiring here.
+     *
+     * Threads the currently-armed reply target (if any) into the
+     * interactor so the sent message renders its quote, then clears
+     * the reply immediately so the banner drops on tap.
      */
     fun send(body: String) {
         val trimmed = body.trim()
         if (trimmed.isEmpty()) return
+        val replyTarget = _replyingTo.value
+        _replyingTo.value = null
         viewModelScope.launch {
             _sendInFlight.value = true
             try {
-                sendMessage(groupId, trimmed)
+                sendMessage(groupId, trimmed, replyTarget)
                 _lastSendError.value = null
             } catch (e: SendMessageError) {
                 _lastSendError.value = e.message ?: e.javaClass.simpleName

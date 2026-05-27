@@ -323,6 +323,9 @@ class OnymApplication : Application() {
                 app.onym.android.chats.MessageDatabase::class.java,
                 "app.onym.android.messages",
             )
+                .addMigrations(
+                    app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_1_2,
+                )
                 .fallbackToDestructiveMigration()
                 .build()
         } catch (_: Throwable) {
@@ -670,7 +673,9 @@ class OnymApplication : Application() {
                     groupId = groupId,
                     groupRepository = groupRepository,
                     messageRepository = messageRepository,
-                    sendMessage = sender::send,
+                    sendMessage = { gid, body, replyTo ->
+                        sender.send(gid, body, replyTo)
+                    },
                     retryMessage = sender::retry,
                 )
             },

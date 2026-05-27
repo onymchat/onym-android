@@ -63,6 +63,9 @@ class RoomMessageStore(
         groupTypeRaw = message.groupType.wireValue,
         encryptedSenderBlsPubkeyHex = encryption.encrypt(message.senderBlsPubkeyHex),
         encryptedBody = encryption.encrypt(message.body),
+        // Plain pointer to another row — not sensitive, so no
+        // encryption. Stored as the UUID string; null for a non-reply.
+        replyToMessageId = message.replyToMessageId?.toString(),
     )
 
     /** Tolerant decode: a row whose encrypted columns fail to
@@ -78,6 +81,11 @@ class RoomMessageStore(
             ?: return null
         val groupType = SepGroupType.fromWire(row.groupTypeRaw) ?: return null
         val id = try { UUID.fromString(row.id) } catch (_: Throwable) { return null }
+        // A malformed reply pointer (somehow non-UUID) degrades to no
+        // reply rather than dropping the whole row — the message body
+        // is the important part; the quote just won't render.
+        val replyToMessageId = row.replyToMessageId
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         return ChatMessage(
             id = id,
             groupId = row.groupId,
@@ -87,6 +95,7 @@ class RoomMessageStore(
             sentAtMillis = row.sentAt,
             direction = direction,
             status = status,
+            replyToMessageId = replyToMessageId,
             groupType = groupType,
         )
     }

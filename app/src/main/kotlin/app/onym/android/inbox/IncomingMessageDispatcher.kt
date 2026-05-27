@@ -559,6 +559,13 @@ class IncomingMessageDispatcher(
             sentAtMillis = payload.sentAtMillis,
             direction = MessageDirection.INCOMING,
             status = MessageStatus.RECEIVED,
+            // Pointer to the quoted message, resolved against the local
+            // store at render time. No trust gate needed: a ref to a
+            // message we never received (or a forged one) just renders
+            // as "Message unavailable" — it can't pull in content from
+            // outside this group because rendering only resolves local
+            // rows.
+            replyToMessageId = payload.replyToMessageId,
             groupType = group.groupType,
         )
         // Use the receivedAt timestamp only for the "ordering by

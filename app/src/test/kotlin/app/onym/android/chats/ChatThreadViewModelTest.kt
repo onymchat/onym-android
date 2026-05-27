@@ -107,7 +107,7 @@ class ChatThreadViewModelTest {
         fixture.seedGroup(groupIdHex)
         val captured = mutableListOf<Pair<String, String>>()
         val vm = fixture.makeViewModel(
-            send = { gid, body -> captured.add(gid to body) },
+            send = { gid, body, _ -> captured.add(gid to body) },
         )
 
         vm.send("  hello world  ")
@@ -121,7 +121,7 @@ class ChatThreadViewModelTest {
         fixture.seedGroup(groupIdHex)
         val captured = mutableListOf<Pair<String, String>>()
         val vm = fixture.makeViewModel(
-            send = { gid, body -> captured.add(gid to body) },
+            send = { gid, body, _ -> captured.add(gid to body) },
         )
 
         vm.send("")
@@ -137,7 +137,7 @@ class ChatThreadViewModelTest {
         val fixture = newFixture()
         fixture.seedGroup(groupIdHex)
         val vm = fixture.makeViewModel(
-            send = { _, _ -> throw SendMessageError.SenderNotAMember },
+            send = { _, _, _ -> throw SendMessageError.SenderNotAMember },
         )
 
         vm.send("hi")
@@ -149,7 +149,7 @@ class ChatThreadViewModelTest {
         val fixture = newFixture()
         fixture.seedGroup(groupIdHex)
         val vm = fixture.makeViewModel(
-            send = { _, _ -> throw SendMessageError.EmptyBody },
+            send = { _, _, _ -> throw SendMessageError.EmptyBody },
         )
         vm.send("hi")
         assertNotNull(vm.lastSendError.value)
@@ -164,7 +164,7 @@ class ChatThreadViewModelTest {
         fixture.seedGroup(groupIdHex)
         var shouldThrow = true
         val vm = fixture.makeViewModel(
-            send = { _, _ ->
+            send = { _, _, _ ->
                 if (shouldThrow) throw SendMessageError.SenderNotAMember
             },
         )
@@ -174,6 +174,69 @@ class ChatThreadViewModelTest {
         shouldThrow = false
         vm.send("second")  // succeeds → error cleared
         assertNull(vm.lastSendError.value)
+    }
+
+    // ─── reply threading ─────────────────────────────────────────
+
+    @Test
+    fun armReply_setsReplyingTo_cancelClearsIt() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val vm = fixture.makeViewModel()
+
+        val target = UUID.randomUUID()
+        vm.armReply(target)
+        assertEquals(target, vm.replyingTo.value)
+
+        vm.cancelReply()
+        assertNull(vm.replyingTo.value)
+    }
+
+    @Test
+    fun send_afterArming_forwardsReplyTarget_andClearsIt() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val captured = mutableListOf<Triple<String, String, UUID?>>()
+        val vm = fixture.makeViewModel(
+            send = { gid, body, replyTo -> captured.add(Triple(gid, body, replyTo)) },
+        )
+
+        val target = UUID.randomUUID()
+        vm.armReply(target)
+        vm.send("agreed")
+
+        assertEquals(1, captured.size)
+        assertEquals(Triple(groupIdHex, "agreed", target), captured.single())
+        // Banner drops the moment the reply is sent.
+        assertNull("send must clear the armed reply", vm.replyingTo.value)
+    }
+
+    @Test
+    fun send_withoutArming_carriesNoReplyTarget() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        var capturedTarget: UUID? = UUID.randomUUID()  // sentinel
+        val vm = fixture.makeViewModel(
+            send = { _, _, replyTo -> capturedTarget = replyTo },
+        )
+
+        vm.send("plain")
+        assertNull("a non-reply send must carry no target", capturedTarget)
+    }
+
+    @Test
+    fun cancelReply_thenSend_carriesNoTarget() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        var capturedTarget: UUID? = UUID.randomUUID()  // sentinel
+        val vm = fixture.makeViewModel(
+            send = { _, _, replyTo -> capturedTarget = replyTo },
+        )
+
+        vm.armReply(UUID.randomUUID())
+        vm.cancelReply()
+        vm.send("plain")
+        assertNull("after cancelling, a send must carry no reply target", capturedTarget)
     }
 
     // ─── retry action ────────────────────────────────────────────
@@ -275,7 +338,7 @@ class ChatThreadViewModelTest {
         }
 
         fun makeViewModel(
-            send: suspend (String, String) -> Unit = { _, _ -> },
+            send: suspend (String, String, UUID?) -> Unit = { _, _, _ -> },
             retry: suspend (String, UUID) -> Unit = { _, _ -> },
         ) = ChatThreadViewModel(
             groupId = groupIdHex,

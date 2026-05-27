@@ -64,7 +64,11 @@ class SendMessageInteractor(
      * want the optimistic `PENDING` view subscribe to
      * [MessageRepository.snapshots] instead.
      */
-    suspend fun send(groupId: String, body: String): ChatMessage = withContext(ioDispatcher) {
+    suspend fun send(
+        groupId: String,
+        body: String,
+        replyToMessageId: UUID? = null,
+    ): ChatMessage = withContext(ioDispatcher) {
         if (body.isEmpty()) throw SendMessageError.EmptyBody
 
         val activeIdentityId = activeIdentity.currentIdentityId.value
@@ -96,6 +100,7 @@ class SendMessageInteractor(
             groupId = group.groupIdBytes,
             senderBlsPubkeyHex = myBlsHex,
             sentAtMillis = sentAtMillis,
+            replyToMessageId = replyToMessageId,
             variant = variant,
         )
 
@@ -109,6 +114,7 @@ class SendMessageInteractor(
             sentAtMillis = sentAtMillis,
             direction = MessageDirection.OUTGOING,
             status = MessageStatus.PENDING,
+            replyToMessageId = replyToMessageId,
             groupType = group.groupType,
         )
         messageRepository.append(pending)
@@ -172,14 +178,17 @@ class SendMessageInteractor(
         // in-flight clock before the network round-trip.
         messageRepository.updateStatus(messageId, MessageStatus.PENDING)
 
-        // Preserve the original messageId + sentAt so receivers
-        // dedup against any prior delivery via their dispatcher.
+        // Preserve the original messageId + sentAt + reply target so
+        // receivers dedup against any prior delivery via their
+        // dispatcher and the re-sent message still quotes the same
+        // original.
         val payload = ChatMessagePayload(
             version = 1,
             messageId = messageId,
             groupId = group.groupIdBytes,
             senderBlsPubkeyHex = myBlsHex,
             sentAtMillis = message.sentAtMillis,
+            replyToMessageId = message.replyToMessageId,
             variant = variant,
         )
         val recipients = recipientInboxKeysFor(group, myBlsHex)

@@ -72,6 +72,24 @@ class RoomMessageStoreTest {
         assertEquals(MessageDirection.OUTGOING, first.direction)
         assertEquals(MessageStatus.PENDING, first.status)
         assertEquals(SepGroupType.TYRANNY, first.groupType)
+        assertNull("a non-reply message round-trips a null reply target", first.replyToMessageId)
+    }
+
+    // ─── reply reference round-trip ───────────────────────────────
+
+    @Test
+    fun insert_thenList_roundtripsReplyTarget() = runTest {
+        val target = UUID.randomUUID()
+        val msg = makeMessage(body = "agreed", replyToMessageId = target)
+        store.insert(msg)
+
+        val first = store.listForGroup(msg.ownerIdentityId, msg.groupId).single()
+        assertEquals(target, first.replyToMessageId)
+        // The pointer is a plain column — readable on the raw row too.
+        assertEquals(
+            target.toString(),
+            db.messageDao().findById(msg.id.toString())!!.replyToMessageId,
+        )
     }
 
     // ─── encryption-at-rest ───────────────────────────────────────
@@ -236,6 +254,7 @@ class RoomMessageStoreTest {
         group: String = "aa".repeat(32),
         sender: String = "cc".repeat(48),
         sentAtMillis: Long = 1_700_000_000_000L,
+        replyToMessageId: UUID? = null,
     ): ChatMessage = ChatMessage(
         id = UUID.randomUUID(),
         groupId = group,
@@ -245,6 +264,7 @@ class RoomMessageStoreTest {
         sentAtMillis = sentAtMillis,
         direction = MessageDirection.OUTGOING,
         status = MessageStatus.PENDING,
+        replyToMessageId = replyToMessageId,
         groupType = SepGroupType.TYRANNY,
     )
 }

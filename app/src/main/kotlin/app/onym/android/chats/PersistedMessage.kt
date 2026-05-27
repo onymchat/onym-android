@@ -22,6 +22,12 @@ import androidx.room.PrimaryKey
  *  - [directionRaw], [statusRaw], [groupTypeRaw] — small enums
  *    persisted as their enum-name / wireValue strings; not
  *    user-identifying.
+ *  - [replyToMessageId] — optional UUID string of the replied-to
+ *    message. Plain (not sensitive — it's just a pointer to another
+ *    row in this same table) and left queryable for a future
+ *    "replies to X" lookup. Nullable, so adding it is a non-
+ *    destructive `ALTER TABLE ADD COLUMN` (see
+ *    [MessageDatabaseMigrations.MIGRATION_1_2]).
  *
  * Encrypted columns (`StorageEncryption.encrypt`):
  *  - [encryptedSenderBlsPubkeyHex] — sender identity claim.
@@ -47,6 +53,7 @@ data class PersistedMessage(
     val groupTypeRaw: String,
     val encryptedSenderBlsPubkeyHex: ByteArray,
     val encryptedBody: ByteArray,
+    val replyToMessageId: String? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -59,7 +66,8 @@ data class PersistedMessage(
             statusRaw == other.statusRaw &&
             groupTypeRaw == other.groupTypeRaw &&
             encryptedSenderBlsPubkeyHex.contentEquals(other.encryptedSenderBlsPubkeyHex) &&
-            encryptedBody.contentEquals(other.encryptedBody)
+            encryptedBody.contentEquals(other.encryptedBody) &&
+            replyToMessageId == other.replyToMessageId
     }
 
     override fun hashCode(): Int {
@@ -72,6 +80,7 @@ data class PersistedMessage(
         h = 31 * h + groupTypeRaw.hashCode()
         h = 31 * h + encryptedSenderBlsPubkeyHex.contentHashCode()
         h = 31 * h + encryptedBody.contentHashCode()
+        h = 31 * h + (replyToMessageId?.hashCode() ?: 0)
         return h
     }
 }

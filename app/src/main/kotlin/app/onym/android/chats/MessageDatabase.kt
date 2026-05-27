@@ -23,9 +23,34 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [PersistedMessage::class],
-    version = 1,
+    // v2 (reply-to): adds the nullable `replyToMessageId` TEXT column
+    // — onym-ios #173 parity. Additive + non-destructive; existing
+    // rows decode to a null reply target (a non-reply message).
+    version = 2,
     exportSchema = false,
 )
 abstract class MessageDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
+}
+
+/**
+ * Hand-rolled migrations for [MessageDatabase]. Wired into the
+ * production builder in [app.onym.android.OnymApplication]; the
+ * in-memory test builder skips them (each test starts on the latest
+ * schema). Sibling to
+ * [app.onym.android.group.GroupDatabaseMigrations].
+ */
+object MessageDatabaseMigrations {
+    /**
+     * v1 → v2: introduce `replyToMessageId` (nullable TEXT) holding
+     * the UUID string of the replied-to message. Existing rows decode
+     * to a null reply target; the column fills in only on rows
+     * written by a reply-aware sender. Mirrors the SwiftData
+     * lightweight migration in onym-ios PR #173.
+     */
+    val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN replyToMessageId TEXT")
+        }
+    }
 }
