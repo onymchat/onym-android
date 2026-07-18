@@ -19,23 +19,8 @@ import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.onym.android.MainActivity
 import app.onym.android.UITestRegistry
-import app.onym.android.chain.ContractEntry
-import app.onym.android.chain.ContractNetwork
-import app.onym.android.chain.ContractRelease
-import app.onym.android.chain.ContractsManifest
-import app.onym.android.chain.GovernanceType
-import app.onym.android.chain.RelayerConfiguration
-import app.onym.android.chain.RelayerEndpoint
 import app.onym.android.identity.IdentitySecretStore
-import app.onym.android.support.FakeContractsManifestFetcher
-import app.onym.android.support.FakeKnownRelayersFetcher
-import app.onym.android.support.InMemoryAnchorSelectionStore
 import app.onym.android.support.InMemoryChainLedger
-import app.onym.android.support.InMemoryRelayerSelectionStore
-import app.onym.android.support.LedgerSepContractTransport
-import app.onym.android.support.LoopbackBlossomClient
-import app.onym.android.support.LoopbackInboxTransport
-import kotlinx.coroutines.runBlocking
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Rule
 import org.junit.Test
@@ -43,7 +28,6 @@ import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 import org.junit.runner.RunWith
 import java.security.Security
-import java.time.Instant
 import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
@@ -90,49 +74,7 @@ class MultiIdentityChatUITest {
                 ctx,
                 prefsFileName = "app.onym.android.identity.uitests.${UUID.randomUUID()}",
             )
-            UITestRegistry.identitySecretStore = identityStore
-            UITestRegistry.relayerStore = InMemoryRelayerSelectionStore().apply {
-                runBlocking {
-                    saveConfiguration(
-                        RelayerConfiguration(
-                            endpoints = listOf(
-                                RelayerEndpoint("test", "https://relayer.test.invalid", listOf("testnet")),
-                            ),
-                            hasUserInteracted = true,
-                        ),
-                    )
-                }
-            }
-            UITestRegistry.relayerFetcher = FakeKnownRelayersFetcher(
-                FakeKnownRelayersFetcher.Mode.Succeeds(emptyList()),
-            )
-            UITestRegistry.contractsStore = InMemoryAnchorSelectionStore()
-            // A Tyranny contract on testnet so the create-group binding
-            // resolves (default-to-latest picks it).
-            UITestRegistry.contractsFetcher = FakeContractsManifestFetcher(
-                FakeContractsManifestFetcher.Mode.Succeeds(
-                    ContractsManifest(
-                        version = 1,
-                        releases = listOf(
-                            ContractRelease(
-                                release = "v0.0.2",
-                                publishedAt = Instant.parse("2023-11-14T00:00:02Z"),
-                                contracts = listOf(
-                                    ContractEntry(
-                                        network = ContractNetwork.Testnet,
-                                        type = GovernanceType.Tyranny,
-                                        id = "CUITESTTYRANNYTESTNET00000000000000000000000000000000000",
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            )
-            UITestRegistry.inboxTransport = LoopbackInboxTransport()
-            UITestRegistry.contractTransportFactory = { LedgerSepContractTransport(chainLedger) }
-            UITestRegistry.blossomClient = LoopbackBlossomClient()
-            UITestRegistry.enabled = true
+            LoopbackRegistryHarness.configure(identityStore, chainLedger)
             ctx.rebuildDependenciesForTest()
         }
 
