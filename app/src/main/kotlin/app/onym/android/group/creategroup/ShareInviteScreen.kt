@@ -145,10 +145,10 @@ fun ShareInviteScreen(
                         onClick = {
                             val sendIntent = Intent().apply {
                                 action = Intent.ACTION_SEND
-                                putExtra(
-                                    Intent.EXTRA_TEXT,
-                                    IntroCapability.shareText(s.link, s.groupName),
-                                )
+                                // Share the plain link only — no group-name-
+                                // decorated text — so recipients get a single
+                                // clean invite URL (matches iOS).
+                                putExtra(Intent.EXTRA_TEXT, s.link)
                                 type = "text/plain"
                             }
                             context.startActivity(
