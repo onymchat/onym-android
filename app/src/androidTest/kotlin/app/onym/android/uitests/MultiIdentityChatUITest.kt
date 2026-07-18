@@ -33,6 +33,7 @@ import app.onym.android.support.InMemoryAnchorSelectionStore
 import app.onym.android.support.InMemoryChainLedger
 import app.onym.android.support.InMemoryRelayerSelectionStore
 import app.onym.android.support.LedgerSepContractTransport
+import app.onym.android.support.LoopbackBlossomClient
 import app.onym.android.support.LoopbackInboxTransport
 import kotlinx.coroutines.runBlocking
 import org.bouncycastle.jce.provider.BouncyCastleProvider
@@ -130,6 +131,7 @@ class MultiIdentityChatUITest {
             )
             UITestRegistry.inboxTransport = LoopbackInboxTransport()
             UITestRegistry.contractTransportFactory = { LedgerSepContractTransport(chainLedger) }
+            UITestRegistry.blossomClient = LoopbackBlossomClient()
             UITestRegistry.enabled = true
             ctx.rebuildDependenciesForTest()
         }
@@ -218,6 +220,22 @@ class MultiIdentityChatUITest {
         switchToIdentity("Alice")
         openTheChat()
         waitForContentDescription("Read", timeout = 40.seconds)
+
+        // 8. Alice -> Bob image message. The attach button, under the
+        //    UI-test harness, sends a generated test image straight
+        //    through the encode → encrypt → upload(loopback) pipeline.
+        switchToIdentity("Alice")
+        openTheChat()
+        sendImage()
+        // The sender renders its own image bubble (primed cache).
+        waitForImageBubble()
+
+        // 9. Bob receives it: the bubble lazily downloads from the
+        //    loopback Blossom store, hash-verifies, decrypts, and
+        //    renders — proving the full cross-identity image round-trip.
+        switchToIdentity("Bob")
+        openTheChat()
+        waitForImageBubble(timeout = 40.seconds)
     }
 
     // ─── helpers ──────────────────────────────────────────────────
@@ -280,6 +298,21 @@ class MultiIdentityChatUITest {
     private fun sendMessage(body: String) {
         composeRule.onNodeWithTag("chat_thread.input_field").performTextInput(body)
         composeRule.onNodeWithTag("chat_thread.send_button").performClick()
+    }
+
+    /** Tap the composer's attach button. Under [UITestRegistry.enabled]
+     *  the screen bypasses the system photo picker and sends a generated
+     *  test image through the real send pipeline. */
+    private fun sendImage() {
+        composeRule.onNodeWithTag("chat_thread.attach_button").performClick()
+    }
+
+    /** Wait until at least one image-attachment bubble is rendered. */
+    private fun waitForImageBubble(timeout: kotlin.time.Duration = 20.seconds) {
+        composeRule.waitUntil(timeout.inWholeMilliseconds) {
+            composeRule.onAllNodes(hasTestTagStartingWith("chat_thread.image."))
+                .fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     private fun deliverDeeplink(link: String) {
