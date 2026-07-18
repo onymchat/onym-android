@@ -27,6 +27,15 @@ import kotlinx.coroutines.launch
  * a VM the screen collects).
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+/** A picked media item staged in the composer's preview strip, awaiting
+ *  Send. Holds a thumbnail (for the strip) + the raw source (for the
+ *  album send). */
+data class PendingMediaItem(
+    val id: java.util.UUID,
+    val thumbnail: android.graphics.Bitmap?,
+    val source: ChatMediaSource,
+)
+
 class ChatThreadViewModel(
     val groupId: String,
     private val groupRepository: GroupRepository,
@@ -44,7 +53,11 @@ class ChatThreadViewModel(
      *  Defaulted to a no-op so tests that don't exercise video keep
      *  their construction sites unchanged. */
     private val sendVideo: suspend (groupId: String, videoUri: android.net.Uri) -> Unit = { _, _ -> },
+    /** Send a multi-media album (encode/seal each → upload → fan-out). */
+    private val sendAlbum: suspend (groupId: String, sources: List<ChatMediaSource>) -> Unit = { _, _ -> },
     private val retryMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
+    /** Delete a message locally (the failed-media Delete action). */
+    private val deleteMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
     /** Loader the UI uses to fetch + decrypt image attachments. */
     val imageLoader: ChatImageLoader? = null,
     /** Loader the UI uses to fetch + decrypt video blobs for playback. */
@@ -176,6 +189,46 @@ class ChatThreadViewModel(
                 _sendInFlight.value = false
             }
         }
+    }
+
+    /** Media staged in the composer's preview strip, awaiting Send. */
+    private val _pendingMedia = MutableStateFlow<List<PendingMediaItem>>(emptyList())
+    val pendingMedia: StateFlow<List<PendingMediaItem>> = _pendingMedia.asStateFlow()
+
+    /** Stage a picked item in the preview strip. */
+    fun stagePendingMedia(thumbnail: android.graphics.Bitmap?, source: ChatMediaSource) {
+        _pendingMedia.value = _pendingMedia.value + PendingMediaItem(
+            id = java.util.UUID.randomUUID(), thumbnail = thumbnail, source = source
+        )
+    }
+
+    /** Drop a staged item (its ✕ was tapped). */
+    fun removePendingMedia(id: java.util.UUID) {
+        _pendingMedia.value = _pendingMedia.value.filterNot { it.id == id }
+    }
+
+    /** Send the staged media as one album (or a single message if one
+     *  item), then clear the strip. */
+    fun sendPendingMedia() {
+        val sources = _pendingMedia.value.map { it.source }
+        if (sources.isEmpty()) return
+        _pendingMedia.value = emptyList()
+        viewModelScope.launch {
+            _sendInFlight.value = true
+            try {
+                sendAlbum(groupId, sources)
+                _lastSendError.value = null
+            } catch (e: Throwable) {
+                _lastSendError.value = e.message ?: e.javaClass.simpleName
+            } finally {
+                _sendInFlight.value = false
+            }
+        }
+    }
+
+    /** Delete a message (the failed-media Delete action). */
+    fun deleteMessage(messageId: java.util.UUID) {
+        viewModelScope.launch { runCatching { deleteMessage(groupId, messageId) } }
     }
 
     fun clearError() { _lastSendError.value = null }

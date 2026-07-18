@@ -117,6 +117,12 @@ data class ChatMessagePayload(
      */
     @SerialName("video_attachment")
     val videoAttachment: ChatVideoAttachment? = null,
+    /**
+     * A multi-media **album** (2+ items) attached to this message.
+     * Additive + optional; single-media messages leave this `null` and
+     * use the flat fields above. See [ChatMediaAttachment].
+     */
+    val attachments: List<ChatMediaAttachment>? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -129,7 +135,8 @@ data class ChatMessagePayload(
             replyToMessageId == other.replyToMessageId &&
             variant == other.variant &&
             attachment == other.attachment &&
-            videoAttachment == other.videoAttachment
+            videoAttachment == other.videoAttachment &&
+            attachments == other.attachments
     }
 
     override fun hashCode(): Int {
@@ -142,6 +149,7 @@ data class ChatMessagePayload(
         h = 31 * h + variant.hashCode()
         h = 31 * h + (attachment?.hashCode() ?: 0)
         h = 31 * h + (videoAttachment?.hashCode() ?: 0)
+        h = 31 * h + (attachments?.hashCode() ?: 0)
         return h
     }
 }

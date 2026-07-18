@@ -66,6 +66,13 @@ class SendMessageInteractor(
      *  defaults to a no-op so construction sites that never send video
      *  stay unchanged. */
     private val encodeVideo: suspend (android.net.Uri) -> ChatVideoEncoder.Encoded? = { null },
+    /** Persists sealed blobs so a failed media send can be resent (even
+     *  after an app restart) by re-uploading the exact ciphertext. */
+    private val outbox: ChatOutbox? = null,
+    /** Primed with the plaintext of an outgoing image/poster so the sender
+     *  sees the media immediately — the optimistic bubble is inserted
+     *  before the upload, so the blob isn't on Blossom yet. */
+    private val imageLoader: ChatImageLoader? = null,
 ) {
 
     /**
@@ -173,11 +180,6 @@ class SendMessageInteractor(
 
         val encoded = encodeImage(imageData) ?: throw SendMessageError.ImageEncodeFailed
         val sealed = ChatImageCrypto.seal(encoded.jpeg)
-        try {
-            blossomClient.upload(sealed.blob, "image/jpeg")
-        } catch (e: Exception) {
-            throw SendMessageError.ImageUploadFailed(e.message ?: e.javaClass.simpleName)
-        }
         val attachment = ChatImageAttachment(
             sha256 = sealed.sha256Hex,
             mimeType = "image/jpeg",
@@ -188,6 +190,10 @@ class SendMessageInteractor(
             blurhash = encoded.blurhash,
             server = blossomServerUrl,
         )
+        // Persist the ciphertext for resend + prime the display so the
+        // sender's bubble renders now, before the blob exists on Blossom.
+        outbox?.store(sealed.sha256Hex, sealed.blob)
+        imageLoader?.prime(sealed.sha256Hex, encoded.jpeg)
 
         val messageId = idFactory()
         val sentAtMillis = clock()
@@ -214,17 +220,18 @@ class SendMessageInteractor(
             groupType = group.groupType,
             imageAttachment = attachment,
         )
+        // Optimistic insert BEFORE upload — the bubble appears at once
+        // with a loading indicator.
         messageRepository.append(pending)
 
-        val recipients = recipientInboxKeysFor(group, myBlsHex)
-        val finalStatus = try {
-            val successCount = fanOut(payload, recipients)
-            if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT else MessageStatus.FAILED
-        } catch (_: EncodingException) {
-            messageRepository.updateStatus(messageId, activeIdentityId.value, MessageStatus.FAILED)
-            MessageStatus.FAILED
-        }
-        messageRepository.updateStatus(messageId, activeIdentityId.value, finalStatus)
+        val finalStatus = uploadAndFanOut(
+            blobs = listOf(sealed.blob to "image/jpeg"),
+            payload = payload,
+            recipients = recipientInboxKeysFor(group, myBlsHex),
+            messageId = messageId,
+            ownerId = activeIdentityId.value,
+            sentBlobShas = listOf(sealed.sha256Hex),
+        )
         pending.copy(status = finalStatus)
     }
 
@@ -259,12 +266,6 @@ class SendMessageInteractor(
         val posterSealed = ChatImageCrypto.seal(encoded.poster.jpeg)
         val videoSealed = ChatImageCrypto.seal(encoded.mp4)
         if (videoSealed.blob.size > MAX_UPLOAD_BYTES) throw SendMessageError.VideoTooLarge
-        try {
-            blossomClient.upload(posterSealed.blob, "image/jpeg")
-            blossomClient.upload(videoSealed.blob, "video/mp4")
-        } catch (e: Exception) {
-            throw SendMessageError.VideoUploadFailed(e.message ?: e.javaClass.simpleName)
-        }
 
         val poster = ChatImageAttachment(
             sha256 = posterSealed.sha256Hex,
@@ -287,6 +288,12 @@ class SendMessageInteractor(
             poster = poster,
             server = blossomServerUrl,
         )
+
+        // Persist both ciphertexts for resend; prime the poster so the
+        // bubble renders it now (the video blob isn't shown in the bubble).
+        outbox?.store(posterSealed.sha256Hex, posterSealed.blob)
+        outbox?.store(videoSealed.sha256Hex, videoSealed.blob)
+        imageLoader?.prime(posterSealed.sha256Hex, encoded.poster.jpeg)
 
         val messageId = idFactory()
         val sentAtMillis = clock()
@@ -315,15 +322,139 @@ class SendMessageInteractor(
         )
         messageRepository.append(pending)
 
-        val recipients = recipientInboxKeysFor(group, myBlsHex)
-        val finalStatus = try {
-            val successCount = fanOut(payload, recipients)
-            if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT else MessageStatus.FAILED
-        } catch (_: EncodingException) {
-            messageRepository.updateStatus(messageId, activeIdentityId.value, MessageStatus.FAILED)
-            MessageStatus.FAILED
+        val finalStatus = uploadAndFanOut(
+            blobs = listOf(
+                posterSealed.blob to "image/jpeg",
+                videoSealed.blob to "video/mp4",
+            ),
+            payload = payload,
+            recipients = recipientInboxKeysFor(group, myBlsHex),
+            messageId = messageId,
+            ownerId = activeIdentityId.value,
+            sentBlobShas = listOf(posterSealed.sha256Hex, videoSealed.sha256Hex),
+        )
+        pending.copy(status = finalStatus)
+    }
+
+    /**
+     * Send a multi-media **album** — several picked images/videos as one
+     * message (one caption, one status, one read receipt), rendered as a
+     * grid. Each item is encoded + sealed and its ciphertext persisted to
+     * the outbox; the single optimistic bubble is inserted before the
+     * uploads (posters/images primed so the grid renders at once), then
+     * every blob uploads and the payload fans out. A single surviving
+     * item collapses to a normal single-media message.
+     */
+    suspend fun sendAlbum(
+        groupId: String,
+        sources: List<ChatMediaSource>,
+        caption: String = "",
+    ): ChatMessage = withContext(ioDispatcher) {
+        val activeIdentityId = activeIdentity.currentIdentityId.value
+            ?: throw SendMessageError.NoIdentityLoaded
+        val activeSummary = identitiesFlow.value.firstOrNull { it.id == activeIdentityId }
+            ?: throw SendMessageError.NoIdentityLoaded
+        val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
+            ?: throw SendMessageError.UnknownGroup
+        val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
+        if (group.memberProfiles[myBlsHex] == null) throw SendMessageError.SenderNotAMember
+        val variant: ChatMessageVariant = when (group.groupType) {
+            SepGroupType.TYRANNY -> ChatMessageVariant.Tyranny(body = caption)
+            else -> throw SendMessageError.UnsupportedGroupType(group.groupType)
         }
-        messageRepository.updateStatus(messageId, activeIdentityId.value, finalStatus)
+
+        val items = mutableListOf<ChatMediaAttachment>()
+        val uploads = mutableListOf<Pair<ByteArray, String>>()
+        val shas = mutableListOf<String>()
+        for (source in sources) {
+            when (source) {
+                is ChatMediaSource.Image -> {
+                    val encoded = encodeImage(source.data) ?: continue
+                    val sealed = ChatImageCrypto.seal(encoded.jpeg)
+                    val attachment = ChatImageAttachment(
+                        sha256 = sealed.sha256Hex, mimeType = "image/jpeg",
+                        byteSize = sealed.blob.size, width = encoded.width, height = encoded.height,
+                        encKey = sealed.key, blurhash = encoded.blurhash, server = blossomServerUrl,
+                    )
+                    outbox?.store(sealed.sha256Hex, sealed.blob)
+                    imageLoader?.prime(sealed.sha256Hex, encoded.jpeg)
+                    items.add(ChatMediaAttachment.image(attachment))
+                    uploads.add(sealed.blob to "image/jpeg")
+                    shas.add(sealed.sha256Hex)
+                }
+                is ChatMediaSource.Video -> {
+                    val encoded = encodeVideo(source.uri) ?: continue
+                    val posterSealed = ChatImageCrypto.seal(encoded.poster.jpeg)
+                    val videoSealed = ChatImageCrypto.seal(encoded.mp4)
+                    if (videoSealed.blob.size > MAX_UPLOAD_BYTES) continue
+                    val poster = ChatImageAttachment(
+                        sha256 = posterSealed.sha256Hex, mimeType = "image/jpeg",
+                        byteSize = posterSealed.blob.size, width = encoded.poster.width,
+                        height = encoded.poster.height, encKey = posterSealed.key,
+                        blurhash = encoded.poster.blurhash, server = blossomServerUrl,
+                    )
+                    val videoAttachment = ChatVideoAttachment(
+                        sha256 = videoSealed.sha256Hex, mimeType = "video/mp4",
+                        byteSize = videoSealed.blob.size, width = encoded.width, height = encoded.height,
+                        durationSeconds = encoded.durationSeconds, encKey = videoSealed.key,
+                        poster = poster, server = blossomServerUrl,
+                    )
+                    outbox?.store(posterSealed.sha256Hex, posterSealed.blob)
+                    outbox?.store(videoSealed.sha256Hex, videoSealed.blob)
+                    imageLoader?.prime(posterSealed.sha256Hex, encoded.poster.jpeg)
+                    items.add(ChatMediaAttachment.video(videoAttachment))
+                    uploads.add(posterSealed.blob to "image/jpeg")
+                    uploads.add(videoSealed.blob to "video/mp4")
+                    shas.add(posterSealed.sha256Hex)
+                    shas.add(videoSealed.sha256Hex)
+                }
+            }
+        }
+        if (items.isEmpty()) throw SendMessageError.ImageEncodeFailed
+
+        val messageId = idFactory()
+        val sentAtMillis = clock()
+        // A single surviving item collapses to normal single media.
+        val singleImage = if (items.size == 1) items[0].image else null
+        val singleVideo = if (items.size == 1) items[0].video else null
+        val album = if (items.size > 1) items.toList() else null
+        val payload = ChatMessagePayload(
+            version = 1,
+            messageId = messageId,
+            groupId = group.groupIdBytes,
+            senderBlsPubkeyHex = myBlsHex,
+            sentAtMillis = sentAtMillis,
+            replyToMessageId = null,
+            variant = variant,
+            attachment = singleImage,
+            videoAttachment = singleVideo,
+            attachments = album,
+        )
+        val pending = ChatMessage(
+            id = messageId,
+            groupId = groupId,
+            ownerIdentityId = activeIdentityId.value,
+            senderBlsPubkeyHex = myBlsHex,
+            body = caption,
+            sentAtMillis = sentAtMillis,
+            direction = MessageDirection.OUTGOING,
+            status = MessageStatus.PENDING,
+            replyToMessageId = null,
+            groupType = group.groupType,
+            imageAttachment = singleImage,
+            videoAttachment = singleVideo,
+            albumAttachments = album,
+        )
+        messageRepository.append(pending)
+
+        val finalStatus = uploadAndFanOut(
+            blobs = uploads,
+            payload = payload,
+            recipients = recipientInboxKeysFor(group, myBlsHex),
+            messageId = messageId,
+            ownerId = activeIdentityId.value,
+            sentBlobShas = shas,
+        )
         pending.copy(status = finalStatus)
     }
 
@@ -376,10 +507,11 @@ class SendMessageInteractor(
         // in-flight clock before the network round-trip.
         messageRepository.updateStatus(messageId, activeIdentityId.value, MessageStatus.PENDING)
 
-        // Preserve the original messageId + sentAt + reply target so
-        // receivers dedup against any prior delivery via their
-        // dispatcher and the re-sent message still quotes the same
-        // original.
+        // Preserve the original messageId + sentAt + reply target + any
+        // attachment(s) so receivers dedup against a prior delivery and
+        // the re-sent media descriptor resolves. The earlier
+        // implementation dropped the attachment; the blob(s) are
+        // re-uploaded from the outbox below (same bytes → same SHA-256).
         val payload = ChatMessagePayload(
             version = 1,
             messageId = messageId,
@@ -388,17 +520,92 @@ class SendMessageInteractor(
             sentAtMillis = message.sentAtMillis,
             replyToMessageId = message.replyToMessageId,
             variant = variant,
+            attachment = message.imageAttachment,
+            videoAttachment = message.videoAttachment,
+            attachments = message.albumAttachments,
         )
-        val recipients = recipientInboxKeysFor(group, myBlsHex)
+        val blobs = attachmentBlobs(message)
+        uploadAndFanOut(
+            blobs = blobs.map { it.blob to it.mimeType },
+            payload = payload,
+            recipients = recipientInboxKeysFor(group, myBlsHex),
+            messageId = messageId,
+            ownerId = activeIdentityId.value,
+            sentBlobShas = blobs.map { it.sha },
+        )
+    }
+
+    /**
+     * Delete an outgoing message locally (from the failed-media menu) and
+     * evict its outbox blob(s). No network side effects.
+     */
+    suspend fun delete(groupId: String, messageId: java.util.UUID) = withContext(ioDispatcher) {
+        val activeIdentityId = activeIdentity.currentIdentityId.value ?: return@withContext
+        val message = messageRepository.findById(messageId, activeIdentityId.value)
+        message?.media?.flatMap { it.blobShas }?.forEach { outbox?.remove(it) }
+        messageRepository.deleteMessage(messageId, activeIdentityId.value, groupId)
+    }
+
+    /**
+     * Upload each attachment blob then fan the payload out, updating the
+     * message's status. Shared by sendImage/sendVideo/sendAlbum/retry.
+     * An upload failure marks the message FAILED and keeps the outbox
+     * blob(s) for a later resend (no fan-out — recipients never get a
+     * descriptor pointing at a missing blob). On confirmed SENT the
+     * [sentBlobShas] are evicted from the outbox.
+     */
+    private suspend fun uploadAndFanOut(
+        blobs: List<Pair<ByteArray, String>>,
+        payload: ChatMessagePayload,
+        recipients: List<ByteArray>,
+        messageId: java.util.UUID,
+        ownerId: String,
+        sentBlobShas: List<String>,
+    ): MessageStatus {
+        for ((blob, mime) in blobs) {
+            try {
+                blossomClient.upload(blob, mime)
+            } catch (_: Exception) {
+                messageRepository.updateStatus(messageId, ownerId, MessageStatus.FAILED)
+                return MessageStatus.FAILED
+            }
+        }
         val finalStatus = try {
             val successCount = fanOut(payload, recipients)
-            if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT
-            else MessageStatus.FAILED
+            if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT else MessageStatus.FAILED
         } catch (_: EncodingException) {
             MessageStatus.FAILED
         }
-        messageRepository.updateStatus(messageId, activeIdentityId.value, finalStatus)
+        messageRepository.updateStatus(messageId, ownerId, finalStatus)
+        if (finalStatus == MessageStatus.SENT) {
+            sentBlobShas.forEach { outbox?.remove(it) }
+        }
+        return finalStatus
     }
+
+    /** The persisted outbox blobs backing a message's media (single or
+     *  album), in upload order. Empty when the outbox lacks the bytes. */
+    private fun attachmentBlobs(
+        message: ChatMessage,
+    ): List<BlobEntry> {
+        val out = mutableListOf<BlobEntry>()
+        for (item in message.media) {
+            item.image?.let { img ->
+                outbox?.load(img.sha256)?.let { out.add(BlobEntry(img.sha256, it, img.mimeType)) }
+            }
+            item.video?.let { vid ->
+                outbox?.load(vid.poster.sha256)?.let {
+                    out.add(BlobEntry(vid.poster.sha256, it, vid.poster.mimeType))
+                }
+                outbox?.load(vid.sha256)?.let {
+                    out.add(BlobEntry(vid.sha256, it, vid.mimeType))
+                }
+            }
+        }
+        return out
+    }
+
+    private data class BlobEntry(val sha: String, val blob: ByteArray, val mimeType: String)
 
     /**
      * Encode the payload once and seal+ship per recipient. Returns

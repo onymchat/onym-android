@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -117,6 +118,13 @@ fun ChatBubble(
     imageLoader: ChatImageLoader? = null,
     onImageTapped: ((ChatImageAttachment) -> Unit)? = null,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)? = null,
+    /** Tap on an album item at the given index — opens the full-screen
+     *  gallery there. Only wired for sent (non-pending, non-failed) media. */
+    onAlbumItemTapped: ((Int) -> Unit)? = null,
+    /** Tap on a failed outgoing media message — surfaces the Resend /
+     *  Delete menu. Distinct from [onRetry] (text messages retry on a
+     *  plain tap). */
+    onFailedMediaTap: (() -> Unit)? = null,
     reply: ChatReplyQuote? = null,
     onQuoteTap: (() -> Unit)? = null,
     isHighlighted: Boolean = false,
@@ -254,17 +262,23 @@ fun ChatBubble(
                             .testTag("chat_thread.sender.${message.id}"),
                     )
                 }
+                val hasMedia = message.media.isNotEmpty()
                 BubbleBody(
                     body = message.body,
                     fill = fill,
                     textColor = textColor,
                     messageId = message.id,
-                    onClick = if (retryEnabled) onRetry else null,
-                    attachment = message.imageAttachment,
-                    video = message.videoAttachment,
+                    // Text messages retry on a plain bubble tap; media
+                    // messages route the failed tap to the Resend/Delete
+                    // menu inside the media overlay instead.
+                    onClick = if (retryEnabled && !hasMedia) onRetry else null,
+                    media = message.media,
+                    status = message.status,
                     imageLoader = imageLoader,
                     onImageTapped = onImageTapped,
                     onVideoTapped = onVideoTapped,
+                    onAlbumItemTapped = onAlbumItemTapped,
+                    onFailedMediaTap = onFailedMediaTap,
                     reply = reply,
                     replyAccentColor = reply?.accent?.color(darkTheme),
                     isOutgoing = isOutgoing,
@@ -292,11 +306,13 @@ private fun BubbleBody(
     textColor: Color,
     messageId: java.util.UUID,
     onClick: (() -> Unit)?,
-    attachment: ChatImageAttachment?,
-    video: ChatVideoAttachment?,
+    media: List<ChatMediaAttachment>,
+    status: MessageStatus,
     imageLoader: ChatImageLoader?,
     onImageTapped: ((ChatImageAttachment) -> Unit)?,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)?,
+    onAlbumItemTapped: ((Int) -> Unit)?,
+    onFailedMediaTap: (() -> Unit)?,
     reply: ChatReplyQuote?,
     replyAccentColor: Color?,
     isOutgoing: Boolean,
@@ -342,20 +358,58 @@ private fun BubbleBody(
                 onTap = if (!reply.isUnavailable) onQuoteTap else null,
             )
         }
-        if (video != null) {
-            AttachmentVideo(
-                video = video,
-                imageLoader = imageLoader,
-                messageId = messageId,
-                onTap = onVideoTapped?.let { cb -> { cb(video) } },
-            )
-        } else if (attachment != null) {
-            AttachmentImage(
-                attachment = attachment,
-                imageLoader = imageLoader,
-                messageId = messageId,
-                onTap = onImageTapped?.let { cb -> { cb(attachment) } },
-            )
+        if (media.isNotEmpty()) {
+            // Pending → dimmed with a spinner; failed → dimmed with an
+            // error glyph, tap opens the Resend/Delete menu. Only sent
+            // media is tappable-to-view. Mirrors iOS
+            // `ChatBubbleCell.applyAttachmentSendState`.
+            val sending = isOutgoing && status == MessageStatus.PENDING
+            val failed = isOutgoing && status == MessageStatus.FAILED
+            Box(
+                modifier = Modifier.testTag("chat_thread.media.$messageId"),
+            ) {
+                if (media.size == 1) {
+                    val item = media[0]
+                    val videoItem = item.video
+                    val imageItem = item.image
+                    if (item.isVideo && videoItem != null) {
+                        AttachmentVideo(
+                            video = videoItem,
+                            imageLoader = imageLoader,
+                            messageId = messageId,
+                            onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
+                                onVideoTapped?.invoke(videoItem)
+                            },
+                        )
+                    } else if (imageItem != null) {
+                        AttachmentImage(
+                            attachment = imageItem,
+                            imageLoader = imageLoader,
+                            messageId = messageId,
+                            onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
+                                onImageTapped?.invoke(imageItem)
+                            },
+                        )
+                    }
+                } else {
+                    AlbumGrid(
+                        media = media,
+                        imageLoader = imageLoader,
+                        messageId = messageId,
+                        onTileTap = if (sending) null else { index ->
+                            if (failed) onFailedMediaTap?.invoke()
+                            else onAlbumItemTapped?.invoke(index)
+                        },
+                    )
+                }
+                if (sending || failed) {
+                    MediaSendOverlay(
+                        sending = sending,
+                        messageId = messageId,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
+            }
         }
         // Image messages may carry an empty caption — skip the text row
         // entirely so the bubble hugs the image with no blank line.
@@ -490,6 +544,177 @@ private fun AttachmentVideo(
                 .background(Color.Black.copy(alpha = 0.55f))
                 .padding(horizontal = 5.dp, vertical = 1.dp),
         )
+    }
+}
+
+/**
+ * Resolves the tap handler for a single media item given its send
+ * state: pending media is untappable, failed media routes to the
+ * Resend/Delete menu, sent media opens the viewer. Pure so the state
+ * machine is obvious at the call site.
+ */
+private fun mediaViewTap(
+    sending: Boolean,
+    failed: Boolean,
+    onFailedMediaTap: (() -> Unit)?,
+    viewAction: () -> Unit,
+): (() -> Unit)? = when {
+    sending -> null
+    failed -> onFailedMediaTap
+    else -> viewAction
+}
+
+/**
+ * Dimming scrim over outgoing media that's still uploading (spinner)
+ * or has failed (error glyph, tap opens the Resend/Delete menu via the
+ * media's own click target). Mirrors iOS
+ * `ChatBubbleCell.applyAttachmentSendState`.
+ */
+@Composable
+private fun MediaSendOverlay(
+    sending: Boolean,
+    messageId: java.util.UUID,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(IMAGE_RADIUS))
+            .background(Color.Black.copy(alpha = 0.35f))
+            .testTag(
+                if (sending) "chat_thread.media.sending.$messageId"
+                else "chat_thread.media.failed.$messageId",
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (sending) {
+            CircularProgressIndicator(
+                color = Color.White,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(28.dp),
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Filled.ErrorOutline,
+                contentDescription = "Failed — tap to resend or delete",
+                tint = Color.White,
+                modifier = Modifier.size(32.dp),
+            )
+        }
+    }
+}
+
+/**
+ * A 2-column grid of album thumbnails: 2 items → one row, 3 → 2+1,
+ * 4 → 2×2, 5+ → 2×2 with a "+N" scrim on the 4th tile. Tapping a tile
+ * opens the full-screen gallery at that index. Mirrors iOS
+ * `AlbumGridView`.
+ */
+@Composable
+private fun AlbumGrid(
+    media: List<ChatMediaAttachment>,
+    imageLoader: ChatImageLoader?,
+    messageId: java.util.UUID,
+    onTileTap: ((Int) -> Unit)?,
+) {
+    val shown = media.take(4)
+    val extra = media.size - shown.size
+    val spacing = 2.dp
+    Column(
+        modifier = Modifier
+            .width(IMAGE_MAX_WIDTH)
+            .clip(RoundedCornerShape(IMAGE_RADIUS)),
+        verticalArrangement = Arrangement.spacedBy(spacing),
+    ) {
+        shown.chunked(2).forEachIndexed { rowIndex, row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                row.forEachIndexed { colIndex, item ->
+                    val index = rowIndex * 2 + colIndex
+                    AlbumTile(
+                        item = item,
+                        imageLoader = imageLoader,
+                        messageId = messageId,
+                        index = index,
+                        plusCount = if (index == shown.lastIndex && extra > 0) extra else 0,
+                        modifier = Modifier
+                            .weight(1f)
+                            .aspectRatio(1f),
+                        onTap = onTileTap?.let { cb -> { cb(index) } },
+                    )
+                }
+                // Odd trailing item keeps its half-width slot rather than
+                // stretching across the row.
+                if (row.size == 1) {
+                    Box(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlbumTile(
+    item: ChatMediaAttachment,
+    imageLoader: ChatImageLoader?,
+    messageId: java.util.UUID,
+    index: Int,
+    plusCount: Int,
+    modifier: Modifier,
+    onTap: (() -> Unit)?,
+) {
+    val thumb = item.thumbnail
+    val placeholder = remember(thumb.blurhash) {
+        runCatching { Blurhash.decode(thumb.blurhash, 32, 32) }.getOrNull()
+    }
+    var bitmap by remember(thumb.sha256) {
+        mutableStateOf<android.graphics.Bitmap?>(null)
+    }
+    LaunchedEffect(thumb.sha256, imageLoader) {
+        if (imageLoader != null) bitmap = imageLoader.load(thumb)
+    }
+    val shown = bitmap ?: placeholder
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier)
+            .testTag("chat_thread.album.tile.$index.$messageId"),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (shown != null) {
+            Image(
+                bitmap = shown.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (item.isVideo) {
+            Icon(
+                imageVector = Icons.Filled.PlayCircle,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.9f),
+                modifier = Modifier.size(32.dp),
+            )
+        }
+        if (plusCount > 0) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "+$plusCount",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+            }
+        }
     }
 }
 

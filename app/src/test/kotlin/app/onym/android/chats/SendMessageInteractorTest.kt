@@ -133,14 +133,25 @@ class SendMessageInteractorTest {
     }
 
     @Test
-    fun sendImage_uploadFailure_throwsImageUploadFailed() = runTest {
+    fun sendImage_uploadFailure_marksFailed_keepsOutboxForResend() = runTest {
+        // Two-step send: the optimistic bubble is inserted before the
+        // upload, so an upload failure marks the row FAILED (rather than
+        // throwing) and keeps the sealed blob in the outbox for a resend.
         val fixture = newFixture(blossomClient = FailingBlossomClient())
         fixture.seedGroup(includePeer = true)
 
-        assertThrows(SendMessageError.ImageUploadFailed::class.java) {
-            kotlinx.coroutines.runBlocking { fixture.interactor.sendImage(groupIdHex, ByteArray(8)) }
-        }
+        val result = fixture.interactor.sendImage(groupIdHex, ByteArray(8))
+
+        assertEquals(MessageStatus.FAILED, result.status)
+        val persisted = fixture.messageStore
+            .listForGroup(activeId.value, groupIdHex)
+            .single()
+        assertEquals(MessageStatus.FAILED, persisted.status)
+        // No fan-out on a failed upload — recipients never get a
+        // descriptor pointing at a missing blob.
         assertTrue(fixture.transport.sends().isEmpty())
+        // The sealed ciphertext is retained for resend.
+        assertNotNull(fixture.outbox.load(persisted.imageAttachment!!.sha256))
     }
 
     // ─── video send ──────────────────────────────────────────────
@@ -192,15 +203,17 @@ class SendMessageInteractorTest {
     }
 
     @Test
-    fun sendVideo_uploadFailure_throwsVideoUploadFailed() = runTest {
+    fun sendVideo_uploadFailure_marksFailed() = runTest {
         val fixture = newFixture(blossomClient = FailingBlossomClient())
         fixture.seedGroup(includePeer = true)
 
-        assertThrows(SendMessageError.VideoUploadFailed::class.java) {
-            kotlinx.coroutines.runBlocking {
-                fixture.interactor.sendVideo(groupIdHex, Uri.parse("content://test/v"))
-            }
-        }
+        val result = fixture.interactor.sendVideo(groupIdHex, Uri.parse("content://test/v"))
+
+        assertEquals(MessageStatus.FAILED, result.status)
+        assertEquals(
+            MessageStatus.FAILED,
+            fixture.messageStore.listForGroup(activeId.value, groupIdHex).single().status,
+        )
         assertTrue(fixture.transport.sends().isEmpty())
     }
 
@@ -216,6 +229,104 @@ class SendMessageInteractorTest {
             }
         }
         assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    // ─── album (multi-media) send ────────────────────────────────
+
+    @Test
+    fun sendAlbum_multipleItems_persistsAlbum_uploadsAllBlobs_andFansOut() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.sendAlbum(
+            groupIdHex,
+            listOf(
+                ChatMediaSource.Image(ByteArray(16) { 1 }),
+                ChatMediaSource.Image(ByteArray(16) { 2 }),
+                ChatMediaSource.Video(Uri.parse("content://test/v")),
+            ),
+        )
+
+        assertEquals(MessageStatus.SENT, result.status)
+        // Album carries all three items; the flat single-media fields stay null.
+        val album = result.albumAttachments
+        assertNotNull(album)
+        assertEquals(3, album!!.size)
+        assertNull(result.imageAttachment)
+        assertNull(result.videoAttachment)
+        // Two images (1 blob each) + one video (poster + video) = 4 blobs.
+        val fake = fixture.blossomClient as FakeBlossomClient
+        assertEquals(4, fake.uploads.size)
+        // The album rides the wire payload.
+        val shipped = decodeShipped(fixture.transport.sends().single().payload)
+        assertEquals(3, shipped.attachments?.size)
+    }
+
+    @Test
+    fun sendAlbum_singleItem_collapsesToSingleMedia() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.sendAlbum(
+            groupIdHex,
+            listOf(ChatMediaSource.Image(ByteArray(16) { 7 })),
+        )
+
+        assertEquals(MessageStatus.SENT, result.status)
+        // One item collapses to a flat single-image message (no album).
+        assertNull(result.albumAttachments)
+        assertNotNull(result.imageAttachment)
+        val shipped = decodeShipped(fixture.transport.sends().single().payload)
+        assertNull(shipped.attachments)
+        assertNotNull(shipped.attachment)
+    }
+
+    // ─── resend re-uploads from the outbox ────────────────────────
+
+    @Test
+    fun resend_afterFailedUpload_reuploadsSameBytes_andFlipsToSent() = runTest {
+        val blossom = ToggleableBlossomClient(failUploads = true)
+        val fixture = newFixture(blossomClient = blossom)
+        fixture.seedGroup(includePeer = true)
+
+        // First attempt fails at upload → FAILED, blob retained in outbox.
+        val failed = fixture.interactor.sendImage(groupIdHex, ByteArray(24) { it.toByte() })
+        assertEquals(MessageStatus.FAILED, failed.status)
+        val sha = failed.imageAttachment!!.sha256
+        assertNotNull(fixture.outbox.load(sha))
+        assertTrue(fixture.transport.sends().isEmpty())
+
+        // Network recovers; resend re-uploads the identical ciphertext.
+        blossom.failUploads = false
+        fixture.interactor.retry(groupIdHex, failed.id)
+
+        val refreshed = fixture.messageStore.findById(failed.id, activeId.value)!!
+        assertEquals(MessageStatus.SENT, refreshed.status)
+        // Exactly one blob uploaded on the resend, addressed by the same SHA
+        // the descriptor already committed to.
+        assertEquals(1, blossom.uploads.size)
+        assertEquals(sha, ChatImageCrypto.sha256Hex(blossom.uploads.single()))
+        // One envelope shipped; the outbox blob is evicted on confirmed send.
+        assertEquals(1, fixture.transport.sends().size)
+        assertNull(fixture.outbox.load(sha))
+    }
+
+    // ─── delete removes the row + evicts the outbox ───────────────
+
+    @Test
+    fun delete_removesMessage_andEvictsOutboxBlob() = runTest {
+        val blossom = ToggleableBlossomClient(failUploads = true)
+        val fixture = newFixture(blossomClient = blossom)
+        fixture.seedGroup(includePeer = true)
+
+        val failed = fixture.interactor.sendImage(groupIdHex, ByteArray(12) { 9 })
+        val sha = failed.imageAttachment!!.sha256
+        assertNotNull(fixture.outbox.load(sha))
+
+        fixture.interactor.delete(groupIdHex, failed.id)
+
+        assertNull(fixture.messageStore.findById(failed.id, activeId.value))
+        assertNull(fixture.outbox.load(sha))
     }
 
     // ─── reply reference rides the send + survives retry ─────────
@@ -607,6 +718,9 @@ class SendMessageInteractorTest {
             scope = TestScope(UnconfinedTestDispatcher()),
         )
         val transport = ConfigurableInboxTransport()
+        val outbox = ChatOutbox(
+            java.nio.file.Files.createTempDirectory("outbox-test").toFile(),
+        )
         val interactor = SendMessageInteractor(
             activeIdentity = activeProvider,
             identitiesFlow = identitiesFlow,
@@ -618,9 +732,10 @@ class SendMessageInteractorTest {
             blossomServerUrl = "https://blossom.test",
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_700_000_000_000L },
-            idFactory = { UUID.fromString("00000000-0000-0000-0000-000000000001") },
+            idFactory = { UUID.randomUUID() },
             encodeImage = encodeImage,
             encodeVideo = encodeVideo,
+            outbox = outbox,
         )
         return Fixture(
             interactor = interactor,
@@ -628,6 +743,7 @@ class SendMessageInteractorTest {
             messageStore = messageStore,
             transport = transport,
             blossomClient = blossomClient,
+            outbox = outbox,
         )
     }
 
@@ -637,6 +753,7 @@ class SendMessageInteractorTest {
         val messageStore: InMemoryMessageStore,
         val transport: ConfigurableInboxTransport,
         val blossomClient: BlossomClient,
+        val outbox: ChatOutbox,
     ) {
         suspend fun seedGroup(
             includePeer: Boolean,
@@ -707,8 +824,27 @@ private class FakeBlossomClient : BlossomClient {
         blobs[sha256] ?: throw IllegalStateException("no blob $sha256")
 }
 
+/** A Blossom client whose uploads fail while [failUploads] is set, then
+ *  succeed once it clears — drives the fail-then-resend round-trip. Keeps
+ *  the ciphertext so a download would serve it back like the real server. */
+private class ToggleableBlossomClient(var failUploads: Boolean) : BlossomClient {
+    val uploads = mutableListOf<ByteArray>()
+    private val blobs = HashMap<String, ByteArray>()
+
+    override suspend fun upload(blob: ByteArray, mimeType: String): BlobDescriptor {
+        if (failUploads) throw java.io.IOException("network down")
+        uploads.add(blob)
+        val sha = ChatImageCrypto.sha256Hex(blob)
+        blobs[sha] = blob
+        return BlobDescriptor(sha256 = sha, url = "https://blossom.test/$sha", size = blob.size)
+    }
+
+    override suspend fun download(sha256: String): ByteArray =
+        blobs[sha256] ?: throw IllegalStateException("no blob $sha256")
+}
+
 /** A Blossom client whose `upload` always fails — drives the
- *  [SendMessageError.ImageUploadFailed] path. */
+ *  upload-failure → FAILED path. */
 private class FailingBlossomClient : BlossomClient {
     override suspend fun upload(blob: ByteArray, mimeType: String): BlobDescriptor =
         throw java.io.IOException("network down")

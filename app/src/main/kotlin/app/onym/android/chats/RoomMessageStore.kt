@@ -70,6 +70,9 @@ class RoomMessageStore(
         withContext(ioDispatcher) { dao.updateStatus(id.toString(), ownerIdentityId, status.name) }
     }
 
+    override suspend fun deleteById(id: UUID, ownerIdentityId: String): Int =
+        withContext(ioDispatcher) { dao.deleteByIdAndOwner(id.toString(), ownerIdentityId) }
+
     override suspend fun deleteForOwner(ownerIdentityId: String): Int =
         withContext(ioDispatcher) { dao.deleteForOwner(ownerIdentityId) }
 
@@ -99,6 +102,12 @@ class RoomMessageStore(
         // per-video key + the poster descriptor).
         encryptedVideoAttachmentJson = message.videoAttachment?.let {
             encryption.encrypt(attachmentJson.encodeToString(ChatVideoAttachment.serializer(), it))
+        },
+        // Album JSON (list of image/video items), encrypted at rest.
+        encryptedAlbumJson = message.albumAttachments?.let {
+            encryption.encrypt(attachmentJson.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(ChatMediaAttachment.serializer()), it
+            ))
         },
     )
 
@@ -136,6 +145,15 @@ class RoomMessageStore(
                     attachmentJson.decodeFromString(ChatVideoAttachment.serializer(), it)
                 }.getOrNull()
             }
+        val albumAttachments = row.encryptedAlbumJson
+            ?.let { tryDecryptString(it) }
+            ?.let {
+                runCatching {
+                    attachmentJson.decodeFromString(
+                        kotlinx.serialization.builtins.ListSerializer(ChatMediaAttachment.serializer()), it
+                    )
+                }.getOrNull()
+            }
         return ChatMessage(
             id = id,
             groupId = row.groupId,
@@ -149,6 +167,7 @@ class RoomMessageStore(
             groupType = groupType,
             imageAttachment = imageAttachment,
             videoAttachment = videoAttachment,
+            albumAttachments = albumAttachments,
         )
     }
 

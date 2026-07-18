@@ -60,4 +60,18 @@ data class ChatMessage(
      *  this is present. The poster loads eagerly like an image; the video
      *  blob only downloads on play ([ChatVideoLoader]). */
     val videoAttachment: ChatVideoAttachment? = null,
-)
+    /** A multi-media album (2+ items) attached to this message. Mirrors
+     *  [ChatMessagePayload.attachments]. `null` for text + single-media
+     *  messages (which use [imageAttachment] / [videoAttachment]). */
+    val albumAttachments: List<ChatMediaAttachment>? = null,
+) {
+    /** Canonical media list for rendering: the album when present, else
+     *  the single image/video wrapped in a one-element list, else empty. */
+    val media: List<ChatMediaAttachment>
+        get() = when {
+            !albumAttachments.isNullOrEmpty() -> albumAttachments
+            imageAttachment != null -> listOf(ChatMediaAttachment.image(imageAttachment))
+            videoAttachment != null -> listOf(ChatMediaAttachment.video(videoAttachment))
+            else -> emptyList()
+        }
+}

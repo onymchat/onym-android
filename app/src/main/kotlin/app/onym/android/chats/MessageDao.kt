@@ -64,6 +64,12 @@ interface MessageDao {
     @Query("UPDATE messages SET statusRaw = :statusRaw WHERE id = :id AND ownerIdentityId = :ownerIdentityId")
     suspend fun updateStatus(id: String, ownerIdentityId: String, statusRaw: String): Int
 
+    /** Delete a single message scoped to the composite
+     *  `(id, ownerIdentityId)` key (used by the failed-media Delete
+     *  action). Returns the row count. */
+    @Query("DELETE FROM messages WHERE id = :id AND ownerIdentityId = :ownerIdentityId")
+    suspend fun deleteByIdAndOwner(id: String, ownerIdentityId: String): Int
+
     /** Cascade delete for the identity-removal flow. Returns the
      *  number of rows deleted so the caller can log cleanup size. */
     @Query("DELETE FROM messages WHERE ownerIdentityId = :ownerIdentityId")

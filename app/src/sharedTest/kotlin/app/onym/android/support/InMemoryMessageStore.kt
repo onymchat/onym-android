@@ -71,6 +71,10 @@ class InMemoryMessageStore : MessageStore {
         }
     }
 
+    override suspend fun deleteById(id: UUID, ownerIdentityId: String): Int = mutex.withLock {
+        if (rows.remove(id.toString() to ownerIdentityId) != null) 1 else 0
+    }
+
     override suspend fun deleteForOwner(ownerIdentityId: String): Int = mutex.withLock {
         val before = rows.size
         rows.values.removeAll { it.ownerIdentityId == ownerIdentityId }

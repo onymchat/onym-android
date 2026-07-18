@@ -106,6 +106,50 @@ class RoomMessageStoreTest {
         assertEquals("caption", listed.body)
     }
 
+    @Test
+    fun insert_thenList_roundtripsAlbumAttachments() = runTest {
+        val image = ChatImageAttachment(
+            sha256 = "11".repeat(32),
+            mimeType = "image/jpeg",
+            byteSize = 12_000,
+            width = 240,
+            height = 160,
+            encKey = ByteArray(32) { 0x1 },
+            blurhash = "LEHV6nWB2yk8",
+            server = "https://blossom.onym.app",
+        )
+        val video = ChatVideoAttachment(
+            sha256 = "22".repeat(32),
+            mimeType = "video/mp4",
+            byteSize = 4_200_000,
+            width = 1280,
+            height = 720,
+            durationSeconds = 4.0,
+            encKey = ByteArray(32) { 0x2 },
+            poster = ChatImageAttachment(
+                sha256 = "33".repeat(32),
+                mimeType = "image/jpeg",
+                byteSize = 40_000,
+                width = 1280,
+                height = 720,
+                encKey = ByteArray(32) { 0x3 },
+                blurhash = "LEHV6nWB2yk8",
+                server = "https://blossom.onym.app",
+            ),
+            server = "https://blossom.onym.app",
+        )
+        val album = listOf(
+            ChatMediaAttachment.image(image),
+            ChatMediaAttachment.video(video),
+        )
+        val msg = makeMessage(body = "").copy(albumAttachments = album)
+        store.insert(msg)
+
+        val listed = store.listForGroup(msg.ownerIdentityId, msg.groupId).single()
+        assertEquals(album, listed.albumAttachments)
+        assertEquals(2, listed.media.size)
+    }
+
     // ─── search ───────────────────────────────────────────────────
 
     @Test
@@ -275,6 +319,20 @@ class RoomMessageStoreTest {
         assertEquals(2, deleted)
         assertTrue(store.listForGroup("alice", groupA).isEmpty())
         assertEquals(1, store.listForGroup("alice", groupB).size)
+    }
+
+    @Test
+    fun deleteById_removesOnlyThatOwnersRow() = runTest {
+        val groupId = "aa".repeat(32)
+        val sharedId = UUID.randomUUID()
+        store.insert(makeMessage(owner = "alice", group = groupId, body = "mine").copy(id = sharedId))
+        store.insert(makeMessage(owner = "bob", group = groupId, body = "theirs").copy(id = sharedId))
+
+        val deleted = store.deleteById(sharedId, "alice")
+        assertEquals(1, deleted)
+        assertTrue(store.listForGroup("alice", groupId).isEmpty())
+        // Bob's copy of the same wire id is untouched.
+        assertEquals(1, store.listForGroup("bob", groupId).size)
     }
 
     // ─── multi-identity (same wire id, two owners) ────────────────

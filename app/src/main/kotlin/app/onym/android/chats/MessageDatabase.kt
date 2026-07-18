@@ -34,7 +34,9 @@ import androidx.room.RoomDatabase
     // BLOB. Additive; existing rows decode to a text-only message.
     // v5 (video attachments): adds nullable `encryptedVideoAttachmentJson`
     // BLOB. Additive; existing rows decode to a message with no video.
-    version = 5,
+    // v6 (albums): adds nullable `encryptedAlbumJson` BLOB. Additive;
+    // existing rows decode to a message with no album.
+    version = 6,
     exportSchema = false,
 )
 abstract class MessageDatabase : RoomDatabase() {
@@ -126,6 +128,16 @@ object MessageDatabaseMigrations {
     val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE messages ADD COLUMN encryptedVideoAttachmentJson BLOB")
+        }
+    }
+
+    /**
+     * v5 → v6: add the nullable `encryptedAlbumJson` BLOB for multi-media
+     * albums. Additive; existing rows decode to no album.
+     */
+    val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN encryptedAlbumJson BLOB")
         }
     }
 }

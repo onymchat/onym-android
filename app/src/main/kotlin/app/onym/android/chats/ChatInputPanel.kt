@@ -1,14 +1,24 @@
 package app.onym.android.chats
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.FilledIconButton
@@ -29,6 +39,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -69,13 +82,30 @@ fun ChatInputPanel(
     focusRequester: FocusRequester? = null,
     onAttach: (() -> Unit)? = null,
     onAttachVideo: (() -> Unit)? = null,
+    /** Media staged in the two-step send flow, shown as a removable
+     *  thumbnail strip above the composer. */
+    pendingMedia: List<PendingMediaItem> = emptyList(),
+    /** Drop a staged item (its ✕ was tapped). */
+    onRemovePending: ((java.util.UUID) -> Unit)? = null,
+    /** Confirm-send the staged media as one message/album. */
+    onSendMedia: (() -> Unit)? = null,
 ) {
     var text by remember { mutableStateOf("") }
     val sendBody = trimmedSendBody(text)
-    val canSend = enabled && sendBody != null
+    val hasPendingMedia = pendingMedia.isNotEmpty()
+    // With media staged, Send ships the album (no caption this
+    // iteration); otherwise it ships the trimmed text body.
+    val canSend = enabled && (hasPendingMedia || sendBody != null)
 
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (hasPendingMedia) {
+            MediaPreviewStrip(
+                items = pendingMedia,
+                onRemove = onRemovePending,
+            )
+        }
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .testTag("chat_thread.input_panel"),
@@ -136,6 +166,11 @@ fun ChatInputPanel(
         )
         FilledIconButton(
             onClick = {
+                // Staged media takes precedence — confirm-send the album.
+                if (hasPendingMedia) {
+                    onSendMedia?.invoke()
+                    return@FilledIconButton
+                }
                 val body = trimmedSendBody(text) ?: return@FilledIconButton
                 onSend(body)
                 text = ""
@@ -161,6 +196,79 @@ fun ChatInputPanel(
                 imageVector = Icons.AutoMirrored.Filled.Send,
                 contentDescription = "Send",
             )
+        }
+    }
+    }
+}
+
+/**
+ * Horizontal strip of staged-media thumbnails shown above the composer
+ * in the two-step send flow. Each tile carries a ✕ to drop it before
+ * sending; videos get a play glyph. Mirrors the iOS
+ * `ChatInputPanelView` media preview strip.
+ */
+@Composable
+private fun MediaPreviewStrip(
+    items: List<PendingMediaItem>,
+    onRemove: ((java.util.UUID) -> Unit)?,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .testTag("chat_thread.input.media_strip"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(items = items, key = { it.id }) { item ->
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .testTag("chat_thread.input.media_strip.tile"),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val thumb = item.thumbnail
+                    if (thumb != null) {
+                        Image(
+                            bitmap = thumb.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    if (item.source is ChatMediaSource.Video) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayCircle,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.9f),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+                if (onRemove != null) {
+                    IconButton(
+                        onClick = { onRemove(item.id) },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .testTag("chat_thread.input.media_strip.remove"),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "Remove",
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -95,6 +95,45 @@ class ChatVideoAttachmentTest {
     }
 
     @Test
+    fun payload_withAlbum_roundTripsWithKindDiscriminator() {
+        val sampleImage = ChatImageAttachment(
+            sha256 = "ef".repeat(32),
+            mimeType = "image/jpeg",
+            byteSize = 12_000,
+            width = 240,
+            height = 160,
+            encKey = ByteArray(32) { 0x33 },
+            blurhash = "LEHV6nWB2yk8",
+            server = "https://blossom.onym.app",
+        )
+        val album = listOf(
+            ChatMediaAttachment.image(sampleImage),
+            ChatMediaAttachment.video(sampleVideo()),
+        )
+        val original = ChatMessagePayload(
+            version = 1,
+            messageId = UUID.fromString("12345678-1234-1234-1234-123456789ABC"),
+            groupId = ByteArray(32) { (it * 7).toByte() },
+            senderBlsPubkeyHex = "ab".repeat(48),
+            sentAtMillis = 1_700_000_000_000L,
+            variant = ChatMessageVariant.Tyranny(body = ""),
+            attachments = album,
+        )
+        val encoded = strictJson.encodeToString(ChatMessagePayload.serializer(), original)
+        val decoded = strictJson.decodeFromString(ChatMessagePayload.serializer(), encoded)
+
+        assertEquals(2, decoded.attachments?.size)
+        assertEquals(ChatMediaAttachment.KIND_IMAGE, decoded.attachments!![0].kind)
+        assertEquals(ChatMediaAttachment.KIND_VIDEO, decoded.attachments[1].kind)
+        assertEquals(sampleImage.sha256, decoded.attachments[0].image?.sha256)
+        assertEquals(sampleVideo().sha256, decoded.attachments[1].video?.sha256)
+        // The discriminated-union shape the iOS twin also emits.
+        assertTrue(encoded.contains("\"attachments\""))
+        assertTrue(encoded.contains("\"kind\""))
+        assertTrue(encoded.contains("\"image\""))
+    }
+
+    @Test
     fun formatVideoDuration_formatsAsMinutesSeconds() {
         assertEquals("0:00", formatVideoDuration(0.0))
         assertEquals("0:09", formatVideoDuration(9.4))

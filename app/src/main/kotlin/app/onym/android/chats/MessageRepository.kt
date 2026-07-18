@@ -212,6 +212,18 @@ class MessageRepository(
         }
     }
 
+    /**
+     * Delete a single message (the failed-media Delete action) and
+     * refresh the group's cached flow so the bubble disappears.
+     */
+    suspend fun deleteMessage(id: UUID, ownerIdentityId: String, groupId: String) = mutex.withLock {
+        store.deleteById(id, ownerIdentityId)
+        val activeOwnerId = identity.currentIdentityId.value?.value
+        if (ownerIdentityId == activeOwnerId) {
+            refreshGroupLocked(activeOwnerId, groupId)
+        }
+    }
+
     // ─── private ──────────────────────────────────────────────────
 
     private suspend fun handleOwnerRemovalLocked(id: IdentityId) {

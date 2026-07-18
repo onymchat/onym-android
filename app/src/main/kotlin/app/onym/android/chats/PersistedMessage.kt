@@ -75,6 +75,10 @@ data class PersistedMessage(
      *  destructive `ALTER TABLE ADD COLUMN` migration shape as
      *  [encryptedAttachmentJson]; carries the per-video key + poster. */
     val encryptedVideoAttachmentJson: ByteArray? = null,
+    /** AES-GCM-encrypted JSON of the `List<ChatMediaAttachment>` album
+     *  (or `null` for text / single-media). Same at-rest encryption +
+     *  non-destructive ALTER migration shape as the other columns. */
+    val encryptedAlbumJson: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -92,7 +96,9 @@ data class PersistedMessage(
             (encryptedAttachmentJson?.contentEquals(other.encryptedAttachmentJson)
                 ?: (other.encryptedAttachmentJson == null)) &&
             (encryptedVideoAttachmentJson?.contentEquals(other.encryptedVideoAttachmentJson)
-                ?: (other.encryptedVideoAttachmentJson == null))
+                ?: (other.encryptedVideoAttachmentJson == null)) &&
+            (encryptedAlbumJson?.contentEquals(other.encryptedAlbumJson)
+                ?: (other.encryptedAlbumJson == null))
     }
 
     override fun hashCode(): Int {
@@ -108,6 +114,7 @@ data class PersistedMessage(
         h = 31 * h + (replyToMessageId?.hashCode() ?: 0)
         h = 31 * h + (encryptedAttachmentJson?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedVideoAttachmentJson?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedAlbumJson?.contentHashCode() ?: 0)
         return h
     }
 }

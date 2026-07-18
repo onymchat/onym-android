@@ -96,26 +96,42 @@ fun ChatThreadScreen(
     val group by viewModel.group.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val replyingTo by viewModel.replyingTo.collectAsStateWithLifecycle()
+    val pendingMedia by viewModel.pendingMedia.collectAsStateWithLifecycle()
 
     // The video attachment currently shown in the full-screen player, if any.
     var playingVideo by remember { mutableStateOf<ChatVideoAttachment?>(null) }
     // The image attachment currently shown in the full-screen viewer, if any.
     var viewingImage by remember { mutableStateOf<ChatImageAttachment?>(null) }
+    // The album currently open in the swipeable full-screen gallery, if any.
+    var galleryContext by remember { mutableStateOf<AlbumGalleryContext?>(null) }
+    // The failed outgoing media message whose Resend/Delete menu is open.
+    var failedMenuMessageId by remember { mutableStateOf<java.util.UUID?>(null) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
+    // Two-step media send: the picker STAGES items into the composer's
+    // preview strip; the actual upload only fires on Send. Multi-select
+    // so several photos/videos batch into one album.
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri != null) {
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris ->
+        for (uri in uris) {
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            if (bytes != null) viewModel.sendImage(bytes)
+                ?: continue
+            viewModel.stagePendingMedia(
+                thumbnail = decodeThumbnail(bytes),
+                source = ChatMediaSource.Image(bytes),
+            )
         }
     }
     // Under the UI-test harness the system photo picker can't be driven,
-    // so send a generated test image directly instead.
+    // so stage a generated test image directly instead.
     val onAttach: () -> Unit = {
         if (UITestRegistry.enabled) {
-            viewModel.sendImage(debugTestImageBytes())
+            val bytes = debugTestImageBytes()
+            viewModel.stagePendingMedia(
+                thumbnail = decodeThumbnail(bytes),
+                source = ChatMediaSource.Image(bytes),
+            )
         } else {
             imagePicker.launch(
                 androidx.activity.result.PickVisualMediaRequest(
@@ -125,16 +141,24 @@ fun ChatThreadScreen(
         }
     }
     val videoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri != null) viewModel.sendVideo(uri)
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris ->
+        for (uri in uris) {
+            viewModel.stagePendingMedia(
+                thumbnail = videoThumbnail(context, uri),
+                source = ChatMediaSource.Video(uri),
+            )
+        }
     }
     // Under the UI-test harness the picker + Media3 transcoding can't run,
-    // so send a canned video (the interactor's injected encoder ignores
-    // the URI) straight through the send pipeline.
+    // so stage a canned video (the interactor's injected encoder ignores
+    // the URI) straight through the staging pipeline.
     val onAttachVideo: () -> Unit = {
         if (UITestRegistry.enabled) {
-            viewModel.sendVideo(android.net.Uri.EMPTY)
+            viewModel.stagePendingMedia(
+                thumbnail = null,
+                source = ChatMediaSource.Video(android.net.Uri.EMPTY),
+            )
         } else {
             videoPicker.launch(
                 androidx.activity.result.PickVisualMediaRequest(
@@ -198,6 +222,11 @@ fun ChatThreadScreen(
                 imageLoader = viewModel.imageLoader,
                 onImageTapped = { viewingImage = it },
                 onVideoTapped = { playingVideo = it },
+                onAlbumTapped = { media, index -> galleryContext = AlbumGalleryContext(media, index) },
+                onFailedMediaTap = { failedMenuMessageId = it },
+                pendingMedia = pendingMedia,
+                onRemovePending = viewModel::removePendingMedia,
+                onSendMedia = viewModel::sendPendingMedia,
                 scrollToMessageId = scrollToMessageId,
                 replyingTo = replyingTo,
                 onArmReply = viewModel::armReply,
@@ -225,7 +254,42 @@ fun ChatThreadScreen(
             onDismiss = { viewingImage = null },
         )
     }
+
+    // Swipeable full-screen album gallery, shown when an album tile is
+    // tapped. Pages through the album's images/videos starting at the
+    // tapped index.
+    galleryContext?.let { ctx ->
+        FullScreenAlbumGallery(
+            media = ctx.media,
+            startIndex = ctx.startIndex,
+            imageLoader = viewModel.imageLoader,
+            videoLoader = viewModel.videoLoader,
+            onDismiss = { galleryContext = null },
+        )
+    }
+
+    // Resend / Delete menu for a failed outgoing media message.
+    failedMenuMessageId?.let { messageId ->
+        FailedMediaActionSheet(
+            onResend = {
+                viewModel.retry(messageId)
+                failedMenuMessageId = null
+            },
+            onDelete = {
+                viewModel.deleteMessage(messageId)
+                failedMenuMessageId = null
+            },
+            onDismiss = { failedMenuMessageId = null },
+        )
+    }
 }
+
+/** The album + start index backing the full-screen gallery. Mirrors iOS
+ *  `AlbumGalleryContext`. */
+private data class AlbumGalleryContext(
+    val media: List<ChatMediaAttachment>,
+    val startIndex: Int,
+)
 
 @Composable
 private fun ChatThreadBody(
@@ -239,6 +303,11 @@ private fun ChatThreadBody(
     imageLoader: ChatImageLoader? = null,
     onImageTapped: ((ChatImageAttachment) -> Unit)? = null,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)? = null,
+    onAlbumTapped: ((List<ChatMediaAttachment>, Int) -> Unit)? = null,
+    onFailedMediaTap: ((java.util.UUID) -> Unit)? = null,
+    pendingMedia: List<PendingMediaItem> = emptyList(),
+    onRemovePending: ((java.util.UUID) -> Unit)? = null,
+    onSendMedia: (() -> Unit)? = null,
     scrollToMessageId: java.util.UUID? = null,
     replyingTo: java.util.UUID?,
     onArmReply: (java.util.UUID) -> Unit,
@@ -420,6 +489,12 @@ private fun ChatThreadBody(
                         imageLoader = imageLoader,
                         onImageTapped = onImageTapped,
                         onVideoTapped = onVideoTapped,
+                        onAlbumItemTapped = onAlbumTapped?.let { cb ->
+                            { index -> cb(message.media, index) }
+                        },
+                        onFailedMediaTap = onFailedMediaTap?.let { cb ->
+                            { cb(message.id) }
+                        },
                         reply = replyQuotes[message.id],
                         onQuoteTap = message.replyToMessageId?.let { targetId ->
                             { scrollToAndHighlight(targetId) }
@@ -463,6 +538,9 @@ private fun ChatThreadBody(
             focusRequester = composerFocus,
             onAttach = onAttach,
             onAttachVideo = onAttachVideo,
+            pendingMedia = pendingMedia,
+            onRemovePending = onRemovePending,
+            onSendMedia = onSendMedia,
         )
     }
 }
@@ -713,6 +791,193 @@ internal fun shouldGlueToBottomOnImeRise(
     anchoredBeforeIme: Boolean,
     hasMessages: Boolean,
 ): Boolean = rising && anchoredBeforeIme && hasMessages
+
+/**
+ * Swipeable full-screen album gallery. Pages horizontally through an
+ * album's images/videos starting at the tapped index; a vertical drag
+ * fades the backdrop and dismisses past a threshold. Mirrors iOS's
+ * `FullScreenGalleryView` (paged TabView + AVKit).
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun FullScreenAlbumGallery(
+    media: List<ChatMediaAttachment>,
+    startIndex: Int,
+    imageLoader: ChatImageLoader?,
+    videoLoader: ChatVideoLoader?,
+    onDismiss: () -> Unit,
+) {
+    if (media.isEmpty()) return
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = startIndex.coerceIn(0, media.lastIndex),
+        pageCount = { media.size },
+    )
+    val scope = rememberCoroutineScope()
+    val offsetY = remember { androidx.compose.animation.core.Animatable(0f) }
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 120.dp.toPx() }
+    val fadeDistancePx = with(density) { 300.dp.toPx() }
+    val progress = (kotlin.math.abs(offsetY.value) / fadeDistancePx).coerceIn(0f, 1f)
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 1f - progress * 0.7f))
+                .testTag("chat_thread.album_gallery"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset { androidx.compose.ui.unit.IntOffset(0, offsetY.value.roundToInt()) }
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures(
+                            onDragEnd = {
+                                if (offsetY.value > dismissThresholdPx) onDismiss()
+                                else scope.launch { offsetY.animateTo(0f) }
+                            },
+                            onDragCancel = { scope.launch { offsetY.animateTo(0f) } },
+                        ) { change, dragAmount ->
+                            change.consume()
+                            scope.launch { offsetY.snapTo(offsetY.value + dragAmount) }
+                        }
+                    },
+            ) {
+                androidx.compose.foundation.pager.HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                ) { page ->
+                    val item = media[page]
+                    val videoItem = item.video
+                    val imageItem = item.image
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (item.isVideo && videoItem != null) {
+                            GalleryVideoPage(videoItem, videoLoader)
+                        } else if (imageItem != null) {
+                            GalleryImagePage(imageItem, imageLoader)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GalleryImagePage(
+    attachment: ChatImageAttachment,
+    imageLoader: ChatImageLoader?,
+) {
+    var bitmap by remember(attachment.sha256) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(attachment.sha256) { bitmap = imageLoader?.load(attachment) }
+    val shown = bitmap
+    if (shown != null) {
+        androidx.compose.foundation.Image(
+            bitmap = shown.asImageBitmap(),
+            contentDescription = "Photo",
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+            modifier = Modifier.fillMaxSize(),
+        )
+    } else {
+        CircularProgressIndicator(color = Color.White)
+    }
+}
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun GalleryVideoPage(
+    attachment: ChatVideoAttachment,
+    videoLoader: ChatVideoLoader?,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var file by remember(attachment.sha256) { mutableStateOf<java.io.File?>(null) }
+    LaunchedEffect(attachment.sha256) { file = videoLoader?.file(attachment) }
+    val currentFile = file
+    if (currentFile != null) {
+        val exoPlayer = remember(currentFile) {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(currentFile)))
+                prepare()
+            }
+        }
+        DisposableEffect(exoPlayer) { onDispose { exoPlayer.release() } }
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = true
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+    } else {
+        CircularProgressIndicator(color = Color.White)
+    }
+}
+
+/**
+ * Resend / Delete chooser for a failed outgoing media message. Mirrors
+ * the iOS confirmation dialog wired to a tap on failed media.
+ */
+@Composable
+private fun FailedMediaActionSheet(
+    onResend: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Message failed to send") },
+        text = { Text("Resend or delete this media?") },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = onResend,
+                modifier = Modifier.testTag("chat_thread.failed_media.resend"),
+            ) { Text("Resend") }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(
+                onClick = onDelete,
+                modifier = Modifier.testTag("chat_thread.failed_media.delete"),
+            ) { Text("Delete") }
+        },
+        modifier = Modifier.testTag("chat_thread.failed_media.sheet"),
+    )
+}
+
+/** Decodes a downsampled thumbnail for the composer preview strip. */
+private fun decodeThumbnail(bytes: ByteArray, maxDim: Int = 256): android.graphics.Bitmap? =
+    runCatching {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        val larger = maxOf(bounds.outWidth, bounds.outHeight)
+        while (larger / sample > maxDim) sample *= 2
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+    }.getOrNull()
+
+/** Extracts a poster frame from a picked video URI for the preview strip. */
+private fun videoThumbnail(
+    context: android.content.Context,
+    uri: android.net.Uri,
+): android.graphics.Bitmap? =
+    runCatching {
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, uri)
+            retriever.getFrameAtTime(0)
+        } finally {
+            retriever.release()
+        }
+    }.getOrNull()
 
 @Composable
 private fun EmptyThread(modifier: Modifier = Modifier) {

@@ -43,6 +43,10 @@ interface MessageStore {
      *  addressed identity's copy of the message. */
     suspend fun updateStatus(id: UUID, ownerIdentityId: String, status: MessageStatus)
 
+    /** Delete a single message scoped to `(id, ownerIdentityId)` (the
+     *  failed-media Delete action). Returns the row count. */
+    suspend fun deleteById(id: UUID, ownerIdentityId: String): Int
+
     /** Cascade delete for the identity-removal flow. Returns the
      *  number of rows deleted. */
     suspend fun deleteForOwner(ownerIdentityId: String): Int
