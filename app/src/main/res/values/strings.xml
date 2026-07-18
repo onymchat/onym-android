@@ -81,8 +81,15 @@
     <string name="chats_tab">Chats</string>
     <string name="chats_title">Chats</string>
     <string name="chats_create_group">Create Group</string>
-    <string name="chats_empty_title">No chats yet</string>
-    <string name="chats_empty_body">Create an end-to-end encrypted group anchored on Stellar.</string>
+    <string name="chats_empty_title">Start a private chat</string>
+    <string name="chats_empty_body">Spin up an encrypted group and share one link — that\'s it.</string>
+    <string name="chats_empty_create_cta">Create a group &amp; share a link</string>
+    <string name="chats_empty_benefit_encrypted_title">End-to-end encrypted</string>
+    <string name="chats_empty_benefit_encrypted_detail">Only your group can read what\'s sent.</string>
+    <string name="chats_empty_benefit_identity_title">No phone number, no email</string>
+    <string name="chats_empty_benefit_identity_detail">Your identity is a key you own — not your contact info.</string>
+    <string name="chats_empty_benefit_decentralized_title">No central server</string>
+    <string name="chats_empty_benefit_decentralized_detail">Group membership is anchored on Stellar, not owned by us.</string>
     <string name="chats_unnamed_group">(Unnamed)</string>
     <string name="chats_published_on_chain">Published on chain</string>
 

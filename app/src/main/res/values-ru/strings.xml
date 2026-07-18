@@ -74,8 +74,15 @@
     <string name="chats_tab">Чаты</string>
     <string name="chats_title">Чаты</string>
     <string name="chats_create_group">Создать группу</string>
-    <string name="chats_empty_title">Чатов пока нет</string>
-    <string name="chats_empty_body">Создайте сквозно зашифрованную группу, закреплённую на Stellar.</string>
+    <string name="chats_empty_title">Начните приватный чат</string>
+    <string name="chats_empty_body">Создайте зашифрованную группу и поделитесь одной ссылкой — вот и всё.</string>
+    <string name="chats_empty_create_cta">Создать группу и поделиться ссылкой</string>
+    <string name="chats_empty_benefit_encrypted_title">Сквозное шифрование</string>
+    <string name="chats_empty_benefit_encrypted_detail">Прочитать сообщения может только ваша группа.</string>
+    <string name="chats_empty_benefit_identity_title">Без номера телефона и почты</string>
+    <string name="chats_empty_benefit_identity_detail">Ваша личность — это ваш ключ, а не контактные данные.</string>
+    <string name="chats_empty_benefit_decentralized_title">Без центрального сервера</string>
+    <string name="chats_empty_benefit_decentralized_detail">Состав группы закреплён на Stellar и не принадлежит нам.</string>
     <string name="chats_unnamed_group">(Без названия)</string>
     <string name="chats_published_on_chain">Опубликовано в блокчейне</string>
 

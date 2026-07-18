@@ -4,6 +4,8 @@ import android.graphics.BitmapFactory
 import android.text.format.DateUtils
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,8 +26,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -219,29 +224,32 @@ private fun EmptyState(
         modifier = Modifier
             .padding(padding)
             .fillMaxSize()
-            .padding(horizontal = 24.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             modifier = Modifier
-                .size(88.dp)
+                .size(96.dp)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                Icons.Filled.Forum,
+                Icons.Filled.Lock,
                 contentDescription = null,
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.size(42.dp),
                 tint = MaterialTheme.colorScheme.primary,
             )
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(20.dp))
+        // Lead with the value, not "you have nothing" — turn the empty
+        // state into a pitch for starting the first chat.
         Text(
             text = stringResource(R.string.chats_empty_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(6.dp))
         Text(
@@ -250,20 +258,43 @@ private fun EmptyState(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(20.dp))
+
+        Spacer(Modifier.height(28.dp))
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            BenefitRow(
+                icon = Icons.Filled.Lock,
+                title = stringResource(R.string.chats_empty_benefit_encrypted_title),
+                detail = stringResource(R.string.chats_empty_benefit_encrypted_detail),
+            )
+            BenefitRow(
+                icon = Icons.Filled.VpnKey,
+                title = stringResource(R.string.chats_empty_benefit_identity_title),
+                detail = stringResource(R.string.chats_empty_benefit_identity_detail),
+            )
+            BenefitRow(
+                icon = Icons.Filled.Hub,
+                title = stringResource(R.string.chats_empty_benefit_decentralized_title),
+                detail = stringResource(R.string.chats_empty_benefit_decentralized_detail),
+            )
+        }
+
+        Spacer(Modifier.height(32.dp))
         Button(
             onClick = onCreateGroup,
             modifier = Modifier
                 .heightIn(min = 50.dp)
-                .widthIn(min = 220.dp)
+                .fillMaxWidth()
                 .testTag("chats.create_group_empty_cta"),
         ) {
             Text(
-                text = stringResource(R.string.chats_create_group),
+                text = stringResource(R.string.chats_empty_create_cta),
                 style = MaterialTheme.typography.titleMedium,
             )
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(6.dp))
         // Secondary affordance: a first-time user who was sent an
         // invite QR (and has no chats yet) joins from here.
         TextButton(
@@ -279,6 +310,36 @@ private fun EmptyState(
             Text(
                 text = stringResource(R.string.chats_scan_to_join),
                 style = MaterialTheme.typography.titleMedium,
+            )
+        }
+    }
+}
+
+/** One privacy-benefit line in the empty state: accent icon + a bold
+ *  title over a muted one-line detail. */
+@Composable
+private fun BenefitRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    detail: String,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Column {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
