@@ -267,6 +267,12 @@ fun RootScreen(
                 val networkPref by networkFlow.collectAsStateWithLifecycle(
                     initialValue = dependencies.networkPreferenceProvider.current(),
                 )
+                val readReceiptsFlow = remember(dependencies) {
+                    dependencies.readReceiptsPreferenceProvider.flow
+                }
+                val sendReadReceipts by readReceiptsFlow.collectAsStateWithLifecycle(
+                    initialValue = dependencies.readReceiptsPreferenceProvider.current(),
+                )
                 val coroutineScope = rememberCoroutineScope()
                 val identitiesVm: IdentitiesViewModel = viewModel(
                     factory = viewModelFactory {
@@ -291,6 +297,12 @@ fun RootScreen(
                                 if (on) app.onym.android.chain.AppNetwork.Mainnet
                                 else app.onym.android.chain.AppNetwork.Testnet,
                             )
+                        }
+                    },
+                    sendReadReceipts = sendReadReceipts,
+                    onToggleReadReceipts = { on ->
+                        coroutineScope.launch {
+                            dependencies.readReceiptsPreferenceProvider.set(on)
                         }
                     },
                     onNostrRelaysClick = { navController.navigate(ROUTE_NOSTR_RELAYS) },

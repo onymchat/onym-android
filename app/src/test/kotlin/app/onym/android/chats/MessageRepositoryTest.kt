@@ -206,6 +206,52 @@ class MessageRepositoryTest {
 
     // ─── helpers ──────────────────────────────────────────────────
 
+    // ─── upgradeStatus() (delivery / read receipts) ───────────────
+
+    @Test
+    fun upgradeStatus_raisesAlongTheLadder() = runTest {
+        val store = InMemoryMessageStore()
+        val msg = makeMessage(owner = aliceId, group = groupA, body = "m")
+            .copy(status = MessageStatus.SENT)
+        store.preload(listOf(msg))
+        val repo = makeRepo(store, aliceId)
+        val flow = repo.snapshots(groupA)
+
+        repo.upgradeStatus(msg.id, MessageStatus.DELIVERED)
+        assertEquals(MessageStatus.DELIVERED, flow.first().first().status)
+
+        repo.upgradeStatus(msg.id, MessageStatus.READ)
+        assertEquals(MessageStatus.READ, flow.first().first().status)
+    }
+
+    @Test
+    fun upgradeStatus_neverDowngrades() = runTest {
+        val store = InMemoryMessageStore()
+        val msg = makeMessage(owner = aliceId, group = groupA, body = "m")
+            .copy(status = MessageStatus.READ)
+        store.preload(listOf(msg))
+        val repo = makeRepo(store, aliceId)
+        val flow = repo.snapshots(groupA)
+
+        // A late delivered receipt arriving after read must not lower it.
+        repo.upgradeStatus(msg.id, MessageStatus.DELIVERED)
+        assertEquals(MessageStatus.READ, flow.first().first().status)
+    }
+
+    @Test
+    fun upgradeStatus_ignoresIncomingAndUnknown() = runTest {
+        val store = InMemoryMessageStore()
+        val incoming = makeMessage(owner = aliceId, group = groupA, body = "in")
+            .copy(direction = MessageDirection.INCOMING, status = MessageStatus.RECEIVED)
+        store.preload(listOf(incoming))
+        val repo = makeRepo(store, aliceId)
+        val flow = repo.snapshots(groupA)
+
+        repo.upgradeStatus(incoming.id, MessageStatus.DELIVERED)
+        repo.upgradeStatus(UUID.randomUUID(), MessageStatus.DELIVERED)  // unknown id
+        assertEquals(MessageStatus.RECEIVED, flow.first().first().status)
+    }
+
     private fun makeRepo(
         store: InMemoryMessageStore,
         active: IdentityId?,

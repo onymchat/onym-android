@@ -90,6 +90,15 @@ private val Context.nostrRelaysDataStore: DataStore<Preferences> by preferencesD
 )
 
 /**
+ * DataStore Preferences for chat settings (the symmetric read-receipt
+ * toggle). Separate file so it doesn't touch the network / relay
+ * domains.
+ */
+private val Context.chatPreferencesDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.chat_prefs",
+)
+
+/**
  * Composition root. Two responsibilities:
  *
  *  - Register the BouncyCastle JCE provider once at process start
@@ -346,6 +355,9 @@ class OnymApplication : Application() {
 
         // App-wide network preference (PR-C follow-up). Constructed
         // here (early) so PR-89's chainStateReader can read it.
+        val readReceiptsPreference = app.onym.android.chats.DataStoreReadReceiptsPreferenceProvider(
+            dataStore = applicationContext.chatPreferencesDataStore,
+        )
         val networkPreference = DataStoreNetworkPreferenceProvider(
             dataStore = applicationContext.networkPreferenceDataStore,
         )
@@ -446,6 +458,12 @@ class OnymApplication : Application() {
         // Resolve a pending verification the moment its fresh snapshot
         // materializes its group (and cancel the timeout).
         groupStateVerifier.start()
+        val chatReceiptSender = app.onym.android.chats.ChatReceiptSender(
+            activeIdentity = identityRepository,
+            identitiesFlow = identityRepository.identities,
+            envelopeSealer = identityRepository,
+            inboxTransport = inboxTransport,
+        )
         val incomingDispatcher = app.onym.android.inbox.IncomingMessageDispatcher(
             envelopeDecrypter = identityRepository,
             groupRepository = groupRepository,
@@ -455,6 +473,8 @@ class OnymApplication : Application() {
             chainState = chainStateReader,
             pendingInvites = pendingInvitesStore,
             groupStateRefresher = groupStateVerifier,
+            receiptSender = chatReceiptSender,
+            readReceiptsEnabled = { readReceiptsPreference.current() },
         )
         // Filter the invites surface to the active identity, and cascade
         // a wipe on identity removal — mirrors the per-identity wiring
@@ -609,6 +629,7 @@ class OnymApplication : Application() {
                 AnchorsPickerViewModel(repository = contractsRepository)
             },
             networkPreferenceProvider = networkPreference,
+            readReceiptsPreferenceProvider = readReceiptsPreference,
             makeCreateGroupViewModel = {
                 val interactor = CreateGroupInteractor(
                     identity = identityRepository,
@@ -677,6 +698,8 @@ class OnymApplication : Application() {
                         sender.send(gid, body, replyTo)
                     },
                     retryMessage = sender::retry,
+                    chatReceiptSender = chatReceiptSender,
+                    readReceiptsEnabled = { readReceiptsPreference.current() },
                 )
             },
             makeIdentitiesViewModel = {

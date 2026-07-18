@@ -37,7 +37,19 @@ class ChatThreadViewModel(
         replyToMessageId: java.util.UUID?,
     ) -> Unit,
     private val retryMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
+    /** Ships read receipts for incoming messages the user is viewing.
+     *  Defaulted to a no-op so tests that don't exercise receipts keep
+     *  their construction sites unchanged. */
+    private val chatReceiptSender: ChatReceiptSending = NoopChatReceiptSender(),
+    /** Symmetric read-receipt gate — when `false`, no read receipts are
+     *  emitted (and, on the receive side, none are honored). */
+    private val readReceiptsEnabled: () -> Boolean = { true },
 ) : ViewModel() {
+
+    /** Incoming message ids we've already emitted a read receipt for,
+     *  so re-emissions of the messages flow while the thread stays open
+     *  don't re-send. Touched only from the single messages collector. */
+    private val ackedReadIds = mutableSetOf<java.util.UUID>()
 
     /** Latest snapshot of the [ChatGroup] this thread renders.
      *  `null` when no group with [groupId] exists on this device
@@ -58,7 +70,14 @@ class ChatThreadViewModel(
     val messages: StateFlow<List<ChatMessage>> = MutableStateFlow<List<ChatMessage>>(emptyList())
         .also { initial ->
             viewModelScope.launch {
-                messageRepository.snapshots(groupId).collect { initial.value = it }
+                messageRepository.snapshots(groupId).collect {
+                    initial.value = it
+                    // The thread is on-screen while this collector runs,
+                    // so any incoming message here is "read". Gated by
+                    // the symmetric setting, batched per sender, deduped
+                    // via [ackedReadIds].
+                    sendReadReceipts(it)
+                }
             }
         }
         .asStateFlow()
@@ -118,6 +137,34 @@ class ChatThreadViewModel(
     }
 
     fun clearError() { _lastSendError.value = null }
+
+    /**
+     * Emit READ receipts for incoming messages the user is now looking
+     * at. No-op when the symmetric setting is off. Groups unacked
+     * incoming ids by sender and ships one receipt per sender to that
+     * sender's inbox key (resolved from the group's member profiles).
+     */
+    private suspend fun sendReadReceipts(snapshot: List<ChatMessage>) {
+        if (!readReceiptsEnabled()) return
+        val grp = group.value ?: return
+        val bySender = LinkedHashMap<String, MutableList<java.util.UUID>>()
+        for (message in snapshot) {
+            if (message.direction == MessageDirection.INCOMING && message.id !in ackedReadIds) {
+                bySender.getOrPut(message.senderBlsPubkeyHex) { mutableListOf() }.add(message.id)
+            }
+        }
+        if (bySender.isEmpty()) return
+        for ((senderHex, ids) in bySender) {
+            val inbox = grp.memberProfiles[senderHex]?.inboxPublicKey ?: continue
+            chatReceiptSender.send(
+                kind = ChatReceiptPayload.Kind.READ,
+                messageIds = ids,
+                groupId = grp.groupIdBytes,
+                recipientInboxKey = inbox,
+            )
+            ackedReadIds.addAll(ids)
+        }
+    }
 
     /**
      * Fire-and-forget retry on a previously-failed outgoing message.

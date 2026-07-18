@@ -2,8 +2,11 @@ package app.onym.android.inbox
 
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
+import app.onym.android.chats.ChatMessage
 import app.onym.android.chats.ChatMessagePayload
 import app.onym.android.chats.ChatMessageVariant
+import app.onym.android.chats.ChatReceiptPayload
+import app.onym.android.chats.ChatReceiptSending
 import app.onym.android.chats.MessageDirection
 import app.onym.android.chats.MessageRepository
 import app.onym.android.chats.MessageStatus
@@ -229,6 +232,71 @@ class IncomingMessageDispatcherChatMessageTest {
 
     // ─── helpers ──────────────────────────────────────────────────
 
+    // ─── receipts ─────────────────────────────────────────────────
+
+    @Test
+    fun incomingChatMessage_shipsDeliveredReceiptToSender() = runTest {
+        val fx = newFixture()
+        fx.seedGroup(owner = ownerIdentity, withSenderProfile = true)
+        val spy = SpyReceiptSender()
+        val id = UUID.randomUUID()
+        fx.dispatchChat(ownerIdentity, chatPayload(id, "hi"), senderSendingKey, spy)
+        assertEquals(1, spy.sends.size)
+        assertEquals(ChatReceiptPayload.Kind.DELIVERED, spy.sends[0].kind)
+        assertEquals(listOf(id), spy.sends[0].messageIds)
+        assertTrue(spy.sends[0].recipientInboxKey.contentEquals(senderInbox))
+    }
+
+    @Test
+    fun receipt_delivered_raisesOutgoingToDelivered() = runTest {
+        val fx = newFixture()
+        val id = UUID.randomUUID()
+        fx.messageRepository.append(outgoingMessage(id, MessageStatus.SENT))
+        fx.dispatchReceipt(ownerIdentity, receipt(ChatReceiptPayload.Kind.DELIVERED, listOf(id)))
+        assertEquals(MessageStatus.DELIVERED, fx.messageStore.findById(id)?.status)
+    }
+
+    @Test
+    fun receipt_read_honoredOnlyWhenEnabled() = runTest {
+        val fx = newFixture()
+        val id = UUID.randomUUID()
+        fx.messageRepository.append(outgoingMessage(id, MessageStatus.DELIVERED))
+
+        fx.dispatchReceipt(
+            ownerIdentity,
+            receipt(ChatReceiptPayload.Kind.READ, listOf(id)),
+            readReceiptsEnabled = { false },
+        )
+        assertEquals(MessageStatus.DELIVERED, fx.messageStore.findById(id)?.status)
+
+        fx.dispatchReceipt(
+            ownerIdentity,
+            receipt(ChatReceiptPayload.Kind.READ, listOf(id)),
+            readReceiptsEnabled = { true },
+        )
+        assertEquals(MessageStatus.READ, fx.messageStore.findById(id)?.status)
+    }
+
+    private fun receipt(kind: ChatReceiptPayload.Kind, ids: List<UUID>) = ChatReceiptPayload(
+        version = 1,
+        groupId = groupIdBytes,
+        senderBlsPubkeyHex = senderBlsHex,
+        kind = kind,
+        messageIds = ids,
+    )
+
+    private fun outgoingMessage(id: UUID, status: MessageStatus) = ChatMessage(
+        id = id,
+        groupId = groupIdHex,
+        ownerIdentityId = ownerIdentity.value,
+        senderBlsPubkeyHex = "ff".repeat(48),
+        body = "mine",
+        sentAtMillis = 1_700_000_000_000L,
+        direction = MessageDirection.OUTGOING,
+        status = status,
+        groupType = SepGroupType.TYRANNY,
+    )
+
     private fun chatPayload(
         id: UUID,
         body: String,
@@ -320,6 +388,43 @@ class IncomingMessageDispatcherChatMessageTest {
                 receivedAt = Instant.EPOCH,
             )
         }
+
+        suspend fun dispatchChat(
+            owner: IdentityId,
+            payload: ChatMessagePayload,
+            signer: ByteArray?,
+            receiptSender: ChatReceiptSending,
+            readReceiptsEnabled: () -> Boolean = { true },
+        ) {
+            val plaintext = jsonFormat
+                .encodeToString(ChatMessagePayload.serializer(), payload)
+                .toByteArray(Charsets.UTF_8)
+            IncomingMessageDispatcher(
+                envelopeDecrypter = StubDecrypterChat(plaintext, signer),
+                groupRepository = groupRepository,
+                invitationsRepository = invitationsRepository,
+                messageRepository = messageRepository,
+                receiptSender = receiptSender,
+                readReceiptsEnabled = readReceiptsEnabled,
+            ).dispatch("env-${payload.messageId}", owner, byteArrayOf(), Instant.EPOCH)
+        }
+
+        suspend fun dispatchReceipt(
+            owner: IdentityId,
+            receipt: ChatReceiptPayload,
+            readReceiptsEnabled: () -> Boolean = { true },
+        ) {
+            val plaintext = jsonFormat
+                .encodeToString(ChatReceiptPayload.serializer(), receipt)
+                .toByteArray(Charsets.UTF_8)
+            IncomingMessageDispatcher(
+                envelopeDecrypter = StubDecrypterChat(plaintext, senderSendingKey),
+                groupRepository = groupRepository,
+                invitationsRepository = invitationsRepository,
+                messageRepository = messageRepository,
+                readReceiptsEnabled = readReceiptsEnabled,
+            ).dispatch("env-receipt", owner, byteArrayOf(), Instant.EPOCH)
+        }
     }
 
     private fun makeGroup(
@@ -345,6 +450,26 @@ class IncomingMessageDispatcherChatMessageTest {
 
     private companion object {
         private val jsonFormat = Json { encodeDefaults = true }
+    }
+}
+
+private class SpyReceiptSender : ChatReceiptSending {
+    data class Sent(
+        val kind: ChatReceiptPayload.Kind,
+        val messageIds: List<UUID>,
+        val groupId: ByteArray,
+        val recipientInboxKey: ByteArray,
+    )
+
+    val sends = mutableListOf<Sent>()
+
+    override suspend fun send(
+        kind: ChatReceiptPayload.Kind,
+        messageIds: List<UUID>,
+        groupId: ByteArray,
+        recipientInboxKey: ByteArray,
+    ) {
+        sends.add(Sent(kind, messageIds, groupId, recipientInboxKey))
     }
 }
 

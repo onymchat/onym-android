@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
@@ -431,6 +432,7 @@ private fun StatusIndicator(
     val tint = when (visual.tint) {
         ChatStatusTint.Muted -> MaterialTheme.colorScheme.onSurfaceVariant
         ChatStatusTint.Error -> MaterialTheme.colorScheme.error
+        ChatStatusTint.Accent -> MaterialTheme.colorScheme.primary
     }
     Icon(
         imageVector = visual.icon,
@@ -464,6 +466,16 @@ internal fun statusVisualFor(status: MessageStatus): StatusVisual? = when (statu
         tint = ChatStatusTint.Muted,
         contentDescription = "Sent",
     )
+    MessageStatus.DELIVERED -> StatusVisual(
+        icon = Icons.Filled.DoneAll,
+        tint = ChatStatusTint.Muted,
+        contentDescription = "Delivered",
+    )
+    MessageStatus.READ -> StatusVisual(
+        icon = Icons.Filled.DoneAll,
+        tint = ChatStatusTint.Accent,
+        contentDescription = "Read",
+    )
     MessageStatus.FAILED -> StatusVisual(
         icon = Icons.Filled.ErrorOutline,
         tint = ChatStatusTint.Error,
@@ -495,7 +507,7 @@ internal data class StatusVisual(
     val contentDescription: String,
 )
 
-internal enum class ChatStatusTint { Muted, Error }
+internal enum class ChatStatusTint { Muted, Error, Accent }
 
 private val BUBBLE_RADIUS = 16.dp
 private val STATUS_ICON_SIZE = 14.dp

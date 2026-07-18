@@ -6,7 +6,10 @@ import app.onym.android.chain.SepTier
 import app.onym.android.chats.ChatMessage
 import app.onym.android.chats.ChatMessagePayload
 import app.onym.android.chats.ChatMessageVariant
+import app.onym.android.chats.ChatReceiptPayload
+import app.onym.android.chats.ChatReceiptSending
 import app.onym.android.chats.MessageDirection
+import app.onym.android.chats.NoopChatReceiptSender
 import app.onym.android.chats.MessageRepository
 import app.onym.android.chats.MessageStatus
 import app.onym.android.group.ChatGroup
@@ -91,6 +94,15 @@ class IncomingMessageDispatcher(
      *  [GroupStateRefreshRequest]s are answered here on the admin side.
      *  Defaulted to a no-op for the same reason as [pendingInvites]. */
     private val groupStateRefresher: GroupStateRefreshing = NoopGroupStateRefresher(),
+    /** Ships a delivered receipt back to a chat message's sender the
+     *  moment we persist it. Defaulted to a no-op so existing
+     *  dispatcher tests keep their construction sites unchanged. */
+    private val receiptSender: ChatReceiptSending = NoopChatReceiptSender(),
+    /** Symmetric read-receipt gate: an inbound READ receipt only
+     *  raises a message to [MessageStatus.READ] when this device also
+     *  sends read receipts. Defaulted to `true` (the shipping
+     *  default). */
+    private val readReceiptsEnabled: () -> Boolean = { true },
 ) {
 
     suspend fun dispatch(
@@ -170,6 +182,17 @@ class IncomingMessageDispatcher(
         val avatarUpdate = tryDecodeGroupAvatar(envelope.plaintext)
         if (avatarUpdate != null) {
             applyAvatar(avatarUpdate, envelope.senderEd25519PublicKey)
+            return
+        }
+
+        // Fast path: ChatReceiptPayload — a peer acking one of OUR
+        // messages as delivered / read. Wire-shape-disjoint from every
+        // other payload (unique `kind` + `message_ids` keys), so the
+        // trial-decode can't steal a different payload even under
+        // ignoreUnknownKeys.
+        val receipt = tryDecodeReceipt(envelope.plaintext)
+        if (receipt != null) {
+            applyReceipt(receipt)
             return
         }
 
@@ -503,6 +526,35 @@ class IncomingMessageDispatcher(
         null
     }
 
+    private fun tryDecodeReceipt(bytes: ByteArray): ChatReceiptPayload? = try {
+        permissiveJson.decodeFromString(
+            ChatReceiptPayload.serializer(),
+            bytes.toString(Charsets.UTF_8),
+        )
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
+     * Apply an inbound receipt: raise the acked outgoing messages to
+     * DELIVERED / READ (monotonic — [MessageRepository.upgradeStatus]
+     * enforces the ladder). READ receipts are honored only when this
+     * device also sends them (symmetric).
+     */
+    private suspend fun applyReceipt(receipt: ChatReceiptPayload) {
+        val messages = messageRepository ?: return
+        val newStatus = when (receipt.kind) {
+            ChatReceiptPayload.Kind.DELIVERED -> MessageStatus.DELIVERED
+            ChatReceiptPayload.Kind.READ -> {
+                if (!readReceiptsEnabled()) return
+                MessageStatus.READ
+            }
+        }
+        for (id in receipt.messageIds) {
+            messages.upgradeStatus(id, newStatus)
+        }
+    }
+
     /**
      * Persist an inbound chat message after running the full trust
      * chain. Drops silently (no fall-through) on any failure — the
@@ -573,6 +625,16 @@ class IncomingMessageDispatcher(
         // canonical sort key today.
         @Suppress("UNUSED_VARIABLE") val _receivedAt = receivedAt
         messages.append(message)
+
+        // Ack the sender: delivered now (unconditional — it only
+        // reveals a device received the ciphertext). Read receipts are
+        // sent later, when the user opens the thread.
+        receiptSender.send(
+            kind = ChatReceiptPayload.Kind.DELIVERED,
+            messageIds = listOf(payload.messageId),
+            groupId = payload.groupId,
+            recipientInboxKey = profile.inboxPublicKey,
+        )
     }
 
     private fun variantMatchesGroup(
