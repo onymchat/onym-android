@@ -131,6 +131,14 @@ data class ChatGroup(
     @SerialName("avatar")
     @Serializable(with = Base64ByteArraySerializer::class)
     val avatar: ByteArray? = null,
+    /**
+     * When the local user last opened / read this thread (ms since epoch).
+     * Drives the chat-list unread badge: incoming messages with
+     * `sentAtMillis > lastReadAtMillis` are unread. `null` = never opened.
+     * Local-only (not on the wire) — defaulted so wire decoders + existing
+     * construction sites need no change.
+     */
+    val lastReadAtMillis: Long? = null,
 ) {
     /** Strongly-typed accessor — same value as [ownerIdentityId] but
      *  wrapped so callers don't carry stringly-typed identity ids
@@ -160,7 +168,8 @@ data class ChatGroup(
             adminEd25519PubkeyHex == other.adminEd25519PubkeyHex &&
             isPublishedOnChain == other.isPublishedOnChain &&
             ownerIdentityId == other.ownerIdentityId &&
-            (avatar?.contentEquals(other.avatar) ?: (other.avatar == null))
+            (avatar?.contentEquals(other.avatar) ?: (other.avatar == null)) &&
+            lastReadAtMillis == other.lastReadAtMillis
     }
 
     override fun hashCode(): Int {
@@ -180,6 +189,7 @@ data class ChatGroup(
         h = 31 * h + isPublishedOnChain.hashCode()
         h = 31 * h + ownerIdentityId.hashCode()
         h = 31 * h + (avatar?.contentHashCode() ?: 0)
+        h = 31 * h + (lastReadAtMillis?.hashCode() ?: 0)
         return h
     }
 

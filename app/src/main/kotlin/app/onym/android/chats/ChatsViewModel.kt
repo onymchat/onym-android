@@ -5,10 +5,33 @@ import androidx.lifecycle.viewModelScope
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupAvatarBroadcaster
 import app.onym.android.group.GroupRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/**
+ * One row on the Chats list: a group enriched with its latest-message
+ * preview + unread count, used for the subtitle + badge and to order the
+ * list most-recent-message-first. Mirrors iOS `ChatListItem`.
+ */
+data class ChatListItem(
+    val group: ChatGroup,
+    /** Latest message's one-line preview (subtitle), or `null` when the
+     *  group has no messages yet. */
+    val latestPreview: String?,
+    /** Latest message timestamp (ms) — the sort key; falls back to the
+     *  group's creation time when there are no messages. */
+    val latestAtMillis: Long?,
+    /** Incoming messages received since the thread was last read. */
+    val unreadCount: Int,
+) {
+    val id: String get() = group.id
+    val sortKey: Long get() = latestAtMillis ?: group.createdAtMillis
+}
 
 /**
  * Read-only ViewModel for the Chats tab. Drains
@@ -32,16 +55,42 @@ import kotlinx.coroutines.launch
  * row UI itself stays read-only; [groups] re-emits once the change
  * persists.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ChatsViewModel(
     private val repository: GroupRepository,
+    private val messageRepository: MessageRepository,
     private val avatarBroadcaster: GroupAvatarBroadcaster? = null,
 ) : ViewModel() {
 
-    val groups: StateFlow<List<ChatGroup>> = repository.snapshots.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = repository.snapshots.value,
-    )
+    /**
+     * Enriched + sorted chat-list rows. Recomputes whenever the group set
+     * changes OR the messages table changes (via
+     * [MessageRepository.changeToken]) — so a new/received message re-sorts
+     * the list and updates the subtitle + unread badge live. Sorted
+     * most-recent-message-first.
+     */
+    val items: StateFlow<List<ChatListItem>> =
+        combine(repository.snapshots, messageRepository.changeToken()) { groups, _ -> groups }
+            .mapLatest { groups -> enrich(groups) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
+
+    private suspend fun enrich(groups: List<ChatGroup>): List<ChatListItem> =
+        groups.map { group ->
+            val latest = messageRepository.latestMessage(group.ownerIdentityId, group.id)
+            val unread = messageRepository.unreadCount(
+                group.ownerIdentityId, group.id, group.lastReadAtMillis ?: 0L
+            )
+            ChatListItem(
+                group = group,
+                latestPreview = latest?.chatListPreview,
+                latestAtMillis = latest?.sentAtMillis,
+                unreadCount = unread,
+            )
+        }.sortedByDescending { it.sortKey }
 
     /**
      * Admin-only: set ([avatar] non-null) or clear ([avatar] == null)

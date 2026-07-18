@@ -447,6 +447,7 @@ class RoomMessageStoreTest {
         sender: String = "cc".repeat(48),
         sentAtMillis: Long = 1_700_000_000_000L,
         replyToMessageId: UUID? = null,
+        direction: MessageDirection = MessageDirection.OUTGOING,
     ): ChatMessage = ChatMessage(
         id = UUID.randomUUID(),
         groupId = group,
@@ -454,9 +455,37 @@ class RoomMessageStoreTest {
         senderBlsPubkeyHex = sender,
         body = body,
         sentAtMillis = sentAtMillis,
-        direction = MessageDirection.OUTGOING,
+        direction = direction,
         status = MessageStatus.PENDING,
         replyToMessageId = replyToMessageId,
         groupType = SepGroupType.TYRANNY,
     )
+
+    @Test
+    fun latestMessage_returnsMostRecentBySentAt_decrypted() = runTest {
+        val group = "aa".repeat(32)
+        store.insert(makeMessage(body = "old", group = group, sentAtMillis = 1_000))
+        store.insert(makeMessage(body = "newest", group = group, sentAtMillis = 3_000))
+        store.insert(makeMessage(body = "middle", group = group, sentAtMillis = 2_000))
+
+        val latest = store.latestMessage("test-owner", group)
+        assertEquals("newest", latest?.body)
+        assertNull(store.latestMessage("test-owner", "bb".repeat(32)))
+    }
+
+    @Test
+    fun unreadCount_countsIncomingAfterMarker() = runTest {
+        val group = "aa".repeat(32)
+        store.insert(makeMessage(body = "seen", group = group, sentAtMillis = 1_000,
+            direction = MessageDirection.INCOMING))
+        store.insert(makeMessage(body = "u1", group = group, sentAtMillis = 2_000,
+            direction = MessageDirection.INCOMING))
+        store.insert(makeMessage(body = "u2", group = group, sentAtMillis = 3_000,
+            direction = MessageDirection.INCOMING))
+        store.insert(makeMessage(body = "mine", group = group, sentAtMillis = 4_000,
+            direction = MessageDirection.OUTGOING))
+
+        assertEquals(2, store.unreadCount("test-owner", group, sinceMillis = 1_500))
+        assertEquals(3, store.unreadCount("test-owner", group, sinceMillis = 0))
+    }
 }

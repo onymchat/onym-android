@@ -81,14 +81,14 @@ fun ChatMembersScreen(
     onBack: () -> Unit,
     onShareInviteClick: (() -> Unit)? = null,
 ) {
-    val groups by chatsViewModel.groups.collectAsStateWithLifecycle()
+    val chatItems by chatsViewModel.items.collectAsStateWithLifecycle()
     val identityRows by identityViewModel.items.collectAsStateWithLifecycle()
     val activeBlsHex: String? = identityRows.firstOrNull { it.isActive }
         ?.summary
         ?.blsPublicKey
         ?.toHexLowercase()
 
-    val group = groups.firstOrNull { it.id == groupId }
+    val group = chatItems.firstOrNull { it.group.id == groupId }?.group
 
     // PR 94: only the cryptographic admin of a Tyranny group should
     // see the Share Invite button. A non-admin's minted invite would

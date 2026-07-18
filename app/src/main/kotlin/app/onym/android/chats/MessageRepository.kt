@@ -113,6 +113,22 @@ class MessageRepository(
         return store.search(ownerId.value, query, limit)
     }
 
+    // ─── chat-list aggregates ─────────────────────────────────────
+
+    /** Most recent message for one group (chat-list subtitle + sort). */
+    suspend fun latestMessage(ownerIdentityId: String, groupId: String): ChatMessage? =
+        store.latestMessage(ownerIdentityId, groupId)
+
+    /** Count of incoming messages in one group received after
+     *  [sinceMillis] (chat-list unread badge). */
+    suspend fun unreadCount(ownerIdentityId: String, groupId: String, sinceMillis: Long): Int =
+        store.unreadCount(ownerIdentityId, groupId, sinceMillis)
+
+    /** Coarse "messages changed" signal (fires on any insert / status
+     *  flip / delete). The chat list combines it with the group snapshot
+     *  to recompute latest message + unread and re-sort. */
+    fun changeToken(): kotlinx.coroutines.flow.Flow<Int> = store.changeToken()
+
     /**
      * Persist [message] and emit on the corresponding group's
      * cached flow. Idempotent on [ChatMessage.id] — a re-delivery

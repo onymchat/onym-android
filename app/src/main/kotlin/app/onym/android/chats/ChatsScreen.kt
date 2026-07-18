@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -89,7 +90,7 @@ fun ChatsScreen(
     onOpenChat: (groupId: String) -> Unit = {},
     onScanToJoin: () -> Unit = {},
 ) {
-    val groups by viewModel.groups.collectAsStateWithLifecycle()
+    val chatItems by viewModel.items.collectAsStateWithLifecycle()
     val pending by (approveRequestsViewModel?.pending?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(emptyList<app.onym.android.group.JoinRequestApprover.PendingRequest>()) })
     val pendingInvites by (pendingInvitesViewModel?.pending?.collectAsStateWithLifecycle()
@@ -169,7 +170,7 @@ fun ChatsScreen(
                     // once the user has at least one chat. Hidden in
                     // the empty state because the central CTA already
                     // covers it.
-                    if (groups.isNotEmpty()) {
+                    if (chatItems.isNotEmpty()) {
                         IconButton(
                             onClick = onCreateGroup,
                             modifier = Modifier.testTag("chats.create_group_toolbar"),
@@ -185,7 +186,7 @@ fun ChatsScreen(
         },
         containerColor = MaterialTheme.colorScheme.surface,
     ) { padding ->
-        if (groups.isEmpty()) {
+        if (chatItems.isEmpty()) {
             EmptyState(
                 padding = padding,
                 onCreateGroup = onCreateGroup,
@@ -197,8 +198,8 @@ fun ChatsScreen(
                     .padding(padding)
                     .fillMaxSize(),
             ) {
-                items(groups, key = { it.id }) { group ->
-                    ChatsRow(group = group, onClick = { onOpenChat(group.id) })
+                items(chatItems, key = { it.id }) { item ->
+                    ChatsRow(item = item, onClick = { onOpenChat(item.group.id) })
                     HorizontalDivider(thickness = 0.5.dp)
                 }
             }
@@ -287,9 +288,10 @@ private fun EmptyState(
 
 @Composable
 private fun ChatsRow(
-    group: ChatGroup,
+    item: ChatListItem,
     onClick: () -> Unit,
 ) {
+    val group = item.group
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -311,14 +313,26 @@ private fun ChatsRow(
                 maxLines = 1,
             )
             Text(
-                text = subtitleFor(group),
+                text = item.latestPreview?.takeIf { it.isNotEmpty() } ?: subtitleFor(group),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // Unread rows read a touch stronger than the muted metadata.
+                color = if (item.unreadCount > 0) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("chats.row.subtitle.${group.id}"),
             )
         }
 
-        if (group.isPublishedOnChain) {
+        if (item.unreadCount > 0) {
+            UnreadBadge(
+                count = item.unreadCount,
+                modifier = Modifier.testTag("chats.row.unread.${group.id}"),
+            )
+        } else if (group.isPublishedOnChain) {
             Icon(
                 Icons.Filled.Verified,
                 contentDescription = stringResource(R.string.chats_published_on_chain),
@@ -326,6 +340,26 @@ private fun ChatsRow(
                 modifier = Modifier.size(18.dp),
             )
         }
+    }
+}
+
+/** Red pill showing the unread-message count on a chat row (caps at 99+). */
+@Composable
+private fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.error)
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = if (count > 99) "99+" else count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onError,
+        )
     }
 }
 

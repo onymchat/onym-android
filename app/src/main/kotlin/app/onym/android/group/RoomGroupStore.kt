@@ -56,11 +56,16 @@ class RoomGroupStore(
             dao.insert(encoded)
             true
         } else {
-            // Preserve the original createdAt on update — only the
-            // mutable columns (epoch, commitment, isPublished, name,
-            // members, etc.) get refreshed. Mirrors the iOS twin's
-            // explicit field-by-field assignment in `insertOrUpdate`.
-            dao.update(encoded.copy(createdAt = existing.createdAt))
+            // Preserve the original createdAt AND the last-read marker on
+            // update — only the mutable content columns (epoch, commitment,
+            // isPublished, name, members, etc.) get refreshed. A group
+            // update (member change, avatar, publish) must not reset the
+            // user's read state (only markRead writes it). Mirrors the iOS
+            // twin's explicit field-by-field assignment in `insertOrUpdate`.
+            dao.update(encoded.copy(
+                createdAt = existing.createdAt,
+                lastReadAtMillis = existing.lastReadAtMillis,
+            ))
             false
         }
     }
@@ -73,6 +78,10 @@ class RoomGroupStore(
                 dao.markPublishedFlagOnly(id, ownerIdentityId)
             }
         }
+    }
+
+    override suspend fun markRead(id: String, ownerIdentityId: String, lastReadAtMillis: Long) {
+        withContext(ioDispatcher) { dao.markRead(id, ownerIdentityId, lastReadAtMillis) }
     }
 
     override suspend fun delete(id: String, ownerIdentityId: String) {
@@ -108,6 +117,7 @@ class RoomGroupStore(
             encryptedMemberProfilesJson = memberProfilesEncrypted,
             encryptedAdminEd25519PubkeyHex = group.adminEd25519PubkeyHex?.let(encryption::encrypt),
             encryptedAvatar = group.avatar?.let(encryption::encrypt),
+            lastReadAtMillis = group.lastReadAtMillis,
         )
     }
 
@@ -168,6 +178,7 @@ class RoomGroupStore(
             isPublishedOnChain = row.isPublishedOnChain,
             ownerIdentityId = row.ownerIdentityId,
             avatar = avatar,
+            lastReadAtMillis = row.lastReadAtMillis,
         )
     }
 

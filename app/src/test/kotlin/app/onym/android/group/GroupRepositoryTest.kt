@@ -113,6 +113,22 @@ class GroupRepositoryTest {
     }
 
     @Test
+    fun markRead_stampsLastReadAt_andIgnoresOlderMarks() = runTest {
+        val store = InMemoryGroupStore()
+        val group = makeGroup(id = "ee".repeat(32), name = "G", owner = aliceId)
+        store.preload(listOf(group))
+        val repo = makeRepo(store, active = aliceId)
+        repo.reload()
+
+        repo.markRead(group.id, group.ownerIdentityId, 2_000L)
+        assertEquals(2_000L, repo.snapshots.value.single().lastReadAtMillis)
+
+        // An older mark is a no-op — the marker only moves forward.
+        repo.markRead(group.id, group.ownerIdentityId, 1_000L)
+        assertEquals(2_000L, repo.snapshots.value.single().lastReadAtMillis)
+    }
+
+    @Test
     fun delete_emptiesSnapshot() = runTest {
         val store = InMemoryGroupStore()
         val group = makeGroup(id = "dd".repeat(32), name = "G", owner = aliceId)

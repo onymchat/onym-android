@@ -79,4 +79,20 @@ data class ChatMessage(
             videoAttachment != null -> listOf(ChatMediaAttachment.video(videoAttachment))
             else -> emptyList()
         }
+
+    /** One-line preview for the chat-list row subtitle. Media messages
+     *  (which carry no/empty body) render a label; text renders its body.
+     *  Own messages get a "You: " prefix to disambiguate in a group.
+     *  Mirrors iOS `ChatMessage.chatListPreview`. */
+    val chatListPreview: String
+        get() {
+            val content = when {
+                voiceAttachment != null -> "Voice message"
+                !albumAttachments.isNullOrEmpty() -> "Album"
+                videoAttachment != null -> "Video"
+                imageAttachment != null -> "Photo"
+                else -> body
+            }
+            return if (direction == MessageDirection.OUTGOING) "You: $content" else content
+        }
 }

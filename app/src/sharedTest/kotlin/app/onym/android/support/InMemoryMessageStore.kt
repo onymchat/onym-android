@@ -1,8 +1,11 @@
 package app.onym.android.support
 
 import app.onym.android.chats.ChatMessage
+import app.onym.android.chats.MessageDirection
 import app.onym.android.chats.MessageStatus
 import app.onym.android.chats.MessageStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
@@ -42,6 +45,30 @@ class InMemoryMessageStore : MessageStore {
     override suspend fun findById(id: UUID, ownerIdentityId: String): ChatMessage? = mutex.withLock {
         rows[id.toString() to ownerIdentityId]
     }
+
+    override suspend fun latestMessage(
+        ownerIdentityId: String,
+        groupId: String,
+    ): ChatMessage? = mutex.withLock {
+        rows.values
+            .filter { it.ownerIdentityId == ownerIdentityId && it.groupId == groupId }
+            .maxByOrNull { it.sentAtMillis }
+    }
+
+    override suspend fun unreadCount(
+        ownerIdentityId: String,
+        groupId: String,
+        sinceMillis: Long,
+    ): Int = mutex.withLock {
+        rows.values.count {
+            it.ownerIdentityId == ownerIdentityId &&
+                it.groupId == groupId &&
+                it.direction == MessageDirection.INCOMING &&
+                it.sentAtMillis > sinceMillis
+        }
+    }
+
+    override fun changeToken(): Flow<Int> = MutableStateFlow(rows.size)
 
     override suspend fun search(
         ownerIdentityId: String,

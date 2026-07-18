@@ -39,6 +39,22 @@ class RoomMessageStore(
             dao.findByIdAndOwner(id.toString(), ownerIdentityId)?.let(::decode)
         }
 
+    override suspend fun latestMessage(ownerIdentityId: String, groupId: String): ChatMessage? =
+        withContext(ioDispatcher) {
+            dao.latestForOwnerAndGroup(ownerIdentityId, groupId)?.let(::decode)
+        }
+
+    override suspend fun unreadCount(
+        ownerIdentityId: String,
+        groupId: String,
+        sinceMillis: Long,
+    ): Int = withContext(ioDispatcher) {
+        dao.unreadCount(ownerIdentityId, groupId, sinceMillis)
+    }
+
+    override fun changeToken(): kotlinx.coroutines.flow.Flow<Int> =
+        dao.observeMessageChangeToken()
+
     override suspend fun search(
         ownerIdentityId: String,
         query: String,

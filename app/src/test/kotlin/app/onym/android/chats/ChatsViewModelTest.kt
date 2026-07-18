@@ -9,6 +9,7 @@ import app.onym.android.group.GroupRepository
 import app.onym.android.identity.IdentityId
 import app.onym.android.support.FakeActiveIdentityProvider
 import app.onym.android.support.InMemoryGroupStore
+import app.onym.android.support.InMemoryMessageStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
@@ -21,77 +22,100 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.UUID
 
 /**
  * Unit tests for [ChatsViewModel]. Backed by [InMemoryGroupStore] +
- * a real [GroupRepository] — the in-memory store is the same one
- * `GroupRepositoryTest` exercises, so these tests verify the VM's
- * subscribe → re-emit path without standing up Room or
- * `StorageEncryption`.
- *
- * Mirrors the iOS `ChatsFlow` test surface (one-test, two-test
- * minimum) from onym-ios PR #30.
+ * [InMemoryMessageStore] and real repositories — the in-memory stores are
+ * the same ones the repository tests exercise, so these verify the VM's
+ * enrich → sort → re-emit path (latest-message subtitle + unread badge +
+ * recency sort) without standing up Room or `StorageEncryption`.
  */
 class ChatsViewModelTest {
+
+    private val owner = IdentityId("test-owner")
 
     @Before fun setUp() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
-    @Test
-    fun groups_startsEmpty_whenRepositoryHasNoRows() = runTest {
-        val store = InMemoryGroupStore()
-        val repository = GroupRepository(
-            store = store,
-            identity = FakeActiveIdentityProvider(initial = IdentityId("test-owner")),
+    private suspend fun makeVM(
+        groupStore: InMemoryGroupStore,
+        messageStore: InMemoryMessageStore = InMemoryMessageStore(),
+    ): ChatsViewModel {
+        val identity = FakeActiveIdentityProvider(initial = owner)
+        val groupRepo = GroupRepository(
+            store = groupStore,
+            identity = identity,
             scope = TestScope(UnconfinedTestDispatcher()),
         )
-        repository.reload()
-
-        val vm = ChatsViewModel(repository)
-
-        assertEquals(emptyList<ChatGroup>(), vm.groups.value)
+        // Pull the preloaded rows into the snapshot StateFlow.
+        groupRepo.reload()
+        val messageRepo = MessageRepository(
+            store = messageStore,
+            identity = identity,
+            scope = TestScope(UnconfinedTestDispatcher()),
+        )
+        return ChatsViewModel(repository = groupRepo, messageRepository = messageRepo)
     }
 
     @Test
-    fun groups_reflectsRepositoryUpdates() = runTest {
+    fun items_startEmpty_whenRepositoryHasNoRows() = runTest {
+        val vm = makeVM(InMemoryGroupStore())
+        assertEquals(emptyList<ChatListItem>(), vm.items.value)
+    }
+
+    @Test
+    fun items_reflectRepositoryUpdates() = runTest {
         val store = InMemoryGroupStore()
-        val repository = GroupRepository(
-            store = store,
-            identity = FakeActiveIdentityProvider(initial = IdentityId("test-owner")),
-            scope = TestScope(UnconfinedTestDispatcher()),
-        )
-        repository.reload()
-        val vm = ChatsViewModel(repository)
-        // Touch the StateFlow so the subscribe-side collector starts
-        // (SharingStarted.WhileSubscribed). Without `first()` the
-        // upstream wouldn't be active when `insert` fires.
-        vm.groups.first()
+        store.preload(listOf(makeGroup(id = "aa".repeat(32), name = "Friends")))
+        val vm = makeVM(store)
 
-        repository.insert(makeGroup(id = "aa".repeat(32), name = "Friends"))
-
-        val snapshot = vm.groups.value
+        val snapshot = vm.items.first { it.isNotEmpty() }
         assertEquals(1, snapshot.size)
-        assertEquals("Friends", snapshot.single().name)
-        assertTrue("group is unpublished by default", !snapshot.single().isPublishedOnChain)
+        assertEquals("Friends", snapshot.single().group.name)
+        // No messages yet → no preview, zero unread.
+        assertEquals(null, snapshot.single().latestPreview)
+        assertEquals(0, snapshot.single().unreadCount)
     }
 
     @Test
-    fun groups_sortedByCreatedAtDescending() = runTest {
-        val store = InMemoryGroupStore()
-        val repository = GroupRepository(
-            store = store,
-            identity = FakeActiveIdentityProvider(initial = IdentityId("test-owner")),
-            scope = TestScope(UnconfinedTestDispatcher()),
-        )
-        repository.insert(makeGroup(id = "01".repeat(32), name = "older", createdAtMillis = 1_700_000_000_000L))
-        repository.insert(makeGroup(id = "02".repeat(32), name = "newer", createdAtMillis = 1_700_000_500_000L))
-        repository.reload()
+    fun items_sortedByLatestMessage_thenSubtitleAndUnread() = runTest {
+        val groupStore = InMemoryGroupStore()
+        // "older" group created first but has the NEWEST message → it should
+        // sort ahead of "newer" (created later, but no messages).
+        groupStore.preload(listOf(
+            makeGroup(id = "01".repeat(32), name = "older", createdAtMillis = 1_000),
+            makeGroup(id = "02".repeat(32), name = "newer", createdAtMillis = 2_000),
+        ))
+        val messageStore = InMemoryMessageStore()
+        messageStore.preload(listOf(
+            incoming(group = "01".repeat(32), body = "hey there", sentAt = 9_000),
+        ))
+        val vm = makeVM(groupStore, messageStore)
 
-        val vm = ChatsViewModel(repository)
-        val snapshot = vm.groups.first()
-
-        assertEquals(listOf("newer", "older"), snapshot.map { it.name })
+        val snapshot = vm.items.first { it.isNotEmpty() }
+        // Recency sort: the group with a message leads.
+        assertEquals(listOf("older", "newer"), snapshot.map { it.group.name })
+        val withMessage = snapshot.first { it.group.name == "older" }
+        assertEquals("hey there", withMessage.latestPreview)
+        // The group was never opened (lastReadAtMillis null → 0) so the
+        // incoming message counts as unread.
+        assertEquals(1, withMessage.unreadCount)
+        assertTrue(snapshot.first { it.group.name == "newer" }.latestPreview == null)
     }
+
+    private fun incoming(group: String, body: String, sentAt: Long) = ChatMessage(
+        id = UUID.randomUUID(),
+        groupId = group,
+        ownerIdentityId = owner.value,
+        senderBlsPubkeyHex = "ab".repeat(48),
+        body = body,
+        sentAtMillis = sentAt,
+        direction = MessageDirection.INCOMING,
+        status = MessageStatus.RECEIVED,
+        replyToMessageId = null,
+        groupType = SepGroupType.TYRANNY,
+    )
 
     private fun makeGroup(
         id: String,
@@ -110,6 +134,6 @@ class ChatsViewModelTest {
         groupType = SepGroupType.TYRANNY,
         adminPubkeyHex = null,
         isPublishedOnChain = false,
-            ownerIdentityId = "test-owner",
+        ownerIdentityId = owner.value,
     )
 }

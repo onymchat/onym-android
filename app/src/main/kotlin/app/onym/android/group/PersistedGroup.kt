@@ -94,11 +94,19 @@ data class PersistedGroup(
      * other sensitive columns — a local avatar can leak who the group is.
      */
     val encryptedAvatar: ByteArray? = null,
+    /**
+     * When the local user last opened / read this thread (ms since epoch),
+     * or `null` if never. Plain (a timestamp isn't user-identifying) and
+     * nullable so Room's migration lands the column on existing rows
+     * without a wipe. Drives the chat-list unread badge.
+     */
+    val lastReadAtMillis: Long? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is PersistedGroup) return false
         return id == other.id &&
+            lastReadAtMillis == other.lastReadAtMillis &&
             createdAt == other.createdAt &&
             epoch == other.epoch &&
             tierRaw == other.tierRaw &&
@@ -118,6 +126,7 @@ data class PersistedGroup(
 
     override fun hashCode(): Int {
         var h = id.hashCode()
+        h = 31 * h + (lastReadAtMillis?.hashCode() ?: 0)
         h = 31 * h + createdAt.hashCode()
         h = 31 * h + epoch.hashCode()
         h = 31 * h + tierRaw

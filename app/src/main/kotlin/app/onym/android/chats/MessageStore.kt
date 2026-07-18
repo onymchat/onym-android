@@ -1,5 +1,6 @@
 package app.onym.android.chats
 
+import kotlinx.coroutines.flow.Flow
 import java.util.UUID
 
 /**
@@ -30,6 +31,19 @@ interface MessageStore {
      *  on [app.onym.android.chats.SendMessageInteractor.retry] and the
      *  receipt-driven status upgrade. */
     suspend fun findById(id: UUID, ownerIdentityId: String): ChatMessage?
+
+    /** Most recent message (any direction) in one group, or `null` when
+     *  the group has no messages. Drives the chat-list subtitle + sort. */
+    suspend fun latestMessage(ownerIdentityId: String, groupId: String): ChatMessage?
+
+    /** Count of incoming messages in one group received after [sinceMillis]
+     *  (the chat-list unread badge). */
+    suspend fun unreadCount(ownerIdentityId: String, groupId: String, sinceMillis: Long): Int
+
+    /** Coarse "messages table changed" signal — emits on any message
+     *  insert / status flip / delete. The chat list listens to recompute
+     *  each group's latest message + unread count and re-sort. */
+    fun changeToken(): Flow<Int>
 
     /** Idempotent insert on [ChatMessage.id]. Returns `true` on a
      *  fresh write, `false` when the row already exists. Nostr

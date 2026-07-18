@@ -53,6 +53,10 @@ interface GroupStore {
      */
     suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?)
 
+    /** Stamp the group's last-read marker (chat-list unread badge). No-op
+     *  if the `(id, ownerIdentityId)` row is missing. */
+    suspend fun markRead(id: String, ownerIdentityId: String, lastReadAtMillis: Long)
+
     /** Delete the `(id, ownerIdentityId)` row. No-op if absent. Scoped
      *  to the owner so another identity's copy of the same group
      *  survives. */

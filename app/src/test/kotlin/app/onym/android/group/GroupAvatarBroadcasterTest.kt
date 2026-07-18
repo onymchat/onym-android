@@ -207,6 +207,7 @@ private class BroadcasterGroupStore : GroupStore {
         return isNew
     }
     override suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?) {}
+    override suspend fun markRead(id: String, ownerIdentityId: String, lastReadAtMillis: Long) {}
     override suspend fun delete(id: String, ownerIdentityId: String) { rows.remove(id) }
 }
 

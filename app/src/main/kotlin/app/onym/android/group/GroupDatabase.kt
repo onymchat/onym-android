@@ -28,7 +28,10 @@ import androidx.room.RoomDatabase
     // on-chain group — fixes "last invited identity wins". Table
     // rebuild; existing rows migrate cleanly (their ids stay unique
     // under the composite key).
-    version = 7,
+    // v8 (last-read): adds nullable `lastReadAtMillis` INTEGER for the
+    // chat-list unread badge. Additive; existing rows decode to null
+    // (never opened → everything unread until first open).
+    version = 8,
     exportSchema = false,
 )
 abstract class GroupDatabase : RoomDatabase() {
@@ -126,6 +129,16 @@ object GroupDatabaseMigrations {
                 "CREATE INDEX IF NOT EXISTS `index_groups_ownerIdentityId` " +
                     "ON `groups` (`ownerIdentityId`)",
             )
+        }
+    }
+
+    /**
+     * v7 → v8: add the nullable `lastReadAtMillis` INTEGER for the
+     * chat-list unread badge. Additive; existing rows decode to null.
+     */
+    val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE groups ADD COLUMN lastReadAtMillis INTEGER")
         }
     }
 }

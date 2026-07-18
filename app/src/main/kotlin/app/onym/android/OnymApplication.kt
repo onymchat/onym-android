@@ -301,6 +301,7 @@ class OnymApplication : Application() {
                     GroupDatabaseMigrations.MIGRATION_4_5,
                     GroupDatabaseMigrations.MIGRATION_5_6,
                     GroupDatabaseMigrations.MIGRATION_6_7,
+                    GroupDatabaseMigrations.MIGRATION_7_8,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -727,6 +728,7 @@ class OnymApplication : Application() {
             makeChatsViewModel = {
                 app.onym.android.chats.ChatsViewModel(
                     repository = groupRepository,
+                    messageRepository = messageRepository,
                     avatarBroadcaster = app.onym.android.group.GroupAvatarBroadcaster(
                         activeIdentity = identityRepository,
                         identitiesFlow = identityRepository.identities,
@@ -770,6 +772,12 @@ class OnymApplication : Application() {
                     },
                     retryMessage = sender::retry,
                     deleteMessage = { gid, id -> sender.delete(gid, id) },
+                    markRead = { gid, lastReadAtMillis ->
+                        val ownerId = identityRepository.currentIdentityId.value?.value
+                        if (ownerId != null) {
+                            groupRepository.markRead(gid, ownerId, lastReadAtMillis)
+                        }
+                    },
                     chatReceiptSender = chatReceiptSender,
                     readReceiptsEnabled = { readReceiptsPreference.current() },
                     imageLoader = imageLoader,

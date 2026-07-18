@@ -63,6 +63,13 @@ class InMemoryGroupStore : GroupStore {
             )
         }
 
+    override suspend fun markRead(id: String, ownerIdentityId: String, lastReadAtMillis: Long) =
+        mutex.withLock {
+            val key = id to ownerIdentityId
+            val existing = rows[key] ?: return@withLock
+            rows[key] = existing.copy(lastReadAtMillis = lastReadAtMillis)
+        }
+
     override suspend fun delete(id: String, ownerIdentityId: String) {
         mutex.withLock { rows.remove(id to ownerIdentityId) }
     }

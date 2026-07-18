@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Room DAO over [PersistedMessage]. Mirrors the verb set the chat
@@ -47,6 +48,40 @@ interface MessageDao {
      *  decrypt — this just scopes + orders the candidate rows. */
     @Query("SELECT * FROM messages WHERE ownerIdentityId = :ownerIdentityId ORDER BY sentAt DESC")
     suspend fun listForOwner(ownerIdentityId: String): List<PersistedMessage>
+
+    /** Most recent message (any direction) in one group for the chat-list
+     *  row subtitle + most-recent-first sort. Body is encrypted, so the
+     *  store decrypts the returned row. */
+    @Query(
+        "SELECT * FROM messages " +
+            "WHERE ownerIdentityId = :ownerIdentityId AND groupId = :groupId " +
+            "ORDER BY sentAt DESC LIMIT 1",
+    )
+    suspend fun latestForOwnerAndGroup(
+        ownerIdentityId: String,
+        groupId: String,
+    ): PersistedMessage?
+
+    /** Count of *incoming* messages in one group received after
+     *  [sinceMillis] — the chat-list unread badge. Plain columns only, so
+     *  no decryption. */
+    @Query(
+        "SELECT COUNT(*) FROM messages " +
+            "WHERE ownerIdentityId = :ownerIdentityId AND groupId = :groupId " +
+            "AND directionRaw = 'INCOMING' AND sentAt > :sinceMillis",
+    )
+    suspend fun unreadCount(
+        ownerIdentityId: String,
+        groupId: String,
+        sinceMillis: Long,
+    ): Int
+
+    /** Coarse change signal for the chat list: emits whenever the messages
+     *  table changes (Room re-runs the query on any insert/update/delete),
+     *  so the list can recompute per-group latest message + unread and
+     *  re-sort. The value itself (row count) is incidental. */
+    @Query("SELECT COUNT(*) FROM messages")
+    fun observeMessageChangeToken(): Flow<Int>
 
     /** Idempotent on [PersistedMessage.id]: a re-delivery of the
      *  same wire message is a silent no-op rather than a thrown

@@ -65,6 +65,10 @@ class ChatThreadViewModel(
     private val retryMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
     /** Delete a message locally (the failed-media Delete action). */
     private val deleteMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
+    /** Stamp the group's chat-list last-read marker (unread badge) up to
+     *  the given message timestamp. Defaulted to a no-op so tests that
+     *  don't exercise the badge keep their construction sites unchanged. */
+    private val markRead: suspend (groupId: String, lastReadAtMillis: Long) -> Unit = { _, _ -> },
     /** Loader the UI uses to fetch + decrypt image attachments. */
     val imageLoader: ChatImageLoader? = null,
     /** Loader the UI uses to fetch + decrypt video blobs for playback. */
@@ -111,6 +115,12 @@ class ChatThreadViewModel(
                     // the symmetric setting, batched per sender, deduped
                     // via [ackedReadIds].
                     sendReadReceipts(it)
+                    // Clear the chat-list unread badge: mark the group read
+                    // up to the newest message currently shown. No-op in the
+                    // repo when it isn't newer than the stored marker.
+                    it.maxOfOrNull { m -> m.sentAtMillis }?.let { newest ->
+                        markRead(groupId, newest)
+                    }
                 }
             }
         }

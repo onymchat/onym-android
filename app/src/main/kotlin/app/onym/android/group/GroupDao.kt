@@ -71,6 +71,16 @@ interface GroupDao {
     @Query("UPDATE groups SET isPublishedOnChain = 1 WHERE id = :id AND ownerIdentityId = :ownerIdentityId")
     suspend fun markPublishedFlagOnly(id: String, ownerIdentityId: String): Int
 
+    /** Stamp the chat-list last-read marker (unread badge). Scoped to
+     *  `(id, ownerIdentityId)` so opening a thread as one identity doesn't
+     *  clear another identity's unread state for the same group. Returns
+     *  the row count. */
+    @Query(
+        "UPDATE groups SET lastReadAtMillis = :lastReadAtMillis " +
+            "WHERE id = :id AND ownerIdentityId = :ownerIdentityId",
+    )
+    suspend fun markRead(id: String, ownerIdentityId: String, lastReadAtMillis: Long): Int
+
     /** Delete one identity's copy of a group. Scoped to the owner so
      *  deleting a chat for one identity leaves another identity's copy
      *  of the same group intact. */

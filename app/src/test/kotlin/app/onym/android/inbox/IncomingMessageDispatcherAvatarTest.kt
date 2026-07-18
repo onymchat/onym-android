@@ -208,6 +208,10 @@ private class AvatarInMemoryGroupStore : GroupStore {
             commitment = commitment ?: existing.commitment,
         )
     }
+    override suspend fun markRead(id: String, ownerIdentityId: String, lastReadAtMillis: Long) {
+        val existing = rows[id] ?: return
+        rows[id] = existing.copy(lastReadAtMillis = lastReadAtMillis)
+    }
     override suspend fun delete(id: String, ownerIdentityId: String) { rows.remove(id) }
 }
 

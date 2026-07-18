@@ -109,6 +109,22 @@ class GroupRepository(
         refreshLocked(identity.currentIdentityId.value)
     }
 
+    /**
+     * Stamp a group's last-read marker (chat-list unread badge) and
+     * re-emit snapshots so the badge clears. No-op when [lastReadAtMillis]
+     * isn't newer than the stored marker — the "thread is open" caller
+     * fires on every repaint, so this keeps it from writing + re-emitting
+     * on each one.
+     */
+    suspend fun markRead(id: String, ownerIdentityId: String, lastReadAtMillis: Long) = mutex.withLock {
+        val current = _snapshots.value
+            .firstOrNull { it.id == id && it.ownerIdentityId == ownerIdentityId }
+            ?.lastReadAtMillis
+        if (current != null && current >= lastReadAtMillis) return@withLock
+        store.markRead(id, ownerIdentityId, lastReadAtMillis)
+        refreshLocked(identity.currentIdentityId.value)
+    }
+
     suspend fun delete(id: String, ownerIdentityId: String) = mutex.withLock {
         store.delete(id, ownerIdentityId)
         refreshLocked(identity.currentIdentityId.value)
