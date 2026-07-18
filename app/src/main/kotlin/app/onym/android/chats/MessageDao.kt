@@ -42,6 +42,12 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE id = :id AND ownerIdentityId = :ownerIdentityId LIMIT 1")
     suspend fun findByIdAndOwner(id: String, ownerIdentityId: String): PersistedMessage?
 
+    /** All of one identity's messages across every group, newest first.
+     *  Bodies are encrypted, so text filtering happens in the store after
+     *  decrypt — this just scopes + orders the candidate rows. */
+    @Query("SELECT * FROM messages WHERE ownerIdentityId = :ownerIdentityId ORDER BY sentAt DESC")
+    suspend fun listForOwner(ownerIdentityId: String): List<PersistedMessage>
+
     /** Idempotent on [PersistedMessage.id]: a re-delivery of the
      *  same wire message is a silent no-op rather than a thrown
      *  exception, mirroring the dispatcher's "drop duplicates"

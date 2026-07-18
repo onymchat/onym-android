@@ -104,6 +104,16 @@ class MessageRepository(
         store.findById(id, ownerIdentityId)
 
     /**
+     * Case-insensitive substring search over the active identity's
+     * message bodies across every group, newest first. Returns empty
+     * when no identity is selected. A cold, cross-group read — no caching.
+     */
+    suspend fun search(query: String, limit: Int = 200): List<ChatMessage> {
+        val ownerId = identity.currentIdentityId.value ?: return emptyList()
+        return store.search(ownerId.value, query, limit)
+    }
+
+    /**
      * Persist [message] and emit on the corresponding group's
      * cached flow. Idempotent on [ChatMessage.id] — a re-delivery
      * (same wire `messageId`) is a no-op: returns `false`, skips the

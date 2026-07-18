@@ -39,6 +39,24 @@ class RoomMessageStore(
             dao.findByIdAndOwner(id.toString(), ownerIdentityId)?.let(::decode)
         }
 
+    override suspend fun search(
+        ownerIdentityId: String,
+        query: String,
+        limit: Int,
+    ): List<ChatMessage> = withContext(ioDispatcher) {
+        val needle = query.trim().lowercase()
+        if (needle.isEmpty()) return@withContext emptyList()
+        val results = ArrayList<ChatMessage>()
+        for (row in dao.listForOwner(ownerIdentityId)) {
+            val message = decode(row) ?: continue
+            if (message.body.lowercase().contains(needle)) {
+                results.add(message)
+                if (results.size >= limit) break
+            }
+        }
+        results
+    }
+
     override suspend fun insert(message: ChatMessage): Boolean =
         withContext(ioDispatcher) {
             // OnConflictStrategy.IGNORE returns -1 on a (id, owner)

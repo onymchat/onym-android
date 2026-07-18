@@ -55,6 +55,8 @@ class AppDependencies(
      *  Mirrors the UIViewControllerRepresentable bridge factory from
      *  onym-ios PR #151, Android-idiomatic types. */
     val makeChatThreadViewModel: (groupId: String) -> ChatThreadViewModel,
+    /** Search tab — full-text message search over the active identity. */
+    val makeSearchViewModel: () -> app.onym.android.search.SearchViewModel,
     /** Settings → Identities — multi-identity management (PR-5). */
     val makeIdentitiesViewModel: () -> app.onym.android.identity.IdentitiesViewModel,
     /** Post-create deeplink invite share (deeplink-invite PR-5). */

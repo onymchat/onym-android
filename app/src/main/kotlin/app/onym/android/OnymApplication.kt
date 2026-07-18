@@ -758,6 +758,12 @@ class OnymApplication : Application() {
                     videoLoader = videoLoader,
                 )
             },
+            makeSearchViewModel = {
+                app.onym.android.search.SearchViewModel(
+                    messageRepository = messageRepository,
+                    groupRepository = groupRepository,
+                )
+            },
             makeIdentitiesViewModel = {
                 app.onym.android.identity.IdentitiesViewModel(identity = identityRepository)
             },

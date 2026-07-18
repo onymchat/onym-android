@@ -43,6 +43,19 @@ class InMemoryMessageStore : MessageStore {
         rows[id.toString() to ownerIdentityId]
     }
 
+    override suspend fun search(
+        ownerIdentityId: String,
+        query: String,
+        limit: Int,
+    ): List<ChatMessage> = mutex.withLock {
+        val needle = query.trim().lowercase()
+        if (needle.isEmpty()) return@withLock emptyList()
+        rows.values
+            .filter { it.ownerIdentityId == ownerIdentityId && it.body.lowercase().contains(needle) }
+            .sortedByDescending { it.sentAtMillis }
+            .take(limit)
+    }
+
     override suspend fun insert(message: ChatMessage): Boolean = mutex.withLock {
         val key = keyOf(message)
         if (rows.containsKey(key)) return@withLock false

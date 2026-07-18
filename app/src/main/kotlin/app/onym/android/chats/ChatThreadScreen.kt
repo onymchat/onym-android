@@ -82,6 +82,9 @@ fun ChatThreadScreen(
     viewModel: ChatThreadViewModel,
     onBack: () -> Unit,
     onShowMembers: () -> Unit,
+    /** When non-null (opened from Search), the thread cold-opens scrolled
+     *  to this message and flashes it, instead of opening at the bottom. */
+    scrollToMessageId: java.util.UUID? = null,
 ) {
     val group by viewModel.group.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -185,6 +188,7 @@ fun ChatThreadScreen(
                 onAttachVideo = onAttachVideo,
                 imageLoader = viewModel.imageLoader,
                 onVideoTapped = { playingVideo = it },
+                scrollToMessageId = scrollToMessageId,
                 replyingTo = replyingTo,
                 onArmReply = viewModel::armReply,
                 onCancelReply = viewModel::cancelReply,
@@ -214,6 +218,7 @@ private fun ChatThreadBody(
     onAttachVideo: (() -> Unit)? = null,
     imageLoader: ChatImageLoader? = null,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)? = null,
+    scrollToMessageId: java.util.UUID? = null,
     replyingTo: java.util.UUID?,
     onArmReply: (java.util.UUID) -> Unit,
     onCancelReply: () -> Unit,
@@ -283,7 +288,19 @@ private fun ChatThreadBody(
         if (sortedMessages.isEmpty()) return@LaunchedEffect
         val lastIndex = sortedMessages.lastIndex
         if (!hasInitialScrolled) {
-            listState.scrollToItem(lastIndex)
+            // Opened-from-search: land on the target message + flash it,
+            // rather than jumping to the bottom.
+            val targetIndex = scrollToMessageId?.let { indexById[it] }
+            if (targetIndex != null) {
+                listState.scrollToItem(targetIndex)
+                highlightedId = scrollToMessageId
+                launch {
+                    kotlinx.coroutines.delay(HIGHLIGHT_HOLD_MILLIS)
+                    if (highlightedId == scrollToMessageId) highlightedId = null
+                }
+            } else {
+                listState.scrollToItem(lastIndex)
+            }
             hasInitialScrolled = true
             return@LaunchedEffect
         }

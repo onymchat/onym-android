@@ -19,6 +19,12 @@ interface MessageStore {
      *  the chat-thread read path. */
     suspend fun listForGroup(ownerIdentityId: String, groupId: String): List<ChatMessage>
 
+    /** Case-insensitive substring search over one identity's message
+     *  bodies across all groups, newest first (capped at [limit]).
+     *  Bodies are encrypted at rest, so the store decrypts and filters in
+     *  memory. An empty query returns nothing. */
+    suspend fun search(ownerIdentityId: String, query: String, limit: Int): List<ChatMessage>
+
     /** Single-message lookup scoped to `(id, ownerIdentityId)`.
      *  Returns `null` for unknown ids. Drives the retry-on-failed path
      *  on [app.onym.android.chats.SendMessageInteractor.retry] and the

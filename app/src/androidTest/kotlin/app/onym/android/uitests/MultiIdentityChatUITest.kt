@@ -251,6 +251,21 @@ class MultiIdentityChatUITest {
         switchToIdentity("Alice")
         openTheChat()
         waitForVideoBubble(timeout = 40.seconds)
+
+        // 12. Search (as Alice): find Bob's message text, tap the result,
+        //     and assert it opens the chat thread scrolled to that message.
+        backToTabBar()
+        composeRule.onNodeWithTag("nav.tab.search").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("search.field").performTextInput("Hello from Bob")
+        waitForTag("search.result.", prefix = true, timeout = 15.seconds)
+        composeRule.onNode(
+            hasTestTagStartingWith("search.result.").and(hasText("Hello from Bob", substring = true)),
+        ).performClick()
+        // Tapping the result opens the thread (composer present) with the
+        // matched message rendered — proving search → open-at-message.
+        waitForTag("chat_thread.input_field")
+        waitForText("Hello from Bob")
     }
 
     // ─── helpers ──────────────────────────────────────────────────

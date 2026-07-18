@@ -106,6 +106,44 @@ class RoomMessageStoreTest {
         assertEquals("caption", listed.body)
     }
 
+    // ─── search ───────────────────────────────────────────────────
+
+    @Test
+    fun search_matchesBodySubstring_caseInsensitive_newestFirst() = runTest {
+        store.insert(makeMessage(group = "aa".repeat(32), body = "Let's meet at noon",
+            sentAtMillis = 1_700_000_000_000L))
+        store.insert(makeMessage(group = "bb".repeat(32), body = "MEETING moved to 3pm",
+            sentAtMillis = 1_700_000_500_000L))
+        store.insert(makeMessage(group = "aa".repeat(32), body = "unrelated chatter",
+            sentAtMillis = 1_700_000_900_000L))
+
+        val hits = store.search(ownerIdentityId = "test-owner", query = "meet", limit = 200)
+        assertEquals(listOf("MEETING moved to 3pm", "Let's meet at noon"), hits.map { it.body })
+    }
+
+    @Test
+    fun search_isOwnerScoped() = runTest {
+        store.insert(makeMessage(owner = "alice", body = "secret plan A"))
+        store.insert(makeMessage(owner = "bob", body = "secret plan B"))
+
+        val hits = store.search(ownerIdentityId = "alice", query = "secret", limit = 200)
+        assertEquals(listOf("secret plan A"), hits.map { it.body })
+    }
+
+    @Test
+    fun search_emptyQuery_returnsNothing() = runTest {
+        store.insert(makeMessage(body = "anything"))
+        assertTrue(store.search("test-owner", "   ", 200).isEmpty())
+    }
+
+    @Test
+    fun search_respectsLimit() = runTest {
+        repeat(5) { i ->
+            store.insert(makeMessage(body = "match $i", sentAtMillis = 1_700_000_000_000L + i))
+        }
+        assertEquals(3, store.search("test-owner", "match", 3).size)
+    }
+
     // ─── reply reference round-trip ───────────────────────────────
 
     @Test

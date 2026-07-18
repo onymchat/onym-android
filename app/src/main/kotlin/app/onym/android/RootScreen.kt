@@ -25,6 +25,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -207,8 +209,19 @@ fun RootScreen(
                     onCancel = { navController.popBackStack() },
                 )
             }
-            composable("chat_thread/{groupId}") { entry ->
+            composable(
+                "chat_thread/{groupId}?scrollTo={scrollTo}",
+                arguments = listOf(
+                    navArgument("scrollTo") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) { entry ->
                 val groupId = entry.arguments?.getString("groupId") ?: return@composable
+                val scrollTo = entry.arguments?.getString("scrollTo")
+                    ?.let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
                 val vm: app.onym.android.chats.ChatThreadViewModel = viewModel(
                     factory = viewModelFactory {
                         initializer { dependencies.makeChatThreadViewModel(groupId) }
@@ -220,6 +233,7 @@ fun RootScreen(
                     onShowMembers = {
                         navController.navigate("chat_members/$groupId")
                     },
+                    scrollToMessageId = scrollTo,
                 )
             }
             composable("chat_members/{groupId}") { entry ->
@@ -381,7 +395,17 @@ fun RootScreen(
                 )
             }
             composable(Tab.Search.route) {
-                SearchScreen()
+                val vm: app.onym.android.search.SearchViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeSearchViewModel() }
+                    },
+                )
+                SearchScreen(
+                    viewModel = vm,
+                    onOpenResult = { groupId, messageId ->
+                        navController.navigate("chat_thread/$groupId?scrollTo=$messageId")
+                    },
+                )
             }
             composable(ROUTE_IDENTITIES) {
                 val vm: IdentitiesViewModel = viewModel(

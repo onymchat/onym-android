@@ -74,6 +74,33 @@ class MessageRepositoryTest {
         assertEquals(2, b.first().size)
     }
 
+    // ─── search() ─────────────────────────────────────────────────
+
+    @Test
+    fun search_scopedToActiveIdentity_matchesBody() = runTest {
+        val store = InMemoryMessageStore()
+        store.preload(
+            listOf(
+                makeMessage(owner = aliceId, group = groupA, body = "dinner plans"),
+                makeMessage(owner = bobId, group = groupA, body = "dinner plans too"),
+            ),
+        )
+        val repo = makeRepo(store, active = aliceId)
+
+        val hits = repo.search("dinner")
+        assertEquals(1, hits.size)
+        assertEquals(aliceId.value, hits.single().ownerIdentityId)
+    }
+
+    @Test
+    fun search_returnsEmptyWhenNoActiveIdentity() = runTest {
+        val store = InMemoryMessageStore()
+        store.preload(listOf(makeMessage(owner = aliceId, group = groupA, body = "hi there")))
+        val repo = makeRepo(store, active = null)
+
+        assertTrue(repo.search("hi").isEmpty())
+    }
+
     // ─── append() ─────────────────────────────────────────────────
 
     @Test
