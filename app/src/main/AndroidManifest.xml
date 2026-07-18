@@ -30,6 +30,18 @@
         android:name="android.hardware.camera.any"
         android:required="false" />
 
+    <!--
+        RECORD_AUDIO: recording voice messages in the chat composer
+        (`ChatVoiceRecorder`). Requested at runtime the first time the user
+        holds the mic button; audio is AES-GCM-encrypted on-device before
+        upload. Microphone hardware isn't essential (text + media messaging
+        works without it), so the feature is declared not-required.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
     <application
         android:name=".OnymApplication"
         android:label="@string/app_name"

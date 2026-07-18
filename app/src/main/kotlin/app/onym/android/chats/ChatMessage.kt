@@ -64,6 +64,11 @@ data class ChatMessage(
      *  [ChatMessagePayload.attachments]. `null` for text + single-media
      *  messages (which use [imageAttachment] / [videoAttachment]). */
     val albumAttachments: List<ChatMediaAttachment>? = null,
+    /** Encrypted voice message attached to this message, if any. Mirrors
+     *  [ChatMessagePayload.voiceAttachment]. The bubble renders the waveform
+     *  + duration from the descriptor and only downloads the audio blob on
+     *  play. Mutually exclusive with the image/video/album fields. */
+    val voiceAttachment: ChatVoiceAttachment? = null,
 ) {
     /** Canonical media list for rendering: the album when present, else
      *  the single image/video wrapped in a one-element list, else empty. */

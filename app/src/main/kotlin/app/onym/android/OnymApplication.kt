@@ -339,6 +339,7 @@ class OnymApplication : Application() {
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_3_4,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_4_5,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_5_6,
+                    app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_6_7,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -419,6 +420,10 @@ class OnymApplication : Application() {
         val videoLoader = app.onym.android.chats.ChatVideoLoader(
             blossomClient = blossomClient,
             cacheDir = java.io.File(applicationContext.cacheDir, "chat_videos"),
+        )
+        val voiceLoader = app.onym.android.chats.ChatVoiceLoader(
+            blossomClient = blossomClient,
+            cacheDir = java.io.File(applicationContext.cacheDir, "chat_voice"),
         )
         // Outbox: persists sealed media blobs so a failed send can be
         // resent (survives restart) by re-uploading the exact bytes.
@@ -760,12 +765,16 @@ class OnymApplication : Application() {
                     sendImage = { gid, data -> sender.sendImage(gid, data) },
                     sendVideo = { gid, uri -> sender.sendVideo(gid, uri) },
                     sendAlbum = { gid, sources -> sender.sendAlbum(gid, sources) },
+                    sendVoice = { gid, bytes, duration, waveform ->
+                        sender.sendVoice(gid, bytes, duration, waveform)
+                    },
                     retryMessage = sender::retry,
                     deleteMessage = { gid, id -> sender.delete(gid, id) },
                     chatReceiptSender = chatReceiptSender,
                     readReceiptsEnabled = { readReceiptsPreference.current() },
                     imageLoader = imageLoader,
                     videoLoader = videoLoader,
+                    voiceLoader = voiceLoader,
                 )
             },
             makeSearchViewModel = {

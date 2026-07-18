@@ -109,6 +109,10 @@ class RoomMessageStore(
                 kotlinx.serialization.builtins.ListSerializer(ChatMediaAttachment.serializer()), it
             ))
         },
+        // Voice JSON (carries the per-clip key + waveform), encrypted at rest.
+        encryptedVoiceAttachmentJson = message.voiceAttachment?.let {
+            encryption.encrypt(attachmentJson.encodeToString(ChatVoiceAttachment.serializer(), it))
+        },
     )
 
     /** Tolerant decode: a row whose encrypted columns fail to
@@ -154,6 +158,13 @@ class RoomMessageStore(
                     )
                 }.getOrNull()
             }
+        val voiceAttachment = row.encryptedVoiceAttachmentJson
+            ?.let { tryDecryptString(it) }
+            ?.let {
+                runCatching {
+                    attachmentJson.decodeFromString(ChatVoiceAttachment.serializer(), it)
+                }.getOrNull()
+            }
         return ChatMessage(
             id = id,
             groupId = row.groupId,
@@ -168,6 +179,7 @@ class RoomMessageStore(
             imageAttachment = imageAttachment,
             videoAttachment = videoAttachment,
             albumAttachments = albumAttachments,
+            voiceAttachment = voiceAttachment,
         )
     }
 

@@ -185,11 +185,12 @@ class MultiIdentityChatUITest {
             composeRule.onAllNodesWithTag("chat_thread.image_viewer").fetchSemanticsNodes().isEmpty()
         }
 
-        // 8b. Two-step album: stage an image + a video in the preview
-        //     strip, prove both show as removable tiles, drop one, stage a
-        //     second image, then confirm-send them as a single album bubble.
+        // 8b. Two-step album: stage two items in the preview strip (the
+        //     combined attach picker stages a test image under the harness),
+        //     prove both show as removable tiles, drop one, stage another,
+        //     then confirm-send them as a single album bubble.
         composeRule.onNodeWithTag("chat_thread.attach_button").performClick()
-        composeRule.onNodeWithTag("chat_thread.attach_video_button").performClick()
+        composeRule.onNodeWithTag("chat_thread.attach_button").performClick()
         composeRule.waitUntil(10.seconds.inWholeMilliseconds) {
             composeRule.onAllNodesWithTag("chat_thread.input.media_strip.remove")
                 .fetchSemanticsNodes().size == 2
@@ -228,31 +229,23 @@ class MultiIdentityChatUITest {
         openTheChat()
         waitForImageBubble(timeout = 40.seconds)
 
-        // 10. Bob -> Alice video message. The attach-video button, under
-        //     the UI-test harness, sends a canned video (both poster and
-        //     video blobs) through the encode → encrypt → upload pipeline.
+        // 10. Bob -> Alice voice message. Under the UI-test harness a plain
+        //     tap on the mic button sends a canned voice clip (a real
+        //     press-and-hold recording can't be driven from a UI test); the
+        //     audio blob round-trips through the loopback Blossom store. The
+        //     bubble exposes the player as `chat_thread.voice.play.<id>`.
         switchToIdentity("Bob")
         openTheChat()
-        sendVideo()
-        waitForVideoBubble()
+        // The mic button shows when the composer is empty.
+        composeRule.onNodeWithTag("chat_thread.mic_button").performClick()
+        waitForTag("chat_thread.voice.play.", prefix = true, timeout = 40.seconds)
 
-        // 10a. Tap the video → full-screen player opens; swipe down → it
-        //      dismisses (dismissed by swipe, no close button).
-        composeRule.onAllNodes(hasTestTagStartingWith("chat_thread.video."))
-            .onFirst().performClick()
-        waitForTag("chat_thread.video_player")
-        composeRule.onNodeWithTag("chat_thread.video_player")
-            .performTouchInput { swipeDown() }
-        composeRule.waitUntil(10.seconds.inWholeMilliseconds) {
-            composeRule.onAllNodesWithTag("chat_thread.video_player").fetchSemanticsNodes().isEmpty()
-        }
-
-        // 11. Alice receives it: her bubble lazily downloads the poster
-        //     from the loopback Blossom store, decrypts, and renders —
-        //     proving the cross-identity video round-trip.
+        // 11. Alice receives it: her bubble lazily renders the waveform +
+        //     duration from the descriptor — proving the cross-identity
+        //     voice round-trip.
         switchToIdentity("Alice")
         openTheChat()
-        waitForVideoBubble(timeout = 40.seconds)
+        waitForTag("chat_thread.voice.play.", prefix = true, timeout = 40.seconds)
 
         // 12. Search (as Alice): find Bob's message text, tap the result,
         //     and assert it opens the chat thread scrolled to that message.
@@ -347,23 +340,6 @@ class MultiIdentityChatUITest {
     private fun waitForImageBubble(timeout: kotlin.time.Duration = 20.seconds) {
         composeRule.waitUntil(timeout.inWholeMilliseconds) {
             composeRule.onAllNodes(hasTestTagStartingWith("chat_thread.image."))
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-    }
-
-    /** Two-step video send: tap attach-video (under [UITestRegistry.enabled]
-     *  the screen stages a canned video in the preview strip), then
-     *  confirm-send via the composer's Send button. */
-    private fun sendVideo() {
-        composeRule.onNodeWithTag("chat_thread.attach_video_button").performClick()
-        waitForTag("chat_thread.input.media_strip.remove")
-        composeRule.onNodeWithTag("chat_thread.send_button").performClick()
-    }
-
-    /** Wait until at least one video-attachment bubble (poster) is rendered. */
-    private fun waitForVideoBubble(timeout: kotlin.time.Duration = 20.seconds) {
-        composeRule.waitUntil(timeout.inWholeMilliseconds) {
-            composeRule.onAllNodes(hasTestTagStartingWith("chat_thread.video."))
                 .fetchSemanticsNodes().isNotEmpty()
         }
     }

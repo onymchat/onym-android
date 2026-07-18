@@ -108,23 +108,32 @@ fun ChatThreadScreen(
     var failedMenuMessageId by remember { mutableStateOf<java.util.UUID?>(null) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
-    // Two-step media send: the picker STAGES items into the composer's
-    // preview strip; the actual upload only fires on Send. Multi-select
-    // so several photos/videos batch into one album.
-    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+    // Two-step media send: the single combined picker STAGES photos/videos
+    // into the composer's preview strip; the upload only fires on Send.
+    // Multi-select so several items batch into one album. Each pick is
+    // classified image-vs-video by its resolver MIME type.
+    val mediaPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(),
     ) { uris ->
         for (uri in uris) {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: continue
-            viewModel.stagePendingMedia(
-                thumbnail = decodeThumbnail(bytes),
-                source = ChatMediaSource.Image(bytes),
-            )
+            val mime = context.contentResolver.getType(uri).orEmpty()
+            if (mime.startsWith("video")) {
+                viewModel.stagePendingMedia(
+                    thumbnail = videoThumbnail(context, uri),
+                    source = ChatMediaSource.Video(uri),
+                )
+            } else {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: continue
+                viewModel.stagePendingMedia(
+                    thumbnail = decodeThumbnail(bytes),
+                    source = ChatMediaSource.Image(bytes),
+                )
+            }
         }
     }
-    // Under the UI-test harness the system photo picker can't be driven,
-    // so stage a generated test image directly instead.
+    // Under the UI-test harness the system picker can't be driven, so stage
+    // a generated test image directly instead.
     val onAttach: () -> Unit = {
         if (UITestRegistry.enabled) {
             val bytes = debugTestImageBytes()
@@ -133,36 +142,10 @@ fun ChatThreadScreen(
                 source = ChatMediaSource.Image(bytes),
             )
         } else {
-            imagePicker.launch(
+            mediaPicker.launch(
                 androidx.activity.result.PickVisualMediaRequest(
-                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
-                ),
-            )
-        }
-    }
-    val videoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(),
-    ) { uris ->
-        for (uri in uris) {
-            viewModel.stagePendingMedia(
-                thumbnail = videoThumbnail(context, uri),
-                source = ChatMediaSource.Video(uri),
-            )
-        }
-    }
-    // Under the UI-test harness the picker + Media3 transcoding can't run,
-    // so stage a canned video (the interactor's injected encoder ignores
-    // the URI) straight through the staging pipeline.
-    val onAttachVideo: () -> Unit = {
-        if (UITestRegistry.enabled) {
-            viewModel.stagePendingMedia(
-                thumbnail = null,
-                source = ChatMediaSource.Video(android.net.Uri.EMPTY),
-            )
-        } else {
-            videoPicker.launch(
-                androidx.activity.result.PickVisualMediaRequest(
-                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly,
+                    androidx.activity.result.contract.ActivityResultContracts
+                        .PickVisualMedia.ImageAndVideo,
                 ),
             )
         }
@@ -218,8 +201,14 @@ fun ChatThreadScreen(
                 onSend = viewModel::send,
                 onRetry = viewModel::retry,
                 onAttach = onAttach,
-                onAttachVideo = onAttachVideo,
+                onSendVoice = viewModel::sendVoice,
+                onSendVoiceCanned = if (UITestRegistry.enabled) {
+                    { viewModel.sendVoiceCanned() }
+                } else {
+                    null
+                },
                 imageLoader = viewModel.imageLoader,
+                voiceLoader = viewModel.voiceLoader,
                 onImageTapped = { viewingImage = it },
                 onVideoTapped = { playingVideo = it },
                 onAlbumTapped = { media, index -> galleryContext = AlbumGalleryContext(media, index) },
@@ -299,8 +288,10 @@ private fun ChatThreadBody(
     onSend: (String) -> Unit,
     onRetry: (java.util.UUID) -> Unit,
     onAttach: (() -> Unit)? = null,
-    onAttachVideo: (() -> Unit)? = null,
+    onSendVoice: ((ChatVoiceRecorder.Recording) -> Unit)? = null,
+    onSendVoiceCanned: (() -> Unit)? = null,
     imageLoader: ChatImageLoader? = null,
+    voiceLoader: ChatVoiceLoader? = null,
     onImageTapped: ((ChatImageAttachment) -> Unit)? = null,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)? = null,
     onAlbumTapped: ((List<ChatMediaAttachment>, Int) -> Unit)? = null,
@@ -487,6 +478,7 @@ private fun ChatThreadBody(
                         sender = senderDisplays[message.id] ?: ChatSenderDisplay.Unknown,
                         onRetry = { onRetry(message.id) },
                         imageLoader = imageLoader,
+                        voiceLoader = voiceLoader,
                         onImageTapped = onImageTapped,
                         onVideoTapped = onVideoTapped,
                         onAlbumItemTapped = onAlbumTapped?.let { cb ->
@@ -537,7 +529,8 @@ private fun ChatThreadBody(
             onSend = onSend,
             focusRequester = composerFocus,
             onAttach = onAttach,
-            onAttachVideo = onAttachVideo,
+            onSendVoice = onSendVoice,
+            onSendVoiceCanned = onSendVoiceCanned,
             pendingMedia = pendingMedia,
             onRemovePending = onRemovePending,
             onSendMedia = onSendMedia,

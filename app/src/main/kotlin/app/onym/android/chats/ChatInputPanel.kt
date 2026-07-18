@@ -1,23 +1,34 @@
 package app.onym.android.chats
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -30,14 +41,22 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -80,8 +99,14 @@ fun ChatInputPanel(
     enabled: Boolean = true,
     maxLines: Int = MAX_LINES,
     focusRequester: FocusRequester? = null,
+    /** Tapped the single attach button → combined photo/video picker. */
     onAttach: (() -> Unit)? = null,
-    onAttachVideo: (() -> Unit)? = null,
+    /** A voice message finished recording (mic released past the minimum
+     *  hold, not cancelled). The host encrypts + uploads it. */
+    onSendVoice: ((ChatVoiceRecorder.Recording) -> Unit)? = null,
+    /** Loopback-harness only: send a canned voice clip on a plain mic tap
+     *  (a real press-and-hold recording can't be driven from a UI test). */
+    onSendVoiceCanned: (() -> Unit)? = null,
     /** Media staged in the two-step send flow, shown as a removable
      *  thumbnail strip above the composer. */
     pendingMedia: List<PendingMediaItem> = emptyList(),
@@ -96,6 +121,14 @@ fun ChatInputPanel(
     // With media staged, Send ships the album (no caption this
     // iteration); otherwise it ships the trimmed text body.
     val canSend = enabled && (hasPendingMedia || sendBody != null)
+
+    // Voice-recording UI state, driven by the mic button's press-and-hold.
+    // While recording, the attach + text field are replaced by a record
+    // indicator (red dot + timer + "slide to cancel"); the mic stays put on
+    // the trailing edge so the finger keeps its pointer stream.
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingElapsedMs by remember { mutableLongStateOf(0L) }
+    var recordingWillCancel by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxWidth()) {
         if (hasPendingMedia) {
@@ -112,92 +145,250 @@ fun ChatInputPanel(
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (onAttach != null) {
-            IconButton(
-                onClick = onAttach,
-                enabled = enabled,
-                modifier = Modifier.testTag("chat_thread.attach_button"),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Image,
-                    contentDescription = "Attach photo",
-                )
-            }
-        }
-        if (onAttachVideo != null) {
-            IconButton(
-                onClick = onAttachVideo,
-                enabled = enabled,
-                modifier = Modifier.testTag("chat_thread.attach_video_button"),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Videocam,
-                    contentDescription = "Attach video",
-                )
-            }
-        }
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(BUBBLE_CORNER))
-                .then(
-                    if (focusRequester != null) {
-                        Modifier.focusRequester(focusRequester)
-                    } else {
-                        Modifier
-                    },
-                )
-                .testTag("chat_thread.input_field"),
-            enabled = enabled,
-            placeholder = { Text("Message") },
-            maxLines = maxLines,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Default,
-            ),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            ),
-            shape = RoundedCornerShape(BUBBLE_CORNER),
-        )
-        FilledIconButton(
-            onClick = {
-                // Staged media takes precedence — confirm-send the album.
-                if (hasPendingMedia) {
-                    onSendMedia?.invoke()
-                    return@FilledIconButton
+        if (isRecording) {
+            RecordingIndicator(
+                elapsedMs = recordingElapsedMs,
+                willCancel = recordingWillCancel,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            if (onAttach != null) {
+                // Single circular paperclip attach button → combined picker.
+                IconButton(
+                    onClick = onAttach,
+                    enabled = enabled,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .testTag("chat_thread.attach_button"),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.AttachFile,
+                        contentDescription = "Attach photo or video",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                val body = trimmedSendBody(text) ?: return@FilledIconButton
-                onSend(body)
-                text = ""
-            },
-            enabled = canSend,
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                // Disabled state must visually contrast with the
-                // adjacent text field (also `surfaceVariant`) so the
-                // button reads as "greyed out", not as an extension of
-                // the field. Match M3's standard low-alpha disabled
-                // palette — a tinted overlay against the screen surface
-                // rather than a solid fill that blends with the field.
-                disabledContainerColor = MaterialTheme.colorScheme.onSurface
-                    .copy(alpha = 0.12f),
-                disabledContentColor = MaterialTheme.colorScheme.onSurface
-                    .copy(alpha = 0.38f),
-            ),
-            modifier = Modifier.testTag("chat_thread.send_button"),
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = "Send",
+            }
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(BUBBLE_CORNER))
+                    .then(
+                        if (focusRequester != null) {
+                            Modifier.focusRequester(focusRequester)
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .testTag("chat_thread.input_field"),
+                enabled = enabled,
+                placeholder = { Text("Message") },
+                maxLines = maxLines,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Default,
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+                shape = RoundedCornerShape(BUBBLE_CORNER),
             )
         }
+        // Right side toggles: mic when the composer is empty (or actively
+        // recording), Send once there's text or staged media.
+        val showMic = enabled && onSendVoice != null &&
+            (isRecording || (sendBody == null && !hasPendingMedia))
+        if (showMic) {
+            VoiceMicButton(
+                onSendVoice = onSendVoice,
+                onSendVoiceCanned = onSendVoiceCanned,
+                onRecordingChange = { recording, elapsedMs, willCancel ->
+                    isRecording = recording
+                    recordingElapsedMs = elapsedMs
+                    recordingWillCancel = willCancel
+                },
+            )
+        } else {
+            FilledIconButton(
+                onClick = {
+                    // Staged media takes precedence — confirm-send the album.
+                    if (hasPendingMedia) {
+                        onSendMedia?.invoke()
+                        return@FilledIconButton
+                    }
+                    val body = trimmedSendBody(text) ?: return@FilledIconButton
+                    onSend(body)
+                    text = ""
+                },
+                enabled = canSend,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    disabledContainerColor = MaterialTheme.colorScheme.onSurface
+                        .copy(alpha = 0.12f),
+                    disabledContentColor = MaterialTheme.colorScheme.onSurface
+                        .copy(alpha = 0.38f),
+                ),
+                modifier = Modifier.testTag("chat_thread.send_button"),
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                )
+            }
+        }
     }
+    }
+}
+
+/**
+ * Trailing mic button. Held to record a voice message (via
+ * [ChatVoiceRecorder]); released past the minimum hold to send; slid left
+ * past a threshold to cancel. Reports recording state through
+ * [onRecordingChange] so the composer can swap the text field for a record
+ * indicator. Under the loopback harness ([onSendVoiceCanned] non-null) a
+ * plain tap sends a canned clip instead (a press-and-hold can't be driven
+ * from a UI test).
+ */
+@Composable
+private fun VoiceMicButton(
+    onSendVoice: ((ChatVoiceRecorder.Recording) -> Unit)?,
+    onSendVoiceCanned: (() -> Unit)?,
+    onRecordingChange: (recording: Boolean, elapsedMs: Long, willCancel: Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+
+    if (onSendVoiceCanned != null) {
+        FilledIconButton(
+            onClick = onSendVoiceCanned,
+            modifier = Modifier.testTag("chat_thread.mic_button"),
+        ) {
+            Icon(imageVector = Icons.Filled.Mic, contentDescription = "Record voice message")
+        }
+        return
+    }
+
+    val recorder = remember { ChatVoiceRecorder(context) }
+    DisposableEffect(Unit) { onDispose { recorder.cancel() } }
+
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> hasPermission = granted }
+
+    var recording by remember { mutableStateOf(false) }
+    var willCancel by remember { mutableStateOf(false) }
+    val latestOnSend by rememberUpdatedState(onSendVoice)
+    val cancelThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
+
+    // Report elapsed time (and live willCancel flips) while recording.
+    LaunchedEffect(recording) {
+        while (recording) {
+            onRecordingChange(true, (recorder.elapsedSeconds * 1000).toLong(), willCancel)
+            kotlinx.coroutines.delay(100)
+        }
+    }
+
+    FilledIconButton(
+        onClick = {},
+        colors = IconButtonDefaults.filledIconButtonColors(
+            containerColor = if (recording) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.primary
+            },
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ),
+        modifier = Modifier
+            .testTag("chat_thread.mic_button")
+            .pointerInput(hasPermission) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    if (!hasPermission) {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        var e = awaitPointerEvent()
+                        while (e.changes.any { it.pressed }) e = awaitPointerEvent()
+                        return@awaitEachGesture
+                    }
+                    if (!recorder.start()) return@awaitEachGesture
+                    recording = true
+                    willCancel = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        willCancel = (change.position.x - down.position.x) < -cancelThresholdPx
+                        if (!change.pressed) break
+                    }
+                    recording = false
+                    onRecordingChange(false, 0, false)
+                    if (willCancel) {
+                        recorder.cancel()
+                    } else {
+                        val result = recorder.stop()
+                        if (result == null) {
+                            recorder.cancel()
+                        } else if (result.durationSeconds < ChatVoiceRecorder.MINIMUM_DURATION_SECONDS) {
+                            runCatching { result.file.delete() }
+                        } else {
+                            latestOnSend?.invoke(result)
+                        }
+                    }
+                }
+            },
+    ) {
+        Icon(imageVector = Icons.Filled.Mic, contentDescription = "Record voice message")
+    }
+}
+
+/**
+ * Record-time indicator shown in place of the attach button + text field
+ * while a voice message is recording: a red dot, an `m:ss` timer, and a
+ * "slide to cancel" hint (turning red once the drag crosses the cancel
+ * threshold). Mirrors the iOS composer's recording overlay.
+ */
+@Composable
+private fun RecordingIndicator(
+    elapsedMs: Long,
+    willCancel: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .padding(horizontal = 4.dp)
+            .testTag("chat_thread.recording"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.error),
+        )
+        Spacer(Modifier.width(8.dp))
+        val seconds = (elapsedMs / 1000).toInt()
+        Text(
+            text = String.format(java.util.Locale.US, "%d:%02d", seconds / 60, seconds % 60),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = if (willCancel) "release to cancel" else "‹ slide to cancel",
+            color = if (willCancel) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

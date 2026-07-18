@@ -630,6 +630,9 @@ class IncomingMessageDispatcher(
             videoAttachment = payload.videoAttachment,
             // Multi-media album (if any); each item's poster loads lazily.
             albumAttachments = payload.attachments,
+            // Encrypted voice (if any). The waveform + duration render from
+            // the descriptor; the audio blob downloads on play.
+            voiceAttachment = payload.voiceAttachment,
         )
         // Use the receivedAt timestamp only for the "ordering by
         // arrival" UI follow-up — wire `sentAtMillis` is the

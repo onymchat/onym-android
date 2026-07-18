@@ -459,6 +459,91 @@ class SendMessageInteractor(
     }
 
     /**
+     * Send a voice message. Encrypts the recorded AAC bytes and inserts the
+     * optimistic bubble **before** the upload (mirroring [sendImage]), so
+     * the sender sees the voice bubble immediately (waveform + duration
+     * render from the descriptor) with a loading indicator. The sealed
+     * ciphertext is persisted in the outbox first, so an upload/fan-out
+     * failure leaves a FAILED bubble the user can resend or delete. The
+     * caller supplies the pre-computed [durationSeconds] + [waveform] (the
+     * recorder sampled the amplitude live).
+     */
+    suspend fun sendVoice(
+        groupId: String,
+        audioBytes: ByteArray,
+        durationSeconds: Double,
+        waveform: List<Int>,
+    ): ChatMessage = withContext(ioDispatcher) {
+        val activeIdentityId = activeIdentity.currentIdentityId.value
+            ?: throw SendMessageError.NoIdentityLoaded
+        val activeSummary = identitiesFlow.value.firstOrNull { it.id == activeIdentityId }
+            ?: throw SendMessageError.NoIdentityLoaded
+        val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
+            ?: throw SendMessageError.UnknownGroup
+        val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
+        if (group.memberProfiles[myBlsHex] == null) throw SendMessageError.SenderNotAMember
+        val variant: ChatMessageVariant = when (group.groupType) {
+            // A voice message never carries a caption.
+            SepGroupType.TYRANNY -> ChatMessageVariant.Tyranny(body = "")
+            else -> throw SendMessageError.UnsupportedGroupType(group.groupType)
+        }
+
+        val sealed = ChatImageCrypto.seal(audioBytes)
+        if (sealed.blob.size > MAX_UPLOAD_BYTES) throw SendMessageError.VideoTooLarge
+
+        val voiceAttachment = ChatVoiceAttachment(
+            sha256 = sealed.sha256Hex,
+            mimeType = "audio/mp4",
+            byteSize = sealed.blob.size,
+            durationSeconds = durationSeconds,
+            encKey = sealed.key,
+            waveform = waveform,
+            server = blossomServerUrl,
+        )
+
+        // Persist the ciphertext for resend. No prime — the bubble renders
+        // from the waveform descriptor, not a thumbnail.
+        outbox?.store(sealed.sha256Hex, sealed.blob)
+
+        val messageId = idFactory()
+        val sentAtMillis = clock()
+        val payload = ChatMessagePayload(
+            version = 1,
+            messageId = messageId,
+            groupId = group.groupIdBytes,
+            senderBlsPubkeyHex = myBlsHex,
+            sentAtMillis = sentAtMillis,
+            replyToMessageId = null,
+            variant = variant,
+            voiceAttachment = voiceAttachment,
+        )
+        val pending = ChatMessage(
+            id = messageId,
+            groupId = groupId,
+            ownerIdentityId = activeIdentityId.value,
+            senderBlsPubkeyHex = myBlsHex,
+            body = "",
+            sentAtMillis = sentAtMillis,
+            direction = MessageDirection.OUTGOING,
+            status = MessageStatus.PENDING,
+            replyToMessageId = null,
+            groupType = group.groupType,
+            voiceAttachment = voiceAttachment,
+        )
+        messageRepository.append(pending)
+
+        val finalStatus = uploadAndFanOut(
+            blobs = listOf(sealed.blob to "audio/mp4"),
+            payload = payload,
+            recipients = recipientInboxKeysFor(group, myBlsHex),
+            messageId = messageId,
+            ownerId = activeIdentityId.value,
+            sentBlobShas = listOf(sealed.sha256Hex),
+        )
+        pending.copy(status = finalStatus)
+    }
+
+    /**
      * Retry a previously-failed outgoing message. No-op (silent) for
      * unknown / non-failed / non-outgoing rows — closes the
      * double-delivery hole where a tap on a row that already flipped
@@ -523,6 +608,7 @@ class SendMessageInteractor(
             attachment = message.imageAttachment,
             videoAttachment = message.videoAttachment,
             attachments = message.albumAttachments,
+            voiceAttachment = message.voiceAttachment,
         )
         val blobs = attachmentBlobs(message)
         uploadAndFanOut(
@@ -543,6 +629,8 @@ class SendMessageInteractor(
         val activeIdentityId = activeIdentity.currentIdentityId.value ?: return@withContext
         val message = messageRepository.findById(messageId, activeIdentityId.value)
         message?.media?.flatMap { it.blobShas }?.forEach { outbox?.remove(it) }
+        // Voice lives outside `media` — evict its blob explicitly.
+        message?.voiceAttachment?.let { outbox?.remove(it.sha256) }
         messageRepository.deleteMessage(messageId, activeIdentityId.value, groupId)
     }
 
@@ -600,6 +688,12 @@ class SendMessageInteractor(
                 outbox?.load(vid.sha256)?.let {
                     out.add(BlobEntry(vid.sha256, it, vid.mimeType))
                 }
+            }
+        }
+        // Voice lives outside `media`; re-upload its blob explicitly.
+        message.voiceAttachment?.let { voice ->
+            outbox?.load(voice.sha256)?.let {
+                out.add(BlobEntry(voice.sha256, it, voice.mimeType))
             }
         }
         return out

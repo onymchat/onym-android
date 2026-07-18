@@ -329,6 +329,97 @@ class SendMessageInteractorTest {
         assertNull(fixture.outbox.load(sha))
     }
 
+    // ─── voice send ───────────────────────────────────────────────
+
+    private fun cannedWaveform() = (0 until 40).map { (it * 6) % 256 }
+
+    @Test
+    fun sendVoice_uploadsBlob_persistsAttachment_andFansOut() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.sendVoice(
+            groupIdHex,
+            audioBytes = ByteArray(32) { it.toByte() },
+            durationSeconds = 6.0,
+            waveform = cannedWaveform(),
+        )
+
+        assertEquals(MessageStatus.SENT, result.status)
+        // Voice carries no caption; the flat media fields stay null.
+        assertEquals("", result.body)
+        assertNull(result.imageAttachment)
+        assertNull(result.videoAttachment)
+        assertNull(result.albumAttachments)
+        val voice = result.voiceAttachment
+        assertNotNull(voice)
+        assertEquals("audio/mp4", voice!!.mimeType)
+        assertEquals(6.0, voice.durationSeconds, 0.0)
+        assertEquals(40, voice.waveform.size)
+        assertEquals(32, voice.encKey.size)
+        // One blob uploaded (the ciphertext) under its sha.
+        val fake = fixture.blossomClient as FakeBlossomClient
+        assertEquals(1, fake.uploads.size)
+        assertEquals(voice.sha256, ChatImageCrypto.sha256Hex(fake.uploads.single()))
+        // The voice descriptor rides the wire payload.
+        val shipped = decodeShipped(fixture.transport.sends().single().payload)
+        assertEquals(voice.sha256, shipped.voiceAttachment?.sha256)
+    }
+
+    @Test
+    fun sendVoice_uploadFailure_marksFailed_keepsOutboxForResend() = runTest {
+        val fixture = newFixture(blossomClient = FailingBlossomClient())
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.sendVoice(
+            groupIdHex, ByteArray(16) { 3 }, 4.0, cannedWaveform()
+        )
+
+        assertEquals(MessageStatus.FAILED, result.status)
+        assertTrue(fixture.transport.sends().isEmpty())
+        assertNotNull(fixture.outbox.load(result.voiceAttachment!!.sha256))
+    }
+
+    @Test
+    fun resend_failedVoice_reuploadsSameBytes_andFlipsToSent() = runTest {
+        val blossom = ToggleableBlossomClient(failUploads = true)
+        val fixture = newFixture(blossomClient = blossom)
+        fixture.seedGroup(includePeer = true)
+
+        val failed = fixture.interactor.sendVoice(
+            groupIdHex, ByteArray(24) { it.toByte() }, 5.0, cannedWaveform()
+        )
+        assertEquals(MessageStatus.FAILED, failed.status)
+        val sha = failed.voiceAttachment!!.sha256
+
+        blossom.failUploads = false
+        fixture.interactor.retry(groupIdHex, failed.id)
+
+        val refreshed = fixture.messageStore.findById(failed.id, activeId.value)!!
+        assertEquals(MessageStatus.SENT, refreshed.status)
+        // Re-sent with the voice attachment intact, uploaded under the same sha.
+        assertEquals(sha, refreshed.voiceAttachment?.sha256)
+        assertEquals(1, blossom.uploads.size)
+        assertEquals(sha, ChatImageCrypto.sha256Hex(blossom.uploads.single()))
+        assertNull(fixture.outbox.load(sha))
+    }
+
+    @Test
+    fun delete_voice_removesMessage_andEvictsOutbox() = runTest {
+        val fixture = newFixture(blossomClient = FailingBlossomClient())
+        fixture.seedGroup(includePeer = true)
+        val failed = fixture.interactor.sendVoice(
+            groupIdHex, ByteArray(12) { 5 }, 3.0, cannedWaveform()
+        )
+        val sha = failed.voiceAttachment!!.sha256
+        assertNotNull(fixture.outbox.load(sha))
+
+        fixture.interactor.delete(groupIdHex, failed.id)
+
+        assertNull(fixture.messageStore.findById(failed.id, activeId.value))
+        assertNull(fixture.outbox.load(sha))
+    }
+
     // ─── reply reference rides the send + survives retry ─────────
 
     @Test

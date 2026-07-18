@@ -107,6 +107,26 @@ class RoomMessageStoreTest {
     }
 
     @Test
+    fun insert_thenList_roundtripsVoiceAttachment() = runTest {
+        val voice = ChatVoiceAttachment(
+            sha256 = "77".repeat(32),
+            mimeType = "audio/mp4",
+            byteSize = 48_000,
+            durationSeconds = 6.0,
+            encKey = ByteArray(32) { 0x5 },
+            waveform = (0 until 40).map { it % 256 },
+            server = "https://blossom.onym.app",
+        )
+        val msg = makeMessage(body = "").copy(voiceAttachment = voice)
+        store.insert(msg)
+
+        val listed = store.listForGroup(msg.ownerIdentityId, msg.groupId).single()
+        assertEquals(voice, listed.voiceAttachment)
+        assertNull(listed.imageAttachment)
+        assertNull(listed.videoAttachment)
+    }
+
+    @Test
     fun insert_thenList_roundtripsAlbumAttachments() = runTest {
         val image = ChatImageAttachment(
             sha256 = "11".repeat(32),

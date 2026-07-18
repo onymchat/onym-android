@@ -79,6 +79,11 @@ data class PersistedMessage(
      *  (or `null` for text / single-media). Same at-rest encryption +
      *  non-destructive ALTER migration shape as the other columns. */
     val encryptedAlbumJson: ByteArray? = null,
+    /** AES-GCM-encrypted JSON of the [ChatVoiceAttachment] (or `null` for a
+     *  message with no voice). Same at-rest encryption + non-destructive
+     *  ALTER migration shape as the other attachment columns; carries the
+     *  per-clip key + the waveform. */
+    val encryptedVoiceAttachmentJson: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -98,7 +103,9 @@ data class PersistedMessage(
             (encryptedVideoAttachmentJson?.contentEquals(other.encryptedVideoAttachmentJson)
                 ?: (other.encryptedVideoAttachmentJson == null)) &&
             (encryptedAlbumJson?.contentEquals(other.encryptedAlbumJson)
-                ?: (other.encryptedAlbumJson == null))
+                ?: (other.encryptedAlbumJson == null)) &&
+            (encryptedVoiceAttachmentJson?.contentEquals(other.encryptedVoiceAttachmentJson)
+                ?: (other.encryptedVoiceAttachmentJson == null))
     }
 
     override fun hashCode(): Int {
@@ -115,6 +122,7 @@ data class PersistedMessage(
         h = 31 * h + (encryptedAttachmentJson?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedVideoAttachmentJson?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedAlbumJson?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedVoiceAttachmentJson?.contentHashCode() ?: 0)
         return h
     }
 }

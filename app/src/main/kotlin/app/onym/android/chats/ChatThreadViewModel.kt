@@ -55,6 +55,13 @@ class ChatThreadViewModel(
     private val sendVideo: suspend (groupId: String, videoUri: android.net.Uri) -> Unit = { _, _ -> },
     /** Send a multi-media album (encode/seal each → upload → fan-out). */
     private val sendAlbum: suspend (groupId: String, sources: List<ChatMediaSource>) -> Unit = { _, _ -> },
+    /** Send a voice message (seal recorded bytes → upload → fan-out). */
+    private val sendVoice: suspend (
+        groupId: String,
+        audioBytes: ByteArray,
+        durationSeconds: Double,
+        waveform: List<Int>,
+    ) -> Unit = { _, _, _, _ -> },
     private val retryMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
     /** Delete a message locally (the failed-media Delete action). */
     private val deleteMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
@@ -62,6 +69,8 @@ class ChatThreadViewModel(
     val imageLoader: ChatImageLoader? = null,
     /** Loader the UI uses to fetch + decrypt video blobs for playback. */
     val videoLoader: ChatVideoLoader? = null,
+    /** Loader the UI uses to fetch + decrypt voice blobs for playback. */
+    val voiceLoader: ChatVoiceLoader? = null,
     /** Ships read receipts for incoming messages the user is viewing.
      *  Defaulted to a no-op so tests that don't exercise receipts keep
      *  their construction sites unchanged. */
@@ -182,6 +191,40 @@ class ChatThreadViewModel(
             _sendInFlight.value = true
             try {
                 sendVideo(groupId, uri)
+                _lastSendError.value = null
+            } catch (e: Throwable) {
+                _lastSendError.value = e.message ?: e.javaClass.simpleName
+            } finally {
+                _sendInFlight.value = false
+            }
+        }
+    }
+
+    /** Send a recorded voice message (bytes + duration + live waveform). */
+    fun sendVoice(recording: ChatVoiceRecorder.Recording) {
+        val bytes = recording.file.readBytes()
+        viewModelScope.launch {
+            _sendInFlight.value = true
+            try {
+                sendVoice(groupId, bytes, recording.durationSeconds, recording.waveform)
+                _lastSendError.value = null
+            } catch (e: Throwable) {
+                _lastSendError.value = e.message ?: e.javaClass.simpleName
+            } finally {
+                _sendInFlight.value = false
+                runCatching { recording.file.delete() }
+            }
+        }
+    }
+
+    /** Loopback-harness only: send a canned voice clip without a recorder
+     *  (a real press-and-hold recording can't be driven from a UI test). */
+    fun sendVoiceCanned() {
+        val waveform = List(ChatVoiceRecorder.WAVEFORM_BAR_COUNT) { (it * 6) % 256 }
+        viewModelScope.launch {
+            _sendInFlight.value = true
+            try {
+                sendVoice(groupId, "uitest-voice".toByteArray(), 4.0, waveform)
                 _lastSendError.value = null
             } catch (e: Throwable) {
                 _lastSendError.value = e.message ?: e.javaClass.simpleName

@@ -6,6 +6,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -48,6 +51,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -56,6 +62,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -116,6 +123,7 @@ fun ChatBubble(
     maxWidthFraction: Float = 0.75f,
     onRetry: (() -> Unit)? = null,
     imageLoader: ChatImageLoader? = null,
+    voiceLoader: ChatVoiceLoader? = null,
     onImageTapped: ((ChatImageAttachment) -> Unit)? = null,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)? = null,
     /** Tap on an album item at the given index — opens the full-screen
@@ -262,7 +270,7 @@ fun ChatBubble(
                             .testTag("chat_thread.sender.${message.id}"),
                     )
                 }
-                val hasMedia = message.media.isNotEmpty()
+                val hasMedia = message.media.isNotEmpty() || message.voiceAttachment != null
                 BubbleBody(
                     body = message.body,
                     fill = fill,
@@ -273,8 +281,10 @@ fun ChatBubble(
                     // menu inside the media overlay instead.
                     onClick = if (retryEnabled && !hasMedia) onRetry else null,
                     media = message.media,
+                    voice = message.voiceAttachment,
                     status = message.status,
                     imageLoader = imageLoader,
+                    voiceLoader = voiceLoader,
                     onImageTapped = onImageTapped,
                     onVideoTapped = onVideoTapped,
                     onAlbumItemTapped = onAlbumItemTapped,
@@ -307,8 +317,10 @@ private fun BubbleBody(
     messageId: java.util.UUID,
     onClick: (() -> Unit)?,
     media: List<ChatMediaAttachment>,
+    voice: ChatVoiceAttachment?,
     status: MessageStatus,
     imageLoader: ChatImageLoader?,
+    voiceLoader: ChatVoiceLoader?,
     onImageTapped: ((ChatImageAttachment) -> Unit)?,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)?,
     onAlbumItemTapped: ((Int) -> Unit)?,
@@ -356,6 +368,17 @@ private fun BubbleBody(
                 messageId = messageId,
                 // Only an available target is worth jumping to.
                 onTap = if (!reply.isUnavailable) onQuoteTap else null,
+            )
+        }
+        if (voice != null) {
+            VoiceMessageBubble(
+                voice = voice,
+                voiceLoader = voiceLoader,
+                messageId = messageId,
+                tint = textColor,
+                status = status,
+                isOutgoing = isOutgoing,
+                onFailedTap = onFailedMediaTap,
             )
         }
         if (media.isNotEmpty()) {
@@ -714,6 +737,164 @@ private fun AlbumTile(
                     ),
                 )
             }
+        }
+    }
+}
+
+/**
+ * Inline voice-message player: a play/pause button, a static waveform (from
+ * the descriptor) that fills with playback progress, and an `m:ss` duration.
+ * Tapping play lazily downloads + decrypts the clip via [voiceLoader] and
+ * plays it with a `MediaPlayer`. An outgoing `PENDING` clip shows a spinner;
+ * a `FAILED` clip shows an error glyph and routes taps to [onFailedTap].
+ * Mirrors iOS `ChatVoiceMessageView`.
+ */
+@Composable
+private fun VoiceMessageBubble(
+    voice: ChatVoiceAttachment,
+    voiceLoader: ChatVoiceLoader?,
+    messageId: java.util.UUID,
+    tint: Color,
+    status: MessageStatus,
+    isOutgoing: Boolean,
+    onFailedTap: (() -> Unit)?,
+) {
+    val scope = rememberCoroutineScope()
+    val sending = isOutgoing && status == MessageStatus.PENDING
+    val failed = isOutgoing && status == MessageStatus.FAILED
+
+    var player by remember(voice.sha256) { mutableStateOf<android.media.MediaPlayer?>(null) }
+    var isPlaying by remember(voice.sha256) { mutableStateOf(false) }
+    var progress by remember(voice.sha256) { mutableFloatStateOf(0f) }
+    var loading by remember(voice.sha256) { mutableStateOf(false) }
+
+    DisposableEffect(voice.sha256) {
+        onDispose { runCatching { player?.release() } }
+    }
+    // Advance the waveform fill while playing.
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            val p = player
+            if (p != null && p.duration > 0) {
+                progress = (p.currentPosition.toFloat() / p.duration).coerceIn(0f, 1f)
+            }
+            kotlinx.coroutines.delay(80)
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .width(220.dp)
+            .testTag("chat_thread.voice.$messageId"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+            if (sending || loading) {
+                CircularProgressIndicator(
+                    color = tint,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(24.dp),
+                )
+            } else {
+                val icon = when {
+                    failed -> Icons.Filled.ErrorOutline
+                    isPlaying -> Icons.Filled.PauseCircle
+                    else -> Icons.Filled.PlayCircle
+                }
+                Icon(
+                    imageVector = icon,
+                    contentDescription = if (failed) {
+                        "Failed — tap to resend or delete"
+                    } else {
+                        "Play voice message"
+                    },
+                    tint = if (failed) MaterialTheme.colorScheme.error else tint,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .testTag("chat_thread.voice.play.$messageId")
+                        .clickable {
+                            if (failed) {
+                                onFailedTap?.invoke()
+                                return@clickable
+                            }
+                            val p = player
+                            if (p != null) {
+                                if (p.isPlaying) {
+                                    p.pause(); isPlaying = false
+                                } else {
+                                    p.start(); isPlaying = true
+                                }
+                            } else if (!loading && voiceLoader != null) {
+                                loading = true
+                                scope.launch {
+                                    val file = voiceLoader.file(voice)
+                                    loading = false
+                                    if (file != null) {
+                                        val mp = android.media.MediaPlayer().apply {
+                                            setDataSource(file.absolutePath)
+                                            prepare()
+                                            setOnCompletionListener {
+                                                isPlaying = false
+                                                progress = 0f
+                                                seekTo(0)
+                                            }
+                                        }
+                                        player = mp
+                                        mp.start()
+                                        isPlaying = true
+                                    }
+                                }
+                            }
+                        },
+                )
+            }
+        }
+        VoiceWaveform(
+            samples = voice.waveform,
+            progress = progress,
+            playedColor = tint,
+            trackColor = tint.copy(alpha = 0.3f),
+            modifier = Modifier
+                .weight(1f)
+                .height(24.dp),
+        )
+        Text(
+            text = formatVideoDuration(voice.durationSeconds),
+            color = tint,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/** Draws the voice waveform as vertical rounded bars, filling bars up to
+ *  [progress] in [playedColor] and the rest in [trackColor]. */
+@Composable
+private fun VoiceWaveform(
+    samples: List<Int>,
+    progress: Float,
+    playedColor: Color,
+    trackColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        if (samples.isEmpty()) return@Canvas
+        val count = samples.size
+        val spacing = 2.dp.toPx()
+        val barWidth = ((size.width - spacing * (count - 1)) / count).coerceAtLeast(1.5f)
+        val midY = size.height / 2
+        val playedUpTo = progress * count
+        samples.forEachIndexed { i, sample ->
+            val norm = sample / 255f
+            val barHeight = (norm * size.height).coerceAtLeast(3f)
+            val x = i * (barWidth + spacing)
+            drawRoundRect(
+                color = if (i < playedUpTo) playedColor else trackColor,
+                topLeft = Offset(x, midY - barHeight / 2),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2, barWidth / 2),
+            )
         }
     }
 }

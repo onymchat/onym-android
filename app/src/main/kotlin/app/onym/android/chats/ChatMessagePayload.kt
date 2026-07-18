@@ -123,6 +123,14 @@ data class ChatMessagePayload(
      * use the flat fields above. See [ChatMediaAttachment].
      */
     val attachments: List<ChatMediaAttachment>? = null,
+    /**
+     * Optional encrypted voice message attached to this message. Additive +
+     * optional exactly like [attachment], so it ships under `version = 1`.
+     * A voice message never carries a caption or rides in an album. See
+     * [ChatVoiceAttachment].
+     */
+    @SerialName("voice_attachment")
+    val voiceAttachment: ChatVoiceAttachment? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -136,7 +144,8 @@ data class ChatMessagePayload(
             variant == other.variant &&
             attachment == other.attachment &&
             videoAttachment == other.videoAttachment &&
-            attachments == other.attachments
+            attachments == other.attachments &&
+            voiceAttachment == other.voiceAttachment
     }
 
     override fun hashCode(): Int {
@@ -150,6 +159,7 @@ data class ChatMessagePayload(
         h = 31 * h + (attachment?.hashCode() ?: 0)
         h = 31 * h + (videoAttachment?.hashCode() ?: 0)
         h = 31 * h + (attachments?.hashCode() ?: 0)
+        h = 31 * h + (voiceAttachment?.hashCode() ?: 0)
         return h
     }
 }
