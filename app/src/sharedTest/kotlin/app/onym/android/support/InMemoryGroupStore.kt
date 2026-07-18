@@ -19,10 +19,15 @@ import kotlinx.coroutines.sync.withLock
 class InMemoryGroupStore : GroupStore {
 
     private val mutex = Mutex()
-    private val rows = LinkedHashMap<String, ChatGroup>()
+    // Keyed by the composite (id, ownerIdentityId) so two local
+    // identities can each hold their own row for the same group id —
+    // matches the production Room composite primary key.
+    private val rows = LinkedHashMap<Pair<String, String>, ChatGroup>()
+
+    private fun keyOf(group: ChatGroup) = group.id to group.ownerIdentityId
 
     suspend fun preload(groups: List<ChatGroup>) = mutex.withLock {
-        for (g in groups) rows[g.id] = g
+        for (g in groups) rows[keyOf(g)] = g
     }
 
     override suspend fun list(): List<ChatGroup> = mutex.withLock {
@@ -42,20 +47,23 @@ class InMemoryGroupStore : GroupStore {
     }
 
     override suspend fun insertOrUpdate(group: ChatGroup): Boolean = mutex.withLock {
-        val isNew = !rows.containsKey(group.id)
-        rows[group.id] = group
+        val key = keyOf(group)
+        val isNew = !rows.containsKey(key)
+        rows[key] = group
         isNew
     }
 
-    override suspend fun markPublished(id: String, commitment: ByteArray?) = mutex.withLock {
-        val existing = rows[id] ?: return@withLock
-        rows[id] = existing.copy(
-            isPublishedOnChain = true,
-            commitment = commitment ?: existing.commitment,
-        )
-    }
+    override suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?) =
+        mutex.withLock {
+            val key = id to ownerIdentityId
+            val existing = rows[key] ?: return@withLock
+            rows[key] = existing.copy(
+                isPublishedOnChain = true,
+                commitment = commitment ?: existing.commitment,
+            )
+        }
 
-    override suspend fun delete(id: String) {
-        mutex.withLock { rows.remove(id) }
+    override suspend fun delete(id: String, ownerIdentityId: String) {
+        mutex.withLock { rows.remove(id to ownerIdentityId) }
     }
 }

@@ -1,7 +1,7 @@
 package app.onym.android.group
 
 import androidx.room.Entity
-import androidx.room.PrimaryKey
+import androidx.room.Index
 
 /**
  * Room row shape for one chat group on disk. Splits the schema into
@@ -36,20 +36,36 @@ import androidx.room.PrimaryKey
  *
  * Mirrors `PersistedGroup.swift` from onym-ios PR #25.
  */
-@Entity(tableName = "groups")
+@Entity(
+    tableName = "groups",
+    // Uniqueness is the COMPOSITE (id, ownerIdentityId), not `id`
+    // alone. The same on-chain group can be joined by more than one
+    // local identity on a single device (one identity invites another
+    // to the same chat); each identity must keep its own row. Keying on
+    // `id` alone made the second joiner's `@Update` overwrite the first
+    // identity's `ownerIdentityId` — "last invited identity wins", and
+    // the chat vanished for the earlier one. Mirrors the composite
+    // `#Unique([id, ownerIdentityId])` on iOS `PersistedGroup`.
+    primaryKeys = ["id", "ownerIdentityId"],
+    // The composite PK indexes (id, ownerIdentityId); the per-identity
+    // list filter is `WHERE ownerIdentityId = :id`, which that leading-
+    // column index can't serve — keep a standalone index for it.
+    indices = [Index(value = ["ownerIdentityId"])],
+)
 data class PersistedGroup(
-    @PrimaryKey val id: String,
+    /** 64-char hex of the 32-byte group ID. Not unique on its own —
+     *  part of the composite primary key with [ownerIdentityId]. */
+    val id: String,
     val createdAt: Long,
     val epoch: Long,
     val tierRaw: Int,
     val groupTypeRaw: String,
     val isPublishedOnChain: Boolean,
-    /** [app.onym.android.identity.IdentityId.value]. Indexed (PR-3
-     *  added the column) so the per-identity flow filter (`SELECT *
-     *  FROM groups WHERE ownerIdentityId = :id`) doesn't full-scan.
-     *  Schema bumped to 3 — `fallbackToDestructiveMigration` cleans
-     *  any stale rows from the previous shape (no production data;
-     *  greenfield licence per the multi-identity spec). */
+    /** [app.onym.android.identity.IdentityId.value]. Part of the
+     *  composite primary key (with [id]) so a group joined by two
+     *  local identities keeps a row per identity, and indexed so the
+     *  per-identity flow filter (`SELECT * FROM groups WHERE
+     *  ownerIdentityId = :id`) doesn't full-scan. */
     val ownerIdentityId: String,
 
     val encryptedName: ByteArray,

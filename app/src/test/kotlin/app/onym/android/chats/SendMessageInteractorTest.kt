@@ -289,7 +289,7 @@ class SendMessageInteractorTest {
 
         fixture.interactor.retry(groupIdHex, failed.id)
 
-        val refreshed = fixture.messageStore.findById(failed.id)!!
+        val refreshed = fixture.messageStore.findById(failed.id, failed.ownerIdentityId)!!
         assertEquals(MessageStatus.SENT, refreshed.status)
         // The wire payload re-used the original messageId so the
         // receiver dedups against any prior delivery — assert the
@@ -309,7 +309,7 @@ class SendMessageInteractorTest {
         fixture.interactor.retry(groupIdHex, failed.id)
         assertEquals(
             MessageStatus.FAILED,
-            fixture.messageStore.findById(failed.id)!!.status,
+            fixture.messageStore.findById(failed.id, failed.ownerIdentityId)!!.status,
         )
     }
 
@@ -335,7 +335,7 @@ class SendMessageInteractorTest {
         // Status unchanged; no envelope shipped.
         assertEquals(
             MessageStatus.SENT,
-            fixture.messageStore.findById(sent.id)!!.status,
+            fixture.messageStore.findById(sent.id, sent.ownerIdentityId)!!.status,
         )
         assertTrue(fixture.transport.sends().isEmpty())
     }
@@ -352,7 +352,7 @@ class SendMessageInteractorTest {
         fixture.interactor.retry(groupIdHex, pending.id)
         assertEquals(
             MessageStatus.PENDING,
-            fixture.messageStore.findById(pending.id)!!.status,
+            fixture.messageStore.findById(pending.id, pending.ownerIdentityId)!!.status,
         )
         assertTrue(fixture.transport.sends().isEmpty())
     }

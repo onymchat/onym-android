@@ -105,7 +105,7 @@ class GroupRepositoryTest {
         repo.reload()
 
         val onchainCommitment = ByteArray(32) { 0x42 }
-        repo.markPublished(group.id, onchainCommitment)
+        repo.markPublished(group.id, group.ownerIdentityId, onchainCommitment)
 
         val snapshot = repo.snapshots.value.single()
         assertTrue(snapshot.isPublishedOnChain)
@@ -120,7 +120,7 @@ class GroupRepositoryTest {
         val repo = makeRepo(store, active = aliceId)
         repo.reload()
 
-        repo.delete(group.id)
+        repo.delete(group.id, group.ownerIdentityId)
         assertTrue(repo.snapshots.value.isEmpty())
     }
 

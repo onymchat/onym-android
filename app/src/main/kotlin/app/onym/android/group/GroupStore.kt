@@ -46,9 +46,15 @@ interface GroupStore {
      * existing commitment column is preserved (the relayer's
      * `get_state` is the source of truth post-anchor; if we don't
      * have a fresh value, we don't blow away whatever's there).
+     *
+     * Scoped to the composite `(id, ownerIdentityId)` so a group
+     * joined by more than one local identity flips only the given
+     * identity's row.
      */
-    suspend fun markPublished(id: String, commitment: ByteArray?)
+    suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?)
 
-    /** No-op if [id] is absent. */
-    suspend fun delete(id: String)
+    /** Delete the `(id, ownerIdentityId)` row. No-op if absent. Scoped
+     *  to the owner so another identity's copy of the same group
+     *  survives. */
+    suspend fun delete(id: String, ownerIdentityId: String)
 }

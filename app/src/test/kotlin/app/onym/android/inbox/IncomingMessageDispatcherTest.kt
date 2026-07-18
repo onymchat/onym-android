@@ -634,14 +634,14 @@ private class InMemoryGroupStore : GroupStore {
         rows[group.id] = group
         return isNew
     }
-    override suspend fun markPublished(id: String, commitment: ByteArray?) {
+    override suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?) {
         val existing = rows[id] ?: return
         rows[id] = existing.copy(
             isPublishedOnChain = true,
             commitment = commitment ?: existing.commitment,
         )
     }
-    override suspend fun delete(id: String) { rows.remove(id) }
+    override suspend fun delete(id: String, ownerIdentityId: String) { rows.remove(id) }
 
     /** Test-only helper — replace a row by id without going through
      *  insertOrUpdate's "preserve createdAt" branch. */

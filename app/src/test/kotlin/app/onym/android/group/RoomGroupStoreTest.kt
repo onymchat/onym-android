@@ -93,7 +93,7 @@ class RoomGroupStoreTest {
         val group = makeGroup(id = "ab".repeat(32), name = "Family")
         store.insertOrUpdate(group)
 
-        val raw = db.groupDao().findById(group.id)!!
+        val raw = db.groupDao().findByIdAndOwner(group.id, group.ownerIdentityId)!!
         assertNotEquals(
             "encryptedName must not contain the plaintext name",
             plaintextName.toList(),
@@ -147,7 +147,7 @@ class RoomGroupStoreTest {
         store.insertOrUpdate(group)
 
         val onchainCommitment = ByteArray(32) { 0x42 }
-        store.markPublished(group.id, onchainCommitment)
+        store.markPublished(group.id, group.ownerIdentityId, onchainCommitment)
 
         val listed = store.list()
         assertTrue(listed[0].isPublishedOnChain)
@@ -156,7 +156,7 @@ class RoomGroupStoreTest {
 
     @Test
     fun markPublished_unknownIdIsNoOp() = runTest {
-        store.markPublished("ff".repeat(32), null)
+        store.markPublished("ff".repeat(32), "test-owner", null)
         assertTrue("no group existed; list must stay empty", store.list().isEmpty())
     }
 
@@ -166,7 +166,7 @@ class RoomGroupStoreTest {
         store.insertOrUpdate(group)
         val originalCommitment = group.commitment
 
-        store.markPublished(group.id, null)
+        store.markPublished(group.id, group.ownerIdentityId, null)
 
         val listed = store.list().single()
         assertTrue(listed.isPublishedOnChain)
@@ -185,8 +185,45 @@ class RoomGroupStoreTest {
         store.insertOrUpdate(group)
         assertEquals(1, store.list().size)
 
-        store.delete(group.id)
+        store.delete(group.id, group.ownerIdentityId)
         assertTrue(store.list().isEmpty())
+    }
+
+    // ─── multi-identity (same group id, two owners) ───────────────
+
+    @Test
+    fun insertOrUpdate_sameGroupIdDifferentOwners_keepsBothRows() = runTest {
+        // Regression: two identities on one device joining the SAME
+        // on-chain group must each keep their own row. Before the
+        // composite (id, ownerIdentityId) key the second insert's
+        // @Update overwrote the first identity's owner — "last invited
+        // identity wins" and the chat vanished for the earlier one.
+        val sharedId = "fe".repeat(32)
+        val a = makeGroup(id = sharedId, name = "A's copy", owner = "owner-a")
+        val b = makeGroup(id = sharedId, name = "B's copy", owner = "owner-b")
+
+        assertTrue(store.insertOrUpdate(a))
+        assertTrue("second owner must be a fresh insert", store.insertOrUpdate(b))
+
+        assertEquals(1, store.listForOwner("owner-a").size)
+        assertEquals(1, store.listForOwner("owner-b").size)
+        assertEquals(2, store.list().size)
+    }
+
+    @Test
+    fun delete_isScopedToOwner() = runTest {
+        val sharedId = "fd".repeat(32)
+        store.insertOrUpdate(makeGroup(id = sharedId, name = "A", owner = "owner-a"))
+        store.insertOrUpdate(makeGroup(id = sharedId, name = "B", owner = "owner-b"))
+
+        store.delete(sharedId, "owner-a")
+
+        assertTrue(store.listForOwner("owner-a").isEmpty())
+        assertEquals(
+            "deleting one identity's copy leaves the other's row",
+            1,
+            store.listForOwner("owner-b").size,
+        )
     }
 
     // ─── ordering ─────────────────────────────────────────────────
@@ -236,7 +273,7 @@ class RoomGroupStoreTest {
     fun memberProfiles_emptyMapPersistsAsNullColumn() = runTest {
         val group = makeGroup(id = "fb".repeat(32), name = "G", memberProfiles = emptyMap())
         store.insertOrUpdate(group)
-        val raw = db.groupDao().findById(group.id)!!
+        val raw = db.groupDao().findByIdAndOwner(group.id, group.ownerIdentityId)!!
         assertNull(raw.encryptedMemberProfilesJson)
         // Decode side maps null → emptyMap.
         assertEquals(emptyMap<String, MemberProfile>(), store.list().single().memberProfiles)
@@ -250,7 +287,7 @@ class RoomGroupStoreTest {
         val group = makeGroup(id = "fc".repeat(32), name = "G").copy(avatar = avatar)
         store.insertOrUpdate(group)
 
-        val raw = db.groupDao().findById(group.id)!!
+        val raw = db.groupDao().findByIdAndOwner(group.id, group.ownerIdentityId)!!
         assertNotEquals(
             "encryptedAvatar must not contain the plaintext JPEG bytes",
             avatar.toList(),
@@ -263,7 +300,7 @@ class RoomGroupStoreTest {
     fun avatar_nullPersistsAsNullColumn() = runTest {
         val group = makeGroup(id = "fd".repeat(32), name = "G")
         store.insertOrUpdate(group)
-        val raw = db.groupDao().findById(group.id)!!
+        val raw = db.groupDao().findByIdAndOwner(group.id, group.ownerIdentityId)!!
         assertNull(raw.encryptedAvatar)
         assertNull(store.list().single().avatar)
     }
@@ -276,6 +313,7 @@ class RoomGroupStoreTest {
         adminPubkeyHex: String? = null,
         createdAtMillis: Long = 1_700_000_000_000L,
         memberProfiles: Map<String, MemberProfile> = emptyMap(),
+        owner: String = "test-owner",
     ): ChatGroup {
         val member = GovernanceMember(
             publicKeyCompressed = ByteArray(48) { 0x11 },
@@ -295,7 +333,7 @@ class RoomGroupStoreTest {
             groupType = SepGroupType.TYRANNY,
             adminPubkeyHex = adminPubkeyHex,
             isPublishedOnChain = false,
-            ownerIdentityId = "test-owner",
+            ownerIdentityId = owner,
         )
     }
 

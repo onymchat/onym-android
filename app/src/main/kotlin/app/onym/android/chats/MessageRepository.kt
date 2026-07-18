@@ -94,11 +94,14 @@ class MessageRepository(
     }
 
     /**
-     * Look up one message by id. Goes through the store, not the
-     * cache, so the retry-on-failed path doesn't depend on the chat
-     * thread being currently subscribed.
+     * Look up one identity's copy of a message by id. Goes through the
+     * store, not the cache, so the retry-on-failed path doesn't depend
+     * on the chat thread being currently subscribed. Scoped to the
+     * owner so the same wire id held by another local identity is never
+     * returned in its place.
      */
-    suspend fun findById(id: UUID): ChatMessage? = store.findById(id)
+    suspend fun findById(id: UUID, ownerIdentityId: String): ChatMessage? =
+        store.findById(id, ownerIdentityId)
 
     /**
      * Persist [message] and emit on the corresponding group's
@@ -113,7 +116,16 @@ class MessageRepository(
      */
     suspend fun append(message: ChatMessage): Boolean = mutex.withLock {
         val inserted = store.insert(message)
-        if (inserted) refreshGroupLocked(message.ownerIdentityId, message.groupId)
+        // The cached per-group flow holds the ACTIVE identity's view.
+        // Only refresh it when the inserted row belongs to the active
+        // identity — a background insert for another local identity
+        // (the inbox fan-out delivers to every identity concurrently)
+        // must not overwrite the active thread with the other
+        // identity's rows.
+        val activeOwnerId = identity.currentIdentityId.value?.value
+        if (inserted && message.ownerIdentityId == activeOwnerId) {
+            refreshGroupLocked(activeOwnerId, message.groupId)
+        }
         inserted
     }
 
@@ -123,11 +135,15 @@ class MessageRepository(
      * status callbacks land on the outgoing pipeline without
      * needing to know the source group.
      */
-    suspend fun updateStatus(id: UUID, status: MessageStatus) = mutex.withLock {
-        store.updateStatus(id, status)
+    suspend fun updateStatus(id: UUID, ownerIdentityId: String, status: MessageStatus) = mutex.withLock {
+        store.updateStatus(id, ownerIdentityId, status)
         for ((_, flow) in perGroup) {
             val current = flow.value
-            val replaced = current.map { if (it.id == id) it.copy(status = status) else it }
+            // Match on (id, owner) — the same wire id can exist under a
+            // second identity, whose row must not be touched here.
+            val replaced = current.map {
+                if (it.id == id && it.ownerIdentityId == ownerIdentityId) it.copy(status = status) else it
+            }
             // Only emit when a row actually changed — avoids spurious
             // re-renders on groups that didn't contain the id.
             if (replaced !== current && replaced != current) {
@@ -144,13 +160,13 @@ class MessageRepository(
      * duplicate receipt, or a receipt for an unknown / incoming /
      * failed row all do nothing. See [MessageStatus.deliveryRank].
      */
-    suspend fun upgradeStatus(id: UUID, to: MessageStatus) {
+    suspend fun upgradeStatus(id: UUID, ownerIdentityId: String, to: MessageStatus) {
         val newRank = to.deliveryRank ?: return
-        val message = store.findById(id) ?: return
+        val message = store.findById(id, ownerIdentityId) ?: return
         if (message.direction != MessageDirection.OUTGOING) return
         val currentRank = message.status.deliveryRank ?: return
         if (newRank <= currentRank) return
-        updateStatus(id, to)
+        updateStatus(id, ownerIdentityId, to)
     }
 
     /**
@@ -174,9 +190,16 @@ class MessageRepository(
      * Cascade entry point for group deletion. Drops the store rows
      * and removes the cached flow.
      */
-    suspend fun removeForGroup(groupId: String) = mutex.withLock {
-        store.deleteForGroup(groupId)
-        perGroup.remove(groupId)?.also { it.value = emptyList() }
+    suspend fun removeForGroup(groupId: String, ownerIdentityId: String) = mutex.withLock {
+        store.deleteForGroup(groupId, ownerIdentityId)
+        // The cached flow holds the active identity's view; only drop
+        // it when the deletion targets that identity. Another identity's
+        // copy of the same group id (and its cache, if ever loaded)
+        // is unaffected.
+        val activeOwnerId = identity.currentIdentityId.value?.value
+        if (ownerIdentityId == activeOwnerId) {
+            perGroup.remove(groupId)?.also { it.value = emptyList() }
+        }
     }
 
     // ─── private ──────────────────────────────────────────────────

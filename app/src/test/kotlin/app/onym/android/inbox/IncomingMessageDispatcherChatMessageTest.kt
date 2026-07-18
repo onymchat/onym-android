@@ -253,7 +253,7 @@ class IncomingMessageDispatcherChatMessageTest {
         val id = UUID.randomUUID()
         fx.messageRepository.append(outgoingMessage(id, MessageStatus.SENT))
         fx.dispatchReceipt(ownerIdentity, receipt(ChatReceiptPayload.Kind.DELIVERED, listOf(id)))
-        assertEquals(MessageStatus.DELIVERED, fx.messageStore.findById(id)?.status)
+        assertEquals(MessageStatus.DELIVERED, fx.messageStore.findById(id, ownerIdentity.value)?.status)
     }
 
     @Test
@@ -267,14 +267,14 @@ class IncomingMessageDispatcherChatMessageTest {
             receipt(ChatReceiptPayload.Kind.READ, listOf(id)),
             readReceiptsEnabled = { false },
         )
-        assertEquals(MessageStatus.DELIVERED, fx.messageStore.findById(id)?.status)
+        assertEquals(MessageStatus.DELIVERED, fx.messageStore.findById(id, ownerIdentity.value)?.status)
 
         fx.dispatchReceipt(
             ownerIdentity,
             receipt(ChatReceiptPayload.Kind.READ, listOf(id)),
             readReceiptsEnabled = { true },
         )
-        assertEquals(MessageStatus.READ, fx.messageStore.findById(id)?.status)
+        assertEquals(MessageStatus.READ, fx.messageStore.findById(id, ownerIdentity.value)?.status)
     }
 
     private fun receipt(kind: ChatReceiptPayload.Kind, ids: List<UUID>) = ChatReceiptPayload(

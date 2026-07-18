@@ -31,15 +31,18 @@ interface GroupDao {
     @Query("SELECT * FROM groups WHERE ownerIdentityId = :ownerIdentityId ORDER BY createdAt DESC")
     suspend fun listForOwner(ownerIdentityId: String): List<PersistedGroup>
 
-    @Query("SELECT * FROM groups WHERE id = :id LIMIT 1")
-    suspend fun findById(id: String): PersistedGroup?
+    /** Look up one identity's copy of a group. Scoped to the
+     *  composite `(id, ownerIdentityId)` key so a second identity's
+     *  row for the same group id is never returned in its place. */
+    @Query("SELECT * FROM groups WHERE id = :id AND ownerIdentityId = :ownerIdentityId LIMIT 1")
+    suspend fun findByIdAndOwner(id: String, ownerIdentityId: String): PersistedGroup?
 
     /**
-     * Pure insert. Use [findById] first to decide between insert
-     * and [update] so [RoomGroupStore.insertOrUpdate] can return
-     * `true` on insert / `false` on update. Throws on PK conflict
-     * (the store's caller has already gone through [findById] and
-     * routed accordingly).
+     * Pure insert. Use [findByIdAndOwner] first to decide between
+     * insert and [update] so [RoomGroupStore.insertOrUpdate] can
+     * return `true` on insert / `false` on update. Throws on PK
+     * conflict (the store's caller has already gone through
+     * [findByIdAndOwner] and routed accordingly).
      */
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(record: PersistedGroup)
@@ -51,21 +54,28 @@ interface GroupDao {
      * Flip [PersistedGroup.isPublishedOnChain] to true and replace
      * the [PersistedGroup.encryptedCommitment]. Caller passes a
      * non-null encrypted blob OR omits the column update entirely
-     * via [markPublishedFlagOnly].
+     * via [markPublishedFlagOnly]. Scoped to `(id, ownerIdentityId)`
+     * so it flips only the creating identity's row.
      */
-    @Query("UPDATE groups SET isPublishedOnChain = 1, encryptedCommitment = :encryptedCommitment WHERE id = :id")
-    suspend fun markPublishedWithCommitment(id: String, encryptedCommitment: ByteArray): Int
+    @Query(
+        "UPDATE groups SET isPublishedOnChain = 1, encryptedCommitment = :encryptedCommitment " +
+            "WHERE id = :id AND ownerIdentityId = :ownerIdentityId",
+    )
+    suspend fun markPublishedWithCommitment(id: String, ownerIdentityId: String, encryptedCommitment: ByteArray): Int
 
     /**
      * Flip [PersistedGroup.isPublishedOnChain] to true without
      * touching the commitment column — used when the post-anchor
      * flow doesn't have a fresh commitment to write.
      */
-    @Query("UPDATE groups SET isPublishedOnChain = 1 WHERE id = :id")
-    suspend fun markPublishedFlagOnly(id: String): Int
+    @Query("UPDATE groups SET isPublishedOnChain = 1 WHERE id = :id AND ownerIdentityId = :ownerIdentityId")
+    suspend fun markPublishedFlagOnly(id: String, ownerIdentityId: String): Int
 
-    @Query("DELETE FROM groups WHERE id = :id")
-    suspend fun delete(id: String): Int
+    /** Delete one identity's copy of a group. Scoped to the owner so
+     *  deleting a chat for one identity leaves another identity's copy
+     *  of the same group intact. */
+    @Query("DELETE FROM groups WHERE id = :id AND ownerIdentityId = :ownerIdentityId")
+    suspend fun delete(id: String, ownerIdentityId: String): Int
 
     /** Cascade delete for the identity-removal flow (PR-3 hooks
      *  `IdentityRepository.setRemovalListener` to call this). Returns

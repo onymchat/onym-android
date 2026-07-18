@@ -88,7 +88,7 @@ class RoomMessageStoreTest {
         // The pointer is a plain column — readable on the raw row too.
         assertEquals(
             target.toString(),
-            db.messageDao().findById(msg.id.toString())!!.replyToMessageId,
+            db.messageDao().findByIdAndOwner(msg.id.toString(), msg.ownerIdentityId)!!.replyToMessageId,
         )
     }
 
@@ -100,7 +100,7 @@ class RoomMessageStoreTest {
         val msg = makeMessage(body = "secret payload")
         store.insert(msg)
 
-        val raw = db.messageDao().findById(msg.id.toString())!!
+        val raw = db.messageDao().findByIdAndOwner(msg.id.toString(), msg.ownerIdentityId)!!
         assertNotEquals(
             "encryptedBody must not contain the plaintext body",
             plaintextBody.toList(),
@@ -121,11 +121,11 @@ class RoomMessageStoreTest {
     fun updateStatus_changesStatusWithoutTouchingEncryptedColumns() = runTest {
         val msg = makeMessage(body = "draft")
         store.insert(msg)
-        val originalRow = db.messageDao().findById(msg.id.toString())!!
+        val originalRow = db.messageDao().findByIdAndOwner(msg.id.toString(), msg.ownerIdentityId)!!
 
-        store.updateStatus(msg.id, MessageStatus.SENT)
+        store.updateStatus(msg.id, msg.ownerIdentityId, MessageStatus.SENT)
 
-        val updatedRow = db.messageDao().findById(msg.id.toString())!!
+        val updatedRow = db.messageDao().findByIdAndOwner(msg.id.toString(), msg.ownerIdentityId)!!
         assertEquals(MessageStatus.SENT.name, updatedRow.statusRaw)
         // Hot path skips the encryption round-trip: encryptedBody +
         // encryptedSenderBlsPubkeyHex bytes are unchanged byte-for-byte.
@@ -143,7 +143,7 @@ class RoomMessageStoreTest {
 
     @Test
     fun updateStatus_unknownIdIsNoOp() = runTest {
-        store.updateStatus(UUID.randomUUID(), MessageStatus.SENT)
+        store.updateStatus(UUID.randomUUID(), "test-owner", MessageStatus.SENT)
         assertTrue(store.listForGroup("alice", "00".repeat(32)).isEmpty())
     }
 
@@ -202,10 +202,55 @@ class RoomMessageStoreTest {
         store.insert(makeMessage(owner = "alice", group = groupA, body = "a-A2"))
         store.insert(makeMessage(owner = "alice", group = groupB, body = "a-B1"))
 
-        val deleted = store.deleteForGroup(groupA)
+        val deleted = store.deleteForGroup(groupA, "alice")
         assertEquals(2, deleted)
         assertTrue(store.listForGroup("alice", groupA).isEmpty())
         assertEquals(1, store.listForGroup("alice", groupB).size)
+    }
+
+    // ─── multi-identity (same wire id, two owners) ────────────────
+
+    @Test
+    fun insert_sameIdTwoOwners_keepsBothRowsWithOwnDirection() = runTest {
+        // Regression: the same wire message fanned out to two local
+        // identities must keep a row per identity. Before the composite
+        // (id, ownerIdentityId) key the second insert's IGNORE dropped
+        // it — the second identity never saw the message, and a shared
+        // row could flip an outgoing message to incoming.
+        val groupId = "aa".repeat(32)
+        val sharedId = UUID.randomUUID()
+        val outgoing = makeMessage(owner = "owner-a", group = groupId, body = "mine")
+            .copy(id = sharedId, direction = MessageDirection.OUTGOING)
+        val incoming = makeMessage(owner = "owner-b", group = groupId, body = "mine")
+            .copy(id = sharedId, direction = MessageDirection.INCOMING)
+
+        assertTrue(store.insert(outgoing))
+        assertTrue("second owner is a fresh insert, not an IGNORE", store.insert(incoming))
+
+        assertEquals(
+            listOf(MessageDirection.OUTGOING),
+            store.listForGroup("owner-a", groupId).map { it.direction },
+        )
+        assertEquals(
+            listOf(MessageDirection.INCOMING),
+            store.listForGroup("owner-b", groupId).map { it.direction },
+        )
+    }
+
+    @Test
+    fun deleteForGroup_isScopedToOwner() = runTest {
+        val groupId = "aa".repeat(32)
+        store.insert(makeMessage(owner = "owner-a", group = groupId, body = "a"))
+        store.insert(makeMessage(owner = "owner-b", group = groupId, body = "b"))
+
+        store.deleteForGroup(groupId, "owner-a")
+
+        assertTrue(store.listForGroup("owner-a", groupId).isEmpty())
+        assertEquals(
+            "deleting one identity's thread leaves the other's copy",
+            1,
+            store.listForGroup("owner-b", groupId).size,
+        )
     }
 
     // ─── tolerant decode ──────────────────────────────────────────
@@ -229,7 +274,7 @@ class RoomMessageStoreTest {
         )
         db.messageDao().insert(bogusRow)
         // Sanity: row was actually written.
-        assertNotNull(db.messageDao().findById(bogusRow.id))
+        assertNotNull(db.messageDao().findByIdAndOwner(bogusRow.id, bogusRow.ownerIdentityId))
 
         val listed = store.listForGroup(good.ownerIdentityId, good.groupId)
         assertEquals("bogus row must be filtered out", 1, listed.size)

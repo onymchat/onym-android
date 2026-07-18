@@ -300,6 +300,7 @@ class OnymApplication : Application() {
                     GroupDatabaseMigrations.MIGRATION_3_4,
                     GroupDatabaseMigrations.MIGRATION_4_5,
                     GroupDatabaseMigrations.MIGRATION_5_6,
+                    GroupDatabaseMigrations.MIGRATION_6_7,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -334,6 +335,7 @@ class OnymApplication : Application() {
             )
                 .addMigrations(
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_1_2,
+                    app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_2_3,
                 )
                 .fallbackToDestructiveMigration()
                 .build()

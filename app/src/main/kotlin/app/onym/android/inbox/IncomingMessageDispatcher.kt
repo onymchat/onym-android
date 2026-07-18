@@ -192,7 +192,7 @@ class IncomingMessageDispatcher(
         // ignoreUnknownKeys.
         val receipt = tryDecodeReceipt(envelope.plaintext)
         if (receipt != null) {
-            applyReceipt(receipt)
+            applyReceipt(receipt, ownerIdentityId)
             return
         }
 
@@ -541,7 +541,7 @@ class IncomingMessageDispatcher(
      * enforces the ladder). READ receipts are honored only when this
      * device also sends them (symmetric).
      */
-    private suspend fun applyReceipt(receipt: ChatReceiptPayload) {
+    private suspend fun applyReceipt(receipt: ChatReceiptPayload, ownerIdentityId: IdentityId) {
         val messages = messageRepository ?: return
         val newStatus = when (receipt.kind) {
             ChatReceiptPayload.Kind.DELIVERED -> MessageStatus.DELIVERED
@@ -551,7 +551,9 @@ class IncomingMessageDispatcher(
             }
         }
         for (id in receipt.messageIds) {
-            messages.upgradeStatus(id, newStatus)
+            // The receipt acks OUR (this inbox's identity's) outgoing
+            // messages — scope the upgrade to that owner.
+            messages.upgradeStatus(id, ownerIdentityId.value, newStatus)
         }
     }
 

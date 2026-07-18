@@ -206,8 +206,8 @@ private class BroadcasterGroupStore : GroupStore {
         rows[group.id] = group
         return isNew
     }
-    override suspend fun markPublished(id: String, commitment: ByteArray?) {}
-    override suspend fun delete(id: String) { rows.remove(id) }
+    override suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?) {}
+    override suspend fun delete(id: String, ownerIdentityId: String) { rows.remove(id) }
 }
 
 private class BroadcasterIdentity(private val id: IdentityId) : ActiveIdentityProvider {

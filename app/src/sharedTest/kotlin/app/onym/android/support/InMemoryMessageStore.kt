@@ -19,10 +19,15 @@ import java.util.UUID
 class InMemoryMessageStore : MessageStore {
 
     private val mutex = Mutex()
-    private val rows = LinkedHashMap<String, ChatMessage>()
+    // Keyed by the composite (id, ownerIdentityId) so the same wire
+    // message fanned out to two local identities keeps a row per
+    // identity — matches the production Room composite primary key.
+    private val rows = LinkedHashMap<Pair<String, String>, ChatMessage>()
+
+    private fun keyOf(message: ChatMessage) = message.id.toString() to message.ownerIdentityId
 
     suspend fun preload(messages: List<ChatMessage>) = mutex.withLock {
-        for (m in messages) rows[m.id.toString()] = m
+        for (m in messages) rows[keyOf(m)] = m
     }
 
     override suspend fun listForGroup(
@@ -34,21 +39,22 @@ class InMemoryMessageStore : MessageStore {
             .sortedBy { it.sentAtMillis }
     }
 
-    override suspend fun findById(id: UUID): ChatMessage? = mutex.withLock {
-        rows[id.toString()]
+    override suspend fun findById(id: UUID, ownerIdentityId: String): ChatMessage? = mutex.withLock {
+        rows[id.toString() to ownerIdentityId]
     }
 
     override suspend fun insert(message: ChatMessage): Boolean = mutex.withLock {
-        val key = message.id.toString()
+        val key = keyOf(message)
         if (rows.containsKey(key)) return@withLock false
         rows[key] = message
         true
     }
 
-    override suspend fun updateStatus(id: UUID, status: MessageStatus) {
+    override suspend fun updateStatus(id: UUID, ownerIdentityId: String, status: MessageStatus) {
         mutex.withLock {
-            val existing = rows[id.toString()] ?: return@withLock
-            rows[id.toString()] = existing.copy(status = status)
+            val key = id.toString() to ownerIdentityId
+            val existing = rows[key] ?: return@withLock
+            rows[key] = existing.copy(status = status)
         }
     }
 
@@ -58,9 +64,9 @@ class InMemoryMessageStore : MessageStore {
         before - rows.size
     }
 
-    override suspend fun deleteForGroup(groupId: String): Int = mutex.withLock {
+    override suspend fun deleteForGroup(groupId: String, ownerIdentityId: String): Int = mutex.withLock {
         val before = rows.size
-        rows.values.removeAll { it.groupId == groupId }
+        rows.values.removeAll { it.groupId == groupId && it.ownerIdentityId == ownerIdentityId }
         before - rows.size
     }
 }

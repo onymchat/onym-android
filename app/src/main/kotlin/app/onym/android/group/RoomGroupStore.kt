@@ -45,11 +45,13 @@ class RoomGroupStore(
 
     override suspend fun insertOrUpdate(group: ChatGroup): Boolean = withContext(ioDispatcher) {
         val encoded = encode(group)
-        // Pre-check via findById so we can honour the
+        // Pre-check via findByIdAndOwner so we can honour the
         // "true on insert, false on update" contract precisely;
         // OnConflictStrategy.REPLACE alone would lose the original
-        // row's createdAt on update conflicts.
-        val existing = dao.findById(group.id)
+        // row's createdAt on update conflicts. Scoped to the owner so
+        // a second identity joining the same group id inserts its own
+        // row instead of overwriting the first identity's.
+        val existing = dao.findByIdAndOwner(group.id, group.ownerIdentityId)
         if (existing == null) {
             dao.insert(encoded)
             true
@@ -63,18 +65,18 @@ class RoomGroupStore(
         }
     }
 
-    override suspend fun markPublished(id: String, commitment: ByteArray?) {
+    override suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?) {
         withContext(ioDispatcher) {
             if (commitment != null) {
-                dao.markPublishedWithCommitment(id, encryption.encrypt(commitment))
+                dao.markPublishedWithCommitment(id, ownerIdentityId, encryption.encrypt(commitment))
             } else {
-                dao.markPublishedFlagOnly(id)
+                dao.markPublishedFlagOnly(id, ownerIdentityId)
             }
         }
     }
 
-    override suspend fun delete(id: String) {
-        withContext(ioDispatcher) { dao.delete(id) }
+    override suspend fun delete(id: String, ownerIdentityId: String) {
+        withContext(ioDispatcher) { dao.delete(id, ownerIdentityId) }
     }
 
     // ─── encode / decode boundary ──────────────────────────────────

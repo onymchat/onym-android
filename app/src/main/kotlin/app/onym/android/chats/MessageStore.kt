@@ -19,10 +19,11 @@ interface MessageStore {
      *  the chat-thread read path. */
     suspend fun listForGroup(ownerIdentityId: String, groupId: String): List<ChatMessage>
 
-    /** Single-message lookup by id. Returns `null` for unknown ids.
-     *  Drives the retry-on-failed path on
-     *  [app.onym.android.chats.SendMessageInteractor.retry]. */
-    suspend fun findById(id: UUID): ChatMessage?
+    /** Single-message lookup scoped to `(id, ownerIdentityId)`.
+     *  Returns `null` for unknown ids. Drives the retry-on-failed path
+     *  on [app.onym.android.chats.SendMessageInteractor.retry] and the
+     *  receipt-driven status upgrade. */
+    suspend fun findById(id: UUID, ownerIdentityId: String): ChatMessage?
 
     /** Idempotent insert on [ChatMessage.id]. Returns `true` on a
      *  fresh write, `false` when the row already exists. Nostr
@@ -32,14 +33,15 @@ interface MessageStore {
 
     /** Hot path for the outgoing send pipeline (pending → sent /
      *  failed) — skips the encryption round-trip the full row would
-     *  require. */
-    suspend fun updateStatus(id: UUID, status: MessageStatus)
+     *  require. Scoped to `(id, ownerIdentityId)` so it flips only the
+     *  addressed identity's copy of the message. */
+    suspend fun updateStatus(id: UUID, ownerIdentityId: String, status: MessageStatus)
 
     /** Cascade delete for the identity-removal flow. Returns the
      *  number of rows deleted. */
     suspend fun deleteForOwner(ownerIdentityId: String): Int
 
-    /** Cascade delete for the group-deletion flow. Returns the
-     *  number of rows deleted. */
-    suspend fun deleteForGroup(groupId: String): Int
+    /** Cascade delete for the group-deletion flow, scoped to the
+     *  owner. Returns the number of rows deleted. */
+    suspend fun deleteForGroup(groupId: String, ownerIdentityId: String): Int
 }

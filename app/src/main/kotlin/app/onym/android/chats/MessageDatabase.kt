@@ -26,7 +26,11 @@ import androidx.room.RoomDatabase
     // v2 (reply-to): adds the nullable `replyToMessageId` TEXT column
     // — onym-ios #173 parity. Additive + non-destructive; existing
     // rows decode to a null reply target (a non-reply message).
-    version = 2,
+    // v3 (composite PK): primary key becomes (id, ownerIdentityId) so
+    // the same fanned-out wire message can be stored per identity —
+    // fixes the second identity silently losing the message. Table
+    // rebuild; existing rows migrate cleanly.
+    version = 3,
     exportSchema = false,
 )
 abstract class MessageDatabase : RoomDatabase() {
@@ -51,6 +55,53 @@ object MessageDatabaseMigrations {
     val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE messages ADD COLUMN replyToMessageId TEXT")
+        }
+    }
+
+    /**
+     * v2 → v3: change the primary key from `id` alone to the composite
+     * `(id, ownerIdentityId)` so the same wire message fanned out to
+     * two local identities keeps a row per identity. SQLite can't ALTER
+     * a primary key in place, so rebuild the table and copy rows over,
+     * then recreate the two indices the entity declares. Existing rows
+     * migrate cleanly (their `id`s are still unique under the wider
+     * key).
+     */
+    val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `messages_new` (" +
+                    "`id` TEXT NOT NULL, " +
+                    "`groupId` TEXT NOT NULL, " +
+                    "`ownerIdentityId` TEXT NOT NULL, " +
+                    "`sentAt` INTEGER NOT NULL, " +
+                    "`directionRaw` TEXT NOT NULL, " +
+                    "`statusRaw` TEXT NOT NULL, " +
+                    "`groupTypeRaw` TEXT NOT NULL, " +
+                    "`encryptedSenderBlsPubkeyHex` BLOB NOT NULL, " +
+                    "`encryptedBody` BLOB NOT NULL, " +
+                    "`replyToMessageId` TEXT, " +
+                    "PRIMARY KEY(`id`, `ownerIdentityId`))",
+            )
+            db.execSQL(
+                "INSERT INTO `messages_new` (" +
+                    "`id`, `groupId`, `ownerIdentityId`, `sentAt`, `directionRaw`, " +
+                    "`statusRaw`, `groupTypeRaw`, `encryptedSenderBlsPubkeyHex`, " +
+                    "`encryptedBody`, `replyToMessageId`) " +
+                    "SELECT `id`, `groupId`, `ownerIdentityId`, `sentAt`, `directionRaw`, " +
+                    "`statusRaw`, `groupTypeRaw`, `encryptedSenderBlsPubkeyHex`, " +
+                    "`encryptedBody`, `replyToMessageId` FROM `messages`",
+            )
+            db.execSQL("DROP TABLE `messages`")
+            db.execSQL("ALTER TABLE `messages_new` RENAME TO `messages`")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_messages_groupId` " +
+                    "ON `messages` (`groupId`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_messages_ownerIdentityId` " +
+                    "ON `messages` (`ownerIdentityId`)",
+            )
         }
     }
 }

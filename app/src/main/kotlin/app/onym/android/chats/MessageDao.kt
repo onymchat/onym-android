@@ -36,8 +36,11 @@ interface MessageDao {
         groupId: String,
     ): List<PersistedMessage>
 
-    @Query("SELECT * FROM messages WHERE id = :id LIMIT 1")
-    suspend fun findById(id: String): PersistedMessage?
+    /** Single-message lookup scoped to the composite
+     *  `(id, ownerIdentityId)` key so one identity's copy is never
+     *  returned in place of another's. */
+    @Query("SELECT * FROM messages WHERE id = :id AND ownerIdentityId = :ownerIdentityId LIMIT 1")
+    suspend fun findByIdAndOwner(id: String, ownerIdentityId: String): PersistedMessage?
 
     /** Idempotent on [PersistedMessage.id]: a re-delivery of the
      *  same wire message is a silent no-op rather than a thrown
@@ -52,8 +55,8 @@ interface MessageDao {
      *  status transition) without re-encrypting the body. Skipping
      *  the encryption round-trip matters because send-confirmation
      *  callbacks fire on every relay ACK. Returns the row count. */
-    @Query("UPDATE messages SET statusRaw = :statusRaw WHERE id = :id")
-    suspend fun updateStatus(id: String, statusRaw: String): Int
+    @Query("UPDATE messages SET statusRaw = :statusRaw WHERE id = :id AND ownerIdentityId = :ownerIdentityId")
+    suspend fun updateStatus(id: String, ownerIdentityId: String, statusRaw: String): Int
 
     /** Cascade delete for the identity-removal flow. Returns the
      *  number of rows deleted so the caller can log cleanup size. */
@@ -61,8 +64,9 @@ interface MessageDao {
     suspend fun deleteForOwner(ownerIdentityId: String): Int
 
     /** Cascade delete for the group-deletion flow (a user nukes a
-     *  group → its messages go with it). Returns the number of rows
-     *  deleted. */
-    @Query("DELETE FROM messages WHERE groupId = :groupId")
-    suspend fun deleteForGroup(groupId: String): Int
+     *  group → its messages go with it). Scoped to the owner so
+     *  deleting a chat for one identity leaves another identity's copy
+     *  of the same group intact. Returns the number of rows deleted. */
+    @Query("DELETE FROM messages WHERE groupId = :groupId AND ownerIdentityId = :ownerIdentityId")
+    suspend fun deleteForGroup(groupId: String, ownerIdentityId: String): Int
 }

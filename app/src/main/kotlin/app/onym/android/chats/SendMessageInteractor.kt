@@ -125,10 +125,10 @@ class SendMessageInteractor(
             if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT
             else MessageStatus.FAILED
         } catch (e: EncodingException) {
-            messageRepository.updateStatus(messageId, MessageStatus.FAILED)
+            messageRepository.updateStatus(messageId, activeIdentityId.value, MessageStatus.FAILED)
             throw SendMessageError.EncodingFailed(e.message ?: e.javaClass.simpleName)
         }
-        messageRepository.updateStatus(messageId, finalStatus)
+        messageRepository.updateStatus(messageId, activeIdentityId.value, finalStatus)
 
         pending.copy(status = finalStatus)
     }
@@ -153,12 +153,16 @@ class SendMessageInteractor(
      * onym-ios PR #155.
      */
     suspend fun retry(groupId: String, messageId: java.util.UUID) = withContext(ioDispatcher) {
-        val message = messageRepository.findById(messageId) ?: return@withContext
+        // Resolve the active identity first so the message lookup is
+        // scoped to the right owner (a wire id can be held by two
+        // local identities).
+        val activeIdentityId = activeIdentity.currentIdentityId.value ?: return@withContext
+        val message = messageRepository.findById(messageId, activeIdentityId.value)
+            ?: return@withContext
         if (message.direction != MessageDirection.OUTGOING) return@withContext
         if (message.status != MessageStatus.FAILED) return@withContext
         if (message.groupId != groupId) return@withContext
 
-        val activeIdentityId = activeIdentity.currentIdentityId.value ?: return@withContext
         val activeSummary = identitiesFlow.value.firstOrNull { it.id == activeIdentityId }
             ?: return@withContext
         val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
@@ -176,7 +180,7 @@ class SendMessageInteractor(
 
         // Flip to PENDING immediately so the glyph swaps to the
         // in-flight clock before the network round-trip.
-        messageRepository.updateStatus(messageId, MessageStatus.PENDING)
+        messageRepository.updateStatus(messageId, activeIdentityId.value, MessageStatus.PENDING)
 
         // Preserve the original messageId + sentAt + reply target so
         // receivers dedup against any prior delivery via their
@@ -199,7 +203,7 @@ class SendMessageInteractor(
         } catch (_: EncodingException) {
             MessageStatus.FAILED
         }
-        messageRepository.updateStatus(messageId, finalStatus)
+        messageRepository.updateStatus(messageId, activeIdentityId.value, finalStatus)
     }
 
     /**

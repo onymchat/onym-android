@@ -113,7 +113,7 @@ class MessageRepositoryTest {
         repo.append(msg)
         val flow = repo.snapshots(groupA)
 
-        repo.updateStatus(msg.id, MessageStatus.SENT)
+        repo.updateStatus(msg.id, aliceId.value, MessageStatus.SENT)
         assertEquals(MessageStatus.SENT, flow.first().single().status)
     }
 
@@ -125,7 +125,7 @@ class MessageRepositoryTest {
         repo.append(msg)
         val before = repo.snapshots(groupA).first()
 
-        repo.updateStatus(UUID.randomUUID(), MessageStatus.SENT)
+        repo.updateStatus(UUID.randomUUID(), aliceId.value, MessageStatus.SENT)
 
         val after = repo.snapshots(groupA).first()
         assertEquals("status of existing rows must not change", before, after)
@@ -168,7 +168,7 @@ class MessageRepositoryTest {
         assertEquals(1, flowA.first().size)
         assertEquals(1, flowB.first().size)
 
-        repo.removeForGroup(groupA)
+        repo.removeForGroup(groupA, aliceId.value)
 
         // The cached flow for A is dropped — re-subscribing yields a
         // fresh empty flow (different identity from the original).
@@ -217,10 +217,10 @@ class MessageRepositoryTest {
         val repo = makeRepo(store, aliceId)
         val flow = repo.snapshots(groupA)
 
-        repo.upgradeStatus(msg.id, MessageStatus.DELIVERED)
+        repo.upgradeStatus(msg.id, aliceId.value, MessageStatus.DELIVERED)
         assertEquals(MessageStatus.DELIVERED, flow.first().first().status)
 
-        repo.upgradeStatus(msg.id, MessageStatus.READ)
+        repo.upgradeStatus(msg.id, aliceId.value, MessageStatus.READ)
         assertEquals(MessageStatus.READ, flow.first().first().status)
     }
 
@@ -234,7 +234,7 @@ class MessageRepositoryTest {
         val flow = repo.snapshots(groupA)
 
         // A late delivered receipt arriving after read must not lower it.
-        repo.upgradeStatus(msg.id, MessageStatus.DELIVERED)
+        repo.upgradeStatus(msg.id, aliceId.value, MessageStatus.DELIVERED)
         assertEquals(MessageStatus.READ, flow.first().first().status)
     }
 
@@ -247,8 +247,8 @@ class MessageRepositoryTest {
         val repo = makeRepo(store, aliceId)
         val flow = repo.snapshots(groupA)
 
-        repo.upgradeStatus(incoming.id, MessageStatus.DELIVERED)
-        repo.upgradeStatus(UUID.randomUUID(), MessageStatus.DELIVERED)  // unknown id
+        repo.upgradeStatus(incoming.id, aliceId.value, MessageStatus.DELIVERED)
+        repo.upgradeStatus(UUID.randomUUID(), aliceId.value, MessageStatus.DELIVERED)  // unknown id
         assertEquals(MessageStatus.RECEIVED, flow.first().first().status)
     }
 

@@ -318,7 +318,7 @@ open class CreateGroupInteractor(
             avatar = avatar,
         )
         groups.insert(group)
-        groups.markPublished(group.id, proof.commitment)
+        groups.markPublished(group.id, group.ownerIdentityId, proof.commitment)
 
         // 8. Reach each invitee. Tyranny pushes durable invite offers;
         //    every other type ships the membership-grant snapshot

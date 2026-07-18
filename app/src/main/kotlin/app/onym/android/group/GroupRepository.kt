@@ -104,13 +104,13 @@ class GroupRepository(
      * supplied, replaces whatever was held in memory; a `null`
      * commitment leaves the existing column untouched.
      */
-    suspend fun markPublished(id: String, commitment: ByteArray?) = mutex.withLock {
-        store.markPublished(id, commitment)
+    suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?) = mutex.withLock {
+        store.markPublished(id, ownerIdentityId, commitment)
         refreshLocked(identity.currentIdentityId.value)
     }
 
-    suspend fun delete(id: String) = mutex.withLock {
-        store.delete(id)
+    suspend fun delete(id: String, ownerIdentityId: String) = mutex.withLock {
+        store.delete(id, ownerIdentityId)
         refreshLocked(identity.currentIdentityId.value)
     }
 

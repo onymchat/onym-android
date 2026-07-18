@@ -201,14 +201,14 @@ private class AvatarInMemoryGroupStore : GroupStore {
         rows[group.id] = group
         return isNew
     }
-    override suspend fun markPublished(id: String, commitment: ByteArray?) {
+    override suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?) {
         val existing = rows[id] ?: return
         rows[id] = existing.copy(
             isPublishedOnChain = true,
             commitment = commitment ?: existing.commitment,
         )
     }
-    override suspend fun delete(id: String) { rows.remove(id) }
+    override suspend fun delete(id: String, ownerIdentityId: String) { rows.remove(id) }
 }
 
 private class AvatarConstantIdentity(private val id: IdentityId) : ActiveIdentityProvider {

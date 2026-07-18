@@ -31,25 +31,29 @@ class RoomMessageStore(
         dao.listForOwnerAndGroup(ownerIdentityId, groupId).mapNotNull(::decode)
     }
 
-    override suspend fun findById(id: UUID): ChatMessage? = withContext(ioDispatcher) {
-        dao.findById(id.toString())?.let(::decode)
-    }
+    override suspend fun findById(id: UUID, ownerIdentityId: String): ChatMessage? =
+        withContext(ioDispatcher) {
+            dao.findByIdAndOwner(id.toString(), ownerIdentityId)?.let(::decode)
+        }
 
     override suspend fun insert(message: ChatMessage): Boolean =
         withContext(ioDispatcher) {
-            // OnConflictStrategy.IGNORE returns -1 on a PK clash.
+            // OnConflictStrategy.IGNORE returns -1 on a (id, owner)
+            // clash — a genuine re-delivery to the same identity. A
+            // different identity's copy is a distinct composite key and
+            // inserts cleanly.
             dao.insert(encode(message)) != -1L
         }
 
-    override suspend fun updateStatus(id: UUID, status: MessageStatus) {
-        withContext(ioDispatcher) { dao.updateStatus(id.toString(), status.name) }
+    override suspend fun updateStatus(id: UUID, ownerIdentityId: String, status: MessageStatus) {
+        withContext(ioDispatcher) { dao.updateStatus(id.toString(), ownerIdentityId, status.name) }
     }
 
     override suspend fun deleteForOwner(ownerIdentityId: String): Int =
         withContext(ioDispatcher) { dao.deleteForOwner(ownerIdentityId) }
 
-    override suspend fun deleteForGroup(groupId: String): Int =
-        withContext(ioDispatcher) { dao.deleteForGroup(groupId) }
+    override suspend fun deleteForGroup(groupId: String, ownerIdentityId: String): Int =
+        withContext(ioDispatcher) { dao.deleteForGroup(groupId, ownerIdentityId) }
 
     // ─── encode / decode boundary ──────────────────────────────────
 

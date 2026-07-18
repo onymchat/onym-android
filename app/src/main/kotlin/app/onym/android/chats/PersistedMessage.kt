@@ -2,7 +2,6 @@ package app.onym.android.chats
 
 import androidx.room.Entity
 import androidx.room.Index
-import androidx.room.PrimaryKey
 
 /**
  * Room row shape for one chat message on disk. Splits into plain
@@ -38,13 +37,25 @@ import androidx.room.PrimaryKey
  */
 @Entity(
     tableName = "messages",
+    // Uniqueness is the COMPOSITE (id, ownerIdentityId), not `id`
+    // alone. The wire `messageId` is minted once by the sender and
+    // fanned out to every recipient inbox, so when two local
+    // identities are both members of a group the same id lands twice —
+    // once per identity. Keying on `id` alone made the second arrival's
+    // insert a silent no-op (OnConflictStrategy.IGNORE) — the second
+    // identity never saw the message. Each identity keeps its own row.
+    // Mirrors the composite `#Unique([id, ownerIdentityId])` on iOS
+    // `PersistedMessage`.
+    primaryKeys = ["id", "ownerIdentityId"],
     indices = [
         Index(value = ["groupId"]),
         Index(value = ["ownerIdentityId"]),
     ],
 )
 data class PersistedMessage(
-    @PrimaryKey val id: String,
+    /** UUID string of the wire `messageId`. Not unique on its own —
+     *  part of the composite primary key with [ownerIdentityId]. */
+    val id: String,
     val groupId: String,
     val ownerIdentityId: String,
     val sentAt: Long,
