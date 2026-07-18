@@ -22,13 +22,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -80,6 +83,7 @@ internal fun IdentityCarouselCard(
 
     val pagerState = rememberPagerState(pageCount = { items.size + 1 })
     var pendingRemoval by remember { mutableStateOf<IdentitySummary?>(null) }
+    var pendingRename by remember { mutableStateOf<IdentitySummary?>(null) }
     var addName by remember { mutableStateOf("") }
     val activeName = items.firstOrNull { it.isActive }?.summary?.name.orEmpty()
 
@@ -130,6 +134,7 @@ internal fun IdentityCarouselCard(
                         onBackup()
                     },
                     onDelete = { pendingRemoval = row.summary },
+                    onRename = { pendingRename = row.summary },
                 )
             } else {
                 AddIdentityPage(
@@ -169,6 +174,17 @@ internal fun IdentityCarouselCard(
             },
         )
     }
+
+    pendingRename?.let { summary ->
+        RenameIdentityDialog(
+            currentName = summary.name,
+            onDismiss = { pendingRename = null },
+            onConfirm = { newName ->
+                viewModel.rename(summary.id, newName)
+                pendingRename = null
+            },
+        )
+    }
 }
 
 @Composable
@@ -177,6 +193,7 @@ private fun IdentityPage(
     isActive: Boolean,
     onBackup: () -> Unit,
     onDelete: () -> Unit,
+    onRename: () -> Unit,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val tokens = LocalOnymTokens.current
@@ -199,14 +216,30 @@ private fun IdentityPage(
         ) {
             OnymQrCode(value = summary.inviteUrl(), size = 190.dp)
         }
-        Text(
-            text = summary.name.ifBlank { "Identity" },
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = if (isActive) accent else tokens.text,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onRename)
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+                .testTag("identity.rename.${summary.id.value}"),
+        ) {
+            Text(
+                text = summary.name.ifBlank { "Identity" },
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = if (isActive) accent else tokens.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Icon(
+                Icons.Filled.Edit,
+                contentDescription = "Rename",
+                tint = tokens.text3,
+                modifier = Modifier.size(15.dp),
+            )
+        }
         if (isActive) {
             Text(
                 text = "ACTIVE",
@@ -352,6 +385,56 @@ private fun AddIdentityPage(
             Text("Create identity")
         }
     }
+}
+
+/**
+ * Rename dialog reached by tapping an identity's alias in the carousel. A
+ * rename is a local, display-only change — it never touches the keys or the
+ * invite link. Prefilled with the current name; blank input is a no-op.
+ * Mirrors iOS `RenameIdentitySheet`.
+ */
+@Composable
+private fun RenameIdentityDialog(
+    currentName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(currentName) }
+    val trimmed = text.trim()
+    val canSave = trimmed.isNotEmpty()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename identity") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "A name only you see. It doesn't change your keys or your invite link.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = text,
+                    // Cap matches iOS + IdentityDetail (MAX_IDENTITY_NAME_LENGTH).
+                    onValueChange = { if (it.length <= 30) text = it },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (canSave) onConfirm(trimmed) }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("identity.rename.input"),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(trimmed) },
+                enabled = canSave,
+                modifier = Modifier.testTag("identity.rename.confirm"),
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 /** Fire the system share sheet with the identity's plain invite link. */

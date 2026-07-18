@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.test.core.app.ApplicationProvider
@@ -167,6 +168,34 @@ class IdentitiesUITest {
 
         composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 1
+        }
+    }
+
+    @Test
+    fun renameIdentity_viaCarousel_updatesActiveAlias() {
+        openCarousel()
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
+            identityStore.listIds().size == 1
+        }
+        // Add "Work" (lands active), then rename it to "Job" via the
+        // tap-the-name dialog. The carousel's active-alias hook should
+        // reflect the new name.
+        val before = identityStore.listIds().toSet()
+        addViaCarousel("Work")
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
+            identityStore.listIds().size == 2 && carouselActiveName() == "Work"
+        }
+        val workId = identityStore.listIds().first { it !in before }
+        composeRule.onNodeWithTag("identity.rename.${workId.value}").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identity.rename.input")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("identity.rename.input").performTextReplacement("Job")
+        composeRule.onNodeWithTag("identity.rename.confirm").performClick()
+
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
+            carouselActiveName() == "Job"
         }
     }
 
