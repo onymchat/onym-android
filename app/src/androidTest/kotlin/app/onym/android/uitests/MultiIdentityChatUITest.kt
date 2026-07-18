@@ -185,6 +185,42 @@ class MultiIdentityChatUITest {
             composeRule.onAllNodesWithTag("chat_thread.image_viewer").fetchSemanticsNodes().isEmpty()
         }
 
+        // 8b. Two-step album: stage an image + a video in the preview
+        //     strip, prove both show as removable tiles, drop one, stage a
+        //     second image, then confirm-send them as a single album bubble.
+        composeRule.onNodeWithTag("chat_thread.attach_button").performClick()
+        composeRule.onNodeWithTag("chat_thread.attach_video_button").performClick()
+        composeRule.waitUntil(10.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("chat_thread.input.media_strip.remove")
+                .fetchSemanticsNodes().size == 2
+        }
+        // Remove one staged item → back to a single tile.
+        composeRule.onAllNodesWithTag("chat_thread.input.media_strip.remove")
+            .onFirst().performClick()
+        composeRule.waitUntil(10.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("chat_thread.input.media_strip.remove")
+                .fetchSemanticsNodes().size == 1
+        }
+        // Stage a second image so Send ships a 2-item album.
+        composeRule.onNodeWithTag("chat_thread.attach_button").performClick()
+        composeRule.waitUntil(10.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("chat_thread.input.media_strip.remove")
+                .fetchSemanticsNodes().size == 2
+        }
+        composeRule.onNodeWithTag("chat_thread.send_button").performClick()
+        // The album renders as a grid of tiles …
+        waitForTag("chat_thread.album.tile.", prefix = true, timeout = 40.seconds)
+        // … tapping a tile opens the swipeable full-screen gallery; swipe
+        // down dismisses it.
+        composeRule.onAllNodes(hasTestTagStartingWith("chat_thread.album.tile."))
+            .onFirst().performClick()
+        waitForTag("chat_thread.album_gallery")
+        composeRule.onNodeWithTag("chat_thread.album_gallery")
+            .performTouchInput { swipeDown() }
+        composeRule.waitUntil(10.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("chat_thread.album_gallery").fetchSemanticsNodes().isEmpty()
+        }
+
         // 9. Bob receives it: the bubble lazily downloads from the
         //    loopback Blossom store, hash-verifies, decrypts, and
         //    renders — proving the full cross-identity image round-trip.
@@ -296,11 +332,15 @@ class MultiIdentityChatUITest {
         composeRule.onNodeWithTag("chat_thread.send_button").performClick()
     }
 
-    /** Tap the composer's attach button. Under [UITestRegistry.enabled]
-     *  the screen bypasses the system photo picker and sends a generated
-     *  test image through the real send pipeline. */
+    /** Two-step image send: tap attach (under [UITestRegistry.enabled] the
+     *  screen stages a generated test image in the preview strip instead of
+     *  opening the picker), then confirm-send via the composer's Send button. */
     private fun sendImage() {
         composeRule.onNodeWithTag("chat_thread.attach_button").performClick()
+        // The picked image stages in the removable preview strip …
+        waitForTag("chat_thread.input.media_strip.remove")
+        // … and only uploads when Send is tapped.
+        composeRule.onNodeWithTag("chat_thread.send_button").performClick()
     }
 
     /** Wait until at least one image-attachment bubble is rendered. */
@@ -311,11 +351,13 @@ class MultiIdentityChatUITest {
         }
     }
 
-    /** Tap the composer's attach-video button. Under [UITestRegistry.enabled]
-     *  the screen bypasses the picker + Media3 transcoding and sends a
-     *  canned video through the real send pipeline. */
+    /** Two-step video send: tap attach-video (under [UITestRegistry.enabled]
+     *  the screen stages a canned video in the preview strip), then
+     *  confirm-send via the composer's Send button. */
     private fun sendVideo() {
         composeRule.onNodeWithTag("chat_thread.attach_video_button").performClick()
+        waitForTag("chat_thread.input.media_strip.remove")
+        composeRule.onNodeWithTag("chat_thread.send_button").performClick()
     }
 
     /** Wait until at least one video-attachment bubble (poster) is rendered. */
