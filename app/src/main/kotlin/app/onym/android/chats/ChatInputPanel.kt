@@ -24,6 +24,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -61,6 +63,7 @@ fun ChatInputPanel(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     maxLines: Int = MAX_LINES,
+    focusRequester: FocusRequester? = null,
 ) {
     var text by remember { mutableStateOf("") }
     val sendBody = trimmedSendBody(text)
@@ -80,6 +83,13 @@ fun ChatInputPanel(
             modifier = Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(BUBBLE_CORNER))
+                .then(
+                    if (focusRequester != null) {
+                        Modifier.focusRequester(focusRequester)
+                    } else {
+                        Modifier
+                    },
+                )
                 .testTag("chat_thread.input_field"),
             enabled = enabled,
             placeholder = { Text("Message") },

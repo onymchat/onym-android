@@ -42,6 +42,9 @@ class AppDependencies(
     /** App-wide testnet/mainnet preference. Settings exposes a Switch
      *  bound to this; CreateGroupInteractor reads it per call. */
     val networkPreferenceProvider: NetworkPreferenceProvider,
+    /** Symmetric read-receipt setting, bound to the Settings → Chat
+     *  toggle and read by the dispatcher + chat thread. */
+    val readReceiptsPreferenceProvider: app.onym.android.chats.ReadReceiptsPreferenceProvider,
     val makeCreateGroupViewModel: () -> CreateGroupViewModel,
     /** Chats tab — read-only view over [app.onym.android.group.GroupRepository.snapshots].
      *  Mirrors `makeChatsFlow` from onym-ios PR #30. */

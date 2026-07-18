@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
@@ -84,6 +85,10 @@ fun SettingsScreen(
      *  → "Use Mainnet" Switch. */
     useMainnet: Boolean,
     onToggleMainnet: (Boolean) -> Unit,
+    /** Symmetric read-receipt setting. Bound to the Settings → Chat
+     *  → "Send read receipts" Switch. */
+    sendReadReceipts: Boolean = true,
+    onToggleReadReceipts: (Boolean) -> Unit = {},
     /** Settings → Transport → Nostr Relays entry. PR 87. */
     onNostrRelaysClick: (() -> Unit)? = null,
     /** Live count of configured Nostr relays — drives the Settings
@@ -246,6 +251,33 @@ fun SettingsScreen(
                         else R.string.settings_use_mainnet_off_footer,
                     )
                 )
+            }
+
+            // ─── CHAT ──────────────────────────────────────────────
+            item { SettingsSectionLabel("CHAT") }
+            item {
+                SettingsCard {
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(
+                                icon = Icons.Filled.DoneAll,
+                                background = if (sendReadReceipts) SettingsTile.Indigo else SettingsTile.Gray,
+                            )
+                        },
+                        title = "Send read receipts",
+                        subtitle = "You'll only see others' read status if this is on",
+                        showChevron = false,
+                        trailing = {
+                            Switch(
+                                checked = sendReadReceipts,
+                                onCheckedChange = onToggleReadReceipts,
+                                modifier = Modifier.testTag("settings.read_receipts_toggle"),
+                            )
+                        },
+                        onClick = { onToggleReadReceipts(!sendReadReceipts) },
+                        isLast = true,
+                    )
+                }
             }
 
             // ─── APP ───────────────────────────────────────────────

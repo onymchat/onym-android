@@ -137,6 +137,23 @@ class MessageRepository(
     }
 
     /**
+     * Raise an outgoing message's delivery status from an inbound
+     * receipt, never lowering it. No-op unless the row exists, is
+     * outgoing, and [to] sits strictly higher on the delivery ladder
+     * than the current value — so a late DELIVERED after READ, a
+     * duplicate receipt, or a receipt for an unknown / incoming /
+     * failed row all do nothing. See [MessageStatus.deliveryRank].
+     */
+    suspend fun upgradeStatus(id: UUID, to: MessageStatus) {
+        val newRank = to.deliveryRank ?: return
+        val message = store.findById(id) ?: return
+        if (message.direction != MessageDirection.OUTGOING) return
+        val currentRank = message.status.deliveryRank ?: return
+        if (newRank <= currentRank) return
+        updateStatus(id, to)
+    }
+
+    /**
      * Cascade entry point for identity removal. The store is
      * already wiped by [registerRemovalListener]'s closure; this
      * method just refreshes every cached group so subscribers see

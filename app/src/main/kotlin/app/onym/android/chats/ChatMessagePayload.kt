@@ -81,6 +81,25 @@ data class ChatMessagePayload(
      *  cross-platform. */
     @SerialName("sent_at_millis")
     val sentAtMillis: Long,
+    /**
+     * The message this one replies to, if any. Optional + additive,
+     * so it ships under `version = 1`: a sender that omits it decodes
+     * to `null` on any receiver (the `= null` default kicks in for a
+     * missing key), and an older receiver decoding a payload that
+     * carries it just ignores the unknown key. Only the target's ID
+     * travels — the receiver resolves the quoted sender + body from
+     * its own local store at render time, so a dangling ref (target
+     * never delivered) degrades to "message unavailable" rather than
+     * carrying stale text.
+     *
+     * Wire key is snake_case `reply_to_message_id`; the value is the
+     * uppercase canonical UUID string (same encoding as [messageId])
+     * or `null`. Matches `ChatMessagePayload.replyToMessageID` from
+     * onym-ios PR #173.
+     */
+    @SerialName("reply_to_message_id")
+    @Serializable(with = UuidStringSerializer::class)
+    val replyToMessageId: UUID? = null,
     val variant: ChatMessageVariant,
 ) {
     override fun equals(other: Any?): Boolean {
@@ -91,6 +110,7 @@ data class ChatMessagePayload(
             groupId.contentEquals(other.groupId) &&
             senderBlsPubkeyHex == other.senderBlsPubkeyHex &&
             sentAtMillis == other.sentAtMillis &&
+            replyToMessageId == other.replyToMessageId &&
             variant == other.variant
     }
 
@@ -100,6 +120,7 @@ data class ChatMessagePayload(
         h = 31 * h + groupId.contentHashCode()
         h = 31 * h + senderBlsPubkeyHex.hashCode()
         h = 31 * h + sentAtMillis.hashCode()
+        h = 31 * h + replyToMessageId.hashCode()
         h = 31 * h + variant.hashCode()
         return h
     }

@@ -1,5 +1,6 @@
 package app.onym.android.chats
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -30,15 +31,19 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.onym.android.group.MemberProfile
+import app.onym.android.group.OnymAccent
+import kotlinx.coroutines.launch
 
 /**
  * Compose chat-thread screen. Tapping a group in the Chats tab
@@ -68,6 +73,7 @@ fun ChatThreadScreen(
 ) {
     val group by viewModel.group.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val replyingTo by viewModel.replyingTo.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -118,6 +124,9 @@ fun ChatThreadScreen(
                 padding = padding,
                 onSend = viewModel::send,
                 onRetry = viewModel::retry,
+                replyingTo = replyingTo,
+                onArmReply = viewModel::armReply,
+                onCancelReply = viewModel::cancelReply,
             )
         }
     }
@@ -130,6 +139,9 @@ private fun ChatThreadBody(
     padding: PaddingValues,
     onSend: (String) -> Unit,
     onRetry: (java.util.UUID) -> Unit,
+    replyingTo: java.util.UUID?,
+    onArmReply: (java.util.UUID) -> Unit,
+    onCancelReply: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     // Defensive sort. The repository's contract is ascending by
@@ -146,6 +158,33 @@ private fun ChatThreadBody(
     // live profile update — so headers repaint in place.
     val senderDisplays = remember(sortedMessages, memberProfiles) {
         buildSenderDisplays(sortedMessages, memberProfiles)
+    }
+    // Per-message reply quote, resolved live from the loaded list (a
+    // ref to a message we don't have → "Message unavailable"). Plus an
+    // id→index map so tapping a quote can scroll to the original.
+    val replyQuotes = remember(sortedMessages, memberProfiles) {
+        buildReplyQuotes(sortedMessages, memberProfiles)
+    }
+    val indexById = remember(sortedMessages) {
+        sortedMessages.withIndex().associate { (index, message) -> message.id to index }
+    }
+
+    // Tapping a quote scrolls the replied-to message into view and
+    // briefly flashes it. No-op if the target isn't in the current
+    // snapshot (pruned, or never arrived). Mirrors
+    // `ChatThreadViewController.scrollAndHighlight` from onym-ios #174.
+    val coroutineScope = rememberCoroutineScope()
+    var highlightedId by remember { mutableStateOf<java.util.UUID?>(null) }
+    val scrollToAndHighlight: (java.util.UUID) -> Unit = remember(indexById) {
+        target@{ targetId ->
+            val index = indexById[targetId] ?: return@target
+            coroutineScope.launch {
+                listState.animateScrollToItem(index)
+                highlightedId = targetId
+                kotlinx.coroutines.delay(HIGHLIGHT_HOLD_MILLIS)
+                if (highlightedId == targetId) highlightedId = null
+            }
+        }
     }
 
     // Auto-scroll behavior:
@@ -265,19 +304,45 @@ private fun ChatThreadBody(
                         message = message,
                         sender = senderDisplays[message.id] ?: ChatSenderDisplay.Unknown,
                         onRetry = { onRetry(message.id) },
+                        reply = replyQuotes[message.id],
+                        onQuoteTap = message.replyToMessageId?.let { targetId ->
+                            { scrollToAndHighlight(targetId) }
+                        },
+                        isHighlighted = message.id == highlightedId,
+                        onSwipeReply = { onArmReply(message.id) },
                     )
                 }
             }
         }
         HorizontalDivider(thickness = 0.5.dp)
-        // PR A8 wires the Send button end-to-end. The VM's send
-        // does the trim guard + optimistic insert + status flip
-        // through SendMessageInteractor (PR A4). SendMessageError
-        // routes into viewModel.lastSendError, which the UI doesn't
-        // surface yet — network / fan-out failures land as
-        // MessageStatus.FAILED on the bubble (visual indicator
-        // lands in a later PR).
-        ChatInputPanel(onSend = onSend)
+        // Reply banner sits between the message list and the composer
+        // while a reply is armed. Resolved live from the loaded
+        // messages; if the target vanished, the banner just doesn't show.
+        val replyTarget = replyingTo?.let { id -> sortedMessages.firstOrNull { it.id == id } }
+        val composerFocus = remember { FocusRequester() }
+        if (replyTarget != null) {
+            ChatReplyBanner(
+                name = senderName(replyTarget.senderBlsPubkeyHex, memberProfiles),
+                snippet = replyTarget.body,
+                accent = OnymAccent.forSender(replyTarget.senderBlsPubkeyHex)
+                    .color(isSystemInDarkTheme()),
+                onCancel = onCancelReply,
+            )
+        }
+        // Raise the keyboard + focus the composer the moment a reply
+        // is armed, so the user can type straight away. iOS calls
+        // `focusComposer()` from `armReply`.
+        LaunchedEffect(replyingTo) {
+            if (replyingTo != null) {
+                runCatching { composerFocus.requestFocus() }
+            }
+        }
+        // The VM's send does the trim guard + optimistic insert +
+        // status flip through SendMessageInteractor, and threads the
+        // armed reply target so the sent message renders its quote.
+        // SendMessageError routes into viewModel.lastSendError; network
+        // / fan-out failures land as MessageStatus.FAILED on the bubble.
+        ChatInputPanel(onSend = onSend, focusRequester = composerFocus)
     }
 }
 
@@ -308,6 +373,10 @@ internal fun isNearBottom(
  *  the auto-scroll heuristic. 2 = the user is reading the last or
  *  second-to-last message. */
 internal const val NEAR_BOTTOM_INDEX_THRESHOLD = 2
+
+/** How long a quote-tapped message stays highlighted after the scroll
+ *  settles before the pulse fades. */
+private const val HIGHLIGHT_HOLD_MILLIS = 900L
 
 /**
  * Decides whether a frame of the IME-rise animation should re-pin the

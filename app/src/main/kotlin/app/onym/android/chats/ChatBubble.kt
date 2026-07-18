@@ -1,35 +1,62 @@
 package app.onym.android.chats
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * Chat-thread bubble. Two visual modes driven by [ChatMessage.direction]:
@@ -80,6 +107,10 @@ fun ChatBubble(
     modifier: Modifier = Modifier,
     maxWidthFraction: Float = 0.75f,
     onRetry: (() -> Unit)? = null,
+    reply: ChatReplyQuote? = null,
+    onQuoteTap: (() -> Unit)? = null,
+    isHighlighted: Boolean = false,
+    onSwipeReply: (() -> Unit)? = null,
 ) {
     val isOutgoing = message.direction == MessageDirection.OUTGOING
     // The Chats tab is Material-themed (no OnymTheme provider), so we
@@ -105,14 +136,89 @@ fun ChatBubble(
     }
     val retryEnabled = canRetry(message) && onRetry != null
 
+    // Drag-to-reply: the row follows the finger leftward (clamped),
+    // a reply glyph grows in at the trailing edge, a one-shot haptic
+    // fires as the drag crosses the threshold, and releasing past the
+    // threshold arms the reply; otherwise everything springs back.
+    // Available on every message regardless of direction or status.
+    // Mirrors `ChatBubbleCell` swipe-to-reply from onym-ios PR #175.
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val maxTravelPx = with(density) { SWIPE_MAX_TRAVEL.toPx() }
+    val thresholdPx = with(density) { SWIPE_REPLY_THRESHOLD.toPx() }
+    val dragOffset = remember { Animatable(0f) }
+    var dragAccumulated by remember { mutableFloatStateOf(0f) }
+    var swipeArmed by remember { mutableStateOf(false) }
+
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
         val bubbleMaxWidth = maxWidth * maxWidthFraction
+        if (onSwipeReply != null) {
+            val progress = (-dragOffset.value / thresholdPx).coerceIn(0f, 1f)
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Reply,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .size(22.dp)
+                    .graphicsLayer {
+                        alpha = progress
+                        val s = 0.6f + 0.4f * progress
+                        scaleX = s
+                        scaleY = s
+                    },
+            )
+        }
+        val swipeModifier = if (onSwipeReply != null) {
+            Modifier.pointerInput(onSwipeReply) {
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        dragAccumulated = 0f
+                        swipeArmed = false
+                    },
+                    onDragEnd = {
+                        val fire = swipeArmed
+                        swipeArmed = false
+                        dragAccumulated = 0f
+                        scope.launch {
+                            dragOffset.animateTo(0f, spring(dampingRatio = 0.7f))
+                        }
+                        if (fire) onSwipeReply()
+                    },
+                    onDragCancel = {
+                        swipeArmed = false
+                        dragAccumulated = 0f
+                        scope.launch { dragOffset.animateTo(0f, spring(dampingRatio = 0.7f)) }
+                    },
+                ) { change, dragAmount ->
+                    change.consume()
+                    // Leftward only; clamp travel so the row can't be
+                    // dragged off-screen and the armed point reads as a wall.
+                    dragAccumulated = (dragAccumulated + dragAmount)
+                        .coerceIn(-maxTravelPx, 0f)
+                    scope.launch { dragOffset.snapTo(dragAccumulated) }
+                    val pastThreshold = -dragAccumulated >= thresholdPx
+                    if (pastThreshold && !swipeArmed) {
+                        swipeArmed = true
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    } else if (!pastThreshold) {
+                        swipeArmed = false
+                    }
+                }
+            }
+        } else {
+            Modifier
+        }
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(dragOffset.value.roundToInt(), 0) }
+                .then(swipeModifier),
             horizontalArrangement = if (isOutgoing) Arrangement.End else Arrangement.Start,
         ) {
             Column(
@@ -144,6 +250,11 @@ fun ChatBubble(
                     textColor = textColor,
                     messageId = message.id,
                     onClick = if (retryEnabled) onRetry else null,
+                    reply = reply,
+                    replyAccentColor = reply?.accent?.color(darkTheme),
+                    isOutgoing = isOutgoing,
+                    isHighlighted = isHighlighted,
+                    onQuoteTap = onQuoteTap,
                 )
                 if (isOutgoing) {
                     val visual = statusVisualFor(message.status)
@@ -166,25 +277,150 @@ private fun BubbleBody(
     textColor: Color,
     messageId: java.util.UUID,
     onClick: (() -> Unit)?,
+    reply: ChatReplyQuote?,
+    replyAccentColor: Color?,
+    isOutgoing: Boolean,
+    isHighlighted: Boolean,
+    onQuoteTap: (() -> Unit)?,
 ) {
+    // Brief background pulse when the host scrolls here from a tapped
+    // quote — blends the fill toward the surface tint and animates
+    // back once the host clears the highlight. Mirrors iOS PR #174's
+    // `flashHighlight()`.
+    val highlightTarget = if (isHighlighted) {
+        lerp(fill, MaterialTheme.colorScheme.onSurface, HIGHLIGHT_BLEND)
+    } else {
+        fill
+    }
+    val animatedFill by animateColorAsState(
+        targetValue = highlightTarget,
+        animationSpec = tween(durationMillis = 220),
+        label = "bubbleHighlight",
+    )
     val baseModifier = Modifier
         .clip(RoundedCornerShape(BUBBLE_RADIUS))
-        .background(fill)
+        .background(animatedFill)
     val clickableModifier = if (onClick != null) {
         baseModifier.clickable(onClick = onClick)
     } else {
         baseModifier
     }
-    Box(
+    Column(
         modifier = clickableModifier
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .testTag("chat_thread.bubble.$messageId"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        if (reply != null) {
+            ReplyQuoteInset(
+                reply = reply,
+                replyAccentColor = replyAccentColor,
+                isOutgoing = isOutgoing,
+                onAccentColor = textColor,
+                messageId = messageId,
+                // Only an available target is worth jumping to.
+                onTap = if (!reply.isUnavailable) onQuoteTap else null,
+            )
+        }
         Text(
             text = body,
             color = textColor,
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+/**
+ * Inset quote pinned across the top of a bubble that replies to
+ * another message: a thin accent bar, the quoted sender's
+ * name, and a one-line snippet of the quoted body.
+ *
+ * Colors track the bubble direction. An outgoing bubble is a solid
+ * accent fill, so the quote reads in the on-accent color
+ * ([onAccentColor]); an incoming bubble is a light tint, so the quote
+ * uses the quoted sender's own accent ([replyAccentColor]). An
+ * [ChatReplyQuote.isUnavailable] target gets a muted, untappable
+ * "Message unavailable" placeholder.
+ *
+ * Mirrors `ChatBubbleCell.applyReplyQuote` from onym-ios PR #174.
+ */
+@Composable
+private fun ReplyQuoteInset(
+    reply: ChatReplyQuote,
+    replyAccentColor: Color?,
+    isOutgoing: Boolean,
+    onAccentColor: Color,
+    messageId: java.util.UUID,
+    onTap: (() -> Unit)?,
+) {
+    val accent = replyAccentColor ?: MaterialTheme.colorScheme.primary
+    val barColor: Color
+    val nameColor: Color
+    val snippetColor: Color
+    val nameText: String
+    val snippetText: String
+    if (reply.isUnavailable) {
+        val muted = if (isOutgoing) {
+            onAccentColor.copy(alpha = 0.7f)
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        barColor = muted
+        nameColor = muted
+        snippetColor = muted
+        nameText = "Message"
+        snippetText = "Message unavailable"
+    } else {
+        barColor = if (isOutgoing) onAccentColor else accent
+        nameColor = if (isOutgoing) onAccentColor else accent
+        snippetColor = if (isOutgoing) {
+            onAccentColor.copy(alpha = 0.85f)
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        nameText = reply.name
+        snippetText = reply.snippet
+    }
+
+    val tapModifier = if (onTap != null) {
+        Modifier.clickable(onClick = onTap)
+    } else {
+        Modifier
+    }
+    Row(
+        modifier = Modifier
+            .height(IntrinsicSize.Min)
+            .then(tapModifier)
+            .testTag("chat_thread.quote.$messageId"),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(barColor),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                text = nameText,
+                color = nameColor,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("chat_thread.quote.name.$messageId"),
+            )
+            Text(
+                text = snippetText,
+                color = snippetColor,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("chat_thread.quote.snippet.$messageId"),
+            )
+        }
     }
 }
 
@@ -196,6 +432,7 @@ private fun StatusIndicator(
     val tint = when (visual.tint) {
         ChatStatusTint.Muted -> MaterialTheme.colorScheme.onSurfaceVariant
         ChatStatusTint.Error -> MaterialTheme.colorScheme.error
+        ChatStatusTint.Accent -> MaterialTheme.colorScheme.primary
     }
     Icon(
         imageVector = visual.icon,
@@ -229,6 +466,16 @@ internal fun statusVisualFor(status: MessageStatus): StatusVisual? = when (statu
         tint = ChatStatusTint.Muted,
         contentDescription = "Sent",
     )
+    MessageStatus.DELIVERED -> StatusVisual(
+        icon = Icons.Filled.DoneAll,
+        tint = ChatStatusTint.Muted,
+        contentDescription = "Delivered",
+    )
+    MessageStatus.READ -> StatusVisual(
+        icon = Icons.Filled.DoneAll,
+        tint = ChatStatusTint.Accent,
+        contentDescription = "Read",
+    )
     MessageStatus.FAILED -> StatusVisual(
         icon = Icons.Filled.ErrorOutline,
         tint = ChatStatusTint.Error,
@@ -260,10 +507,21 @@ internal data class StatusVisual(
     val contentDescription: String,
 )
 
-internal enum class ChatStatusTint { Muted, Error }
+internal enum class ChatStatusTint { Muted, Error, Accent }
 
 private val BUBBLE_RADIUS = 16.dp
 private val STATUS_ICON_SIZE = 14.dp
+
+/** How far the bubble fill blends toward the surface tint during the
+ *  scroll-to-quote highlight pulse. */
+private const val HIGHLIGHT_BLEND = 0.25f
+
+/** Drag distance past which releasing arms a reply. */
+private val SWIPE_REPLY_THRESHOLD = 56.dp
+
+/** How far the row can travel — past the threshold it resists so the
+ *  gesture has a clear "armed" ceiling. */
+private val SWIPE_MAX_TRAVEL = 72.dp
 
 /** Incoming-bubble tint opacity over the background. Low enough that
  *  the body text stays readable on top, high enough that the sender's

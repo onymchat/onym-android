@@ -2,6 +2,7 @@ package app.onym.android.chats
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.outlined.Schedule
 import app.onym.android.chain.SepGroupType
@@ -41,6 +42,22 @@ class ChatBubbleStatusTest {
         assertNotNull(visual)
         assertEquals(Icons.Filled.Check, visual!!.icon)
         assertEquals(ChatStatusTint.Muted, visual.tint)
+    }
+
+    @Test
+    fun statusVisualFor_delivered_isMutedDoubleCheck() {
+        val visual = statusVisualFor(MessageStatus.DELIVERED)
+        assertNotNull(visual)
+        assertEquals(Icons.Filled.DoneAll, visual!!.icon)
+        assertEquals(ChatStatusTint.Muted, visual.tint)
+    }
+
+    @Test
+    fun statusVisualFor_read_isAccentDoubleCheck() {
+        val visual = statusVisualFor(MessageStatus.READ)
+        assertNotNull(visual)
+        assertEquals(Icons.Filled.DoneAll, visual!!.icon)
+        assertEquals(ChatStatusTint.Accent, visual.tint)
     }
 
     @Test

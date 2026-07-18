@@ -42,5 +42,12 @@ data class ChatMessage(
     val sentAtMillis: Long,
     val direction: MessageDirection,
     val status: MessageStatus,
+    /** The message this one replies to, if any. Mirrors
+     *  [ChatMessagePayload.replyToMessageId]. Only the target ID is
+     *  stored — the UI resolves the quoted sender + body by looking
+     *  this up among the group's other messages at render time, so a
+     *  target that isn't on this device renders as "Message
+     *  unavailable" instead of carrying a stale copy of its text. */
+    val replyToMessageId: UUID? = null,
     val groupType: SepGroupType,
 )
