@@ -336,6 +336,7 @@ class OnymApplication : Application() {
                 .addMigrations(
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_1_2,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_2_3,
+                    app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_3_4,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -396,6 +397,23 @@ class OnymApplication : Application() {
             } else {
                 { url -> OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url) }
             }
+        // Blossom media server for image messages + the lazy loader.
+        // Swapped for an in-memory store under the UI-test harness.
+        val blossomServerUrl = "https://blossom.onym.app"
+        val blossomClient: app.onym.android.chats.BlossomClient =
+            if (UITestRegistry.enabled && UITestRegistry.blossomClient != null) {
+                UITestRegistry.blossomClient!!
+            } else {
+                app.onym.android.chats.OkHttpBlossomClient(
+                    baseUrl = blossomServerUrl,
+                    httpClient = httpClient,
+                    signerProvider = nostrSignerProvider,
+                )
+            }
+        val imageLoader = app.onym.android.chats.ChatImageLoader(
+            blossomClient = blossomClient,
+            cacheDir = java.io.File(applicationContext.cacheDir, "chat_images"),
+        )
         applicationScope.launch {
             // Bootstrap above writes _snapshots; this read happens on
             // the same scope so it observes the bootstrap result.
@@ -694,6 +712,8 @@ class OnymApplication : Application() {
                     groupRepository = groupRepository,
                     messageRepository = messageRepository,
                     inboxTransport = inboxTransport,
+                    blossomClient = blossomClient,
+                    blossomServerUrl = blossomServerUrl,
                 )
                 app.onym.android.chats.ChatThreadViewModel(
                     groupId = groupId,
@@ -702,9 +722,11 @@ class OnymApplication : Application() {
                     sendMessage = { gid, body, replyTo ->
                         sender.send(gid, body, replyTo)
                     },
+                    sendImage = { gid, data -> sender.sendImage(gid, data) },
                     retryMessage = sender::retry,
                     chatReceiptSender = chatReceiptSender,
                     readReceiptsEnabled = { readReceiptsPreference.current() },
+                    imageLoader = imageLoader,
                 )
             },
             makeIdentitiesViewModel = {

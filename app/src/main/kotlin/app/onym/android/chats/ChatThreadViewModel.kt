@@ -36,7 +36,13 @@ class ChatThreadViewModel(
         body: String,
         replyToMessageId: java.util.UUID?,
     ) -> Unit,
+    /** Send an image message (encode → encrypt → upload → fan-out).
+     *  Defaulted to a no-op so tests that don't exercise images keep
+     *  their construction sites unchanged. */
+    private val sendImage: suspend (groupId: String, imageData: ByteArray) -> Unit = { _, _ -> },
     private val retryMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
+    /** Loader the UI uses to fetch + decrypt image attachments. */
+    val imageLoader: ChatImageLoader? = null,
     /** Ships read receipts for incoming messages the user is viewing.
      *  Defaulted to a no-op so tests that don't exercise receipts keep
      *  their construction sites unchanged. */
@@ -128,6 +134,21 @@ class ChatThreadViewModel(
                 _lastSendError.value = null
             } catch (e: SendMessageError) {
                 _lastSendError.value = e.message ?: e.javaClass.simpleName
+            } catch (e: Throwable) {
+                _lastSendError.value = e.message ?: e.javaClass.simpleName
+            } finally {
+                _sendInFlight.value = false
+            }
+        }
+    }
+
+    /** Send an image message with the given raw (undecoded) bytes. */
+    fun sendImage(imageData: ByteArray) {
+        viewModelScope.launch {
+            _sendInFlight.value = true
+            try {
+                sendImage(groupId, imageData)
+                _lastSendError.value = null
             } catch (e: Throwable) {
                 _lastSendError.value = e.message ?: e.javaClass.simpleName
             } finally {

@@ -5,6 +5,7 @@ import app.onym.android.chain.ContractsManifestFetcher
 import app.onym.android.chain.KnownRelayersFetcher
 import app.onym.android.chain.RelayerSelectionStore
 import app.onym.android.chain.SepContractTransport
+import app.onym.android.chats.BlossomClient
 import app.onym.android.identity.IdentitySecretStore
 import app.onym.android.transport.InboxTransport
 
@@ -75,6 +76,10 @@ object UITestRegistry {
      *  ledger. Keyed by relayer URL (ignored by the fake). */
     var contractTransportFactory: ((String) -> SepContractTransport)? = null
 
+    /** In-memory replacement for the Blossom media server so image
+     *  send/receive round-trips with no network. */
+    var blossomClient: BlossomClient? = null
+
     /** Reset between tests. Called from `@Before`. */
     fun reset() {
         enabled = false
@@ -85,5 +90,6 @@ object UITestRegistry {
         identitySecretStore = null
         inboxTransport = null
         contractTransportFactory = null
+        blossomClient = null
     }
 }

@@ -1,5 +1,6 @@
 package app.onym.android.chats
 
+import app.onym.android.UITestRegistry
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,6 +76,29 @@ fun ChatThreadScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val replyingTo by viewModel.replyingTo.collectAsStateWithLifecycle()
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes != null) viewModel.sendImage(bytes)
+        }
+    }
+    // Under the UI-test harness the system photo picker can't be driven,
+    // so send a generated test image directly instead.
+    val onAttach: () -> Unit = {
+        if (UITestRegistry.enabled) {
+            viewModel.sendImage(debugTestImageBytes())
+        } else {
+            imagePicker.launch(
+                androidx.activity.result.PickVisualMediaRequest(
+                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                ),
+            )
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -124,6 +148,8 @@ fun ChatThreadScreen(
                 padding = padding,
                 onSend = viewModel::send,
                 onRetry = viewModel::retry,
+                onAttach = onAttach,
+                imageLoader = viewModel.imageLoader,
                 replyingTo = replyingTo,
                 onArmReply = viewModel::armReply,
                 onCancelReply = viewModel::cancelReply,
@@ -139,6 +165,8 @@ private fun ChatThreadBody(
     padding: PaddingValues,
     onSend: (String) -> Unit,
     onRetry: (java.util.UUID) -> Unit,
+    onAttach: (() -> Unit)? = null,
+    imageLoader: ChatImageLoader? = null,
     replyingTo: java.util.UUID?,
     onArmReply: (java.util.UUID) -> Unit,
     onCancelReply: () -> Unit,
@@ -304,6 +332,7 @@ private fun ChatThreadBody(
                         message = message,
                         sender = senderDisplays[message.id] ?: ChatSenderDisplay.Unknown,
                         onRetry = { onRetry(message.id) },
+                        imageLoader = imageLoader,
                         reply = replyQuotes[message.id],
                         onQuoteTap = message.replyToMessageId?.let { targetId ->
                             { scrollToAndHighlight(targetId) }
@@ -342,7 +371,7 @@ private fun ChatThreadBody(
         // armed reply target so the sent message renders its quote.
         // SendMessageError routes into viewModel.lastSendError; network
         // / fan-out failures land as MessageStatus.FAILED on the bubble.
-        ChatInputPanel(onSend = onSend, focusRequester = composerFocus)
+        ChatInputPanel(onSend = onSend, focusRequester = composerFocus, onAttach = onAttach)
     }
 }
 
@@ -377,6 +406,23 @@ internal const val NEAR_BOTTOM_INDEX_THRESHOLD = 2
 /** How long a quote-tapped message stays highlighted after the scroll
  *  settles before the pulse fades. */
 private const val HIGHLIGHT_HOLD_MILLIS = 900L
+
+/**
+ * Generates a small solid-color JPEG for the UI-test harness, which
+ * can't drive the system photo picker. Mirrors iOS
+ * `debugTestImageData()`. Only ever called under [UITestRegistry.enabled].
+ */
+private fun debugTestImageBytes(): ByteArray {
+    val bitmap = android.graphics.Bitmap.createBitmap(
+        240,
+        160,
+        android.graphics.Bitmap.Config.ARGB_8888,
+    )
+    bitmap.eraseColor(android.graphics.Color.rgb(0x3D, 0x8B, 0xFD))
+    val stream = java.io.ByteArrayOutputStream()
+    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, stream)
+    return stream.toByteArray()
+}
 
 /**
  * Decides whether a frame of the IME-rise animation should re-pin the

@@ -50,4 +50,9 @@ data class ChatMessage(
      *  unavailable" instead of carrying a stale copy of its text. */
     val replyToMessageId: UUID? = null,
     val groupType: SepGroupType,
+    /** Encrypted image attached to this message, if any. Mirrors
+     *  [ChatMessagePayload.attachment]; `body` is the caption when this
+     *  is present. Fetched + decrypted lazily at render time
+     *  ([ChatImageLoader]), not stored inline. */
+    val imageAttachment: ChatImageAttachment? = null,
 )

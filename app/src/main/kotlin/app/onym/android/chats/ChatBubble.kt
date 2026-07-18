@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -14,7 +15,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -33,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -43,9 +47,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -107,6 +113,7 @@ fun ChatBubble(
     modifier: Modifier = Modifier,
     maxWidthFraction: Float = 0.75f,
     onRetry: (() -> Unit)? = null,
+    imageLoader: ChatImageLoader? = null,
     reply: ChatReplyQuote? = null,
     onQuoteTap: (() -> Unit)? = null,
     isHighlighted: Boolean = false,
@@ -250,6 +257,8 @@ fun ChatBubble(
                     textColor = textColor,
                     messageId = message.id,
                     onClick = if (retryEnabled) onRetry else null,
+                    attachment = message.imageAttachment,
+                    imageLoader = imageLoader,
                     reply = reply,
                     replyAccentColor = reply?.accent?.color(darkTheme),
                     isOutgoing = isOutgoing,
@@ -277,6 +286,8 @@ private fun BubbleBody(
     textColor: Color,
     messageId: java.util.UUID,
     onClick: (() -> Unit)?,
+    attachment: ChatImageAttachment?,
+    imageLoader: ChatImageLoader?,
     reply: ChatReplyQuote?,
     replyAccentColor: Color?,
     isOutgoing: Boolean,
@@ -322,11 +333,73 @@ private fun BubbleBody(
                 onTap = if (!reply.isUnavailable) onQuoteTap else null,
             )
         }
-        Text(
-            text = body,
-            color = textColor,
-            style = MaterialTheme.typography.bodyMedium,
-        )
+        if (attachment != null) {
+            AttachmentImage(
+                attachment = attachment,
+                imageLoader = imageLoader,
+                messageId = messageId,
+            )
+        }
+        // Image messages may carry an empty caption — skip the text row
+        // entirely so the bubble hugs the image with no blank line.
+        if (body.isNotEmpty()) {
+            Text(
+                text = body,
+                color = textColor,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+/**
+ * Renders a chat image attachment: a blurhash placeholder that shows
+ * immediately, replaced by the decrypted bitmap once [imageLoader]
+ * fetches + decrypts the blob from Blossom. The frame keeps the
+ * attachment's intrinsic aspect ratio so there's no reflow when the
+ * full image lands. Mirrors `ChatBubbleCell.applyAttachment` from
+ * onym-ios.
+ */
+@Composable
+private fun AttachmentImage(
+    attachment: ChatImageAttachment,
+    imageLoader: ChatImageLoader?,
+    messageId: java.util.UUID,
+) {
+    val aspect = if (attachment.width > 0 && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else {
+        1f
+    }
+    val placeholder = remember(attachment.blurhash) {
+        runCatching { Blurhash.decode(attachment.blurhash, 32, 32) }.getOrNull()
+    }
+    var bitmap by remember(attachment.sha256) {
+        mutableStateOf<android.graphics.Bitmap?>(null)
+    }
+    LaunchedEffect(attachment.sha256, imageLoader) {
+        if (imageLoader != null) {
+            bitmap = imageLoader.load(attachment)
+        }
+    }
+    val shown = bitmap ?: placeholder
+    Box(
+        modifier = Modifier
+            .widthIn(max = IMAGE_MAX_WIDTH)
+            .fillMaxWidth()
+            .aspectRatio(aspect)
+            .clip(RoundedCornerShape(IMAGE_RADIUS))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .testTag("chat_thread.image.$messageId"),
+    ) {
+        if (shown != null) {
+            Image(
+                bitmap = shown.asImageBitmap(),
+                contentDescription = "Photo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 
@@ -511,6 +584,13 @@ internal enum class ChatStatusTint { Muted, Error, Accent }
 
 private val BUBBLE_RADIUS = 16.dp
 private val STATUS_ICON_SIZE = 14.dp
+
+/** Max rendered width of an image attachment inside a bubble. */
+private val IMAGE_MAX_WIDTH = 240.dp
+
+/** Corner radius of the rendered image (slightly tighter than the
+ *  bubble so it nests cleanly inside the padding). */
+private val IMAGE_RADIUS = 12.dp
 
 /** How far the bubble fill blends toward the surface tint during the
  *  scroll-to-quote highlight pulse. */

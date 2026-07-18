@@ -30,7 +30,9 @@ import androidx.room.RoomDatabase
     // the same fanned-out wire message can be stored per identity —
     // fixes the second identity silently losing the message. Table
     // rebuild; existing rows migrate cleanly.
-    version = 3,
+    // v4 (image attachments): adds nullable `encryptedAttachmentJson`
+    // BLOB. Additive; existing rows decode to a text-only message.
+    version = 4,
     exportSchema = false,
 )
 abstract class MessageDatabase : RoomDatabase() {
@@ -102,6 +104,16 @@ object MessageDatabaseMigrations {
                 "CREATE INDEX IF NOT EXISTS `index_messages_ownerIdentityId` " +
                     "ON `messages` (`ownerIdentityId`)",
             )
+        }
+    }
+
+    /**
+     * v3 → v4: add the nullable `encryptedAttachmentJson` BLOB for
+     * image attachments. Additive; existing rows decode to text-only.
+     */
+    val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN encryptedAttachmentJson BLOB")
         }
     }
 }

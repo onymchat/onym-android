@@ -5,6 +5,7 @@ import app.onym.android.persistence.StorageEncryption
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import java.util.UUID
 
 /**
@@ -23,6 +24,8 @@ class RoomMessageStore(
     private val encryption: StorageEncryption,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : MessageStore {
+
+    private val attachmentJson = Json { ignoreUnknownKeys = true }
 
     override suspend fun listForGroup(
         ownerIdentityId: String,
@@ -70,6 +73,10 @@ class RoomMessageStore(
         // Plain pointer to another row — not sensitive, so no
         // encryption. Stored as the UUID string; null for a non-reply.
         replyToMessageId = message.replyToMessageId?.toString(),
+        // Attachment JSON is encrypted at rest (carries the per-image key).
+        encryptedAttachmentJson = message.imageAttachment?.let {
+            encryption.encrypt(attachmentJson.encodeToString(ChatImageAttachment.serializer(), it))
+        },
     )
 
     /** Tolerant decode: a row whose encrypted columns fail to
@@ -90,6 +97,15 @@ class RoomMessageStore(
         // is the important part; the quote just won't render.
         val replyToMessageId = row.replyToMessageId
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        // Attachment is advisory: a decrypt/decode miss degrades to a
+        // text-only row rather than dropping the whole message.
+        val imageAttachment = row.encryptedAttachmentJson
+            ?.let { tryDecryptString(it) }
+            ?.let {
+                runCatching {
+                    attachmentJson.decodeFromString(ChatImageAttachment.serializer(), it)
+                }.getOrNull()
+            }
         return ChatMessage(
             id = id,
             groupId = row.groupId,
@@ -101,6 +117,7 @@ class RoomMessageStore(
             status = status,
             replyToMessageId = replyToMessageId,
             groupType = groupType,
+            imageAttachment = imageAttachment,
         )
     }
 

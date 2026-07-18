@@ -21,8 +21,10 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -73,6 +75,64 @@ class SendMessageInteractorTest {
             TransportInboxId(IdentityRepository.inboxTag(peerInbox)),
             sends.single().inbox,
         )
+    }
+
+    // ─── image send ──────────────────────────────────────────────
+
+    @Test
+    fun sendImage_uploadsEncryptedBlob_persistsAttachment_andFansOut() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.sendImage(groupIdHex, ByteArray(64) { it.toByte() })
+
+        assertEquals(MessageStatus.SENT, result.status)
+        assertEquals(MessageDirection.OUTGOING, result.direction)
+        // The persisted row carries the attachment metadata.
+        val attachment = result.imageAttachment
+        assertNotNull(attachment)
+        assertEquals("image/jpeg", attachment!!.mimeType)
+        assertEquals(240, attachment.width)
+        assertEquals(160, attachment.height)
+        assertEquals(32, attachment.encKey.size)
+        // Exactly one blob uploaded, and it's the ciphertext (nonce ‖ ct ‖
+        // tag) — never the plaintext — addressed by the SHA-256 the
+        // attachment carries.
+        val fake = fixture.blossomClient as FakeBlossomClient
+        assertEquals(1, fake.uploads.size)
+        assertEquals(attachment.sha256, ChatImageCrypto.sha256Hex(fake.uploads.single()))
+        // The blob decrypts back to the original JPEG bytes.
+        val roundTripped = ChatImageCrypto.open(
+            fake.uploads.single(),
+            attachment.encKey,
+            attachment.sha256,
+        )
+        assertArrayEquals(ByteArray(64) { it.toByte() }, roundTripped)
+        // The attachment rides the wire payload to the peer.
+        val shipped = decodeShipped(fixture.transport.sends().single().payload)
+        assertEquals(attachment.sha256, shipped.attachment?.sha256)
+    }
+
+    @Test
+    fun sendImage_encodeFailure_throwsAndUploadsNothing() = runTest {
+        val fixture = newFixture(encodeImage = { null })
+        fixture.seedGroup(includePeer = true)
+
+        assertThrows(SendMessageError.ImageEncodeFailed::class.java) {
+            kotlinx.coroutines.runBlocking { fixture.interactor.sendImage(groupIdHex, ByteArray(8)) }
+        }
+        assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    @Test
+    fun sendImage_uploadFailure_throwsImageUploadFailed() = runTest {
+        val fixture = newFixture(blossomClient = FailingBlossomClient())
+        fixture.seedGroup(includePeer = true)
+
+        assertThrows(SendMessageError.ImageUploadFailed::class.java) {
+            kotlinx.coroutines.runBlocking { fixture.interactor.sendImage(groupIdHex, ByteArray(8)) }
+        }
+        assertTrue(fixture.transport.sends().isEmpty())
     }
 
     // ─── reply reference rides the send + survives retry ─────────
@@ -411,7 +471,17 @@ class SendMessageInteractorTest {
 
     // ─── helpers ──────────────────────────────────────────────────
 
-    private fun newFixture(): Fixture {
+    private fun newFixture(
+        blossomClient: BlossomClient = FakeBlossomClient(),
+        encodeImage: (ByteArray) -> ChatImageEncoder.Encoded? = { data ->
+            ChatImageEncoder.Encoded(
+                jpeg = data,
+                width = 240,
+                height = 160,
+                blurhash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
+            )
+        },
+    ): Fixture {
         val activeProvider = FakeActiveIdentityProvider(initial = activeId)
         val identitiesFlow = MutableStateFlow(
             listOf(
@@ -444,15 +514,19 @@ class SendMessageInteractorTest {
             groupRepository = groupRepository,
             messageRepository = messageRepository,
             inboxTransport = transport,
+            blossomClient = blossomClient,
+            blossomServerUrl = "https://blossom.test",
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_700_000_000_000L },
             idFactory = { UUID.fromString("00000000-0000-0000-0000-000000000001") },
+            encodeImage = encodeImage,
         )
         return Fixture(
             interactor = interactor,
             groupStore = groupStore,
             messageStore = messageStore,
             transport = transport,
+            blossomClient = blossomClient,
         )
     }
 
@@ -461,6 +535,7 @@ class SendMessageInteractorTest {
         val groupStore: InMemoryGroupStore,
         val messageStore: InMemoryMessageStore,
         val transport: ConfigurableInboxTransport,
+        val blossomClient: BlossomClient,
     ) {
         suspend fun seedGroup(
             includePeer: Boolean,
@@ -511,6 +586,34 @@ class SendMessageInteractorTest {
         isPublishedOnChain = true,
         ownerIdentityId = activeId.value,
     )
+}
+
+/** In-memory Blossom store: `upload` keeps the ciphertext keyed by its
+ *  SHA-256 (as the real server does), `download` serves it back. Lets a
+ *  send → fan-out → receive round-trip run with no network. */
+private class FakeBlossomClient : BlossomClient {
+    val uploads = mutableListOf<ByteArray>()
+    private val blobs = HashMap<String, ByteArray>()
+
+    override suspend fun upload(blob: ByteArray, mimeType: String): BlobDescriptor {
+        uploads.add(blob)
+        val sha = ChatImageCrypto.sha256Hex(blob)
+        blobs[sha] = blob
+        return BlobDescriptor(sha256 = sha, url = "https://blossom.test/$sha", size = blob.size)
+    }
+
+    override suspend fun download(sha256: String): ByteArray =
+        blobs[sha256] ?: throw IllegalStateException("no blob $sha256")
+}
+
+/** A Blossom client whose `upload` always fails — drives the
+ *  [SendMessageError.ImageUploadFailed] path. */
+private class FailingBlossomClient : BlossomClient {
+    override suspend fun upload(blob: ByteArray, mimeType: String): BlobDescriptor =
+        throw java.io.IOException("network down")
+
+    override suspend fun download(sha256: String): ByteArray =
+        throw java.io.IOException("network down")
 }
 
 /** Sealer that just returns the plaintext bytes — the tests don't

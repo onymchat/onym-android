@@ -101,6 +101,14 @@ data class ChatMessagePayload(
     @Serializable(with = UuidStringSerializer::class)
     val replyToMessageId: UUID? = null,
     val variant: ChatMessageVariant,
+    /**
+     * Optional encrypted image attached to this message. Additive +
+     * optional, so it ships under `version = 1`: a sender that omits it
+     * decodes to `null` (the `= null` default), and an older receiver
+     * ignores the unknown key. When present, `variant.body` is the
+     * (possibly empty) caption. See [ChatImageAttachment].
+     */
+    val attachment: ChatImageAttachment? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -111,7 +119,8 @@ data class ChatMessagePayload(
             senderBlsPubkeyHex == other.senderBlsPubkeyHex &&
             sentAtMillis == other.sentAtMillis &&
             replyToMessageId == other.replyToMessageId &&
-            variant == other.variant
+            variant == other.variant &&
+            attachment == other.attachment
     }
 
     override fun hashCode(): Int {
@@ -122,6 +131,7 @@ data class ChatMessagePayload(
         h = 31 * h + sentAtMillis.hashCode()
         h = 31 * h + replyToMessageId.hashCode()
         h = 31 * h + variant.hashCode()
+        h = 31 * h + (attachment?.hashCode() ?: 0)
         return h
     }
 }

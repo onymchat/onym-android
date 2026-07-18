@@ -52,9 +52,14 @@ class SendMessageInteractor(
     private val groupRepository: GroupRepository,
     private val messageRepository: MessageRepository,
     private val inboxTransport: InboxTransport,
+    private val blossomClient: BlossomClient,
+    private val blossomServerUrl: String,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val idFactory: () -> UUID = { UUID.randomUUID() },
+    /** Injectable so JVM unit tests can supply a canned encoding without
+     *  the Android `Bitmap` framework. Production uses [ChatImageEncoder]. */
+    private val encodeImage: (ByteArray) -> ChatImageEncoder.Encoded? = ChatImageEncoder::encode,
 ) {
 
     /**
@@ -130,6 +135,90 @@ class SendMessageInteractor(
         }
         messageRepository.updateStatus(messageId, activeIdentityId.value, finalStatus)
 
+        pending.copy(status = finalStatus)
+    }
+
+    /**
+     * Send an image message. Encodes + AES-GCM-encrypts the image,
+     * uploads the ciphertext to Blossom, then ships a normal
+     * [ChatMessagePayload] carrying a [ChatImageAttachment] (+ optional
+     * caption). The optimistic bubble is inserted after a successful
+     * upload but before the fan-out, so receivers never get an
+     * attachment pointing at a missing blob; upload failure throws
+     * before anything is persisted. Mirrors iOS `sendImage`.
+     */
+    suspend fun sendImage(
+        groupId: String,
+        imageData: ByteArray,
+        caption: String = "",
+    ): ChatMessage = withContext(ioDispatcher) {
+        val activeIdentityId = activeIdentity.currentIdentityId.value
+            ?: throw SendMessageError.NoIdentityLoaded
+        val activeSummary = identitiesFlow.value.firstOrNull { it.id == activeIdentityId }
+            ?: throw SendMessageError.NoIdentityLoaded
+        val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
+            ?: throw SendMessageError.UnknownGroup
+        val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
+        if (group.memberProfiles[myBlsHex] == null) throw SendMessageError.SenderNotAMember
+        val variant: ChatMessageVariant = when (group.groupType) {
+            SepGroupType.TYRANNY -> ChatMessageVariant.Tyranny(body = caption)
+            else -> throw SendMessageError.UnsupportedGroupType(group.groupType)
+        }
+
+        val encoded = encodeImage(imageData) ?: throw SendMessageError.ImageEncodeFailed
+        val sealed = ChatImageCrypto.seal(encoded.jpeg)
+        try {
+            blossomClient.upload(sealed.blob, "image/jpeg")
+        } catch (e: Exception) {
+            throw SendMessageError.ImageUploadFailed(e.message ?: e.javaClass.simpleName)
+        }
+        val attachment = ChatImageAttachment(
+            sha256 = sealed.sha256Hex,
+            mimeType = "image/jpeg",
+            byteSize = sealed.blob.size,
+            width = encoded.width,
+            height = encoded.height,
+            encKey = sealed.key,
+            blurhash = encoded.blurhash,
+            server = blossomServerUrl,
+        )
+
+        val messageId = idFactory()
+        val sentAtMillis = clock()
+        val payload = ChatMessagePayload(
+            version = 1,
+            messageId = messageId,
+            groupId = group.groupIdBytes,
+            senderBlsPubkeyHex = myBlsHex,
+            sentAtMillis = sentAtMillis,
+            replyToMessageId = null,
+            variant = variant,
+            attachment = attachment,
+        )
+        val pending = ChatMessage(
+            id = messageId,
+            groupId = groupId,
+            ownerIdentityId = activeIdentityId.value,
+            senderBlsPubkeyHex = myBlsHex,
+            body = caption,
+            sentAtMillis = sentAtMillis,
+            direction = MessageDirection.OUTGOING,
+            status = MessageStatus.PENDING,
+            replyToMessageId = null,
+            groupType = group.groupType,
+            imageAttachment = attachment,
+        )
+        messageRepository.append(pending)
+
+        val recipients = recipientInboxKeysFor(group, myBlsHex)
+        val finalStatus = try {
+            val successCount = fanOut(payload, recipients)
+            if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT else MessageStatus.FAILED
+        } catch (_: EncodingException) {
+            messageRepository.updateStatus(messageId, activeIdentityId.value, MessageStatus.FAILED)
+            MessageStatus.FAILED
+        }
+        messageRepository.updateStatus(messageId, activeIdentityId.value, finalStatus)
         pending.copy(status = finalStatus)
     }
 
@@ -297,4 +386,13 @@ sealed class SendMessageError(message: String) : Exception(message) {
 
     class EncodingFailed(reason: String) :
         SendMessageError("Couldn't encode chat-message payload: $reason")
+
+    /** The picked image couldn't be decoded / re-encoded. */
+    object ImageEncodeFailed : SendMessageError("Couldn't process the image") {
+        private fun readResolve(): Any = ImageEncodeFailed
+    }
+
+    /** Encrypting or uploading the image blob to Blossom failed. */
+    class ImageUploadFailed(reason: String) :
+        SendMessageError("Couldn't upload the image: $reason")
 }

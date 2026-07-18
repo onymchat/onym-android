@@ -65,6 +65,11 @@ data class PersistedMessage(
     val encryptedSenderBlsPubkeyHex: ByteArray,
     val encryptedBody: ByteArray,
     val replyToMessageId: String? = null,
+    /** AES-GCM-encrypted JSON of the [ChatImageAttachment] (or `null`
+     *  for a text-only message). Encrypted at rest like `body` — it
+     *  carries the per-image key. Nullable so the migration lands the
+     *  column on existing rows without a wipe. */
+    val encryptedAttachmentJson: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -78,7 +83,9 @@ data class PersistedMessage(
             groupTypeRaw == other.groupTypeRaw &&
             encryptedSenderBlsPubkeyHex.contentEquals(other.encryptedSenderBlsPubkeyHex) &&
             encryptedBody.contentEquals(other.encryptedBody) &&
-            replyToMessageId == other.replyToMessageId
+            replyToMessageId == other.replyToMessageId &&
+            (encryptedAttachmentJson?.contentEquals(other.encryptedAttachmentJson)
+                ?: (other.encryptedAttachmentJson == null))
     }
 
     override fun hashCode(): Int {
@@ -92,6 +99,7 @@ data class PersistedMessage(
         h = 31 * h + encryptedSenderBlsPubkeyHex.contentHashCode()
         h = 31 * h + encryptedBody.contentHashCode()
         h = 31 * h + (replyToMessageId?.hashCode() ?: 0)
+        h = 31 * h + (encryptedAttachmentJson?.contentHashCode() ?: 0)
         return h
     }
 }

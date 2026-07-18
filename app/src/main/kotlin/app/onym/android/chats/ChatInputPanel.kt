@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +66,7 @@ fun ChatInputPanel(
     enabled: Boolean = true,
     maxLines: Int = MAX_LINES,
     focusRequester: FocusRequester? = null,
+    onAttach: (() -> Unit)? = null,
 ) {
     var text by remember { mutableStateOf("") }
     val sendBody = trimmedSendBody(text)
@@ -77,6 +80,18 @@ fun ChatInputPanel(
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (onAttach != null) {
+            IconButton(
+                onClick = onAttach,
+                enabled = enabled,
+                modifier = Modifier.testTag("chat_thread.attach_button"),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Image,
+                    contentDescription = "Attach photo",
+                )
+            }
+        }
         OutlinedTextField(
             value = text,
             onValueChange = { text = it },

@@ -621,6 +621,10 @@ class IncomingMessageDispatcher(
             // rows.
             replyToMessageId = payload.replyToMessageId,
             groupType = group.groupType,
+            // Encrypted image (if any). The blob is fetched + decrypted
+            // lazily at render time (ChatImageLoader); nothing is
+            // downloaded on receipt.
+            imageAttachment = payload.attachment,
         )
         // Use the receivedAt timestamp only for the "ordering by
         // arrival" UI follow-up — wire `sentAtMillis` is the
