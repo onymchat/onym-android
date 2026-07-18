@@ -236,6 +236,21 @@ class MultiIdentityChatUITest {
         switchToIdentity("Bob")
         openTheChat()
         waitForImageBubble(timeout = 40.seconds)
+
+        // 10. Bob -> Alice video message. The attach-video button, under
+        //     the UI-test harness, sends a canned video (both poster and
+        //     video blobs) through the encode → encrypt → upload pipeline.
+        switchToIdentity("Bob")
+        openTheChat()
+        sendVideo()
+        waitForVideoBubble()
+
+        // 11. Alice receives it: her bubble lazily downloads the poster
+        //     from the loopback Blossom store, decrypts, and renders —
+        //     proving the cross-identity video round-trip.
+        switchToIdentity("Alice")
+        openTheChat()
+        waitForVideoBubble(timeout = 40.seconds)
     }
 
     // ─── helpers ──────────────────────────────────────────────────
@@ -311,6 +326,21 @@ class MultiIdentityChatUITest {
     private fun waitForImageBubble(timeout: kotlin.time.Duration = 20.seconds) {
         composeRule.waitUntil(timeout.inWholeMilliseconds) {
             composeRule.onAllNodes(hasTestTagStartingWith("chat_thread.image."))
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    /** Tap the composer's attach-video button. Under [UITestRegistry.enabled]
+     *  the screen bypasses the picker + Media3 transcoding and sends a
+     *  canned video through the real send pipeline. */
+    private fun sendVideo() {
+        composeRule.onNodeWithTag("chat_thread.attach_video_button").performClick()
+    }
+
+    /** Wait until at least one video-attachment bubble (poster) is rendered. */
+    private fun waitForVideoBubble(timeout: kotlin.time.Duration = 20.seconds) {
+        composeRule.waitUntil(timeout.inWholeMilliseconds) {
+            composeRule.onAllNodes(hasTestTagStartingWith("chat_thread.video."))
                 .fetchSemanticsNodes().isNotEmpty()
         }
     }
