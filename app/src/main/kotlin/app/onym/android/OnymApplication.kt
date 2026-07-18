@@ -337,6 +337,7 @@ class OnymApplication : Application() {
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_1_2,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_2_3,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_3_4,
+                    app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_4_5,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -414,6 +415,31 @@ class OnymApplication : Application() {
             blossomClient = blossomClient,
             cacheDir = java.io.File(applicationContext.cacheDir, "chat_images"),
         )
+        val videoLoader = app.onym.android.chats.ChatVideoLoader(
+            blossomClient = blossomClient,
+            cacheDir = java.io.File(applicationContext.cacheDir, "chat_videos"),
+        )
+        // Real video transcoder captures the app context. Under the
+        // UI-test harness (which can't transcode a real clip) send a
+        // canned encoding so the pipeline still exercises seal → upload
+        // → fan-out; the poster comes from a generated test image.
+        val appContext = applicationContext
+        val encodeVideo: suspend (android.net.Uri) -> app.onym.android.chats.ChatVideoEncoder.Encoded? =
+            if (UITestRegistry.enabled) {
+                { _ ->
+                    app.onym.android.chats.ChatImageEncoder.encode(debugTestImageBytes())?.let { poster ->
+                        app.onym.android.chats.ChatVideoEncoder.Encoded(
+                            mp4 = "uitest-video-blob".toByteArray(),
+                            width = poster.width,
+                            height = poster.height,
+                            durationSeconds = 3.0,
+                            poster = poster,
+                        )
+                    }
+                }
+            } else {
+                { uri -> app.onym.android.chats.ChatVideoEncoder.encode(appContext, uri) }
+            }
         applicationScope.launch {
             // Bootstrap above writes _snapshots; this read happens on
             // the same scope so it observes the bootstrap result.
@@ -714,6 +740,7 @@ class OnymApplication : Application() {
                     inboxTransport = inboxTransport,
                     blossomClient = blossomClient,
                     blossomServerUrl = blossomServerUrl,
+                    encodeVideo = encodeVideo,
                 )
                 app.onym.android.chats.ChatThreadViewModel(
                     groupId = groupId,
@@ -723,10 +750,12 @@ class OnymApplication : Application() {
                         sender.send(gid, body, replyTo)
                     },
                     sendImage = { gid, data -> sender.sendImage(gid, data) },
+                    sendVideo = { gid, uri -> sender.sendVideo(gid, uri) },
                     retryMessage = sender::retry,
                     chatReceiptSender = chatReceiptSender,
                     readReceiptsEnabled = { readReceiptsPreference.current() },
                     imageLoader = imageLoader,
+                    videoLoader = videoLoader,
                 )
             },
             makeIdentitiesViewModel = {
@@ -777,4 +806,19 @@ class OnymApplication : Application() {
     internal fun requireCurrentFragmentActivity(): FragmentActivity =
         resumedActivity?.get() as? FragmentActivity
             ?: error("No resumed FragmentActivity to host BiometricPrompt")
+}
+
+/**
+ * A small solid-color JPEG for the UI-test video-send path's poster.
+ * Only ever called under [UITestRegistry.enabled]; mirrors the image
+ * path's generated test bitmap.
+ */
+private fun debugTestImageBytes(): ByteArray {
+    val bitmap = android.graphics.Bitmap.createBitmap(
+        240, 160, android.graphics.Bitmap.Config.ARGB_8888,
+    )
+    bitmap.eraseColor(android.graphics.Color.rgb(0x8B, 0x3D, 0xFD))
+    val stream = java.io.ByteArrayOutputStream()
+    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, stream)
+    return stream.toByteArray()
 }

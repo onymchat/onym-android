@@ -172,6 +172,14 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
 
+    // Media3 — video transcode (Transformer) + playback (ExoPlayer + UI)
+    // for chat video messages.
+    implementation(libs.androidx.media3.transformer)
+    implementation(libs.androidx.media3.effect)
+    implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
+
     implementation(libs.onym.sdk)
 
     // Room — `suspend` DAO + KSP-generated bindings. PersistenceStore

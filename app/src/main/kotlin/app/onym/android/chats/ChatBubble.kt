@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -114,6 +115,7 @@ fun ChatBubble(
     maxWidthFraction: Float = 0.75f,
     onRetry: (() -> Unit)? = null,
     imageLoader: ChatImageLoader? = null,
+    onVideoTapped: ((ChatVideoAttachment) -> Unit)? = null,
     reply: ChatReplyQuote? = null,
     onQuoteTap: (() -> Unit)? = null,
     isHighlighted: Boolean = false,
@@ -258,7 +260,9 @@ fun ChatBubble(
                     messageId = message.id,
                     onClick = if (retryEnabled) onRetry else null,
                     attachment = message.imageAttachment,
+                    video = message.videoAttachment,
                     imageLoader = imageLoader,
+                    onVideoTapped = onVideoTapped,
                     reply = reply,
                     replyAccentColor = reply?.accent?.color(darkTheme),
                     isOutgoing = isOutgoing,
@@ -287,7 +291,9 @@ private fun BubbleBody(
     messageId: java.util.UUID,
     onClick: (() -> Unit)?,
     attachment: ChatImageAttachment?,
+    video: ChatVideoAttachment?,
     imageLoader: ChatImageLoader?,
+    onVideoTapped: ((ChatVideoAttachment) -> Unit)?,
     reply: ChatReplyQuote?,
     replyAccentColor: Color?,
     isOutgoing: Boolean,
@@ -333,7 +339,14 @@ private fun BubbleBody(
                 onTap = if (!reply.isUnavailable) onQuoteTap else null,
             )
         }
-        if (attachment != null) {
+        if (video != null) {
+            AttachmentVideo(
+                video = video,
+                imageLoader = imageLoader,
+                messageId = messageId,
+                onTap = onVideoTapped?.let { cb -> { cb(video) } },
+            )
+        } else if (attachment != null) {
             AttachmentImage(
                 attachment = attachment,
                 imageLoader = imageLoader,
@@ -401,6 +414,85 @@ private fun AttachmentImage(
             )
         }
     }
+}
+
+/**
+ * Renders a chat video attachment: the poster (its own encrypted image
+ * blob) loads exactly like a photo — blurhash placeholder → decrypted
+ * poster — with a play glyph overlaid and a duration pill in the corner.
+ * Tapping opens the full-screen player; the (large) video blob only
+ * downloads then. Mirrors `ChatBubbleCell` video rendering from onym-ios.
+ */
+@Composable
+private fun AttachmentVideo(
+    video: ChatVideoAttachment,
+    imageLoader: ChatImageLoader?,
+    messageId: java.util.UUID,
+    onTap: (() -> Unit)?,
+) {
+    val poster = video.poster
+    val aspect = if (poster.width > 0 && poster.height > 0) {
+        poster.width.toFloat() / poster.height.toFloat()
+    } else {
+        1f
+    }
+    val placeholder = remember(poster.blurhash) {
+        runCatching { Blurhash.decode(poster.blurhash, 32, 32) }.getOrNull()
+    }
+    var bitmap by remember(poster.sha256) {
+        mutableStateOf<android.graphics.Bitmap?>(null)
+    }
+    LaunchedEffect(poster.sha256, imageLoader) {
+        if (imageLoader != null) {
+            bitmap = imageLoader.load(poster)
+        }
+    }
+    val shown = bitmap ?: placeholder
+    Box(
+        modifier = Modifier
+            .widthIn(max = IMAGE_MAX_WIDTH)
+            .fillMaxWidth()
+            .aspectRatio(aspect)
+            .clip(RoundedCornerShape(IMAGE_RADIUS))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier)
+            .testTag("chat_thread.video.$messageId"),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (shown != null) {
+            Image(
+                bitmap = shown.asImageBitmap(),
+                contentDescription = "Video",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Icon(
+            imageVector = Icons.Filled.PlayCircle,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.9f),
+            modifier = Modifier.size(48.dp),
+        )
+        Text(
+            text = formatVideoDuration(video.durationSeconds),
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(6.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 5.dp, vertical = 1.dp),
+        )
+    }
+}
+
+/** Formats a duration in seconds as `m:ss` (e.g. `1:07`). Pure so a
+ *  unit test can pin it without Compose. Mirrors iOS
+ *  `ChatBubbleCell.formatDuration`. */
+internal fun formatVideoDuration(seconds: Double): String {
+    val total = seconds.coerceAtLeast(0.0).toInt()
+    return "%d:%02d".format(total / 60, total % 60)
 }
 
 /**

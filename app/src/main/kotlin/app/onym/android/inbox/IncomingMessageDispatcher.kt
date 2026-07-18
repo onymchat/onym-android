@@ -625,6 +625,9 @@ class IncomingMessageDispatcher(
             // lazily at render time (ChatImageLoader); nothing is
             // downloaded on receipt.
             imageAttachment = payload.attachment,
+            // Encrypted video (if any). Only the small poster loads on
+            // render; the video blob downloads on play (ChatVideoLoader).
+            videoAttachment = payload.videoAttachment,
         )
         // Use the receivedAt timestamp only for the "ordering by
         // arrival" UI follow-up — wire `sentAtMillis` is the

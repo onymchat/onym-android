@@ -109,6 +109,14 @@ data class ChatMessagePayload(
      * (possibly empty) caption. See [ChatImageAttachment].
      */
     val attachment: ChatImageAttachment? = null,
+    /**
+     * Optional encrypted video attached to this message. Additive +
+     * optional exactly like [attachment], so it ships under
+     * `version = 1`. When present, `variant.body` is the (possibly
+     * empty) caption. See [ChatVideoAttachment].
+     */
+    @SerialName("video_attachment")
+    val videoAttachment: ChatVideoAttachment? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -120,7 +128,8 @@ data class ChatMessagePayload(
             sentAtMillis == other.sentAtMillis &&
             replyToMessageId == other.replyToMessageId &&
             variant == other.variant &&
-            attachment == other.attachment
+            attachment == other.attachment &&
+            videoAttachment == other.videoAttachment
     }
 
     override fun hashCode(): Int {
@@ -132,6 +141,7 @@ data class ChatMessagePayload(
         h = 31 * h + replyToMessageId.hashCode()
         h = 31 * h + variant.hashCode()
         h = 31 * h + (attachment?.hashCode() ?: 0)
+        h = 31 * h + (videoAttachment?.hashCode() ?: 0)
         return h
     }
 }

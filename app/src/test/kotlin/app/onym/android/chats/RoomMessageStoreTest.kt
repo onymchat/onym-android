@@ -75,6 +75,37 @@ class RoomMessageStoreTest {
         assertNull("a non-reply message round-trips a null reply target", first.replyToMessageId)
     }
 
+    @Test
+    fun insert_thenList_roundtripsVideoAttachment() = runTest {
+        val video = ChatVideoAttachment(
+            sha256 = "ef".repeat(32),
+            mimeType = "video/mp4",
+            byteSize = 4_200_000,
+            width = 1280,
+            height = 720,
+            durationSeconds = 12.5,
+            encKey = ByteArray(32) { 0x9 },
+            poster = ChatImageAttachment(
+                sha256 = "cd".repeat(32),
+                mimeType = "image/jpeg",
+                byteSize = 51_234,
+                width = 1280,
+                height = 720,
+                encKey = ByteArray(32) { 0x7 },
+                blurhash = "LEHV6nWB2yk8",
+                server = "https://blossom.onym.app",
+            ),
+            server = "https://blossom.onym.app",
+        )
+        val msg = makeMessage(body = "caption").copy(videoAttachment = video)
+        store.insert(msg)
+
+        val listed = store.listForGroup(msg.ownerIdentityId, msg.groupId).single()
+        assertEquals(video, listed.videoAttachment)
+        assertNull(listed.imageAttachment)
+        assertEquals("caption", listed.body)
+    }
+
     // ─── reply reference round-trip ───────────────────────────────
 
     @Test

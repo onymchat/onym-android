@@ -70,6 +70,11 @@ data class PersistedMessage(
      *  carries the per-image key. Nullable so the migration lands the
      *  column on existing rows without a wipe. */
     val encryptedAttachmentJson: ByteArray? = null,
+    /** AES-GCM-encrypted JSON of the [ChatVideoAttachment] (or `null`
+     *  for a message with no video). Same at-rest encryption + non-
+     *  destructive `ALTER TABLE ADD COLUMN` migration shape as
+     *  [encryptedAttachmentJson]; carries the per-video key + poster. */
+    val encryptedVideoAttachmentJson: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -85,7 +90,9 @@ data class PersistedMessage(
             encryptedBody.contentEquals(other.encryptedBody) &&
             replyToMessageId == other.replyToMessageId &&
             (encryptedAttachmentJson?.contentEquals(other.encryptedAttachmentJson)
-                ?: (other.encryptedAttachmentJson == null))
+                ?: (other.encryptedAttachmentJson == null)) &&
+            (encryptedVideoAttachmentJson?.contentEquals(other.encryptedVideoAttachmentJson)
+                ?: (other.encryptedVideoAttachmentJson == null))
     }
 
     override fun hashCode(): Int {
@@ -100,6 +107,7 @@ data class PersistedMessage(
         h = 31 * h + encryptedBody.contentHashCode()
         h = 31 * h + (replyToMessageId?.hashCode() ?: 0)
         h = 31 * h + (encryptedAttachmentJson?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedVideoAttachmentJson?.contentHashCode() ?: 0)
         return h
     }
 }

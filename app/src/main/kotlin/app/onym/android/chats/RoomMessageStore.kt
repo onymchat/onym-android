@@ -77,6 +77,11 @@ class RoomMessageStore(
         encryptedAttachmentJson = message.imageAttachment?.let {
             encryption.encrypt(attachmentJson.encodeToString(ChatImageAttachment.serializer(), it))
         },
+        // Video attachment JSON is encrypted at rest (carries the
+        // per-video key + the poster descriptor).
+        encryptedVideoAttachmentJson = message.videoAttachment?.let {
+            encryption.encrypt(attachmentJson.encodeToString(ChatVideoAttachment.serializer(), it))
+        },
     )
 
     /** Tolerant decode: a row whose encrypted columns fail to
@@ -106,6 +111,13 @@ class RoomMessageStore(
                     attachmentJson.decodeFromString(ChatImageAttachment.serializer(), it)
                 }.getOrNull()
             }
+        val videoAttachment = row.encryptedVideoAttachmentJson
+            ?.let { tryDecryptString(it) }
+            ?.let {
+                runCatching {
+                    attachmentJson.decodeFromString(ChatVideoAttachment.serializer(), it)
+                }.getOrNull()
+            }
         return ChatMessage(
             id = id,
             groupId = row.groupId,
@@ -118,6 +130,7 @@ class RoomMessageStore(
             replyToMessageId = replyToMessageId,
             groupType = groupType,
             imageAttachment = imageAttachment,
+            videoAttachment = videoAttachment,
         )
     }
 

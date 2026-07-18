@@ -40,9 +40,15 @@ class ChatThreadViewModel(
      *  Defaulted to a no-op so tests that don't exercise images keep
      *  their construction sites unchanged. */
     private val sendImage: suspend (groupId: String, imageData: ByteArray) -> Unit = { _, _ -> },
+    /** Send a video message (transcode → encrypt → upload → fan-out).
+     *  Defaulted to a no-op so tests that don't exercise video keep
+     *  their construction sites unchanged. */
+    private val sendVideo: suspend (groupId: String, videoUri: android.net.Uri) -> Unit = { _, _ -> },
     private val retryMessage: suspend (groupId: String, messageId: java.util.UUID) -> Unit = { _, _ -> },
     /** Loader the UI uses to fetch + decrypt image attachments. */
     val imageLoader: ChatImageLoader? = null,
+    /** Loader the UI uses to fetch + decrypt video blobs for playback. */
+    val videoLoader: ChatVideoLoader? = null,
     /** Ships read receipts for incoming messages the user is viewing.
      *  Defaulted to a no-op so tests that don't exercise receipts keep
      *  their construction sites unchanged. */
@@ -148,6 +154,21 @@ class ChatThreadViewModel(
             _sendInFlight.value = true
             try {
                 sendImage(groupId, imageData)
+                _lastSendError.value = null
+            } catch (e: Throwable) {
+                _lastSendError.value = e.message ?: e.javaClass.simpleName
+            } finally {
+                _sendInFlight.value = false
+            }
+        }
+    }
+
+    /** Send a video message from the given picked content [uri]. */
+    fun sendVideo(uri: android.net.Uri) {
+        viewModelScope.launch {
+            _sendInFlight.value = true
+            try {
+                sendVideo(groupId, uri)
                 _lastSendError.value = null
             } catch (e: Throwable) {
                 _lastSendError.value = e.message ?: e.javaClass.simpleName

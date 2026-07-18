@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButton
@@ -67,6 +68,7 @@ fun ChatInputPanel(
     maxLines: Int = MAX_LINES,
     focusRequester: FocusRequester? = null,
     onAttach: (() -> Unit)? = null,
+    onAttachVideo: (() -> Unit)? = null,
 ) {
     var text by remember { mutableStateOf("") }
     val sendBody = trimmedSendBody(text)
@@ -89,6 +91,18 @@ fun ChatInputPanel(
                 Icon(
                     imageVector = Icons.Filled.Image,
                     contentDescription = "Attach photo",
+                )
+            }
+        }
+        if (onAttachVideo != null) {
+            IconButton(
+                onClick = onAttachVideo,
+                enabled = enabled,
+                modifier = Modifier.testTag("chat_thread.attach_video_button"),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Videocam,
+                    contentDescription = "Attach video",
                 )
             }
         }

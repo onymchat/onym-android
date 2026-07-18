@@ -55,4 +55,9 @@ data class ChatMessage(
      *  is present. Fetched + decrypted lazily at render time
      *  ([ChatImageLoader]), not stored inline. */
     val imageAttachment: ChatImageAttachment? = null,
+    /** Encrypted video attached to this message, if any. Mirrors
+     *  [ChatMessagePayload.videoAttachment]; `body` is the caption when
+     *  this is present. The poster loads eagerly like an image; the video
+     *  blob only downloads on play ([ChatVideoLoader]). */
+    val videoAttachment: ChatVideoAttachment? = null,
 )

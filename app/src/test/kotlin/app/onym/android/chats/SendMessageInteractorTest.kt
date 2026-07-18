@@ -13,6 +13,8 @@ import app.onym.android.support.ConfigurableInboxTransport
 import app.onym.android.support.FakeActiveIdentityProvider
 import app.onym.android.support.InMemoryGroupStore
 import app.onym.android.support.InMemoryMessageStore
+import android.net.Uri
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.onym.android.transport.TransportInboxId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -29,6 +31,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
 import java.util.UUID
 
 /**
@@ -36,9 +39,14 @@ import java.util.UUID
  * fakes for store / transport / identity so the pipeline runs
  * without the keychain + Nostr stack.
  *
+ * Runs under Robolectric ([AndroidJUnit4]) so the video-send tests can
+ * construct an `android.net.Uri` (the injected test encoder ignores its
+ * contents, but the send API takes a real `Uri`).
+ *
  * Mirrors `SendMessageInteractorTests.swift` from onym-ios PR #150.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(AndroidJUnit4::class)
 class SendMessageInteractorTest {
 
     private val activeId = IdentityId("alice")
@@ -131,6 +139,81 @@ class SendMessageInteractorTest {
 
         assertThrows(SendMessageError.ImageUploadFailed::class.java) {
             kotlinx.coroutines.runBlocking { fixture.interactor.sendImage(groupIdHex, ByteArray(8)) }
+        }
+        assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    // ─── video send ──────────────────────────────────────────────
+
+    @Test
+    fun sendVideo_uploadsPosterAndVideoBlobs_persistsAttachment_andFansOut() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.sendVideo(groupIdHex, Uri.parse("content://test/video"))
+
+        assertEquals(MessageStatus.SENT, result.status)
+        assertEquals(MessageDirection.OUTGOING, result.direction)
+        val video = result.videoAttachment
+        assertNotNull(video)
+        assertEquals("video/mp4", video!!.mimeType)
+        assertEquals(1280, video.width)
+        assertEquals(4.0, video.durationSeconds, 0.0)
+        assertEquals(32, video.encKey.size)
+        // Poster is its own encrypted blob with its own key + blurhash.
+        assertEquals("image/jpeg", video.poster.mimeType)
+        assertEquals(32, video.poster.encKey.size)
+        assertNotEquals(video.poster.sha256, video.sha256)
+        // Both blobs (poster + video) uploaded under their sha256s.
+        val fake = fixture.blossomClient as FakeBlossomClient
+        assertEquals(2, fake.uploads.size)
+        val uploadedShas = fake.uploads.map { ChatImageCrypto.sha256Hex(it) }
+        assertTrue(uploadedShas.contains(video.sha256))
+        assertTrue(uploadedShas.contains(video.poster.sha256))
+        // The attachment rides the wire payload to the peer.
+        val shipped = decodeShipped(fixture.transport.sends().single().payload)
+        assertEquals(video.sha256, shipped.videoAttachment?.sha256)
+        // Persisted with the video attachment.
+        val stored = fixture.messageStore.listForGroup(activeId.value, groupIdHex).single()
+        assertEquals(video.sha256, stored.videoAttachment?.sha256)
+    }
+
+    @Test
+    fun sendVideo_encodeFailure_throwsAndUploadsNothing() = runTest {
+        val fixture = newFixture(encodeVideo = { null })
+        fixture.seedGroup(includePeer = true)
+
+        assertThrows(SendMessageError.VideoEncodeFailed::class.java) {
+            kotlinx.coroutines.runBlocking {
+                fixture.interactor.sendVideo(groupIdHex, Uri.parse("content://test/v"))
+            }
+        }
+        assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    @Test
+    fun sendVideo_uploadFailure_throwsVideoUploadFailed() = runTest {
+        val fixture = newFixture(blossomClient = FailingBlossomClient())
+        fixture.seedGroup(includePeer = true)
+
+        assertThrows(SendMessageError.VideoUploadFailed::class.java) {
+            kotlinx.coroutines.runBlocking {
+                fixture.interactor.sendVideo(groupIdHex, Uri.parse("content://test/v"))
+            }
+        }
+        assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    @Test
+    fun sendVideo_oversizeBlob_throwsVideoTooLarge() = runTest {
+        val huge = ByteArray(SendMessageInteractor.MAX_UPLOAD_BYTES + 1)
+        val fixture = newFixture(encodeVideo = { cannedVideoEncoded(mp4 = huge) })
+        fixture.seedGroup(includePeer = true)
+
+        assertThrows(SendMessageError.VideoTooLarge::class.java) {
+            kotlinx.coroutines.runBlocking {
+                fixture.interactor.sendVideo(groupIdHex, Uri.parse("content://test/v"))
+            }
         }
         assertTrue(fixture.transport.sends().isEmpty())
     }
@@ -471,6 +554,22 @@ class SendMessageInteractorTest {
 
     // ─── helpers ──────────────────────────────────────────────────
 
+    /** Canned encoding so the test doesn't run Media3 transcoding: a
+     *  poster (encoded bytes) + placeholder MP4 bytes. */
+    private fun cannedVideoEncoded(mp4: ByteArray = ByteArray(64) { it.toByte() }) =
+        ChatVideoEncoder.Encoded(
+            mp4 = mp4,
+            width = 1280,
+            height = 720,
+            durationSeconds = 4.0,
+            poster = ChatImageEncoder.Encoded(
+                jpeg = ByteArray(32) { it.toByte() },
+                width = 1280,
+                height = 720,
+                blurhash = "LEHV6nWB2yk8",
+            ),
+        )
+
     private fun newFixture(
         blossomClient: BlossomClient = FakeBlossomClient(),
         encodeImage: (ByteArray) -> ChatImageEncoder.Encoded? = { data ->
@@ -481,6 +580,7 @@ class SendMessageInteractorTest {
                 blurhash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
             )
         },
+        encodeVideo: suspend (Uri) -> ChatVideoEncoder.Encoded? = { cannedVideoEncoded() },
     ): Fixture {
         val activeProvider = FakeActiveIdentityProvider(initial = activeId)
         val identitiesFlow = MutableStateFlow(
@@ -520,6 +620,7 @@ class SendMessageInteractorTest {
             clock = { 1_700_000_000_000L },
             idFactory = { UUID.fromString("00000000-0000-0000-0000-000000000001") },
             encodeImage = encodeImage,
+            encodeVideo = encodeVideo,
         )
         return Fixture(
             interactor = interactor,

@@ -60,6 +60,12 @@ class SendMessageInteractor(
     /** Injectable so JVM unit tests can supply a canned encoding without
      *  the Android `Bitmap` framework. Production uses [ChatImageEncoder]. */
     private val encodeImage: (ByteArray) -> ChatImageEncoder.Encoded? = ChatImageEncoder::encode,
+    /** Transcodes + extracts a poster from a picked video. Injectable so
+     *  tests supply a canned encoding instead of running Media3. Wired to
+     *  the real encoder (which needs a `Context`) in `OnymApplication`;
+     *  defaults to a no-op so construction sites that never send video
+     *  stay unchanged. */
+    private val encodeVideo: suspend (android.net.Uri) -> ChatVideoEncoder.Encoded? = { null },
 ) {
 
     /**
@@ -223,6 +229,105 @@ class SendMessageInteractor(
     }
 
     /**
+     * Send a video message. Transcodes to 720p + extracts a poster, then
+     * encrypts + uploads *two* blobs — the poster (small) and the video
+     * (large) — before shipping a [ChatMessagePayload] carrying a
+     * [ChatVideoAttachment] (+ optional caption). Both uploads complete
+     * before the optimistic bubble is inserted, so a receiver never gets
+     * a descriptor pointing at a missing blob. Any encode / size / upload
+     * failure throws before anything is persisted or fanned out.
+     */
+    suspend fun sendVideo(
+        groupId: String,
+        videoUri: android.net.Uri,
+        caption: String = "",
+    ): ChatMessage = withContext(ioDispatcher) {
+        val activeIdentityId = activeIdentity.currentIdentityId.value
+            ?: throw SendMessageError.NoIdentityLoaded
+        val activeSummary = identitiesFlow.value.firstOrNull { it.id == activeIdentityId }
+            ?: throw SendMessageError.NoIdentityLoaded
+        val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
+            ?: throw SendMessageError.UnknownGroup
+        val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
+        if (group.memberProfiles[myBlsHex] == null) throw SendMessageError.SenderNotAMember
+        val variant: ChatMessageVariant = when (group.groupType) {
+            SepGroupType.TYRANNY -> ChatMessageVariant.Tyranny(body = caption)
+            else -> throw SendMessageError.UnsupportedGroupType(group.groupType)
+        }
+
+        val encoded = encodeVideo(videoUri) ?: throw SendMessageError.VideoEncodeFailed
+        val posterSealed = ChatImageCrypto.seal(encoded.poster.jpeg)
+        val videoSealed = ChatImageCrypto.seal(encoded.mp4)
+        if (videoSealed.blob.size > MAX_UPLOAD_BYTES) throw SendMessageError.VideoTooLarge
+        try {
+            blossomClient.upload(posterSealed.blob, "image/jpeg")
+            blossomClient.upload(videoSealed.blob, "video/mp4")
+        } catch (e: Exception) {
+            throw SendMessageError.VideoUploadFailed(e.message ?: e.javaClass.simpleName)
+        }
+
+        val poster = ChatImageAttachment(
+            sha256 = posterSealed.sha256Hex,
+            mimeType = "image/jpeg",
+            byteSize = posterSealed.blob.size,
+            width = encoded.poster.width,
+            height = encoded.poster.height,
+            encKey = posterSealed.key,
+            blurhash = encoded.poster.blurhash,
+            server = blossomServerUrl,
+        )
+        val videoAttachment = ChatVideoAttachment(
+            sha256 = videoSealed.sha256Hex,
+            mimeType = "video/mp4",
+            byteSize = videoSealed.blob.size,
+            width = encoded.width,
+            height = encoded.height,
+            durationSeconds = encoded.durationSeconds,
+            encKey = videoSealed.key,
+            poster = poster,
+            server = blossomServerUrl,
+        )
+
+        val messageId = idFactory()
+        val sentAtMillis = clock()
+        val payload = ChatMessagePayload(
+            version = 1,
+            messageId = messageId,
+            groupId = group.groupIdBytes,
+            senderBlsPubkeyHex = myBlsHex,
+            sentAtMillis = sentAtMillis,
+            replyToMessageId = null,
+            variant = variant,
+            videoAttachment = videoAttachment,
+        )
+        val pending = ChatMessage(
+            id = messageId,
+            groupId = groupId,
+            ownerIdentityId = activeIdentityId.value,
+            senderBlsPubkeyHex = myBlsHex,
+            body = caption,
+            sentAtMillis = sentAtMillis,
+            direction = MessageDirection.OUTGOING,
+            status = MessageStatus.PENDING,
+            replyToMessageId = null,
+            groupType = group.groupType,
+            videoAttachment = videoAttachment,
+        )
+        messageRepository.append(pending)
+
+        val recipients = recipientInboxKeysFor(group, myBlsHex)
+        val finalStatus = try {
+            val successCount = fanOut(payload, recipients)
+            if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT else MessageStatus.FAILED
+        } catch (_: EncodingException) {
+            messageRepository.updateStatus(messageId, activeIdentityId.value, MessageStatus.FAILED)
+            MessageStatus.FAILED
+        }
+        messageRepository.updateStatus(messageId, activeIdentityId.value, finalStatus)
+        pending.copy(status = finalStatus)
+    }
+
+    /**
      * Retry a previously-failed outgoing message. No-op (silent) for
      * unknown / non-failed / non-outgoing rows — closes the
      * double-delivery hole where a tap on a row that already flipped
@@ -344,10 +449,16 @@ class SendMessageInteractor(
 
     private class EncodingException(message: String) : Exception(message)
 
-    private companion object {
+    companion object {
         private val jsonFormat = Json { encodeDefaults = true }
 
-        fun ByteArray.toHexLowercase(): String = buildString(size * 2) {
+        /** Hard ceiling on an encrypted blob we'll attempt to upload —
+         *  sits under Blossom's ~100MB cap so a long clip fails fast
+         *  client-side rather than with an opaque server rejection
+         *  mid-upload. */
+        const val MAX_UPLOAD_BYTES = 95 * 1024 * 1024
+
+        private fun ByteArray.toHexLowercase(): String = buildString(size * 2) {
             for (b in this@toHexLowercase) append("%02x".format(b.toInt() and 0xFF))
         }
     }
@@ -395,4 +506,18 @@ sealed class SendMessageError(message: String) : Exception(message) {
     /** Encrypting or uploading the image blob to Blossom failed. */
     class ImageUploadFailed(reason: String) :
         SendMessageError("Couldn't upload the image: $reason")
+
+    /** The picked video couldn't be transcoded / poster-extracted. */
+    object VideoEncodeFailed : SendMessageError("Couldn't process the video") {
+        private fun readResolve(): Any = VideoEncodeFailed
+    }
+
+    /** Encrypting or uploading a video (or its poster) blob failed. */
+    class VideoUploadFailed(reason: String) :
+        SendMessageError("Couldn't upload the video: $reason")
+
+    /** The transcoded + encrypted video exceeds the upload cap. */
+    object VideoTooLarge : SendMessageError("This video is too large to send") {
+        private fun readResolve(): Any = VideoTooLarge
+    }
 }

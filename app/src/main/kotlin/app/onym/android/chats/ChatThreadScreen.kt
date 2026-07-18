@@ -1,6 +1,7 @@
 package app.onym.android.chats
 
 import app.onym.android.UITestRegistry
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +18,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -27,6 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -37,10 +41,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.onym.android.group.MemberProfile
 import app.onym.android.group.OnymAccent
@@ -76,6 +87,9 @@ fun ChatThreadScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val replyingTo by viewModel.replyingTo.collectAsStateWithLifecycle()
 
+    // The video attachment currently shown in the full-screen player, if any.
+    var playingVideo by remember { mutableStateOf<ChatVideoAttachment?>(null) }
+
     val context = androidx.compose.ui.platform.LocalContext.current
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
@@ -94,6 +108,25 @@ fun ChatThreadScreen(
             imagePicker.launch(
                 androidx.activity.result.PickVisualMediaRequest(
                     androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                ),
+            )
+        }
+    }
+    val videoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) viewModel.sendVideo(uri)
+    }
+    // Under the UI-test harness the picker + Media3 transcoding can't run,
+    // so send a canned video (the interactor's injected encoder ignores
+    // the URI) straight through the send pipeline.
+    val onAttachVideo: () -> Unit = {
+        if (UITestRegistry.enabled) {
+            viewModel.sendVideo(android.net.Uri.EMPTY)
+        } else {
+            videoPicker.launch(
+                androidx.activity.result.PickVisualMediaRequest(
+                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly,
                 ),
             )
         }
@@ -149,12 +182,24 @@ fun ChatThreadScreen(
                 onSend = viewModel::send,
                 onRetry = viewModel::retry,
                 onAttach = onAttach,
+                onAttachVideo = onAttachVideo,
                 imageLoader = viewModel.imageLoader,
+                onVideoTapped = { playingVideo = it },
                 replyingTo = replyingTo,
                 onArmReply = viewModel::armReply,
                 onCancelReply = viewModel::cancelReply,
             )
         }
+    }
+
+    // Full-screen video player, shown over everything when a video
+    // bubble is tapped. Lazily downloads + decrypts the clip.
+    playingVideo?.let { attachment ->
+        FullScreenVideoPlayer(
+            attachment = attachment,
+            videoLoader = viewModel.videoLoader,
+            onDismiss = { playingVideo = null },
+        )
     }
 }
 
@@ -166,7 +211,9 @@ private fun ChatThreadBody(
     onSend: (String) -> Unit,
     onRetry: (java.util.UUID) -> Unit,
     onAttach: (() -> Unit)? = null,
+    onAttachVideo: (() -> Unit)? = null,
     imageLoader: ChatImageLoader? = null,
+    onVideoTapped: ((ChatVideoAttachment) -> Unit)? = null,
     replyingTo: java.util.UUID?,
     onArmReply: (java.util.UUID) -> Unit,
     onCancelReply: () -> Unit,
@@ -333,6 +380,7 @@ private fun ChatThreadBody(
                         sender = senderDisplays[message.id] ?: ChatSenderDisplay.Unknown,
                         onRetry = { onRetry(message.id) },
                         imageLoader = imageLoader,
+                        onVideoTapped = onVideoTapped,
                         reply = replyQuotes[message.id],
                         onQuoteTap = message.replyToMessageId?.let { targetId ->
                             { scrollToAndHighlight(targetId) }
@@ -371,7 +419,12 @@ private fun ChatThreadBody(
         // armed reply target so the sent message renders its quote.
         // SendMessageError routes into viewModel.lastSendError; network
         // / fan-out failures land as MessageStatus.FAILED on the bubble.
-        ChatInputPanel(onSend = onSend, focusRequester = composerFocus, onAttach = onAttach)
+        ChatInputPanel(
+            onSend = onSend,
+            focusRequester = composerFocus,
+            onAttach = onAttach,
+            onAttachVideo = onAttachVideo,
+        )
     }
 }
 
@@ -422,6 +475,71 @@ private fun debugTestImageBytes(): ByteArray {
     val stream = java.io.ByteArrayOutputStream()
     bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, stream)
     return stream.toByteArray()
+}
+
+/**
+ * Full-screen video player shown over the thread when a video bubble is
+ * tapped. Lazily downloads + decrypts the clip via [videoLoader], then
+ * plays the local file with an ExoPlayer surface. Mirrors iOS's
+ * `FullScreenVideoView`.
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun FullScreenVideoPlayer(
+    attachment: ChatVideoAttachment,
+    videoLoader: ChatVideoLoader?,
+    onDismiss: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var file by remember(attachment.sha256) { mutableStateOf<java.io.File?>(null) }
+    LaunchedEffect(attachment.sha256) {
+        file = videoLoader?.file(attachment)
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .testTag("chat_thread.video_player"),
+            contentAlignment = Alignment.Center,
+        ) {
+            val currentFile = file
+            if (currentFile != null) {
+                val exoPlayer = remember(currentFile) {
+                    ExoPlayer.Builder(context).build().apply {
+                        setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(currentFile)))
+                        prepare()
+                        playWhenReady = true
+                    }
+                }
+                DisposableEffect(exoPlayer) {
+                    onDispose { exoPlayer.release() }
+                }
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            player = exoPlayer
+                            useController = true
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                CircularProgressIndicator(color = Color.White)
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .testTag("chat_thread.video_close"),
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Close video", tint = Color.White)
+            }
+        }
+    }
 }
 
 /**
