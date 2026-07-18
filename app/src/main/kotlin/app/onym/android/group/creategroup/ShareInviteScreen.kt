@@ -35,6 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -175,7 +177,11 @@ fun ShareInviteScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("share_invite.copy_button"),
+                            .testTag("share_invite.copy_button")
+                            // Expose the raw invite link to UI tests via
+                            // semantics so they can read it without a
+                            // clipboard round-trip.
+                            .semantics { contentDescription = s.link },
                     ) {
                         Text(
                             stringResource(

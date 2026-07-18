@@ -380,7 +380,22 @@ class OnymApplication : Application() {
         // Inbox transport for invitation send. Constructed once;
         // CreateGroupInteractor.create blocks on `send` (which
         // connects on first use via `NostrInboxTransport`).
-        val inboxTransport = NostrInboxTransport(signerProvider = nostrSignerProvider)
+        // UI-test seam: a loopback transport + in-memory chain factory
+        // (set on UITestRegistry) let two on-device identities exchange
+        // messages and a Tyranny group anchor + verify with no network.
+        // Production always takes the Nostr / OkHttp branch.
+        val inboxTransport: app.onym.android.transport.InboxTransport =
+            if (UITestRegistry.enabled && UITestRegistry.inboxTransport != null) {
+                UITestRegistry.inboxTransport!!
+            } else {
+                NostrInboxTransport(signerProvider = nostrSignerProvider)
+            }
+        val contractTransportFactory: (String) -> app.onym.android.chain.SepContractTransport =
+            if (UITestRegistry.enabled && UITestRegistry.contractTransportFactory != null) {
+                UITestRegistry.contractTransportFactory!!
+            } else {
+                { url -> OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url) }
+            }
         applicationScope.launch {
             // Bootstrap above writes _snapshots; this read happens on
             // the same scope so it observes the bootstrap result.
@@ -432,9 +447,7 @@ class OnymApplication : Application() {
                 relayers = relayerRepository,
                 contracts = contractsRepository,
                 networkPreference = networkPreference,
-                makeContractTransport = { url ->
-                    OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url)
-                },
+                makeContractTransport = contractTransportFactory,
             ),
         )
         // PR 158: invitee-side push invitations. The dispatcher records
@@ -580,9 +593,7 @@ class OnymApplication : Application() {
             relayers = relayerRepository,
             contracts = contractsRepository,
             networkPreference = networkPreference,
-            makeContractTransport = { url ->
-                OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url)
-            },
+            makeContractTransport = contractTransportFactory,
         )
         val approveRequestsViewModel = app.onym.android.group.ApproveRequestsViewModel(
             approver = joinRequestApprover,
@@ -639,18 +650,10 @@ class OnymApplication : Application() {
                     contracts = contractsRepository,
                     groups = groupRepository,
                     networkPreference = networkPreference,
-                    // Use the shared httpClient (with the
-                    // BearerAuthInterceptor installed) so the
-                    // create-group call carries the token. Without
-                    // this override the interactor's default builds a
-                    // fresh OkHttpClient() per call with no auth
-                    // wired in — relayer 401s every request.
-                    makeContractTransport = { url ->
-                        OkHttpSepContractTransport(
-                            httpClient = httpClient,
-                            endpointUrl = url,
-                        )
-                    },
+                    // Shared factory: production uses the app's
+                    // authed OkHttp client; UI tests swap in the
+                    // in-memory chain ledger via UITestRegistry.
+                    makeContractTransport = contractTransportFactory,
                     inboxTransport = inboxTransport,
                     introducer = inviteIntroducer,
                 )

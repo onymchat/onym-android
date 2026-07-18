@@ -80,12 +80,13 @@ internal fun OnymPrimaryButton(
     title: String,
     accent: Color,
     enabled: Boolean = true,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val bg = if (enabled) accent else LocalOnymTokens.current.surface3
     val fg = if (enabled) LocalOnymTokens.current.onAccent else LocalOnymTokens.current.text3
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp)
             .clip(RoundedCornerShape(16.dp))

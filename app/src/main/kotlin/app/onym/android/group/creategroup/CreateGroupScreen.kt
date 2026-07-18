@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -211,6 +212,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .testTag("create_group.name")
                         .onFocusChanged { focusState ->
                             if (focusState.isFocused) viewModel.nameFieldFocused()
                         },
@@ -285,6 +287,7 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 title = stringResource(R.string.create_group_next),
                 accent = accent,
                 enabled = state.canAdvanceToStep2,
+                modifier = Modifier.testTag("create_group.next"),
                 onClick = viewModel::tappedNext,
             )
         }
@@ -604,6 +607,7 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
                 title = state.createCtaLabel.resolved(),
                 accent = accent,
                 enabled = state.canSubmit,
+                modifier = Modifier.testTag("create_group.create"),
                 onClick = viewModel::tappedCreate,
             )
             OnymQuietButton(
@@ -1045,6 +1049,7 @@ private fun SuccessScreen(viewModel: CreateGroupViewModel) {
             OnymPrimaryButton(
                 title = stringResource(R.string.share_invite_link_chooser),
                 accent = accent,
+                modifier = Modifier.testTag("create_group.share_invite"),
                 onClick = viewModel::tappedShareInvite,
             )
             Spacer(Modifier.height(6.dp))

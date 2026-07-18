@@ -4,7 +4,9 @@ import app.onym.android.chain.AnchorSelectionStore
 import app.onym.android.chain.ContractsManifestFetcher
 import app.onym.android.chain.KnownRelayersFetcher
 import app.onym.android.chain.RelayerSelectionStore
+import app.onym.android.chain.SepContractTransport
 import app.onym.android.identity.IdentitySecretStore
+import app.onym.android.transport.InboxTransport
 
 /**
  * Indirection point that lets instrumented UI tests inject in-memory
@@ -62,6 +64,17 @@ object UITestRegistry {
      *  parallel runs. */
     var identitySecretStore: IdentitySecretStore? = null
 
+    /** In-process replacement for [app.onym.android.transport.nostr.NostrInboxTransport].
+     *  A loopback transport lets two on-device identities exchange
+     *  invitations / messages / receipts with no network. */
+    var inboxTransport: InboxTransport? = null
+
+    /** In-memory replacement for the per-request
+     *  [app.onym.android.chain.OkHttpSepContractTransport] factory, so a
+     *  Tyranny group anchors + verifies against the same in-memory chain
+     *  ledger. Keyed by relayer URL (ignored by the fake). */
+    var contractTransportFactory: ((String) -> SepContractTransport)? = null
+
     /** Reset between tests. Called from `@Before`. */
     fun reset() {
         enabled = false
@@ -70,5 +83,7 @@ object UITestRegistry {
         contractsStore = null
         contractsFetcher = null
         identitySecretStore = null
+        inboxTransport = null
+        contractTransportFactory = null
     }
 }
