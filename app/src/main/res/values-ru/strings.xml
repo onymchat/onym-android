@@ -69,6 +69,10 @@
     <string name="backup_recovery_phrase">Резервная копия фразы восстановления</string>
     <string name="security_footer_view_recovery_phrase">Просмотрите свою фразу восстановления из 12 слов. Она понадобится для восстановления личности на новом устройстве.</string>
     <string name="search_placeholder_body">Поиск появится в одном из следующих обновлений.</string>
+    <string name="search_field_placeholder">Поиск сообщений</string>
+    <string name="search_prompt_body">Ищите сообщения во всех своих чатах.</string>
+    <string name="search_no_results_title">Ничего не найдено</string>
+    <string name="search_no_results_body">Нет сообщений, соответствующих запросу.</string>
 
     <!-- ─── Chats tab (PR-30) ─────────────────────────────────────── -->
     <string name="chats_tab">Чаты</string>
