@@ -136,26 +136,10 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
         }
     }
     Column(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            OnymNavTitle(
-                title = stringResource(R.string.create_group_step1_title),
-                subtitle = stringResource(R.string.create_group_step1_subtitle),
-            )
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = 12.dp, top = 8.dp)
-                    .size(32.dp)
-                    .clickable(onClick = viewModel.onClose),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "✕",
-                    color = LocalOnymTokens.current.text2,
-                    style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium),
-                )
-            }
-        }
+        OnymNavTitle(
+            title = stringResource(R.string.create_group_step1_title),
+            subtitle = stringResource(R.string.create_group_step1_subtitle),
+        )
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -259,21 +243,8 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                 }
             }
 
-            OnymSectionLabel(stringResource(R.string.create_group_how_its_run))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                for (g in OnymUIGovernance.entries) {
-                    GovernanceCard(
-                        type = g,
-                        accent = accent,
-                        selected = state.governance == g && g.isAvailable,
-                        modifier = Modifier.weight(1f),
-                        onClick = { viewModel.setGovernance(g) },
-                    )
-                }
-            }
+            OnymSectionLabel(stringResource(R.string.create_group_type))
+            FounderExplanation(accent = accent)
             Spacer(Modifier.height(16.dp))
         }
 
@@ -281,14 +252,63 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
         FlowFooter {
             OnymPrimaryButton(
                 // The button is always enabled when the governance
-                // type is wired (Tyranny only in PR-C); name has a
-                // random placeholder default so there's no "fill in
-                // the blank" gating step.
+                // type is wired (Tyranny only); name has a random
+                // placeholder default so there's no "fill in the blank"
+                // gating step.
                 title = stringResource(R.string.create_group_next),
                 accent = accent,
                 enabled = state.canAdvanceToStep2,
                 modifier = Modifier.testTag("create_group.next"),
                 onClick = viewModel::tappedNext,
+            )
+            Spacer(Modifier.height(4.dp))
+            // Close moved out of the top bar to a tertiary button under
+            // the primary CTA.
+            OnymQuietButton(
+                title = stringResource(R.string.create_group_close),
+                onClick = viewModel.onClose,
+            )
+        }
+    }
+}
+
+/**
+ * Founder is the only group type today, so the "How it's run" picker is
+ * replaced by a short explanation of what Founder means — no "Soon" /
+ * coming-soon types (App Store / Play don't allow shipping visibly-
+ * incomplete features). Mirrors the iOS `founderExplanation`.
+ */
+@Composable
+private fun FounderExplanation(accent: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(LocalOnymTokens.current.surface2)
+            .border(1.dp, LocalOnymTokens.current.hairline, RoundedCornerShape(18.dp))
+            .padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(accent.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            OnymGovIcon(type = OnymUIGovernance.Tyranny, accent = accent, size = 34.dp)
+        }
+        Column {
+            Text(
+                text = stringResource(R.string.governance_tyranny_card_label),
+                color = LocalOnymTokens.current.text,
+                style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = stringResource(R.string.create_group_founder_explainer),
+                color = LocalOnymTokens.current.text2,
+                style = TextStyle(fontSize = 12.5.sp),
             )
         }
     }
@@ -314,7 +334,7 @@ private fun CreateGroupAvatarPicker(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .size(92.dp)
+                .size(112.dp)
                 .clip(CircleShape)
                 .clickable(onClick = onPick),
             contentAlignment = Alignment.Center,
@@ -327,7 +347,7 @@ private fun CreateGroupAvatarPicker(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                OnymGroupAvatar(size = 92.dp, accent = accent)
+                OnymGroupAvatar(size = 112.dp, accent = accent)
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -353,66 +373,6 @@ private fun CreateGroupAvatarPicker(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun GovernanceCard(
-    type: OnymUIGovernance,
-    accent: Color,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val available = type.isAvailable
-    val labelColor = when {
-        selected -> accent
-        available -> LocalOnymTokens.current.text
-        else -> LocalOnymTokens.current.text2
-    }
-    val borderColor = if (selected) accent else LocalOnymTokens.current.hairline
-    val bgTint = if (selected) accent.copy(alpha = 0.18f) else Color.Transparent
-
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(LocalOnymTokens.current.surface2)
-            .background(bgTint)
-            .border(width = if (selected) 1.5.dp else 1.dp, color = borderColor, shape = RoundedCornerShape(18.dp))
-            .clickable(enabled = available, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(contentAlignment = Alignment.TopEnd) {
-            OnymGovIcon(
-                type = type,
-                accent = if (selected) accent else LocalOnymTokens.current.text,
-                size = 42.dp,
-                dimmed = !selected || !available,
-            )
-            if (!available) {
-                Text(
-                    text = stringResource(R.string.create_group_soon_badge),
-                    color = LocalOnymTokens.current.text3,
-                    style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(LocalOnymTokens.current.surface3)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = stringResource(type.cardLabelRes()),
-            color = labelColor,
-            style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.13).sp),
-        )
-        Text(
-            text = stringResource(type.subRes()),
-            color = LocalOnymTokens.current.text2,
-            style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
-        )
     }
 }
 
@@ -1068,13 +1028,6 @@ private fun OnymUIGovernance.cardLabelRes(): Int = when (this) {
     OnymUIGovernance.Tyranny -> R.string.governance_tyranny_card_label
     OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_card_label
     OnymUIGovernance.Anarchy -> R.string.governance_anarchy_card_label
-}
-
-@androidx.annotation.StringRes
-private fun OnymUIGovernance.subRes(): Int = when (this) {
-    OnymUIGovernance.Tyranny -> R.string.governance_tyranny_sub
-    OnymUIGovernance.OneOnOne -> R.string.governance_oneonone_sub
-    OnymUIGovernance.Anarchy -> R.string.governance_anarchy_sub
 }
 
 @androidx.annotation.StringRes

@@ -405,6 +405,9 @@
     <string name="create_group_how_its_run">Как устроена</string>
     <string name="create_group_soon_badge">Скоро</string>
     <string name="create_group_next">Далее · Добавить участников</string>
+    <string name="create_group_type">Тип группы</string>
+    <string name="create_group_founder_explainer">Вы — основатель: вы решаете, кто вступает, и управляете настройками группы. Все могут переписываться и делиться; членством управляете только вы.</string>
+    <string name="create_group_close">Закрыть</string>
 
     <!-- ─── Create group — Step 2 ─────────────────────────────── -->
     <string name="create_group_step2_title">Добавить участников</string>

@@ -417,6 +417,9 @@
     <string name="create_group_how_its_run">How it\'s run</string>
     <string name="create_group_soon_badge">Soon</string>
     <string name="create_group_next">Next · Add people</string>
+    <string name="create_group_type">Group type</string>
+    <string name="create_group_founder_explainer">You\'re the founder — you decide who joins and manage the group\'s settings. Everyone can chat and share; only you control membership.</string>
+    <string name="create_group_close">Close</string>
 
     <!-- ─── Create group — Step 2 ─────────────────────────────── -->
     <string name="create_group_step2_title">Add People</string>
