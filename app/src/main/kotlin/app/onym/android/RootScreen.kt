@@ -298,10 +298,7 @@ fun RootScreen(
                     identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
                     onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
-                    onIdentitiesClick = { navController.navigate(ROUTE_IDENTITIES) },
-                    onIdentityDetailClick = { id ->
-                        navController.navigate("identity_detail/${id.value}")
-                    },
+                    onBackup = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
                     onPrivacyClick = { navController.navigate(ROUTE_PRIVACY) },
                     onAboutClick = { navController.navigate(ROUTE_ABOUT) },
                     useMainnet = networkPref == app.onym.android.chain.AppNetwork.Mainnet,

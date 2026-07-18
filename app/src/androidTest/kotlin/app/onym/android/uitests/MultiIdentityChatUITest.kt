@@ -16,6 +16,8 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -265,41 +267,77 @@ class MultiIdentityChatUITest {
 
     // ─── helpers ──────────────────────────────────────────────────
 
+    /** Add an identity via the Settings identity carousel: swipe to the
+     *  last (add) page, type a name, tap Create. The carousel jumps to the
+     *  new identity and makes it active. */
     private fun addIdentity(name: String) {
-        backToTabBar()
-        composeRule.onNodeWithTag("nav.tab.settings").performClick()
-        composeRule.waitForIdle()
-        composeRule.onNodeWithTag("settings.list")
-            .performScrollToNode(hasTestTag("settings.identities_row"))
-        composeRule.onNodeWithTag("settings.identities_row").performClick()
-        waitForTag("identities.add")
-        composeRule.onNodeWithTag("identities.add").performClick()
-        waitForTag("identities.add.name")
-        composeRule.onNodeWithTag("identities.add.name").performTextInput(name)
-        composeRule.onNodeWithTag("identities.add.confirm").performClick()
-        waitForText(name)
+        openSettingsCarousel()
+        swipeCarouselToAddPage()
+        composeRule.onNodeWithTag("identity.add.name").performTextInput(name)
+        composeRule.onNodeWithTag("identity.add.create").performClick()
+        composeRule.waitUntil(15_000) { carouselActiveName() == name }
         backToTabBar()
     }
 
-    /** Settings -> Identities -> tap the named row -> Set active -> back to Chats. */
+    /** Switch active identity by swiping the carousel to that identity's
+     *  page (landing on it makes it active). */
     private fun switchToIdentity(name: String) {
+        openSettingsCarousel()
+        // Rewind to the first page, then scan forward until the target is
+        // the active (centered) identity.
+        repeat(6) {
+            composeRule.onNodeWithTag("identity.carousel").performTouchInput { swipeRight() }
+            composeRule.waitForIdle()
+        }
+        var tries = 0
+        while (carouselActiveName() != name && tries < 8) {
+            composeRule.onNodeWithTag("identity.carousel").performTouchInput { swipeLeft() }
+            composeRule.waitForIdle()
+            tries++
+        }
+        composeRule.waitUntil(10_000) { carouselActiveName() == name }
+        goToChats()
+    }
+
+    private fun openSettingsCarousel() {
         backToTabBar()
         composeRule.onNodeWithTag("nav.tab.settings").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings.list")
-            .performScrollToNode(hasTestTag("settings.identities_row"))
-        composeRule.onNodeWithTag("settings.identities_row").performClick()
-        waitForText(name)
-        clickRowContaining("identities.row.", name)
-        // The detail screen is a LazyColumn; Set active sits below the
-        // fold, so scroll it into view before tapping.
-        composeRule.waitForIdle()
-        composeRule.onNodeWithTag("identity_detail.list")
-            .performScrollToNode(hasTestTag("identity_detail.set_active"))
-        composeRule.onNodeWithTag("identity_detail.set_active").performClick()
-        composeRule.waitForIdle()
-        goToChats()
+            .performScrollToNode(hasTestTag("identity.carousel"))
     }
+
+    /** Swipe until the trailing add page is the *settled* (centered) page.
+     *  Neighbor pages are composed, so merely finding `identity.add.create`
+     *  isn't enough — it can be off-screen, where a tap coordinate never
+     *  lands. The add page is the last one: index == identity count. */
+    private fun swipeCarouselToAddPage() {
+        val addIndex = identityStore.listIds().size
+        var tries = 0
+        while (carouselSettledPage() != addIndex && tries < 8) {
+            composeRule.onNodeWithTag("identity.carousel").performTouchInput { swipeLeft() }
+            composeRule.waitForIdle()
+            tries++
+        }
+        composeRule.waitUntil(5_000) { carouselSettledPage() == addIndex }
+    }
+
+    /** The alias of the currently-active identity, read from the carousel's
+     *  hidden semantics hook. */
+    private fun carouselActiveName(): String? {
+        val nodes = composeRule.onAllNodesWithTag("identity.carousel.active")
+            .fetchSemanticsNodes()
+        return nodes.firstOrNull()
+            ?.config?.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull()
+    }
+
+    /** The carousel's currently-settled page index, from its hidden hook. */
+    private fun carouselSettledPage(): Int? =
+        composeRule.onAllNodesWithTag("identity.carousel.settled")
+            .fetchSemanticsNodes()
+            .firstOrNull()
+            ?.config?.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull()
+            ?.toIntOrNull()
 
     private fun openCreateGroup() {
         goToChats()

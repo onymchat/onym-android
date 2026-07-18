@@ -77,8 +77,9 @@ fun SettingsScreen(
     identitiesViewModel: IdentitiesViewModel,
     onRelayerClick: () -> Unit,
     onAnchorsClick: () -> Unit,
-    onIdentitiesClick: () -> Unit,
-    onIdentityDetailClick: (IdentityId) -> Unit,
+    /** Launch the recovery-phrase backup flow (active identity). Wired to
+     *  the carousel's per-identity Backup action. */
+    onBackup: () -> Unit,
     onPrivacyClick: () -> Unit,
     onAboutClick: () -> Unit,
     /** App-wide network preference. Bound to the Settings → Network
@@ -98,15 +99,6 @@ fun SettingsScreen(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
         rememberTopAppBarState()
     )
-    val items by identitiesViewModel.items.collectAsStateWithLifecycle()
-    val active = items.firstOrNull { it.isActive }
-    val identityCount = items.size
-    // Resolve display copy that the LazyColumn item blocks need from
-    // outside the LazyListScope (item content is @Composable, but
-    // LazyListScope itself is not — `stringResource` would fail there).
-    val unnamedFallback = stringResource(R.string.identity_unnamed)
-    val activeName = active?.summary?.name?.ifBlank { unnamedFallback }
-
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
@@ -123,44 +115,22 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .testTag("settings.list"),
         ) {
-            // ─── Active identity hero ──────────────────────────────
-            if (active != null && activeName != null) {
-                item {
-                    ActiveIdentityHero(
-                        name = activeName,
-                        keyHex = heroHex(active.summary.blsPublicKey),
-                        onClick = { onIdentityDetailClick(active.summary.id) },
-                    )
-                }
-                // Invite QR hero — compact card directly under the
-                // active-identity row. Tap opens the identity detail
-                // screen, which surfaces a full-size QR + copy/share.
-                item {
-                    InviteQrHero(
-                        summary = active.summary,
-                        activeName = activeName,
-                        onClick = { onIdentityDetailClick(active.summary.id) },
-                    )
-                }
+            // ─── Identity carousel ─────────────────────────────────
+            // One swipeable QR carousel replaces the old Active-identity
+            // hero + Invite-QR hero + Identities row: swipe to switch
+            // active, last page adds a new identity, per-page share /
+            // backup / delete.
+            item {
+                IdentityCarouselCard(
+                    viewModel = identitiesViewModel,
+                    onBackup = onBackup,
+                )
             }
 
             // ─── SECURITY ──────────────────────────────────────────
             item { SettingsSectionLabel(stringResource(R.string.security).uppercase()) }
             item {
                 SettingsCard {
-                    SettingsRow(
-                        leading = {
-                            SettingsTileBox(Icons.Filled.Person, SettingsTile.Purple)
-                        },
-                        title = stringResource(R.string.settings_identities_title),
-                        subtitle = if (identityCount == 1) {
-                            stringResource(R.string.settings_identities_subtitle_one)
-                        } else {
-                            stringResource(R.string.settings_identities_subtitle_n, identityCount)
-                        },
-                        onClick = onIdentitiesClick,
-                        modifier = Modifier.testTag("settings.identities_row"),
-                    )
                     SettingsRow(
                         leading = {
                             SettingsTileBox(Icons.Filled.Shield, SettingsTile.Blue)
@@ -306,144 +276,6 @@ fun SettingsScreen(
             item { BrandFooter() }
             item { Spacer(Modifier.height(32.dp)) }
         }
-    }
-}
-
-@Composable
-private fun ActiveIdentityHero(
-    name: String,
-    keyHex: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 16.dp)
-            .testTag("settings.identity_hero"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Box(
-            modifier = Modifier.size(60.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(SettingsTile.Blue.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                OnymMark(size = 36.dp, color = SettingsTile.Blue)
-            }
-            // Active-state dot (bottom-right)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(16.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .clip(CircleShape)
-                        .background(SettingsTile.Green),
-                )
-            }
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.settings_active_identity_label).uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = name,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = keyHex,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-            modifier = Modifier.size(18.dp),
-        )
-    }
-}
-
-/**
- * Compact "Invite key" hero — a small QR with the active identity's
- * invite URL on the left, an eyebrow + headline + subtitle on the
- * right. Tapping the card hands off to the Identity Detail screen
- * for the full-size QR + Copy / Share actions.
- *
- * Mirrors the iOS prototype's second hero card under the active-
- * identity row (`settings.jsx` lines 559–587).
- */
-@Composable
-private fun InviteQrHero(
-    summary: IdentitySummary,
-    activeName: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 18.dp)
-            .testTag("settings.invite_qr_hero"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.White)
-                .padding(8.dp),
-        ) {
-            OnymQrCode(value = summary.inviteUrl(), size = 92.dp)
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.settings_invite_qr_eyebrow).uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = stringResource(R.string.settings_invite_qr_title),
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = stringResource(R.string.settings_invite_qr_subtitle, activeName),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-            modifier = Modifier.size(18.dp),
-        )
     }
 }
 

@@ -1,13 +1,14 @@
 package app.onym.android.uitests
 
-import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.onym.android.MainActivity
@@ -17,7 +18,6 @@ import app.onym.android.support.FakeContractsManifestFetcher
 import app.onym.android.support.FakeKnownRelayersFetcher
 import app.onym.android.support.InMemoryAnchorSelectionStore
 import app.onym.android.support.InMemoryRelayerSelectionStore
-import app.onym.android.uitests.screens.SettingsScreenObject
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Rule
 import org.junit.Test
@@ -106,156 +106,116 @@ class IdentitiesUITest {
     @get:Rule(order = 1)
     val composeRule = createAndroidComposeRule<MainActivity>()
 
-    private val settings get() = SettingsScreenObject(composeRule)
-
     @Test
-    fun bootstrap_landsOnIdentitiesScreen_withOneRow() {
-        settings.tapIdentitiesRow()
-
-        // Wait for the bootstrap-from-zero path to populate the
-        // identities flow (eager bootstrap kicks off when the
-        // Application's deps are built; the screen's StateFlow
-        // collector picks it up shortly after).
+    fun bootstrap_carousel_showsOneActiveIdentity() {
+        openCarousel()
+        // Wait for the bootstrap-from-zero path to populate the identities
+        // flow (eager bootstrap kicks off when the Application's deps are
+        // built; the carousel's StateFlow collector picks it up shortly
+        // after) and land on a non-empty active alias.
         composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
-            composeRule.onAllNodesWithTag("identities.add").fetchSemanticsNodes().isNotEmpty() &&
-                identityStore.listIds().isNotEmpty()
+            identityStore.listIds().size == 1 && carouselActiveName()?.isNotEmpty() == true
         }
-        // Exactly one identity row is visible.
-        val rowCount = composeRule.onAllNodesWithTag(
-            identityStore.listIds().first().testTagPrefix(),
-        ).fetchSemanticsNodes().size
-        assert(rowCount == 1) { "expected 1 identity row, saw $rowCount" }
     }
 
     @Test
-    fun addIdentity_blankPhrase_appendsFreshRow() {
-        settings.tapIdentitiesRow()
+    fun addIdentity_viaCarousel_appendsAndActivates() {
+        openCarousel()
         composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 1
         }
-        // "Add Identity" now opens a dialog; leaving the recovery-phrase
-        // field blank mints a fresh identity on confirm.
-        composeRule.onNodeWithTag("identities.add").performClick()
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
-            composeRule.onAllNodesWithTag("identities.add.confirm").fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithTag("identities.add.confirm").performClick()
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+        // Swipe to the trailing add page, type a name, create → a second
+        // identity lands on disk and becomes the active (visible) page.
+        addViaCarousel("Work")
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 2
         }
-    }
-
-    @Test
-    fun addIdentity_validPhrase_addsRestoredRow() {
-        settings.tapIdentitiesRow()
         composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
-            identityStore.listIds().size == 1
-        }
-        composeRule.onNodeWithTag("identities.add").performClick()
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
-            composeRule.onAllNodesWithTag("identities.add.mnemonic").fetchSemanticsNodes().isNotEmpty()
-        }
-        // A valid 12-word phrase is accepted: the dialog dismisses (no
-        // inline error) and a second identity lands on disk. That the
-        // restore is byte-for-byte deterministic — and that it reads
-        // back the same phrase rather than minting fresh — is covered
-        // at the repository level (IdentityRepositoryTest); asserting it
-        // here would mean reading secret material in the UI layer, which
-        // the secret-read lint (correctly) forbids.
-        composeRule.onNodeWithTag("identities.add.mnemonic").performTextInput(CANONICAL_MNEMONIC)
-        composeRule.onNodeWithTag("identities.add.confirm").performClick()
-
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
-            identityStore.listIds().size == 2
-        }
-        composeRule.onAllNodesWithTag("identities.add.error").assertCountEquals(0)
-    }
-
-    @Test
-    fun addIdentity_invalidPhrase_showsInlineError_andDoesNotAdd() {
-        settings.tapIdentitiesRow()
-        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
-            identityStore.listIds().size == 1
-        }
-        composeRule.onNodeWithTag("identities.add").performClick()
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
-            composeRule.onAllNodesWithTag("identities.add.mnemonic").fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithTag("identities.add.mnemonic").performTextInput("not a real recovery phrase")
-        composeRule.onNodeWithTag("identities.add.confirm").performClick()
-
-        // Inline error appears; the dialog stays open and no identity
-        // is added.
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
-            composeRule.onAllNodesWithTag("identities.add.error").fetchSemanticsNodes().isNotEmpty()
-        }
-        assert(identityStore.listIds().size == 1) {
-            "invalid phrase must not add an identity"
+            carouselActiveName() == "Work"
         }
     }
 
     @Test
-    fun removeIdentity_typedConfirm_deletesFromStore() {
-        settings.tapIdentitiesRow()
+    fun removeIdentity_viaCarousel_typedConfirm_deletesFromStore() {
+        openCarousel()
         composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 1
         }
-        // Add a second identity so we can remove the second one
-        // (removing the only one is allowed but the post-remove state
-        // is "no identity" — the bootstrap path would re-add one on
+        // Add a second identity so we can remove it (removing the only one
+        // leaves "no identity", which the bootstrap path would re-fill on
         // the next dependency rebuild, complicating the assertion).
-        // "Add Identity" opens a dialog; confirm with a blank phrase to
-        // mint a fresh "Identity 2".
-        composeRule.onNodeWithTag("identities.add").performClick()
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
-            composeRule.onAllNodesWithTag("identities.add.confirm").fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithTag("identities.add.confirm").performClick()
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+        val before = identityStore.listIds().toSet()
+        addViaCarousel("Work")
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 2
         }
-
-        // The newly-added identity gets the auto-fill name "Identity 2".
-        // Post-redesign: removal moved into IdentityDetailScreen — tap
-        // the row to drill in, then "Delete identity" → typed-name
-        // confirm → Delete.
-        val secondId = identityStore.listIds()[1]
-        composeRule.onNodeWithTag("identities.row.${secondId.value}").performClick()
-        // Wait for IdentityDetailScreen's LazyColumn to mount, then
-        // scroll into it to materialise the Delete row's semantics.
-        // After the QR-hero PR, the screen's first viewport ends
-        // around the BACKUP card — Delete sits below the fold and
-        // never enters the semantic tree until scrolled into view,
-        // so a `waitUntil(... delete in tree)` would time out.
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
-            composeRule.onAllNodesWithTag("identity_detail.list").fetchSemanticsNodes().isNotEmpty()
+        // The carousel lands on the newly-added "Work" page. Its Delete
+        // action opens the typed-name confirm dialog (shared with the old
+        // detail screen — same tags).
+        val workId = identityStore.listIds().first { it !in before }
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
+            carouselActiveName() == "Work"
         }
-        composeRule.onNodeWithTag("identity_detail.list")
-            .performScrollToNode(hasTestTag("identity_detail.delete"))
-        composeRule.onNodeWithTag("identity_detail.delete").performClick()
-
-        // Type the expected name; tap Delete.
+        composeRule.onNodeWithTag("identity.delete.${workId.value}").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identity_detail.delete.confirm.input")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithTag("identity_detail.delete.confirm.input")
-            .performTextInput("Identity 2")
+            .performTextInput("Work")
         composeRule.onNodeWithTag("identity_detail.delete.confirm").performClick()
 
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
             identityStore.listIds().size == 1
         }
     }
 
-    /** `identities.row.<id>` is the row's tag prefix; `.remove`
-     *  appends the trash-icon's selector. Pulled into a helper so
-     *  the row-tag scheme stays in one place. */
-    private fun app.onym.android.identity.IdentityId.testTagPrefix(): String =
-        "identities.row.$value"
+    // ─── carousel helpers ──────────────────────────────────────────────
 
-    private companion object {
-        /** Canonical BIP-39 test vector (`abandon × 11 + about`) — the
-         *  same fixture `CrossPlatformFixtureTest` / iOS use, so a
-         *  restore here is byte-for-byte reproducible across platforms. */
-        const val CANONICAL_MNEMONIC =
-            "abandon abandon abandon abandon abandon abandon abandon abandon " +
-                "abandon abandon abandon about"
+    /** Open Settings and scroll the merged Identity carousel into view. */
+    private fun openCarousel() {
+        composeRule.onNodeWithTag("nav.tab.settings").performClick()
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identity.carousel").fetchSemanticsNodes().isNotEmpty()
+        }
     }
+
+    /** Swipe to the trailing add page, enter [name], tap Create. Waits for
+     *  the add page to actually *settle* (be centered) before tapping —
+     *  neighbor pages are composed off-screen, where a tap never lands. The
+     *  add page is the last one: index == identity count. */
+    private fun addViaCarousel(name: String) {
+        val addIndex = identityStore.listIds().size
+        var tries = 0
+        while (carouselSettledPage() != addIndex && tries < 8) {
+            composeRule.onNodeWithTag("identity.carousel").performTouchInput { swipeLeft() }
+            composeRule.waitForIdle()
+            tries++
+        }
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            carouselSettledPage() == addIndex
+        }
+        composeRule.onNodeWithTag("identity.add.name").performTextInput(name)
+        composeRule.onNodeWithTag("identity.add.create").performClick()
+    }
+
+    /** Alias of the currently-active identity, read from the carousel's
+     *  hidden `identity.carousel.active` ContentDescription hook. */
+    private fun carouselActiveName(): String? =
+        composeRule.onAllNodesWithTag("identity.carousel.active")
+            .fetchSemanticsNodes()
+            .firstOrNull()
+            ?.config
+            ?.getOrNull(SemanticsProperties.ContentDescription)
+            ?.firstOrNull()
+
+    /** The carousel's currently-settled page index, from its hidden hook. */
+    private fun carouselSettledPage(): Int? =
+        composeRule.onAllNodesWithTag("identity.carousel.settled")
+            .fetchSemanticsNodes()
+            .firstOrNull()
+            ?.config
+            ?.getOrNull(SemanticsProperties.ContentDescription)
+            ?.firstOrNull()
+            ?.toIntOrNull()
 }

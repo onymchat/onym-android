@@ -560,7 +560,7 @@ private fun EditableIdentityName(
 private const val MAX_IDENTITY_NAME_LENGTH = 30
 
 @Composable
-private fun RemoveIdentityDialog(
+internal fun RemoveIdentityDialog(
     displayName: String,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
