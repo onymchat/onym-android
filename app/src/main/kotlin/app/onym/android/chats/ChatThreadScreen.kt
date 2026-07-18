@@ -2,6 +2,7 @@ package app.onym.android.chats
 
 import app.onym.android.UITestRegistry
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -42,6 +44,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -56,6 +60,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.onym.android.group.MemberProfile
 import app.onym.android.group.OnymAccent
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * Compose chat-thread screen. Tapping a group in the Chats tab
@@ -92,6 +97,8 @@ fun ChatThreadScreen(
 
     // The video attachment currently shown in the full-screen player, if any.
     var playingVideo by remember { mutableStateOf<ChatVideoAttachment?>(null) }
+    // The image attachment currently shown in the full-screen viewer, if any.
+    var viewingImage by remember { mutableStateOf<ChatImageAttachment?>(null) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -187,6 +194,7 @@ fun ChatThreadScreen(
                 onAttach = onAttach,
                 onAttachVideo = onAttachVideo,
                 imageLoader = viewModel.imageLoader,
+                onImageTapped = { viewingImage = it },
                 onVideoTapped = { playingVideo = it },
                 scrollToMessageId = scrollToMessageId,
                 replyingTo = replyingTo,
@@ -205,6 +213,16 @@ fun ChatThreadScreen(
             onDismiss = { playingVideo = null },
         )
     }
+
+    // Full-screen image viewer, shown when an image bubble is tapped.
+    // Swipe down to dismiss.
+    viewingImage?.let { attachment ->
+        FullScreenImageViewer(
+            attachment = attachment,
+            imageLoader = viewModel.imageLoader,
+            onDismiss = { viewingImage = null },
+        )
+    }
 }
 
 @Composable
@@ -217,6 +235,7 @@ private fun ChatThreadBody(
     onAttach: (() -> Unit)? = null,
     onAttachVideo: (() -> Unit)? = null,
     imageLoader: ChatImageLoader? = null,
+    onImageTapped: ((ChatImageAttachment) -> Unit)? = null,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)? = null,
     scrollToMessageId: java.util.UUID? = null,
     replyingTo: java.util.UUID?,
@@ -397,6 +416,7 @@ private fun ChatThreadBody(
                         sender = senderDisplays[message.id] ?: ChatSenderDisplay.Unknown,
                         onRetry = { onRetry(message.id) },
                         imageLoader = imageLoader,
+                        onImageTapped = onImageTapped,
                         onVideoTapped = onVideoTapped,
                         reply = replyQuotes[message.id],
                         onQuoteTap = message.replyToMessageId?.let { targetId ->
@@ -554,6 +574,72 @@ private fun FullScreenVideoPlayer(
                     .testTag("chat_thread.video_close"),
             ) {
                 Icon(Icons.Filled.Close, contentDescription = "Close video", tint = Color.White)
+            }
+        }
+    }
+}
+
+/**
+ * Full-screen image viewer shown over the thread when an image bubble is
+ * tapped. Lazily downloads + decrypts the image; the image tracks a
+ * vertical drag and the black backdrop fades with it, releasing past a
+ * downward threshold dismisses (otherwise it springs back). Mirrors
+ * iOS's swipe-down-to-dismiss `FullScreenImageView`.
+ */
+@Composable
+private fun FullScreenImageViewer(
+    attachment: ChatImageAttachment,
+    imageLoader: ChatImageLoader?,
+    onDismiss: () -> Unit,
+) {
+    var bitmap by remember(attachment.sha256) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(attachment.sha256) { bitmap = imageLoader?.load(attachment) }
+
+    val scope = rememberCoroutineScope()
+    val offsetY = remember { androidx.compose.animation.core.Animatable(0f) }
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 120.dp.toPx() }
+    val fadeDistancePx = with(density) { 300.dp.toPx() }
+    val progress = (kotlin.math.abs(offsetY.value) / fadeDistancePx).coerceIn(0f, 1f)
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 1f - progress * 0.7f))
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            if (offsetY.value > dismissThresholdPx) {
+                                onDismiss()
+                            } else {
+                                scope.launch { offsetY.animateTo(0f) }
+                            }
+                        },
+                        onDragCancel = { scope.launch { offsetY.animateTo(0f) } },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        scope.launch { offsetY.snapTo(offsetY.value + dragAmount) }
+                    }
+                }
+                .testTag("chat_thread.image_viewer"),
+            contentAlignment = Alignment.Center,
+        ) {
+            val shown = bitmap
+            if (shown != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = shown.asImageBitmap(),
+                    contentDescription = "Photo",
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset { androidx.compose.ui.unit.IntOffset(0, offsetY.value.roundToInt()) },
+                )
+            } else {
+                CircularProgressIndicator(color = Color.White)
             }
         }
     }

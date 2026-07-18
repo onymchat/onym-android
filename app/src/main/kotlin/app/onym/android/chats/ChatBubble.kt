@@ -115,6 +115,7 @@ fun ChatBubble(
     maxWidthFraction: Float = 0.75f,
     onRetry: (() -> Unit)? = null,
     imageLoader: ChatImageLoader? = null,
+    onImageTapped: ((ChatImageAttachment) -> Unit)? = null,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)? = null,
     reply: ChatReplyQuote? = null,
     onQuoteTap: (() -> Unit)? = null,
@@ -262,6 +263,7 @@ fun ChatBubble(
                     attachment = message.imageAttachment,
                     video = message.videoAttachment,
                     imageLoader = imageLoader,
+                    onImageTapped = onImageTapped,
                     onVideoTapped = onVideoTapped,
                     reply = reply,
                     replyAccentColor = reply?.accent?.color(darkTheme),
@@ -293,6 +295,7 @@ private fun BubbleBody(
     attachment: ChatImageAttachment?,
     video: ChatVideoAttachment?,
     imageLoader: ChatImageLoader?,
+    onImageTapped: ((ChatImageAttachment) -> Unit)?,
     onVideoTapped: ((ChatVideoAttachment) -> Unit)?,
     reply: ChatReplyQuote?,
     replyAccentColor: Color?,
@@ -351,6 +354,7 @@ private fun BubbleBody(
                 attachment = attachment,
                 imageLoader = imageLoader,
                 messageId = messageId,
+                onTap = onImageTapped?.let { cb -> { cb(attachment) } },
             )
         }
         // Image messages may carry an empty caption — skip the text row
@@ -378,6 +382,7 @@ private fun AttachmentImage(
     attachment: ChatImageAttachment,
     imageLoader: ChatImageLoader?,
     messageId: java.util.UUID,
+    onTap: (() -> Unit)? = null,
 ) {
     val aspect = if (attachment.width > 0 && attachment.height > 0) {
         attachment.width.toFloat() / attachment.height.toFloat()
@@ -403,6 +408,7 @@ private fun AttachmentImage(
             .aspectRatio(aspect)
             .clip(RoundedCornerShape(IMAGE_RADIUS))
             .background(MaterialTheme.colorScheme.surfaceVariant)
+            .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier)
             .testTag("chat_thread.image.$messageId"),
     ) {
         if (shown != null) {

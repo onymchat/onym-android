@@ -14,6 +14,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -171,6 +173,17 @@ class MultiIdentityChatUITest {
         sendImage()
         // The sender renders its own image bubble (primed cache).
         waitForImageBubble()
+
+        // 8a. Tap the image → full-screen viewer opens; swipe down → it
+        //     dismisses (the viewer is dismissed by swipe, not tap).
+        composeRule.onAllNodes(hasTestTagStartingWith("chat_thread.image."))
+            .onFirst().performClick()
+        waitForTag("chat_thread.image_viewer")
+        composeRule.onNodeWithTag("chat_thread.image_viewer")
+            .performTouchInput { swipeDown() }
+        composeRule.waitUntil(10.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("chat_thread.image_viewer").fetchSemanticsNodes().isEmpty()
+        }
 
         // 9. Bob receives it: the bubble lazily downloads from the
         //    loopback Blossom store, hash-verifies, decrypts, and
