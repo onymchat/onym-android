@@ -2,6 +2,8 @@ package app.onym.android.chats
 
 import app.onym.android.UITestRegistry
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -20,7 +22,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,6 +47,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -532,6 +534,14 @@ private fun FullScreenVideoPlayer(
     LaunchedEffect(attachment.sha256) {
         file = videoLoader?.file(attachment)
     }
+
+    val scope = rememberCoroutineScope()
+    val offsetY = remember { androidx.compose.animation.core.Animatable(0f) }
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 120.dp.toPx() }
+    val fadeDistancePx = with(density) { 300.dp.toPx() }
+    val progress = (offsetY.value / fadeDistancePx).coerceIn(0f, 1f)
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -539,7 +549,13 @@ private fun FullScreenVideoPlayer(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
+                .background(Color.Black.copy(alpha = 1f - progress * 0.7f))
+                // Swipe down to dismiss — no close button (matches the
+                // image viewer). Media3's PlayerView consumes touches for
+                // its controls, so claim the vertical drag on the Initial
+                // pointer pass (before the player view) once it's clearly
+                // downward, leaving taps + scrubbing to the controls.
+                .swipeDownToDismiss(offsetY, scope, dismissThresholdPx, onDismiss)
                 .testTag("chat_thread.video_player"),
             contentAlignment = Alignment.Center,
         ) {
@@ -562,19 +578,54 @@ private fun FullScreenVideoPlayer(
                             useController = true
                         }
                     },
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset { androidx.compose.ui.unit.IntOffset(0, offsetY.value.roundToInt()) },
                 )
             } else {
                 CircularProgressIndicator(color = Color.White)
             }
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .testTag("chat_thread.video_close"),
-            ) {
-                Icon(Icons.Filled.Close, contentDescription = "Close video", tint = Color.White)
+        }
+    }
+}
+
+/**
+ * Swipe-down-to-dismiss for a Box that hosts a touch-consuming child
+ * (e.g. a Media3 `PlayerView`). Claims the gesture on the **Initial**
+ * pointer pass — before the child — but only once the drag is clearly
+ * downward past the touch slop, then consumes the moves so the child
+ * never sees them. Taps and other gestures fall through to the child, so
+ * playback controls keep working. Releasing past [thresholdPx] dismisses;
+ * otherwise the content springs back to [offsetY] == 0.
+ */
+private fun Modifier.swipeDownToDismiss(
+    offsetY: androidx.compose.animation.core.Animatable<Float, androidx.compose.animation.core.AnimationVector1D>,
+    scope: kotlinx.coroutines.CoroutineScope,
+    thresholdPx: Float,
+    onDismiss: () -> Unit,
+): Modifier = pointerInput(Unit) {
+    val slop = viewConfiguration.touchSlop
+    awaitEachGesture {
+        val down = awaitFirstDown(
+            requireUnconsumed = false,
+            pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial,
+        )
+        val startY = down.position.y
+        var claimed = false
+        while (true) {
+            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            if (!change.pressed) break
+            if (!claimed && change.position.y - startY > slop) claimed = true
+            if (claimed) {
+                val delta = change.positionChange().y
+                change.consume()
+                scope.launch { offsetY.snapTo((offsetY.value + delta).coerceAtLeast(0f)) }
             }
+        }
+        if (claimed) {
+            if (offsetY.value > thresholdPx) onDismiss()
+            else scope.launch { offsetY.animateTo(0f) }
         }
     }
 }

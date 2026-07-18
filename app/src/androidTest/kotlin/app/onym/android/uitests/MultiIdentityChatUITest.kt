@@ -200,6 +200,17 @@ class MultiIdentityChatUITest {
         sendVideo()
         waitForVideoBubble()
 
+        // 10a. Tap the video → full-screen player opens; swipe down → it
+        //      dismisses (dismissed by swipe, no close button).
+        composeRule.onAllNodes(hasTestTagStartingWith("chat_thread.video."))
+            .onFirst().performClick()
+        waitForTag("chat_thread.video_player")
+        composeRule.onNodeWithTag("chat_thread.video_player")
+            .performTouchInput { swipeDown() }
+        composeRule.waitUntil(10.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("chat_thread.video_player").fetchSemanticsNodes().isEmpty()
+        }
+
         // 11. Alice receives it: her bubble lazily downloads the poster
         //     from the loopback Blossom store, decrypts, and renders —
         //     proving the cross-identity video round-trip.
