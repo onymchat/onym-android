@@ -89,7 +89,6 @@ fun AnchorsRootScreen(
                     } else null,
                 )
             }
-            item { CustomNetworkRow() }
             item { Footer(stringResource(R.string.anchors_footer)) }
 
             // ─── Contract versions for the active network
@@ -347,36 +346,6 @@ private fun ActiveNetworkRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-/** Placeholder for a future user-defined network (custom relayer +
- *  contracts). Modeled as "Soon" — not selectable yet. */
-@Composable
-private fun CustomNetworkRow() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .testTag("anchors.network.custom.disabled"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text("Custom",
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
-            Text("Your own relayer + contracts",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Text(
-            "Soon",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
