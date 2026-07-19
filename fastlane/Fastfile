@@ -13,6 +13,24 @@ platform :android do
   lane :screenshots do
     gradle(task: "assembleDebug assembleDebugAndroidTest")
     capture_android_screenshots
+
+    # Google Play rejects screenshots whose long side is more than 2×
+    # the short side. Tall modern emulators (e.g. Pixel 9a, 1080×2424 =
+    # 2.24:1) exceed that, so pad each over-tall shot with white side
+    # margins down to ~1.95:1 — content untouched. sips is macOS-only;
+    # screenshots are generated locally on macOS.
+    if `which sips`.strip.empty?
+      UI.important("sips not found — screenshots not padded; Play may reject images over 2:1.")
+    else
+      Dir.glob("fastlane/metadata/android/*/images/phoneScreenshots/*.png").each do |png|
+        h = `sips -g pixelHeight '#{png}'`[/pixelHeight: (\d+)/, 1].to_i
+        w = `sips -g pixelWidth '#{png}'`[/pixelWidth: (\d+)/, 1].to_i
+        next if h.zero? || w.zero? || h.to_f / w < 2.0
+        target_w = (h / 1.95).ceil
+        sh("sips --padToHeightWidth #{h} #{target_w} --padColor FFFFFF '#{png}'", log: false)
+      end
+      UI.success("Padded over-tall screenshots to a Play-compliant aspect ratio.")
+    end
   end
 
   desc "First release: upload a signed AAB + all listing assets to internal"
