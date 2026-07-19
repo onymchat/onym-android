@@ -177,6 +177,12 @@ fun SettingsScreen(
                         }
                     }
                 }
+                item {
+                    SettingsFootnote(
+                        "Nostr relays and Blossom servers carry your messages and media. " +
+                            "Replace them with your own instances for maximum privacy.",
+                    )
+                }
             }
 
             // ─── ANCHORS ───────────────────────────────────────────
