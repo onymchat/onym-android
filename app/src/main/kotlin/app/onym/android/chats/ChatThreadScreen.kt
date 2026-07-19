@@ -2,6 +2,8 @@ package app.onym.android.chats
 
 import app.onym.android.UITestRegistry
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -12,7 +14,18 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
@@ -200,6 +213,7 @@ fun ChatThreadScreen(
                 // a fresh message arriving (requirement #6) — Compose
                 // recomposes the `remember(memberProfiles)` below.
                 memberProfiles = group?.memberProfiles.orEmpty(),
+                invitationMessage = group?.invitationMessage,
                 padding = padding,
                 onSend = viewModel::send,
                 onRetry = viewModel::retry,
@@ -287,6 +301,7 @@ private data class AlbumGalleryContext(
 private fun ChatThreadBody(
     messages: List<ChatMessage>,
     memberProfiles: Map<String, MemberProfile>,
+    invitationMessage: String? = null,
     padding: PaddingValues,
     onSend: (String) -> Unit,
     onRetry: (java.util.UUID) -> Unit,
@@ -453,6 +468,8 @@ private fun ChatThreadBody(
     ) {
         if (sortedMessages.isEmpty()) {
             EmptyThread(
+                invitationMessage = invitationMessage,
+                memberProfiles = memberProfiles,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -976,16 +993,120 @@ private fun videoThumbnail(
     }.getOrNull()
 
 @Composable
-private fun EmptyThread(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier.testTag("chat_thread.empty"),
-        contentAlignment = Alignment.Center,
+private fun EmptyThread(
+    invitationMessage: String?,
+    memberProfiles: Map<String, MemberProfile>,
+    modifier: Modifier = Modifier,
+) {
+    val memberNames = remember(memberProfiles) {
+        memberProfiles.values
+            .map { it.alias.ifBlank { "(unnamed)" } }
+            .sortedBy { it.lowercase() }
+    }
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 24.dp)
+            .testTag("chat_thread.empty"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         Text(
             text = stringResource(R.string.thread_empty_body),
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
         )
+
+        invitationMessage?.takeIf { it.isNotBlank() }?.let { message ->
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.members_section_invitation),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = message,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(14.dp),
+                )
+            }
+        }
+
+        if (memberNames.size > 1) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.members_cd),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = memberNames.joinToString(", "),
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+
+        // Privacy selling points — reuse the Chats empty-state copy.
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            EmptyThreadBenefit(
+                icon = Icons.Filled.Lock,
+                title = stringResource(R.string.chats_empty_benefit_encrypted_title),
+                detail = stringResource(R.string.chats_empty_benefit_encrypted_detail),
+            )
+            EmptyThreadBenefit(
+                icon = Icons.Filled.VpnKey,
+                title = stringResource(R.string.chats_empty_benefit_identity_title),
+                detail = stringResource(R.string.chats_empty_benefit_identity_detail),
+            )
+            EmptyThreadBenefit(
+                icon = Icons.Filled.Hub,
+                title = stringResource(R.string.chats_empty_benefit_decentralized_title),
+                detail = stringResource(R.string.chats_empty_benefit_decentralized_detail),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyThreadBenefit(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    detail: String,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Column {
+            Text(text = title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = detail,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
