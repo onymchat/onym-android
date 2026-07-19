@@ -99,6 +99,17 @@ android {
         }
     }
 
+    testOptions {
+        unitTests.all {
+            // The whole unit-test suite runs in one JVM fork. A few
+            // media tests allocate large buffers (e.g. the video
+            // oversize check seals a >95 MB blob — ~190 MB live), which
+            // OOMs the default fork heap on CI and surfaces as the wrong
+            // exception. Give the fork ample headroom.
+            it.maxHeapSize = "2g"
+        }
+    }
+
     // Shared test source set — fakes / fixtures / encryptors that
     // both `test/` (JVM unit) and `androidTest/` (instrumented) can
     // consume from the same `app.onym.android.support` package.
