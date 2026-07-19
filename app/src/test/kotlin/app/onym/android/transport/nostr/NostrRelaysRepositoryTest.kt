@@ -23,7 +23,7 @@ class NostrRelaysRepositoryTest {
 
         val snap = repo.snapshots.value
         assertEquals(1, snap.endpoints.size)
-        assertEquals("wss://nostr.onym.chat", snap.endpoints[0].url)
+        assertEquals("wss://nostr.onym.app", snap.endpoints[0].url)
         assertTrue(snap.endpoints[0].isDefault)
         assertFalse("seed leaves hasUserInteracted=false", snap.hasUserInteracted)
         // Seed is persisted so subsequent boots load it directly.
@@ -62,7 +62,7 @@ class NostrRelaysRepositoryTest {
     @Test
     fun removeEndpoint_drops() = runTest {
         val repo = bootstrappedRepo()
-        repo.removeEndpoint("wss://nostr.onym.chat")
+        repo.removeEndpoint("wss://nostr.onym.app")
         assertEquals(0, repo.snapshots.value.endpoints.size)
         assertTrue(repo.snapshots.value.hasUserInteracted)
     }
@@ -70,7 +70,7 @@ class NostrRelaysRepositoryTest {
     @Test
     fun resetToDefault_restoresSeedAndClearsInteraction() = runTest {
         val repo = bootstrappedRepo()
-        repo.removeEndpoint("wss://nostr.onym.chat")
+        repo.removeEndpoint("wss://nostr.onym.app")
         assertTrue(repo.snapshots.value.hasUserInteracted)
 
         repo.resetToDefault()
@@ -138,7 +138,7 @@ class NostrRelaysRepositoryTest {
         val repo = NostrRelaysRepository(store, StubFetcher(Result.failure(java.io.IOException("offline"))))
         repo.bootstrap()
         repo.resetToDefault()
-        assertEquals("wss://nostr.onym.chat", repo.snapshots.value.endpoints.single().url)
+        assertEquals("wss://nostr.onym.app", repo.snapshots.value.endpoints.single().url)
     }
 
     private suspend fun bootstrappedRepo(): NostrRelaysRepository {

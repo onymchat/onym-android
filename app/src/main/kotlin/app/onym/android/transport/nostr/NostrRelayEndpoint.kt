@@ -20,7 +20,7 @@ data class NostrRelayEndpoint(
          *  inbox transport has somewhere to connect before the user
          *  configures anything. */
         val onymOfficial = NostrRelayEndpoint(
-            url = "wss://nostr.onym.chat",
+            url = "wss://nostr.onym.app",
             name = "Onym Official",
             isDefault = true,
         )
