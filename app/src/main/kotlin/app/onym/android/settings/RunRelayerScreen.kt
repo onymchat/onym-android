@@ -47,7 +47,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.onym.android.R
@@ -177,7 +182,34 @@ fun RunRelayerScreen(
                 }
             }
 
-            item { SettingsFootnote(stringResource(R.string.run_relayer_footnote)) }
+            item {
+                val footnote = stringResource(R.string.run_relayer_footnote)
+                val linkColor = MaterialTheme.colorScheme.primary
+                val annotated = remember(footnote, linkColor) {
+                    buildAnnotatedString {
+                        val marker = "GitHub"
+                        val idx = footnote.indexOf(marker)
+                        if (idx < 0) {
+                            append(footnote)
+                        } else {
+                            append(footnote.substring(0, idx))
+                            withLink(
+                                LinkAnnotation.Url(
+                                    "https://github.com/onymchat/onym-android/issues",
+                                    TextLinkStyles(SpanStyle(color = linkColor)),
+                                ),
+                            ) { append(marker) }
+                            append(footnote.substring(idx + marker.length))
+                        }
+                    }
+                }
+                Text(
+                    text = annotated,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+                )
+            }
             item { Spacer(Modifier.height(40.dp)) }
         }
     }
