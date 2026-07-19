@@ -442,11 +442,9 @@ fun DeployContractScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clickable {
-                                        val host = if (network == ContractNetwork.Testnet) {
-                                            "testnet.stellar.expert"
-                                        } else "stellar.expert"
+                                        // Single host; network is a path segment.
                                         val net = if (network == ContractNetwork.Testnet) "testnet" else "public"
-                                        openUrl(context, "https://$host/explorer/$net/contract/${deployedAddr}")
+                                        openUrl(context, "https://stellar.expert/explorer/$net/contract/${deployedAddr}")
                                     }
                                     .padding(vertical = 13.dp),
                                 contentAlignment = Alignment.Center,

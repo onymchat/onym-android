@@ -134,17 +134,17 @@ fun ContractDetailScreen(
                     SettingsRow(
                         leading = { SettingsTileLabel("SX", SettingsTile.Indigo) },
                         title = stringResource(R.string.contract_detail_explorer_title),
-                        subtitle = if (network == ContractNetwork.Testnet) "testnet.stellar.expert" else "stellar.expert",
+                        subtitle = "stellar.expert",
                         subtitleMono = true,
                         showChevron = false,
                         trailing = { ExternalGlyph() },
                         onClick = {
-                            val host = if (network == ContractNetwork.Testnet) {
-                                "testnet.stellar.expert"
-                            } else "stellar.expert"
-                            val tail = contractAddress?.let { "/explorer/${if (network == ContractNetwork.Testnet) "testnet" else "public"}/contract/$it" }
-                                ?: "/"
-                            openUrl(context, "https://$host$tail")
+                            // Single host; network is a path segment
+                            // (there is no testnet.stellar.expert subdomain).
+                            val net = if (network == ContractNetwork.Testnet) "testnet" else "public"
+                            val tail = contractAddress?.let { "/explorer/$net/contract/$it" }
+                                ?: "/explorer/$net"
+                            openUrl(context, "https://stellar.expert$tail")
                         },
                     )
                     SettingsRow(

@@ -283,13 +283,14 @@ fun UseExistingContractScreen(
                     SettingsRow(
                         leading = { SettingsTileLabel("SX", SettingsTile.Indigo) },
                         title = stringResource(R.string.use_contract_findit_explorer),
-                        subtitle = if (network == ContractNetwork.Testnet) "testnet.stellar.expert" else "stellar.expert",
+                        subtitle = "stellar.expert",
                         subtitleMono = true,
                         showChevron = false,
                         trailing = { ExternalGlyph() },
                         onClick = {
-                            val host = if (network == ContractNetwork.Testnet) "testnet.stellar.expert" else "stellar.expert"
-                            openUrl(context, "https://$host/")
+                            // Single host; network is a path segment.
+                            val net = if (network == ContractNetwork.Testnet) "testnet" else "public"
+                            openUrl(context, "https://stellar.expert/explorer/$net")
                         },
                     )
                     SettingsRow(
