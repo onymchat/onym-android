@@ -15,18 +15,46 @@ platform :android do
     capture_android_screenshots
   end
 
+  desc "First release: upload a signed AAB + all listing assets to internal"
+  desc ""
+  desc "Use this for the very first upload — supply can't push listing"
+  desc "metadata until a build (version code) exists on a track. Uploads"
+  desc "the AAB to the internal track together with the descriptions,"
+  desc "icon, feature graphic, screenshots, and changelog in one run."
+  desc ""
+  desc "  AAB_PATH — path to a signed .aab (default: the bundleRelease"
+  desc "             output). SUPPLY_JSON_KEY — service-account key."
+  desc ""
+  desc "The release is created as a draft; roll it out in the console."
+  lane :deploy_internal do
+    aab = ENV["AAB_PATH"] || "app/build/outputs/bundle/release/app-release.aab"
+    upload_to_play_store(
+      package_name: "app.onym.android",
+      track: "internal",
+      aab: aab,
+      metadata_path: "./fastlane/metadata/android",
+      skip_upload_apk: true,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false,
+      skip_upload_changelogs: false,
+      release_status: "draft"
+    )
+  end
+
   desc "Upload Play store listing text (title/descriptions) — no binary"
   desc ""
   desc "Reads the Google Play service-account key from the environment:"
   desc "  SUPPLY_JSON_KEY       — path to the .json key file  (or…)"
   desc "  SUPPLY_JSON_KEY_DATA  — the JSON contents, inline   (use in CI)"
   desc ""
-  desc "Metadata lives in fastlane/metadata/android (committed). This"
-  desc "pushes listing text only — no APK/AAB, no images/screenshots, no"
-  desc "changelog (changelogs attach to a release via the upload lane)."
+  desc "Requires at least one existing release on the internal track"
+  desc "(supply ties metadata upload to a version code) — run"
+  desc "deploy_internal first. Pushes listing text only."
   lane :upload_metadata do
     upload_to_play_store(
       package_name: "app.onym.android",
+      track: "internal",
       metadata_path: "./fastlane/metadata/android",
       skip_upload_apk: true,
       skip_upload_aab: true,
@@ -37,14 +65,16 @@ platform :android do
     )
   end
 
-  desc "Upload Play store listing text AND screenshots — no binary"
+  desc "Upload Play store listing text + images + screenshots — no binary"
   desc ""
-  desc "Same service-account env vars as upload_metadata. Pushes the"
-  desc "committed listing text plus the generated screenshots (run the"
-  desc "screenshots lane first). No APK/AAB and no changelog."
+  desc "Same service-account env vars as upload_metadata, and likewise"
+  desc "requires an existing internal-track release (run deploy_internal"
+  desc "first). Pushes the committed listing text, icon, feature graphic,"
+  desc "and the generated screenshots (run the screenshots lane first)."
   lane :upload_all do
     upload_to_play_store(
       package_name: "app.onym.android",
+      track: "internal",
       metadata_path: "./fastlane/metadata/android",
       skip_upload_apk: true,
       skip_upload_aab: true,
