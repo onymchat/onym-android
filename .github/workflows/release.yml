@@ -99,7 +99,16 @@ jobs:
     # test suites themselves). AVD snapshot is cached between runs
     # via reactivecircus/android-emulator-runner so warm runs are
     # noticeably faster.
-    name: UI + instrumented tests on emulator
+    name: UI + instrumented tests on emulator (shard ${{ matrix.shard }})
+    # Shard the instrumented suite across two emulators. A single boot
+    # accumulates enough state over ~130 tests to stall the heavy late
+    # UI tests (restoreIdentity, search) regardless of GPU/RAM; ~65 tests
+    # per boot stays comfortably under that threshold. Both shards must
+    # pass (build `needs: android-test` waits for the whole matrix).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     runs-on: ubuntu-latest
     # KVM acceleration is required for tolerable emulator boot
     # times — ubuntu-latest GitHub runners ship /dev/kvm enabled,
@@ -185,7 +194,7 @@ jobs:
           # `sh -c <script>` without quoting, so backslash-newline
           # continuations split into separate sh args and gradle sees a
           # literal `\` task name (run #25262842752 failed that way).
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest -Pandroid.testInstrumentationRunnerArguments.numShards=2 -Pandroid.testInstrumentationRunnerArguments.shardIndex=${{ matrix.shard }}
 
       - name: Run instrumented tests on emulator (retry, fresh emulator)
         if: steps.emu.outcome == 'failure'
@@ -197,7 +206,7 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-snapshot-load -memory 6144 -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest -Pandroid.testInstrumentationRunnerArguments.numShards=2 -Pandroid.testInstrumentationRunnerArguments.shardIndex=${{ matrix.shard }}
 
       - name: Upload androidTest report
         # Always upload — the `report-to-issue` job needs to read the
@@ -207,7 +216,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          name: connectedAndroidTest-report
+          name: connectedAndroidTest-report-shard-${{ matrix.shard }}
           path: |
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
@@ -588,7 +597,10 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
-          name: connectedAndroidTest-report
+          # The instrumented suite is sharded across two emulators; pull
+          # every shard's report into one dir.
+          pattern: connectedAndroidTest-report-shard-*
+          merge-multiple: true
           path: artifact
 
       - name: Update UI_TESTS checkboxes
