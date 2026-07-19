@@ -456,6 +456,9 @@ private fun ChatsRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // Opaque background so the swipe-to-delete red trash behind the
+            // row only shows in the revealed area, not through the row.
+            .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp)
             .testTag("chats.row.${group.id}"),
