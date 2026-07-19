@@ -90,6 +90,15 @@ private val Context.nostrRelaysDataStore: DataStore<Preferences> by preferencesD
 )
 
 /**
+ * DataStore Preferences for Blossom media-server configuration.
+ * Separate domain from Nostr relays — media blob storage vs. Nostr
+ * inbox transport.
+ */
+private val Context.blossomServersDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.blossom_servers_prefs",
+)
+
+/**
  * DataStore Preferences for chat settings (the symmetric read-receipt
  * toggle). Separate file so it doesn't touch the network / relay
  * domains.
@@ -382,6 +391,17 @@ class OnymApplication : Application() {
         )
         applicationScope.launch { nostrRelaysRepository.bootstrap() }
 
+        // User-configurable Blossom media servers (Settings → Transport →
+        // Blossom Relays). Bootstrapped synchronously here (a single local
+        // DataStore read) so the blob client below can be built with the
+        // first configured server's URL. Changes apply on the next launch.
+        val blossomServersRepository = app.onym.android.transport.blossom.BlossomServersRepository(
+            store = app.onym.android.transport.blossom.DataStoreBlossomServersSelectionStore(
+                dataStore = applicationContext.blossomServersDataStore,
+            ),
+        )
+        kotlinx.coroutines.runBlocking { blossomServersRepository.bootstrap() }
+
         // Inbox transport for invitation send. Constructed once;
         // CreateGroupInteractor.create blocks on `send` (which
         // connects on first use via `NostrInboxTransport`).
@@ -403,7 +423,10 @@ class OnymApplication : Application() {
             }
         // Blossom media server for image messages + the lazy loader.
         // Swapped for an in-memory store under the UI-test harness.
-        val blossomServerUrl = "https://blossom.onym.app"
+        // The base URL is the first user-configured server (falls back to
+        // the Onym default if the list was explicitly cleared).
+        val blossomServerUrl = blossomServersRepository.currentEndpoints()
+            .firstOrNull()?.url ?: "https://blossom.onym.app"
         val blossomClient: app.onym.android.chats.BlossomClient =
             if (UITestRegistry.enabled && UITestRegistry.blossomClient != null) {
                 UITestRegistry.blossomClient!!
@@ -809,6 +832,12 @@ class OnymApplication : Application() {
                 )
             },
             nostrRelaysFlow = nostrRelaysRepository.snapshots,
+            makeBlossomServerSettingsViewModel = {
+                app.onym.android.settings.BlossomServerSettingsViewModel(
+                    repository = blossomServersRepository,
+                )
+            },
+            blossomServersFlow = blossomServersRepository.snapshots,
             clearAllMessages = { messageRepository.clearAll() },
             makeJoinViewModel = { capability ->
                 // PR 92: prefill the display-name field from the

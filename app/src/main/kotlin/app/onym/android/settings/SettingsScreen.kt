@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
@@ -99,6 +100,11 @@ fun SettingsScreen(
     /** Live count of configured Nostr relays — drives the Settings
      *  row's subtitle. */
     nostrRelaysCount: Int = 0,
+    /** Settings → Transport → Blossom Relays entry. */
+    onBlossomRelaysClick: (() -> Unit)? = null,
+    /** Live count of configured Blossom servers — drives the Settings
+     *  row's subtitle. */
+    blossomRelaysCount: Int = 0,
     /** Wipe every local message (keeps chats). Invoked only after the
      *  Data → "Clear local message cache" two-step confirmation. */
     onClearMessages: () -> Unit = {},
@@ -155,9 +161,22 @@ fun SettingsScreen(
                             subtitle = if (nostrRelaysCount == 1) "1 configured"
                             else "$nostrRelaysCount configured",
                             onClick = onNostrRelaysClick,
-                            isLast = true,
+                            isLast = onBlossomRelaysClick == null,
                             modifier = Modifier.testTag("settings.nostr_relays_row"),
                         )
+                        if (onBlossomRelaysClick != null) {
+                            SettingsRow(
+                                leading = {
+                                    SettingsTileBox(Icons.Filled.Image, SettingsTile.Indigo)
+                                },
+                                title = "Blossom Relays",
+                                subtitle = if (blossomRelaysCount == 1) "1 configured"
+                                else "$blossomRelaysCount configured",
+                                onClick = onBlossomRelaysClick,
+                                isLast = true,
+                                modifier = Modifier.testTag("settings.blossom_relays_row"),
+                            )
+                        }
                     }
                 }
             }

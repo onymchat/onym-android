@@ -293,6 +293,7 @@ fun RootScreen(
                     },
                 )
                 val nostrRelays by dependencies.nostrRelaysFlow.collectAsStateWithLifecycle()
+                val blossomServers by dependencies.blossomServersFlow.collectAsStateWithLifecycle()
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
@@ -316,6 +317,8 @@ fun RootScreen(
                     },
                     onNostrRelaysClick = { navController.navigate(ROUTE_NOSTR_RELAYS) },
                     nostrRelaysCount = nostrRelays.endpoints.size,
+                    onBlossomRelaysClick = { navController.navigate(ROUTE_BLOSSOM_RELAYS) },
+                    blossomRelaysCount = blossomServers.endpoints.size,
                     onClearMessages = {
                         coroutineScope.launch { dependencies.clearAllMessages() }
                     },
@@ -445,6 +448,17 @@ fun RootScreen(
                     },
                 ) as app.onym.android.settings.NostrRelaySettingsViewModel
                 app.onym.android.settings.NostrRelaySettingsScreen(
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_BLOSSOM_RELAYS) {
+                val vm = viewModel(
+                    factory = viewModelFactory {
+                        initializer { dependencies.makeBlossomServerSettingsViewModel() }
+                    },
+                ) as app.onym.android.settings.BlossomServerSettingsViewModel
+                app.onym.android.settings.BlossomServerSettingsScreen(
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
                 )
@@ -605,6 +619,7 @@ private const val ROUTE_IDENTITIES = "identities"
 private const val ROUTE_ABOUT = "about_onym"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_NOSTR_RELAYS = "nostr_relays"
+private const val ROUTE_BLOSSOM_RELAYS = "blossom_relays"
 private const val ROUTE_RUN_RELAYER = "run_relayer"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
