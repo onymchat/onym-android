@@ -199,6 +199,29 @@ class IdentitiesUITest {
         }
     }
 
+    @Test
+    fun restoreIdentity_viaCarousel_addsIdentity() {
+        openCarousel()
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
+            identityStore.listIds().size == 1
+        }
+        // Add page → "Restore from recovery phrase" → enter the canonical
+        // BIP-39 vector → Restore. It's a valid phrase, so a (deterministic)
+        // second identity lands on disk.
+        swipeToAddPage()
+        composeRule.onNodeWithTag("identity.add.restore").performClick()
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            composeRule.onAllNodesWithTag("identity.restore.phrase")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("identity.restore.phrase").performTextInput(CANONICAL_MNEMONIC)
+        composeRule.onNodeWithTag("identity.restore.confirm").performClick()
+
+        composeRule.waitUntil(timeoutMillis = 10.seconds.inWholeMilliseconds) {
+            identityStore.listIds().size == 2
+        }
+    }
+
     // ─── carousel helpers ──────────────────────────────────────────────
 
     /** Open Settings and scroll the merged Identity carousel into view. */
@@ -226,6 +249,27 @@ class IdentitiesUITest {
         }
         composeRule.onNodeWithTag("identity.add.name").performTextInput(name)
         composeRule.onNodeWithTag("identity.add.create").performClick()
+    }
+
+    /** Swipe to the trailing add page and wait for it to settle (centered). */
+    private fun swipeToAddPage() {
+        val addIndex = identityStore.listIds().size
+        var tries = 0
+        while (carouselSettledPage() != addIndex && tries < 8) {
+            composeRule.onNodeWithTag("identity.carousel").performTouchInput { swipeLeft() }
+            composeRule.waitForIdle()
+            tries++
+        }
+        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+            carouselSettledPage() == addIndex
+        }
+    }
+
+    private companion object {
+        /** Canonical BIP-39 test vector (`abandon × 11 + about`). */
+        const val CANONICAL_MNEMONIC =
+            "abandon abandon abandon abandon abandon abandon abandon abandon " +
+                "abandon abandon abandon about"
     }
 
     /** Alias of the currently-active identity, read from the carousel's

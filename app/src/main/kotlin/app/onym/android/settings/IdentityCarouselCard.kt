@@ -84,6 +84,7 @@ internal fun IdentityCarouselCard(
     val pagerState = rememberPagerState(pageCount = { items.size + 1 })
     var pendingRemoval by remember { mutableStateOf<IdentitySummary?>(null) }
     var pendingRename by remember { mutableStateOf<IdentitySummary?>(null) }
+    var showRestore by remember { mutableStateOf(false) }
     var addName by remember { mutableStateOf("") }
     val activeName = items.firstOrNull { it.isActive }?.summary?.name.orEmpty()
 
@@ -121,7 +122,7 @@ internal fun IdentityCarouselCard(
             pageSpacing = 12.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(430.dp)
+                .height(470.dp)
                 .testTag("identity.carousel"),
         ) { page ->
             if (page < items.size) {
@@ -141,6 +142,7 @@ internal fun IdentityCarouselCard(
                     name = addName,
                     onNameChange = { addName = it },
                     onCreate = { viewModel.add(name = addName) },
+                    onRestore = { showRestore = true },
                 )
             }
         }
@@ -183,6 +185,13 @@ internal fun IdentityCarouselCard(
                 viewModel.rename(summary.id, newName)
                 pendingRename = null
             },
+        )
+    }
+
+    if (showRestore) {
+        RestoreIdentityDialog(
+            viewModel = viewModel,
+            onDismiss = { showRestore = false },
         )
     }
 }
@@ -327,6 +336,7 @@ private fun AddIdentityPage(
     name: String,
     onNameChange: (String) -> Unit,
     onCreate: () -> Unit,
+    onRestore: () -> Unit,
 ) {
     val accent = MaterialTheme.colorScheme.primary
     val tokens = LocalOnymTokens.current
@@ -344,7 +354,7 @@ private fun AddIdentityPage(
                     .padding(12.dp)
                     .blur(9.dp),
             ) {
-                OnymQrCode(value = "onym-add-identity", size = 190.dp)
+                OnymQrCode(value = "onym-add-identity", size = 150.dp)
             }
             Icon(
                 Icons.Filled.Add,
@@ -383,6 +393,12 @@ private fun AddIdentityPage(
                 .testTag("identity.add.create"),
         ) {
             Text("Create identity")
+        }
+        TextButton(
+            onClick = onRestore,
+            modifier = Modifier.testTag("identity.add.restore"),
+        ) {
+            Text("Restore from recovery phrase")
         }
     }
 }
@@ -433,6 +449,94 @@ private fun RenameIdentityDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+/**
+ * Restore an existing identity from its 12/24-word recovery phrase.
+ * Reached from the carousel's add page. The backing pipeline
+ * (`IdentitiesViewModel.add(restoreMnemonic = …)` → repository) already
+ * supports restore + invalid-phrase errors; this is its UI surface.
+ */
+@Composable
+private fun RestoreIdentityDialog(
+    viewModel: IdentitiesViewModel,
+    onDismiss: () -> Unit,
+) {
+    var phrase by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    val addResult by viewModel.addResult.collectAsStateWithLifecycle()
+
+    val words = phrase.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+    val canRestore = words.size == 12 || words.size == 24
+
+    // A successful restore closes the dialog; clear the shared result so a
+    // later add/restore starts clean.
+    LaunchedEffect(addResult) {
+        if (addResult is IdentitiesViewModel.AddResult.Success) {
+            viewModel.clearAddResult()
+            onDismiss()
+        }
+    }
+    val error = when (val r = addResult) {
+        is IdentitiesViewModel.AddResult.InvalidMnemonic ->
+            "That doesn't look like a valid 12 or 24-word phrase."
+        is IdentitiesViewModel.AddResult.Failure -> r.cause
+        else -> null
+    }
+
+    AlertDialog(
+        onDismissRequest = { viewModel.clearAddResult(); onDismiss() },
+        title = { Text("Restore identity") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Enter the 12 or 24-word recovery phrase to restore an identity " +
+                        "on this device.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = phrase,
+                    onValueChange = {
+                        phrase = it
+                        if (addResult != null) viewModel.clearAddResult()
+                    },
+                    placeholder = { Text("word word word …") },
+                    minLines = 3,
+                    isError = error != null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("identity.restore.phrase"),
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { if (it.length <= 30) name = it },
+                    placeholder = { Text("Name (optional)") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("identity.restore.name"),
+                )
+                if (error != null) {
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("identity.restore.error"),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { viewModel.add(name = name, restoreMnemonic = phrase) },
+                enabled = canRestore,
+                modifier = Modifier.testTag("identity.restore.confirm"),
+            ) { Text("Restore") }
+        },
+        dismissButton = {
+            TextButton(onClick = { viewModel.clearAddResult(); onDismiss() }) { Text("Cancel") }
         },
     )
 }
