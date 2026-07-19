@@ -1,0 +1,57 @@
+default_platform(:android)
+
+platform :android do
+  desc "Generate localized Google Play screenshots via the UI-test harness"
+  desc ""
+  desc "Builds the debug + androidTest APKs, then drives the app through"
+  desc "fastlane screengrab (see fastlane/Screengrabfile): the"
+  desc "ScreenshotTest flow runs on the offline UITestRegistry harness,"
+  desc "seeds a group + conversation, and captures every screen in each"
+  desc "configured locale. Output → fastlane/metadata/android/<locale>/"
+  desc "images/phoneScreenshots (git-ignored). Requires a connected"
+  desc "device or running emulator. Upload separately with upload_all."
+  lane :screenshots do
+    gradle(task: "assembleDebug assembleDebugAndroidTest")
+    capture_android_screenshots
+  end
+
+  desc "Upload Play store listing text (title/descriptions) — no binary"
+  desc ""
+  desc "Reads the Google Play service-account key from the environment:"
+  desc "  SUPPLY_JSON_KEY       — path to the .json key file  (or…)"
+  desc "  SUPPLY_JSON_KEY_DATA  — the JSON contents, inline   (use in CI)"
+  desc ""
+  desc "Metadata lives in fastlane/metadata/android (committed). This"
+  desc "pushes listing text only — no APK/AAB, no images/screenshots, no"
+  desc "changelog (changelogs attach to a release via the upload lane)."
+  lane :upload_metadata do
+    upload_to_play_store(
+      package_name: "app.onym.android",
+      metadata_path: "./fastlane/metadata/android",
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: false,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
+    )
+  end
+
+  desc "Upload Play store listing text AND screenshots — no binary"
+  desc ""
+  desc "Same service-account env vars as upload_metadata. Pushes the"
+  desc "committed listing text plus the generated screenshots (run the"
+  desc "screenshots lane first). No APK/AAB and no changelog."
+  lane :upload_all do
+    upload_to_play_store(
+      package_name: "app.onym.android",
+      metadata_path: "./fastlane/metadata/android",
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false,
+      skip_upload_changelogs: true
+    )
+  end
+end

@@ -1,0 +1,7 @@
+package_name("app.onym.android")
+
+# Google Play service-account JSON key. Provide it out-of-band (not
+# committed) via either:
+#   SUPPLY_JSON_KEY       — path to the .json key file, or
+#   SUPPLY_JSON_KEY_DATA  — the JSON contents inline (use in CI).
+json_key_file(ENV["SUPPLY_JSON_KEY"]) if ENV["SUPPLY_JSON_KEY"]

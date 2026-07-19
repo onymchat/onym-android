@@ -230,6 +230,10 @@ dependencies {
     // without a real Activity from main code. Required by Compose UI
     // tests that don't use `createAndroidComposeRule<MyActivity>`.
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // fastlane screengrab — drives the App Store / Play screenshot
+    // capture from the instrumented ScreenshotTest. Test-only.
+    androidTestImplementation("tools.fastlane:screengrab:2.1.1")
 }
 
 /**

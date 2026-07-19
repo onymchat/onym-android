@@ -40,3 +40,14 @@ google-services.json
 # Android Profiling
 *.hprof
 .kotlin/
+
+# fastlane
+fastlane/README.md
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output/
+# Generated Play screenshots (regenerate with `fastlane screenshots`).
+fastlane/metadata/android/*/images/phoneScreenshots/
+fastlane/metadata/android/screenshots.html
+# Google Play service-account key (provide via env, never commit).
+fastlane/*.json

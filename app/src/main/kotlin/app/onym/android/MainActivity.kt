@@ -75,10 +75,19 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
+        // Block screenshots / screen recording and blank the recents
+        // thumbnail across the whole app. Suppressed only under the
+        // in-process UI-test harness so fastlane screengrab can capture
+        // the screen — FLAG_SECURE otherwise yields all-black images.
+        // Gated the same way as every other harness seam (see
+        // UITestRegistry); the registry is switched on by the test's
+        // TestWatcher rule before this Activity launches.
+        if (!UITestRegistry.enabled) {
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE,
+            )
+        }
         super.onCreate(savedInstanceState)
         val dependencies = (application as OnymApplication).dependencies
         setContent {
