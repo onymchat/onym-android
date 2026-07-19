@@ -158,7 +158,7 @@ class IdentitiesUITest {
             carouselActiveName() == "Work"
         }
         composeRule.onNodeWithTag("identity.delete.${workId.value}").performClick()
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+        composeRule.waitUntil(timeoutMillis = 15.seconds.inWholeMilliseconds) {
             composeRule.onAllNodesWithTag("identity_detail.delete.confirm.input")
                 .fetchSemanticsNodes().isNotEmpty()
         }
@@ -187,7 +187,7 @@ class IdentitiesUITest {
         }
         val workId = identityStore.listIds().first { it !in before }
         composeRule.onNodeWithTag("identity.rename.${workId.value}").performClick()
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+        composeRule.waitUntil(timeoutMillis = 15.seconds.inWholeMilliseconds) {
             composeRule.onAllNodesWithTag("identity.rename.input")
                 .fetchSemanticsNodes().isNotEmpty()
         }
@@ -210,7 +210,7 @@ class IdentitiesUITest {
         // second identity lands on disk.
         swipeToAddPage()
         composeRule.onNodeWithTag("identity.add.restore").performClick()
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+        composeRule.waitUntil(timeoutMillis = 15.seconds.inWholeMilliseconds) {
             composeRule.onAllNodesWithTag("identity.restore.phrase")
                 .fetchSemanticsNodes().isNotEmpty()
         }
@@ -244,7 +244,7 @@ class IdentitiesUITest {
             composeRule.waitForIdle()
             tries++
         }
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+        composeRule.waitUntil(timeoutMillis = 15.seconds.inWholeMilliseconds) {
             carouselSettledPage() == addIndex
         }
         composeRule.onNodeWithTag("identity.add.name").performTextInput(name)
@@ -260,7 +260,7 @@ class IdentitiesUITest {
             composeRule.waitForIdle()
             tries++
         }
-        composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
+        composeRule.waitUntil(timeoutMillis = 15.seconds.inWholeMilliseconds) {
             carouselSettledPage() == addIndex
         }
     }

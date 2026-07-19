@@ -173,7 +173,10 @@ jobs:
           # split into separate sh arguments and gradle sees a literal
           # `\` task name. Run #25262842752 failed exactly that way;
           # keep the gradle invocation single-line to dodge the issue.
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon
+          # Exclude ScreenshotTest: it's a screenshot-generation flow for
+          # `fastlane screengrab`, not a correctness gate, and its extra
+          # load on the CI emulator isn't worth flaking the release.
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest
 
       - name: Upload androidTest report
         # Always upload — the `report-to-issue` job needs to read the
