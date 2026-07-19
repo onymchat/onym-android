@@ -286,7 +286,7 @@
     <string name="run_relayer_deploy_railway_subtitle">Простая настройка</string>
     <string name="run_relayer_deploy_docker">Запуск через Docker</string>
     <string name="run_relayer_deploy_docker_subtitle">Самостоятельный хостинг где угодно</string>
-    <string name="run_relayer_footnote">Нужна помощь? Создайте issue на GitHub или присоединитесь к чату разработчиков.</string>
+    <string name="run_relayer_footnote">Нужна помощь? Создайте issue на GitHub.</string>
 
     <!-- ─── Anchors → Custom (deploy / use existing) ─────────────── -->
     <string name="anchors_section_custom">Произвольный</string>

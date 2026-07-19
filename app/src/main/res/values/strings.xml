@@ -291,7 +291,7 @@
     <string name="run_relayer_deploy_railway_subtitle">Simple setup</string>
     <string name="run_relayer_deploy_docker">Run with Docker</string>
     <string name="run_relayer_deploy_docker_subtitle">Self-host anywhere</string>
-    <string name="run_relayer_footnote">Need help? Open an issue on GitHub or join the dev chat.</string>
+    <string name="run_relayer_footnote">Need help? Open an issue on GitHub.</string>
 
     <!-- ─── Anchors → Custom (deploy / use existing) ─────────────── -->
     <string name="anchors_section_custom">Custom</string>
