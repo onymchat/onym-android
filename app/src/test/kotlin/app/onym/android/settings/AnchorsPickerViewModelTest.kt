@@ -3,12 +3,14 @@
 package app.onym.android.settings
 
 import app.onym.android.chain.AnchorSelectionKey
+import app.onym.android.chain.AppNetwork
 import app.onym.android.chain.ContractEntry
 import app.onym.android.chain.ContractNetwork
 import app.onym.android.chain.ContractRelease
 import app.onym.android.chain.ContractsManifest
 import app.onym.android.chain.ContractsRepository
 import app.onym.android.chain.GovernanceType
+import app.onym.android.chain.StaticNetworkPreferenceProvider
 import app.onym.android.support.FakeContractsManifestFetcher
 import app.onym.android.support.InMemoryAnchorSelectionStore
 import kotlinx.coroutines.Dispatchers
@@ -176,7 +178,10 @@ class AnchorsPickerViewModelTest {
         }
         val repo = ContractsRepository(store, fetcher)
         if (seedManifest != null) repo.start()
-        val vm = AnchorsPickerViewModel(repo)
+        val vm = AnchorsPickerViewModel(
+            repo,
+            StaticNetworkPreferenceProvider(AppNetwork.Testnet),
+        )
         yield()
         return repo to vm
     }

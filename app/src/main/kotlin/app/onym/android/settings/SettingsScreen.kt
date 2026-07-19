@@ -18,14 +18,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
@@ -197,28 +195,9 @@ fun SettingsScreen(
                         onClick = onAnchorsClick,
                         modifier = Modifier.testTag("settings.anchors_row"),
                     )
-                    SettingsRow(
-                        leading = {
-                            SettingsTileBox(
-                                icon = if (useMainnet) Icons.Filled.Public else Icons.Filled.Build,
-                                background = if (useMainnet) SettingsTile.Green else SettingsTile.Gray,
-                            )
-                        },
-                        title = stringResource(R.string.settings_use_mainnet),
-                        subtitle = stringResource(
-                            if (useMainnet) R.string.settings_use_mainnet_on_subtitle
-                            else R.string.settings_use_mainnet_off_subtitle
-                        ),
-                        showChevron = false,
-                        trailing = {
-                            Switch(
-                                checked = useMainnet,
-                                onCheckedChange = onToggleMainnet,
-                                modifier = Modifier.testTag("settings.use_mainnet_toggle"),
-                            )
-                        },
-                        onClick = { onToggleMainnet(!useMainnet) },
-                    )
+                    // The network choice (was a "Use Mainnet" toggle) now
+                    // lives inside the Anchors screen as the active-network
+                    // selector — the Anchors subtitle above reflects it.
                     SettingsRow(
                         leading = {
                             SettingsTileBox(Icons.Filled.Cloud, SettingsTile.Indigo)
@@ -230,14 +209,6 @@ fun SettingsScreen(
                         modifier = Modifier.testTag("settings.relayer_row"),
                     )
                 }
-            }
-            item {
-                SettingsFootnote(
-                    stringResource(
-                        if (useMainnet) R.string.settings_use_mainnet_on_footer
-                        else R.string.settings_use_mainnet_off_footer,
-                    )
-                )
             }
 
             // ─── DATA ──────────────────────────────────────────────

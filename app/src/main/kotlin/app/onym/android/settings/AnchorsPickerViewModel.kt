@@ -4,14 +4,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.onym.android.chain.AnchorBinding
 import app.onym.android.chain.AnchorSelectionKey
+import app.onym.android.chain.AppNetwork
 import app.onym.android.chain.ContractEntry
 import app.onym.android.chain.ContractNetwork
 import app.onym.android.chain.ContractRelease
 import app.onym.android.chain.ContractsRepository
 import app.onym.android.chain.GovernanceType
+import app.onym.android.chain.NetworkPreferenceProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -28,36 +31,47 @@ import kotlinx.coroutines.launch
  */
 class AnchorsPickerViewModel(
     private val repository: ContractsRepository,
+    private val networkPreference: NetworkPreferenceProvider,
 ) : ViewModel() {
 
     /** Top-level state mirror. */
     data class State(
         val hasManifest: Boolean,
         val networkAvailability: Map<ContractNetwork, Boolean>,
+        /** The active network for new chats (was the global "Use Mainnet"
+         *  toggle; now selected here). */
+        val activeNetwork: AppNetwork,
     )
 
     private val _state = MutableStateFlow(
         State(
             hasManifest = false,
             networkAvailability = ContractNetwork.entries.associateWith { false },
+            activeNetwork = networkPreference.current(),
         )
     )
     val state: StateFlow<State> = _state.asStateFlow()
 
     init {
         viewModelScope.launch {
-            repository.snapshots.collect { snapshot ->
+            combine(repository.snapshots, networkPreference.flow) { snapshot, active ->
                 val mf = snapshot.manifest
-                _state.value = State(
+                State(
                     hasManifest = mf != null,
                     networkAvailability = ContractNetwork.entries.associateWith { network ->
                         mf?.releases?.any { release ->
                             release.contracts.any { it.network == network }
                         } == true
                     },
+                    activeNetwork = active,
                 )
-            }
+            }.collect { _state.value = it }
         }
+    }
+
+    /** Set the active network for new chats. */
+    fun setActiveNetwork(network: AppNetwork) {
+        viewModelScope.launch { networkPreference.set(network) }
     }
 
     // ─── Network screen ───────────────────────────────────────────

@@ -486,8 +486,8 @@ fun RootScreen(
                 )
                 AnchorsRootScreen(
                     viewModel = vm,
-                    onNetworkClick = { net ->
-                        navController.navigate("anchors_network/${net.wireValue}")
+                    onVersionClick = { net, type ->
+                        navController.navigate("anchors_version/${net.wireValue}/${type.wireValue}")
                     },
                     onBackClick = { navController.popBackStack() },
                 )

@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.onym.android.R
+import app.onym.android.chain.AppNetwork
 import app.onym.android.chain.ContractNetwork
 import app.onym.android.chain.GovernanceType
 
@@ -52,10 +53,12 @@ import app.onym.android.chain.GovernanceType
 @Composable
 fun AnchorsRootScreen(
     viewModel: AnchorsPickerViewModel,
-    onNetworkClick: (ContractNetwork) -> Unit,
+    onVersionClick: (ContractNetwork, GovernanceType) -> Unit,
     onBackClick: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val activeNetwork = state.activeNetwork.contractNetwork
+    val activeAvailable = state.networkAvailability[activeNetwork] == true
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -73,20 +76,49 @@ fun AnchorsRootScreen(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) { padding ->
         LazyColumn(contentPadding = padding) {
-            item { SectionHeader(stringResource(R.string.anchors_section_network)) }
+            // ─── Active network selector (replaces the Use Mainnet toggle)
+            item { SectionHeader("ACTIVE NETWORK") }
             items(ContractNetwork.entries) { network ->
                 val available = state.networkAvailability[network] == true
-                NetworkRootRow(
+                ActiveNetworkRow(
                     network = network,
                     available = available,
+                    isActive = network == activeNetwork,
                     onClick = if (available) {
-                        { onNetworkClick(network) }
+                        { viewModel.setActiveNetwork(network.asAppNetwork()) }
                     } else null,
                 )
             }
+            item { CustomNetworkRow() }
             item { Footer(stringResource(R.string.anchors_footer)) }
+
+            // ─── Contract versions for the active network
+            if (activeAvailable) {
+                item {
+                    SectionHeader(
+                        "CONTRACT VERSIONS · " +
+                            stringResource(activeNetwork.displayNameResId).uppercase()
+                    )
+                }
+                items(viewModel.networkRows(activeNetwork), key = { it.type.wireValue }) { row ->
+                    GovernanceTypeRow(
+                        type = row.type,
+                        resolvedRelease = row.resolvedRelease,
+                        isExplicit = row.isExplicit,
+                        onClick = if (row.resolvedRelease != null) {
+                            { onVersionClick(activeNetwork, row.type) }
+                        } else null,
+                    )
+                }
+            }
         }
     }
+}
+
+/** Map the anchor/manifest network to the app-preference enum. */
+private fun ContractNetwork.asAppNetwork(): AppNetwork = when (this) {
+    ContractNetwork.Testnet -> AppNetwork.Testnet
+    ContractNetwork.Public -> AppNetwork.Mainnet
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -274,9 +306,10 @@ private fun CustomActionRow(
 // ─── pieces ─────────────────────────────────────────────────────
 
 @Composable
-private fun NetworkRootRow(
+private fun ActiveNetworkRow(
     network: ContractNetwork,
     available: Boolean,
+    isActive: Boolean,
     onClick: (() -> Unit)?,
 ) {
     val titleColor = if (available) MaterialTheme.colorScheme.onSurface
@@ -302,13 +335,48 @@ private fun NetworkRootRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (available) {
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+        when {
+            isActive -> Icon(
+                Icons.Filled.Check,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            !available -> Text(
+                "Soon",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/** Placeholder for a future user-defined network (custom relayer +
+ *  contracts). Modeled as "Soon" — not selectable yet. */
+@Composable
+private fun CustomNetworkRow() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag("anchors.network.custom.disabled"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Custom",
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+            Text("Your own relayer + contracts",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(
+            "Soon",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

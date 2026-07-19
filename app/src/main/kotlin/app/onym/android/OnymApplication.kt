@@ -736,7 +736,10 @@ class OnymApplication : Application() {
                 RelayerSettingsViewModel(repository = relayerRepository)
             },
             makeAnchorsPickerViewModel = {
-                AnchorsPickerViewModel(repository = contractsRepository)
+                AnchorsPickerViewModel(
+                    repository = contractsRepository,
+                    networkPreference = networkPreference,
+                )
             },
             networkPreferenceProvider = networkPreference,
             readReceiptsPreferenceProvider = readReceiptsPreference,
