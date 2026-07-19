@@ -7,6 +7,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -183,6 +185,36 @@ fun ChatMembersScreen(
     }
 }
 
+/** The group's invitation message (greeting / policy / articles),
+ *  shown as the group's intro at the top of the info screen. */
+@Composable
+private fun InvitationSection(message: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "INVITATION",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = message,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(14.dp)
+                .testTag("members.invitation"),
+        )
+    }
+}
+
 @Composable
 private fun ChatMembersBody(
     group: ChatGroup,
@@ -204,13 +236,16 @@ private fun ChatMembersBody(
         }.sortedWith(compareBy({ !it.isSelf }, { it.displayAlias.lowercase() }))
     }
 
-    Column(modifier = modifier) {
+    Column(modifier = modifier.verticalScroll(rememberScrollState())) {
         GroupAvatarHeader(
             group = group,
             canEdit = canEditAvatar,
             onPickPhoto = onPickPhoto,
             onRemovePhoto = onRemovePhoto,
         )
+        group.invitationMessage?.takeIf { it.isNotBlank() }?.let { message ->
+            InvitationSection(message)
+        }
         if (rows.isEmpty()) {
             EmptyState(modifier = Modifier.fillMaxSize())
         } else {

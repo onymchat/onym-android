@@ -425,7 +425,9 @@
     <string name="create_group_photo_add">Add photo</string>
     <string name="create_group_photo_change">Change photo</string>
     <string name="create_group_photo_remove">Remove</string>
-    <string name="create_group_accent_color">Accent color</string>
+    <string name="create_group_invitation_label">Invitation message</string>
+    <string name="create_group_invitation_placeholder">Add a greeting, group rules, or policy…</string>
+    <string name="create_group_invitation_helper">Shown to people before they accept your invite. Optional.</string>
     <string name="create_group_how_its_run">How it\'s run</string>
     <string name="create_group_soon_badge">Soon</string>
     <string name="create_group_next">Next · Add people</string>

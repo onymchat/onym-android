@@ -30,6 +30,9 @@ data class PendingInvite(
     val groupId: ByteArray,
     val groupName: String?,
     val inviterAlias: String,
+    /** Optional free-text invitation the creator wrote — shown on the
+     *  invite card so the user reads it before accepting. `null` = none. */
+    val invitationMessage: String?,
     val receivedAt: Instant,
 ) {
     override fun equals(other: Any?): Boolean {
@@ -41,6 +44,7 @@ data class PendingInvite(
             groupId.contentEquals(other.groupId) &&
             groupName == other.groupName &&
             inviterAlias == other.inviterAlias &&
+            invitationMessage == other.invitationMessage &&
             receivedAt == other.receivedAt
     }
 
@@ -51,6 +55,7 @@ data class PendingInvite(
         h = 31 * h + groupId.contentHashCode()
         h = 31 * h + (groupName?.hashCode() ?: 0)
         h = 31 * h + inviterAlias.hashCode()
+        h = 31 * h + (invitationMessage?.hashCode() ?: 0)
         h = 31 * h + receivedAt.hashCode()
         return h
     }

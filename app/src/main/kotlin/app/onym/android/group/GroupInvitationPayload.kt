@@ -103,6 +103,12 @@ data class GroupInvitationPayload(
     @SerialName("avatar")
     @Serializable(with = Base64ByteArraySerializer::class)
     val avatar: ByteArray? = null,
+    /** Optional free-text invitation the creator wrote (greeting / group
+     *  policy / articles of association). Persists into the materialized
+     *  [ChatGroup] as the group's intro. Default null + omitted when
+     *  absent for forward-compat. Mirrors onym-ios. */
+    @SerialName("invitation_message")
+    val invitationMessage: String? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -121,7 +127,8 @@ data class GroupInvitationPayload(
             (inviteeBlsSecretKey?.contentEquals(other.inviteeBlsSecretKey)
                 ?: (other.inviteeBlsSecretKey == null)) &&
             memberProfiles == other.memberProfiles &&
-            (avatar?.contentEquals(other.avatar) ?: (other.avatar == null))
+            (avatar?.contentEquals(other.avatar) ?: (other.avatar == null)) &&
+            invitationMessage == other.invitationMessage
     }
 
     override fun hashCode(): Int {
@@ -139,6 +146,7 @@ data class GroupInvitationPayload(
         h = 31 * h + (inviteeBlsSecretKey?.contentHashCode() ?: 0)
         h = 31 * h + (memberProfiles?.hashCode() ?: 0)
         h = 31 * h + (avatar?.contentHashCode() ?: 0)
+        h = 31 * h + (invitationMessage?.hashCode() ?: 0)
         return h
     }
 }

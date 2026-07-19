@@ -110,6 +110,38 @@ class GroupInviteOfferPayloadTest {
     }
 
     @Test
+    fun invitationMessage_roundTrips() {
+        val long = "Articles of association. ".repeat(200)
+        val offer = GroupInviteOfferPayload(
+            introPublicKey = ByteArray(32) { 0x11 },
+            groupId = ByteArray(32) { 0x22 },
+            groupName = "Maple Garden",
+            inviterAlias = "Alice",
+            invitationMessage = long,
+        )
+        val decoded = json.decodeFromString(
+            GroupInviteOfferPayload.serializer(),
+            json.encodeToString(GroupInviteOfferPayload.serializer(), offer),
+        )
+        assertEquals(long, decoded.invitationMessage)
+        assertEquals(offer, decoded)
+    }
+
+    /** A pre-feature sender's offer (no `invitation_message`) still
+     *  decodes — cross-version compatibility. */
+    @Test
+    fun missingInvitationMessage_decodesToNull() {
+        val legacy = """
+            {"offer_version":1,
+             "intro_pub":"${java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 0x11 })}",
+             "group_id":"${java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 0x22 })}",
+             "group_name":"G","inviter_alias":"A"}
+        """.trimIndent()
+        val decoded = json.decodeFromString(GroupInviteOfferPayload.serializer(), legacy)
+        assertNull(decoded.invitationMessage)
+    }
+
+    @Test
     fun introCapability_rebuildsFromOffer() {
         val offer = makeValid()
         val cap = offer.introCapability()

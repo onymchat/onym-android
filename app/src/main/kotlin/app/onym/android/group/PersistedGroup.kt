@@ -101,6 +101,13 @@ data class PersistedGroup(
      * without a wipe. Drives the chat-list unread badge.
      */
     val lastReadAtMillis: Long? = null,
+    /**
+     * Optional AES-GCM-encrypted invitation message (the group's intro /
+     * policy). `null` on rows migrated from the pre-feature schema or for
+     * groups without one. Encrypted at rest like the other sensitive
+     * columns. Nullable so Room's migration lands the column without a wipe.
+     */
+    val encryptedInvitationMessage: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -121,7 +128,8 @@ data class PersistedGroup(
             (encryptedAdminPubkeyHex?.contentEquals(other.encryptedAdminPubkeyHex) ?: (other.encryptedAdminPubkeyHex == null)) &&
             (encryptedMemberProfilesJson?.contentEquals(other.encryptedMemberProfilesJson) ?: (other.encryptedMemberProfilesJson == null)) &&
             (encryptedAdminEd25519PubkeyHex?.contentEquals(other.encryptedAdminEd25519PubkeyHex) ?: (other.encryptedAdminEd25519PubkeyHex == null)) &&
-            (encryptedAvatar?.contentEquals(other.encryptedAvatar) ?: (other.encryptedAvatar == null))
+            (encryptedAvatar?.contentEquals(other.encryptedAvatar) ?: (other.encryptedAvatar == null)) &&
+            (encryptedInvitationMessage?.contentEquals(other.encryptedInvitationMessage) ?: (other.encryptedInvitationMessage == null))
     }
 
     override fun hashCode(): Int {
@@ -142,6 +150,7 @@ data class PersistedGroup(
         h = 31 * h + (encryptedMemberProfilesJson?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedAdminEd25519PubkeyHex?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedAvatar?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedInvitationMessage?.contentHashCode() ?: 0)
         return h
     }
 }

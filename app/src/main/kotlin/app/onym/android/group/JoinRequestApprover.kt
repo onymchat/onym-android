@@ -256,6 +256,9 @@ open class JoinRequestApprover(
             // members who join via the full snapshot rather than a later
             // GroupAvatarPayload. `null` when the group has no photo.
             avatar = anchored.avatar,
+            // Carry the group's invitation/intro so it persists for the
+            // joiner once they materialize the group.
+            invitationMessage = anchored.invitationMessage,
         )
         val payloadBytes = try {
             jsonFormat.encodeToString(GroupInvitationPayload.serializer(), invitePayload)

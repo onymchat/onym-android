@@ -303,6 +303,8 @@ class IncomingMessageDispatcher(
             // "If present" semantics: a pre-avatar sender omits the key
             // and the group materializes photo-less.
             avatar = invitation.avatar,
+            // The group's invitation/intro, as the sender wrote it.
+            invitationMessage = invitation.invitationMessage,
         )
         groupRepository.insert(group)
     }
@@ -368,6 +370,7 @@ class IncomingMessageDispatcher(
                 groupId = offer.groupId,
                 groupName = offer.groupName,
                 inviterAlias = offer.inviterAlias,
+                invitationMessage = offer.invitationMessage,
                 receivedAt = receivedAt,
             ),
         )

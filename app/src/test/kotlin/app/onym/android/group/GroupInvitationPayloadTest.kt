@@ -56,6 +56,40 @@ class GroupInvitationPayloadTest {
     }
 
     @Test
+    fun roundtrip_invitationMessage_preservesText() {
+        val long = "Group policy: be kind. ".repeat(300)
+        val original = GroupInvitationPayload(
+            version = 1,
+            groupId = ByteArray(32),
+            groupSecret = ByteArray(32),
+            name = "G",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32),
+            commitment = ByteArray(32),
+            tierRaw = 0,
+            groupTypeRaw = "tyranny",
+            invitationMessage = long,
+        )
+        val decoded = json.decodeFromString(
+            GroupInvitationPayload.serializer(),
+            json.encodeToString(GroupInvitationPayload.serializer(), original),
+        )
+        assertEquals(long, decoded.invitationMessage)
+    }
+
+    @Test
+    fun legacyPayload_withoutInvitationMessage_decodesToNull() {
+        val b64 = java.util.Base64.getEncoder().encodeToString(ByteArray(32))
+        val legacy = """
+            {"version":1,"group_id":"$b64","group_secret":"$b64","name":"Family",
+             "members":[],"epoch":0,"salt":"$b64","tier_raw":1,"group_type_raw":"tyranny"}
+        """.trimIndent()
+        val decoded = json.decodeFromString(GroupInvitationPayload.serializer(), legacy)
+        assertNull(decoded.invitationMessage)
+    }
+
+    @Test
     fun roundtrip_memberProfilesField_preservesEntries() {
         val profile = MemberProfile(
             alias = "Alice",

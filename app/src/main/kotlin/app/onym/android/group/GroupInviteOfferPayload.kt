@@ -70,6 +70,14 @@ data class GroupInviteOfferPayload(
      *  "X invited you" prompt. Untrusted text — render, don't trust. */
     @SerialName("inviter_alias")
     val inviterAlias: String,
+
+    /** Optional free-text invitation the creator wrote (greeting / group
+     *  policy / articles of association). Shown on the invitee's invite
+     *  card *before* they accept. Sealed here, so any length is fine.
+     *  Untrusted text — render, don't trust. Defaulted null + omitted
+     *  when absent (encodeDefaults=false) for forward-compat. */
+    @SerialName("invitation_message")
+    val invitationMessage: String? = null,
 ) {
     init {
         require(introPublicKey.size == 32) {
@@ -101,7 +109,8 @@ data class GroupInviteOfferPayload(
             introPublicKey.contentEquals(other.introPublicKey) &&
             groupId.contentEquals(other.groupId) &&
             groupName == other.groupName &&
-            inviterAlias == other.inviterAlias
+            inviterAlias == other.inviterAlias &&
+            invitationMessage == other.invitationMessage
     }
 
     override fun hashCode(): Int {
@@ -110,6 +119,7 @@ data class GroupInviteOfferPayload(
         h = 31 * h + groupId.contentHashCode()
         h = 31 * h + (groupName?.hashCode() ?: 0)
         h = 31 * h + inviterAlias.hashCode()
+        h = 31 * h + (invitationMessage?.hashCode() ?: 0)
         return h
     }
 }

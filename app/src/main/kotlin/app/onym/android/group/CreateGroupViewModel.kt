@@ -72,7 +72,11 @@ data class CreateGroupState(
      *  to distinguish "user accepted the placeholder" from "user
      *  wants to type their own". */
     val nameFieldHasBeenFocused: Boolean = false,
-    val accent: OnymAccent = OnymAccent.Blue,
+    /** Optional free-text invitation the creator writes — a greeting,
+     *  group policy, or articles of association. Travels in the sealed
+     *  invite payloads (never the QR/link, never on-chain). Any length;
+     *  blank means "no invitation". */
+    val invitationMessage: String = "",
     /** Raw JPEG bytes of the group photo the user picked, already run
      *  through [GroupAvatarImage.encode] (256×256, ≤16 KB). `null` =
      *  no photo (the Success screen + invitations fall back to the
@@ -175,6 +179,7 @@ data class CreateGroupState(
  */
 typealias GroupCreator = suspend (
     name: String,
+    invitationMessage: String?,
     invitees: List<ByteArray>,
     groupType: SepGroupType,
     avatar: ByteArray?,
@@ -225,8 +230,8 @@ class CreateGroupViewModel(
         _state.value = _state.value.copy(name = capped)
     }
 
-    fun setAccent(accent: OnymAccent) {
-        _state.value = _state.value.copy(accent = accent)
+    fun setInvitationMessage(text: String) {
+        _state.value = _state.value.copy(invitationMessage = text)
     }
 
     /**
@@ -368,6 +373,7 @@ class CreateGroupViewModel(
         try {
             val group = createGroup(
                 current.effectiveName,
+                current.invitationMessage.trim().ifEmpty { null },
                 current.invitees.map { it.inboxPublicKey },
                 current.governance.sepGroupType,
                 current.avatar,

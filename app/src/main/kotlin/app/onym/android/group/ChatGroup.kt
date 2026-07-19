@@ -139,6 +139,16 @@ data class ChatGroup(
      * construction sites need no change.
      */
     val lastReadAtMillis: Long? = null,
+    /**
+     * Optional free-text invitation the creator wrote — a greeting,
+     * group policy, or articles of association. Set at create time,
+     * sealed into the invite payloads so joiners read it before
+     * accepting, and persisted here as the group's intro. `null` = none.
+     * Defaulted so wire decoders + existing construction sites need no
+     * change. Mirrors onym-ios.
+     */
+    @SerialName("invitation_message")
+    val invitationMessage: String? = null,
 ) {
     /** Strongly-typed accessor — same value as [ownerIdentityId] but
      *  wrapped so callers don't carry stringly-typed identity ids
@@ -169,7 +179,8 @@ data class ChatGroup(
             isPublishedOnChain == other.isPublishedOnChain &&
             ownerIdentityId == other.ownerIdentityId &&
             (avatar?.contentEquals(other.avatar) ?: (other.avatar == null)) &&
-            lastReadAtMillis == other.lastReadAtMillis
+            lastReadAtMillis == other.lastReadAtMillis &&
+            invitationMessage == other.invitationMessage
     }
 
     override fun hashCode(): Int {
@@ -190,6 +201,7 @@ data class ChatGroup(
         h = 31 * h + ownerIdentityId.hashCode()
         h = 31 * h + (avatar?.contentHashCode() ?: 0)
         h = 31 * h + (lastReadAtMillis?.hashCode() ?: 0)
+        h = 31 * h + (invitationMessage?.hashCode() ?: 0)
         return h
     }
 

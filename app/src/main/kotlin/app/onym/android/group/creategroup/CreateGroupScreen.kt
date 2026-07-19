@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -120,7 +121,7 @@ fun CreateGroupScreen(viewModel: CreateGroupViewModel) {
 @Composable
 private fun Step1Screen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color()
+    val accent = OnymAccent.Blue.color()
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -211,37 +212,47 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     .padding(start = 4.dp, top = 6.dp),
             )
 
-            OnymSectionLabel(stringResource(R.string.create_group_accent_color))
-            Row(
+            OnymSectionLabel(stringResource(R.string.create_group_invitation_label))
+            val invitationPlaceholder = stringResource(R.string.create_group_invitation_placeholder)
+            OnymCard {
+                BasicTextField(
+                    value = state.invitationMessage,
+                    onValueChange = viewModel::setInvitationMessage,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    textStyle = TextStyle(
+                        color = LocalOnymTokens.current.text,
+                        fontSize = 15.sp,
+                    ),
+                    cursorBrush = SolidColor(accent),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("create_group.invitation"),
+                    decorationBox = { inner ->
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 14.dp, vertical = 12.dp)
+                                .heightIn(min = 72.dp),
+                        ) {
+                            if (state.invitationMessage.isEmpty()) {
+                                Text(
+                                    text = invitationPlaceholder,
+                                    color = LocalOnymTokens.current.text3,
+                                    style = TextStyle(fontSize = 15.sp),
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+            }
+            Text(
+                text = stringResource(R.string.create_group_invitation_helper),
+                color = LocalOnymTokens.current.text3,
+                style = TextStyle(fontSize = 11.5.sp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                for (a in OnymAccent.entries) {
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(a.color())
-                            .then(
-                                if (state.accent == a) {
-                                    Modifier.border(2.dp, a.color(), CircleShape)
-                                } else Modifier,
-                            )
-                            .clickable { viewModel.setAccent(a) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (state.accent == a) {
-                            Text(
-                                text = "✓",
-                                color = LocalOnymTokens.current.onAccent,
-                                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
-                            )
-                        }
-                    }
-                }
-            }
+                    .padding(start = 4.dp, top = 6.dp),
+            )
 
             OnymSectionLabel(stringResource(R.string.create_group_type))
             FounderExplanation(accent = accent)
@@ -381,7 +392,7 @@ private fun CreateGroupAvatarPicker(
 @Composable
 private fun Step2Screen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color()
+    val accent = OnymAccent.Blue.color()
     Column(modifier = Modifier.fillMaxSize()) {
         OnymNavTitle(
             title = stringResource(R.string.create_group_step2_title),
@@ -583,7 +594,7 @@ private fun Step2Screen(viewModel: CreateGroupViewModel) {
 @Composable
 private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color()
+    val accent = OnymAccent.Blue.color()
     var showScanner by remember { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -723,7 +734,7 @@ private fun InviteByKeyScreen(viewModel: CreateGroupViewModel) {
 @Composable
 private fun CreatingScreen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color()
+    val accent = OnymAccent.Blue.color()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -949,7 +960,7 @@ private fun StepRow(label: String, sub: String, status: StepStatus, accent: Colo
 @Composable
 private fun SuccessScreen(viewModel: CreateGroupViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val accent = state.accent.color()
+    val accent = OnymAccent.Blue.color()
     val group = state.createdGroup
     Column(
         modifier = Modifier

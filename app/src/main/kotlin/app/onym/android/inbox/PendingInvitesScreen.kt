@@ -191,6 +191,19 @@ private fun InviteCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        invite.invitationMessage?.takeIf { it.isNotBlank() }?.let { message ->
+            Text(
+                text = message,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(12.dp)
+                    .testTag("pending_invites.message.${invite.id}"),
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = onDismiss,

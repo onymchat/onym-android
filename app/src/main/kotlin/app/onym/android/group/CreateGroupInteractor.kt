@@ -101,6 +101,10 @@ open class CreateGroupInteractor(
      */
     open suspend fun create(
         name: String,
+        /** Optional free-text invitation (greeting / policy / articles).
+         *  Sealed into the invite payloads + stored on the group; never
+         *  in the QR/link, never on-chain. `null` = none. */
+        invitationMessage: String? = null,
         invitees: List<ByteArray>,
         groupType: SepGroupType = SepGroupType.TYRANNY,
         /** Raw JPEG bytes of the group photo (already budget-bounded by
@@ -316,6 +320,7 @@ open class CreateGroupInteractor(
             isPublishedOnChain = false,
             ownerIdentityId = ownerId.value,
             avatar = avatar,
+            invitationMessage = invitationMessage,
         )
         groups.insert(group)
         groups.markPublished(group.id, group.ownerIdentityId, proof.commitment)
@@ -333,6 +338,7 @@ open class CreateGroupInteractor(
                     ownerIdentityId = ownerId,
                     groupId = groupId,
                     groupName = trimmedName,
+                    invitationMessage = invitationMessage,
                     inviterAlias = creatorAlias,
                 )
             } else {
@@ -350,6 +356,7 @@ open class CreateGroupInteractor(
                     inviteeBlsSecretKey = secondaryBlsSecret,
                     memberProfiles = group.memberProfiles.takeIf { it.isNotEmpty() },
                     avatar = avatar,
+                    invitationMessage = invitationMessage,
                 )
             }
         }
@@ -376,6 +383,7 @@ open class CreateGroupInteractor(
         ownerIdentityId: IdentityId,
         groupId: ByteArray,
         groupName: String,
+        invitationMessage: String?,
         inviterAlias: String,
     ) {
         for ((index, inboxKey) in invitees.withIndex()) {
@@ -397,6 +405,7 @@ open class CreateGroupInteractor(
                     groupId = groupId,
                     groupName = groupName,
                     inviterAlias = inviterAlias,
+                    invitationMessage = invitationMessage,
                 )
             } catch (e: Throwable) {
                 throw CreateGroupError.InvitationSendFailed(index, "build offer: ${e.message ?: e}")
@@ -448,6 +457,7 @@ open class CreateGroupInteractor(
         inviteeBlsSecretKey: ByteArray?,
         memberProfiles: Map<String, MemberProfile>?,
         avatar: ByteArray?,
+        invitationMessage: String?,
     ) {
         for ((index, inboxKey) in invitees.withIndex()) {
             val invitePayload = GroupInvitationPayload(
@@ -469,6 +479,7 @@ open class CreateGroupInteractor(
                 // pre-PR-82 senders shipped null.
                 memberProfiles = memberProfiles,
                 avatar = avatar,
+                invitationMessage = invitationMessage,
             )
             val payloadBytes = try {
                 jsonFormat.encodeToString(

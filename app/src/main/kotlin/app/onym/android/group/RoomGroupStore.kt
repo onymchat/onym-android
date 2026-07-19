@@ -118,6 +118,7 @@ class RoomGroupStore(
             encryptedAdminEd25519PubkeyHex = group.adminEd25519PubkeyHex?.let(encryption::encrypt),
             encryptedAvatar = group.avatar?.let(encryption::encrypt),
             lastReadAtMillis = group.lastReadAtMillis,
+            encryptedInvitationMessage = group.invitationMessage?.let(encryption::encrypt),
         )
     }
 
@@ -144,6 +145,7 @@ class RoomGroupStore(
         val adminPubkeyHex = row.encryptedAdminPubkeyHex?.let { tryDecryptString(it) }
         val adminEd25519PubkeyHex = row.encryptedAdminEd25519PubkeyHex?.let { tryDecryptString(it) }
         val avatar = row.encryptedAvatar?.let { tryDecrypt(it) }
+        val invitationMessage = row.encryptedInvitationMessage?.let { tryDecryptString(it) }
         val memberProfiles: Map<String, MemberProfile> = row.encryptedMemberProfilesJson
             ?.let { tryDecrypt(it) }
             ?.let { bytes ->
@@ -179,6 +181,7 @@ class RoomGroupStore(
             ownerIdentityId = row.ownerIdentityId,
             avatar = avatar,
             lastReadAtMillis = row.lastReadAtMillis,
+            invitationMessage = invitationMessage,
         )
     }
 
