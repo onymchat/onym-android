@@ -321,10 +321,10 @@
     <string name="use_contract_label_section">Подпись</string>
     <string name="use_contract_label_placeholder">Мой форк v0.0.5</string>
     <string name="use_contract_label_footnote">Показывается рядом с адресом контракта в чатах и в списке якорей.</string>
-    <string name="use_contract_verify_button">Проверить</string>
+    <string name="use_contract_verify_button">Проверить формат</string>
     <string name="use_contract_use_button">Использовать этот контракт</string>
-    <string name="use_contract_verified_title">Контракт проверен</string>
-    <string name="use_contract_verified_body">Проверка формата пройдена. Нажмите «Использовать этот контракт», чтобы привязать к нему новые чаты.</string>
+    <string name="use_contract_verified_title">Формат адреса корректный</string>
+    <string name="use_contract_verified_body">Проверяется только вид адреса, а не сам контракт в сети. Нажмите «Использовать этот контракт», чтобы привязать к нему новые чаты.</string>
     <string name="use_contract_findit_section">Как его найти</string>
     <string name="use_contract_findit_explorer">Открыть Stellar Expert</string>
     <string name="use_contract_findit_cli">Soroban CLI</string>

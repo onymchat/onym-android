@@ -52,10 +52,13 @@ import app.onym.android.chain.GovernanceType
 /**
  * Anchors → Custom → Use existing address. Lets the user point new
  * `(network, governance)` chats at a Stellar Soroban contract they
- * already deployed. Validates the C-prefixed 56-char address shape
- * client-side; the actual on-chain probe is a stub here (the
- * "Verify" button shows a green confirmation card unconditionally
- * once the format check passes).
+ * already deployed.
+ *
+ * "Check format" is a client-side address-shape check only (C-prefixed
+ * 56-char) — the app has no direct Soroban RPC path (all chain traffic
+ * goes through the relayer's allowlisted calls), so it can't inspect the
+ * contract's API surface or confirm it exists on-chain. Labeled honestly
+ * to avoid implying an on-chain verification it doesn't perform.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

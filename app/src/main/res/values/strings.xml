@@ -326,10 +326,10 @@
     <string name="use_contract_label_section">Label</string>
     <string name="use_contract_label_placeholder">My fork v0.0.5</string>
     <string name="use_contract_label_footnote">Shown alongside the contract address in chats and on the Anchors list.</string>
-    <string name="use_contract_verify_button">Verify</string>
+    <string name="use_contract_verify_button">Check format</string>
     <string name="use_contract_use_button">Use this contract</string>
-    <string name="use_contract_verified_title">Contract verified</string>
-    <string name="use_contract_verified_body">Format check passed. Tap "Use this contract" to anchor new chats here.</string>
+    <string name="use_contract_verified_title">Address format looks valid</string>
+    <string name="use_contract_verified_body">This checks the address shape only, not the on-chain contract. Tap "Use this contract" to anchor new chats here.</string>
     <string name="use_contract_findit_section">How to find it</string>
     <string name="use_contract_findit_explorer">Browse on Stellar Expert</string>
     <string name="use_contract_findit_cli">Soroban CLI</string>
