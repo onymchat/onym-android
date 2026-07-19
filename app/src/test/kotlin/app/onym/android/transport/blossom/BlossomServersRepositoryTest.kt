@@ -85,6 +85,56 @@ class BlossomServersRepositoryTest {
         assertEquals(null, validate("   "))
     }
 
+    // ─── GitHub-published default fetch ───────────────────────────
+
+    private class StubFetcher(
+        private val result: Result<List<BlossomServerEndpoint>>,
+    ) : KnownBlossomServersFetcher {
+        override suspend fun fetch(): List<BlossomServerEndpoint> = result.getOrThrow()
+    }
+
+    private val published = BlossomServerEndpoint("https://published.example", "Published", isDefault = true)
+
+    @Test
+    fun refresh_installsPublishedList_whenNotUserInteracted() = runTest {
+        val store = InMemoryBlossomServersSelectionStore(BlossomServersConfiguration.empty)
+        val repo = BlossomServersRepository(store, StubFetcher(Result.success(listOf(published))))
+        repo.bootstrap()
+        repo.refresh()
+        assertEquals(listOf(published), repo.snapshots.value.endpoints)
+        assertFalse(repo.snapshots.value.hasUserInteracted)
+    }
+
+    @Test
+    fun refresh_doesNotOverwriteUserCustomisedList() = runTest {
+        val custom = BlossomServerEndpoint.custom("https://mine.example")
+        val store = InMemoryBlossomServersSelectionStore(
+            BlossomServersConfiguration(listOf(custom), hasUserInteracted = true),
+        )
+        val repo = BlossomServersRepository(store, StubFetcher(Result.success(listOf(published))))
+        repo.bootstrap()
+        repo.refresh()
+        assertEquals(listOf(custom), repo.snapshots.value.endpoints)
+    }
+
+    @Test
+    fun resetToDefault_fetchesPublishedList() = runTest {
+        val store = InMemoryBlossomServersSelectionStore(BlossomServersConfiguration.empty)
+        val repo = BlossomServersRepository(store, StubFetcher(Result.success(listOf(published))))
+        repo.bootstrap()
+        repo.resetToDefault()
+        assertEquals(listOf(published), repo.snapshots.value.endpoints)
+    }
+
+    @Test
+    fun resetToDefault_offline_fallsBackToSeed() = runTest {
+        val store = InMemoryBlossomServersSelectionStore(BlossomServersConfiguration.empty)
+        val repo = BlossomServersRepository(store, StubFetcher(Result.failure(java.io.IOException("offline"))))
+        repo.bootstrap()
+        repo.resetToDefault()
+        assertEquals("https://blossom.onym.app", repo.snapshots.value.endpoints.single().url)
+    }
+
     private suspend fun bootstrappedRepo(): BlossomServersRepository {
         val store = InMemoryBlossomServersSelectionStore(BlossomServersConfiguration.empty)
         val repo = BlossomServersRepository(store)

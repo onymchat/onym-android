@@ -384,23 +384,41 @@ class OnymApplication : Application() {
         // Without this seed the user sees "send: not connected" on
         // every send attempt, since nothing else wires endpoints
         // into NostrInboxTransport at startup.
+        // Fetcher pulls the Onym-published default list from GitHub. Under
+        // the UI harness it's whatever the test set (null → no network, so
+        // the hardcoded seed stays the default).
+        val nostrRelaysFetcher: app.onym.android.transport.nostr.KnownNostrRelaysFetcher? =
+            if (UITestRegistry.enabled) UITestRegistry.nostrRelaysFetcher
+            else app.onym.android.transport.nostr.GitHubReleasesKnownNostrRelaysFetcher(httpClient = httpClient)
         val nostrRelaysRepository = app.onym.android.transport.nostr.NostrRelaysRepository(
             store = app.onym.android.transport.nostr.DataStoreNostrRelaysSelectionStore(
                 dataStore = applicationContext.nostrRelaysDataStore,
             ),
+            fetcher = nostrRelaysFetcher,
         )
-        applicationScope.launch { nostrRelaysRepository.bootstrap() }
+        // Disk hydrate (seed on first launch) then refresh from GitHub in
+        // the background; changes apply on the next launch.
+        applicationScope.launch {
+            nostrRelaysRepository.bootstrap()
+            nostrRelaysRepository.start()
+        }
 
         // User-configurable Blossom media servers (Settings → Transport →
         // Blossom Relays). Bootstrapped synchronously here (a single local
         // DataStore read) so the blob client below can be built with the
         // first configured server's URL. Changes apply on the next launch.
+        val blossomServersFetcher: app.onym.android.transport.blossom.KnownBlossomServersFetcher? =
+            if (UITestRegistry.enabled) UITestRegistry.blossomServersFetcher
+            else app.onym.android.transport.blossom.GitHubReleasesKnownBlossomServersFetcher(httpClient = httpClient)
         val blossomServersRepository = app.onym.android.transport.blossom.BlossomServersRepository(
             store = app.onym.android.transport.blossom.DataStoreBlossomServersSelectionStore(
                 dataStore = applicationContext.blossomServersDataStore,
             ),
+            fetcher = blossomServersFetcher,
         )
         kotlinx.coroutines.runBlocking { blossomServersRepository.bootstrap() }
+        // Background-refresh the published default for the next launch.
+        applicationScope.launch { blossomServersRepository.start() }
 
         // Inbox transport for invitation send. Constructed once;
         // CreateGroupInteractor.create blocks on `send` (which

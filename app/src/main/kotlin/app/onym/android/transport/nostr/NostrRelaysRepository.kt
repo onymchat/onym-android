@@ -24,10 +24,15 @@ import kotlinx.coroutines.sync.withLock
  */
 class NostrRelaysRepository(
     private val store: NostrRelaysSelectionStore,
+    /** Fetches the Onym-published default list from GitHub. `null`
+     *  disables network refresh (UI tests / offline) — the hardcoded
+     *  seed stays the only default. */
+    private val fetcher: KnownNostrRelaysFetcher? = null,
 ) {
     private val mutex = Mutex()
     private val _snapshots = MutableStateFlow(NostrRelaysConfiguration.empty)
     val snapshots: StateFlow<NostrRelaysConfiguration> = _snapshots.asStateFlow()
+    private var startInvoked = false
 
     /** Hydrate from disk + apply the first-launch seed when relevant.
      *  Idempotent — safe to call from `onCreate` / app start. */
@@ -44,6 +49,35 @@ class NostrRelaysRepository(
 
     /** Read snapshot — non-suspend convenience for boot wiring. */
     fun currentEndpoints(): List<NostrRelayEndpoint> = _snapshots.value.endpoints
+
+    /** Fire-and-forget: fetch the published default list once and, while
+     *  the user hasn't customised their list, install it. Idempotent;
+     *  errors swallowed so app launch never fails on a network blip. */
+    suspend fun start() {
+        val shouldFetch = mutex.withLock {
+            if (startInvoked) false else { startInvoked = true; true }
+        }
+        if (shouldFetch) runCatching { refreshInternal() }
+    }
+
+    /** User-initiated refresh — rethrows fetch failures. */
+    suspend fun refresh() = refreshInternal()
+
+    private suspend fun refreshInternal() {
+        val f = fetcher ?: return
+        val fresh = f.fetch() // throws on failure; cache stays intact
+        mutex.withLock {
+            val current = _snapshots.value
+            // Only overwrite while the list is still the default (the user
+            // hasn't added/removed). Keep hasUserInteracted=false so it
+            // stays "the default" and re-refreshes on future launches.
+            if (!current.hasUserInteracted && fresh.isNotEmpty()) {
+                val updated = NostrRelaysConfiguration(endpoints = fresh, hasUserInteracted = false)
+                store.save(updated)
+                _snapshots.value = updated
+            }
+        }
+    }
 
     /** Append [endpoint] when its URL isn't already configured.
      *  Returns `true` on append, `false` on duplicate-no-op. Flips
@@ -74,12 +108,21 @@ class NostrRelaysRepository(
         _snapshots.value = updated
     }
 
-    /** Restore the seeded default. Resets [hasUserInteracted] to
-     *  `false` so a subsequent "clear all" + relaunch re-enables the
-     *  first-launch seed branch. */
-    suspend fun resetToDefault() = mutex.withLock {
-        store.save(NostrRelaysConfiguration.seed)
-        _snapshots.value = NostrRelaysConfiguration.seed
+    /** Restore the Onym-published default. Re-fetches the latest list
+     *  from GitHub and installs it; on any failure (offline / bad
+     *  response / empty / no fetcher) falls back to the hardcoded seed.
+     *  Either way [hasUserInteracted] returns to `false`. */
+    suspend fun resetToDefault() {
+        val fresh = fetcher?.let { runCatching { it.fetch() }.getOrNull() }
+        val effective = if (!fresh.isNullOrEmpty()) {
+            NostrRelaysConfiguration(endpoints = fresh, hasUserInteracted = false)
+        } else {
+            NostrRelaysConfiguration.seed
+        }
+        mutex.withLock {
+            store.save(effective)
+            _snapshots.value = effective
+        }
     }
 
     /** Wipe every endpoint (without going through the seed branch).

@@ -80,6 +80,16 @@ object UITestRegistry {
      *  send/receive round-trips with no network. */
     var blossomClient: BlossomClient? = null
 
+    /** Optional fake for the published Nostr-relays feed. When null (the
+     *  default), the repository does no network refresh and keeps its
+     *  hardcoded seed — so existing UI tests that don't set it are
+     *  unaffected. */
+    var nostrRelaysFetcher: app.onym.android.transport.nostr.KnownNostrRelaysFetcher? = null
+
+    /** Optional fake for the published Blossom-servers feed. Same
+     *  null-means-no-network contract as [nostrRelaysFetcher]. */
+    var blossomServersFetcher: app.onym.android.transport.blossom.KnownBlossomServersFetcher? = null
+
     /** Reset between tests. Called from `@Before`. */
     fun reset() {
         enabled = false
@@ -91,5 +101,7 @@ object UITestRegistry {
         inboxTransport = null
         contractTransportFactory = null
         blossomClient = null
+        nostrRelaysFetcher = null
+        blossomServersFetcher = null
     }
 }
