@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
@@ -86,7 +85,6 @@ fun SettingsScreen(
     /** Launch the recovery-phrase backup flow (active identity). Wired to
      *  the carousel's per-identity Backup action. */
     onBackup: () -> Unit,
-    onPrivacyClick: () -> Unit,
     onAboutClick: () -> Unit,
     /** App-wide network preference. Bound to the Settings → Network
      *  → "Use Mainnet" Switch. */
@@ -139,22 +137,10 @@ fun SettingsScreen(
                 )
             }
 
-            // ─── SECURITY ──────────────────────────────────────────
-            item { SettingsSectionLabel(stringResource(R.string.security).uppercase()) }
-            item {
-                SettingsCard {
-                    SettingsRow(
-                        leading = {
-                            SettingsTileBox(Icons.Filled.Shield, SettingsTile.Blue)
-                        },
-                        title = stringResource(R.string.settings_privacy_title),
-                        subtitle = stringResource(R.string.settings_privacy_subtitle),
-                        onClick = onPrivacyClick,
-                        isLast = true,
-                        modifier = Modifier.testTag("settings.privacy_row"),
-                    )
-                }
-            }
+            // The SECURITY section (Privacy & Encryption) was removed.
+            // Recovery-phrase backup lives on each identity's carousel
+            // page (its Backup action); the informational Privacy screen
+            // is gone.
 
             // ─── TRANSPORT ─────────────────────────────────────────
             if (onNostrRelaysClick != null) {

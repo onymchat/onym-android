@@ -57,7 +57,6 @@ import app.onym.android.settings.ContractDetailScreen
 import app.onym.android.settings.DeployContractScreen
 import app.onym.android.settings.IdentitiesScreen
 import app.onym.android.settings.IdentityDetailScreen
-import app.onym.android.settings.PrivacyEncryptionScreen
 import app.onym.android.settings.RelayerSettingsScreen
 import app.onym.android.settings.RelayerSettingsViewModel
 import app.onym.android.settings.RunRelayerScreen
@@ -299,7 +298,6 @@ fun RootScreen(
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
                     onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
                     onBackup = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
-                    onPrivacyClick = { navController.navigate(ROUTE_PRIVACY) },
                     onAboutClick = { navController.navigate(ROUTE_ABOUT) },
                     useMainnet = networkPref == app.onym.android.chain.AppNetwork.Mainnet,
                     onToggleMainnet = { on ->
@@ -433,11 +431,6 @@ fun RootScreen(
                     identityId = IdentityId(raw),
                     onBack = { navController.popBackStack() },
                     onBackup = { navController.navigate(ROUTE_RECOVERY_BACKUP) },
-                )
-            }
-            composable(ROUTE_PRIVACY) {
-                PrivacyEncryptionScreen(
-                    onBack = { navController.popBackStack() },
                 )
             }
             composable(ROUTE_ABOUT) {
@@ -609,7 +602,6 @@ private enum class Tab(val route: String, val labelRes: Int) {
 
 private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
 private const val ROUTE_IDENTITIES = "identities"
-private const val ROUTE_PRIVACY = "privacy"
 private const val ROUTE_ABOUT = "about_onym"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_NOSTR_RELAYS = "nostr_relays"
