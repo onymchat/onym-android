@@ -93,6 +93,24 @@ class ChatsViewModel(
         }.sortedByDescending { it.sortKey }
 
     /**
+     * Delete a chat from this device: wipe its message thread, then remove
+     * the group — both scoped to the owning identity, so another identity's
+     * copy of the same group is untouched. Local-only: the group may still
+     * exist on-chain, but this device's copy (and every message in it) is
+     * gone. Both mutations re-emit snapshots / fire the message-change
+     * token, so [items] recomputes and the row disappears without extra
+     * plumbing. Mirrors iOS `ChatsFlow.deleteChat`.
+     */
+    fun deleteChat(groupId: String) {
+        val owner = repository.snapshots.value
+            .firstOrNull { it.id == groupId }?.ownerIdentityId ?: return
+        viewModelScope.launch {
+            messageRepository.removeForGroup(groupId, owner)
+            repository.delete(groupId, owner)
+        }
+    }
+
+    /**
      * Admin-only: set ([avatar] non-null) or clear ([avatar] == null)
      * the group photo and broadcast the change. No-op when the
      * broadcaster wasn't wired (e.g. lightweight test/preview VMs). The

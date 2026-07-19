@@ -92,6 +92,11 @@
     <string name="chats_empty_benefit_decentralized_detail">Group membership is anchored on Stellar, not owned by us.</string>
     <string name="chats_unnamed_group">(Unnamed)</string>
     <string name="chats_published_on_chain">Published on chain</string>
+    <!-- Swipe-to-delete a chat (with confirmation). Mirrors onym-ios. -->
+    <string name="chats_delete_title">Delete this chat?</string>
+    <string name="chats_delete_message">This removes %1$s and every message in it from this device. It can\'t be undone.</string>
+    <string name="chats_delete_message_this_chat">this chat</string>
+    <string name="chats_delete_confirm">Delete Chat</string>
 
     <!-- ─── Settings → Network section (umbrella) ────────────────── -->
     <!-- Mirrors the chain-UI catalog from onym-ios PR #21. -->

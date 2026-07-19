@@ -104,6 +104,45 @@ class ChatsViewModelTest {
         assertTrue(snapshot.first { it.group.name == "newer" }.latestPreview == null)
     }
 
+    @Test
+    fun deleteChat_removesGroupAndItsMessages() = runTest {
+        val groupStore = InMemoryGroupStore()
+        groupStore.preload(listOf(
+            makeGroup(id = "01".repeat(32), name = "DeleteMe"),
+            makeGroup(id = "02".repeat(32), name = "KeepMe"),
+        ))
+        val messageStore = InMemoryMessageStore()
+        messageStore.preload(listOf(
+            incoming(group = "01".repeat(32), body = "bye", sentAt = 5_000),
+            incoming(group = "02".repeat(32), body = "hi", sentAt = 6_000),
+        ))
+        val vm = makeVM(groupStore, messageStore)
+        // List is populated with both chats first.
+        vm.items.first { it.size == 2 }
+
+        vm.deleteChat("01".repeat(32))
+
+        // The deleted chat's row disappears; the other survives.
+        val after = vm.items.first { it.size == 1 }
+        assertEquals(listOf("KeepMe"), after.map { it.group.name })
+        // Its messages are wiped; the other chat's messages are untouched.
+        assertTrue(messageStore.listForGroup(owner.value, "01".repeat(32)).isEmpty())
+        assertEquals(1, messageStore.listForGroup(owner.value, "02".repeat(32)).size)
+    }
+
+    @Test
+    fun deleteChat_unknownGroup_isNoOp() = runTest {
+        val groupStore = InMemoryGroupStore()
+        groupStore.preload(listOf(makeGroup(id = "01".repeat(32), name = "KeepMe")))
+        val vm = makeVM(groupStore)
+        vm.items.first { it.isNotEmpty() }
+
+        // A group id not present resolves no owner → nothing removed.
+        vm.deleteChat("ff".repeat(32))
+
+        assertEquals(listOf("KeepMe"), vm.items.value.map { it.group.name })
+    }
+
     private fun incoming(group: String, body: String, sentAt: Long) = ChatMessage(
         id = UUID.randomUUID(),
         groupId = group,

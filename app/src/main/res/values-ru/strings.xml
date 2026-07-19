@@ -89,6 +89,11 @@
     <string name="chats_empty_benefit_decentralized_detail">Состав группы закреплён на Stellar и не принадлежит нам.</string>
     <string name="chats_unnamed_group">(Без названия)</string>
     <string name="chats_published_on_chain">Опубликовано в блокчейне</string>
+    <!-- Swipe-to-delete a chat (with confirmation). Mirrors onym-ios. -->
+    <string name="chats_delete_title">Удалить этот чат?</string>
+    <string name="chats_delete_message">Это удалит %1$s и все сообщения в нём с этого устройства. Отменить будет нельзя.</string>
+    <string name="chats_delete_message_this_chat">этот чат</string>
+    <string name="chats_delete_confirm">Удалить чат</string>
 
     <!-- ─── Settings → Network section (umbrella) ────────────────── -->
     <string name="settings_network">Сеть</string>

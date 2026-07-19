@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Lock
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -39,13 +41,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,6 +110,9 @@ fun ChatsScreen(
     val verifyingInvites by (pendingInvitesViewModel?.verifying?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(emptyList<app.onym.android.inbox.PendingGroupVerification>()) })
     val inviteBadgeCount = pendingInvites.size + verifyingInvites.size
+
+    // The chat awaiting a swipe-to-delete confirmation, if any.
+    var pendingDelete by remember { mutableStateOf<ChatListItem?>(null) }
 
     Scaffold(
         topBar = {
@@ -204,11 +214,100 @@ fun ChatsScreen(
                     .fillMaxSize(),
             ) {
                 items(chatItems, key = { it.id }) { item ->
-                    ChatsRow(item = item, onClick = { onOpenChat(item.group.id) })
+                    SwipeableChatRow(
+                        item = item,
+                        onClick = { onOpenChat(item.group.id) },
+                        onRequestDelete = { pendingDelete = item },
+                    )
                     HorizontalDivider(thickness = 0.5.dp)
                 }
             }
         }
+    }
+
+    // Swipe-to-delete confirmation. Deleting wipes the chat + all its
+    // messages from this device (local-only); the group may still exist
+    // on-chain. Mirrors the iOS confirmationDialog.
+    pendingDelete?.let { item ->
+        val name = item.group.name.ifBlank {
+            stringResource(R.string.chats_delete_message_this_chat)
+        }.let { raw ->
+            if (item.group.name.isBlank()) raw else "“$raw”"
+        }
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(stringResource(R.string.chats_delete_title)) },
+            text = { Text(stringResource(R.string.chats_delete_message, name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteChat(item.group.id)
+                        pendingDelete = null
+                    },
+                    modifier = Modifier.testTag("chats.delete.confirm"),
+                ) {
+                    Text(stringResource(R.string.chats_delete_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+}
+
+/**
+ * A chat row that reveals a red Delete background on an end-to-start
+ * (right-to-left) swipe. The swipe never dismisses the row itself —
+ * crossing the threshold fires [onRequestDelete] (which opens a
+ * confirmation dialog) and the row snaps back, so the actual deletion is
+ * always gated by the dialog. Mirrors the iOS swipe-then-confirm flow.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeableChatRow(
+    item: ChatListItem,
+    onClick: () -> Unit,
+    onRequestDelete: () -> Unit,
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onRequestDelete()
+            }
+            // Never settle to dismissed — snap back and let the
+            // confirmation dialog decide whether to delete.
+            false
+        },
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = { ChatRowDeleteBackground() },
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
+        modifier = Modifier.testTag("chats.row.swipe.${item.group.id}"),
+    ) {
+        ChatsRow(item = item, onClick = onClick)
+    }
+}
+
+@Composable
+private fun ChatRowDeleteBackground() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(0.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(horizontal = 20.dp),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Icon(
+            Icons.Filled.Delete,
+            contentDescription = stringResource(R.string.chats_delete_confirm),
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+        )
     }
 }
 
