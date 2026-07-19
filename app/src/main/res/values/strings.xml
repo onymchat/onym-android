@@ -278,12 +278,12 @@
     <string name="run_relayer_read_docs">Read the docs</string>
     <string name="run_relayer_step1_title">Clone the repo</string>
     <string name="run_relayer_step1_body">onym-relayer is open source. Grab it from GitHub.</string>
-    <string name="run_relayer_step2_title">Configure your domain</string>
-    <string name="run_relayer_step2_body">Set RELAYER_URL in .env. This is what users will paste.</string>
-    <string name="run_relayer_step3_title">Deploy</string>
-    <string name="run_relayer_step3_body">Pick a host. Fly.io and Railway have one-click deploys.</string>
+    <string name="run_relayer_step2_title">Configure .env</string>
+    <string name="run_relayer_step2_body">Copy the template, then set your Stellar signing key and bind on 0.0.0.0 so Docker can reach it.</string>
+    <string name="run_relayer_step3_title">Run it with Docker</string>
+    <string name="run_relayer_step3_body">Build the image and start the container on port 8080.</string>
     <string name="run_relayer_step4_title">Add it to Onym</string>
-    <string name="run_relayer_step4_body">Back on Relayer, paste your URL into "Add Custom URL".</string>
+    <string name="run_relayer_step4_body">Back on Relayer, paste your URL (e.g. http://your-host:8080) into "Add Custom URL".</string>
     <string name="run_relayer_deploy_section">One-click deploy</string>
     <string name="run_relayer_deploy_fly">Deploy to Fly.io</string>
     <string name="run_relayer_deploy_fly_subtitle">Free tier · global edge</string>

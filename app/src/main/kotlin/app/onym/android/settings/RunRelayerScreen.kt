@@ -82,8 +82,8 @@ fun RunRelayerScreen(
     val step4Body = stringResource(R.string.run_relayer_step4_body)
     val steps = listOf(
         StepData(1, step1Title, step1Body, "git clone https://github.com/onymchat/onym-relayer\ncd onym-relayer"),
-        StepData(2, step2Title, step2Body, "cp .env.example .env\necho \"RELAYER_URL=https://your-domain\" >> .env"),
-        StepData(3, step3Title, step3Body, "fly launch --copy-config\nfly deploy"),
+        StepData(2, step2Title, step2Body, "cp .env.example .env\n# in .env, set:\n#   RELAYER_SECRET_KEY=S…\n#   RELAYER_BIND=0.0.0.0:8080"),
+        StepData(3, step3Title, step3Body, "docker build -t onym-relayer .\ndocker run --env-file .env -p 8080:8080 onym-relayer"),
         StepData(4, step4Title, step4Body, null),
     )
 
@@ -149,18 +149,11 @@ fun RunRelayerScreen(
                         color = Color.White.copy(alpha = 0.7f),
                     )
                     Spacer(Modifier.height(16.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        DarkHeroButton(
-                            label = stringResource(R.string.run_relayer_view_github),
-                            primary = true,
-                            onClick = { openUrl(context, "https://github.com/onymchat/onym-relayer") },
-                        )
-                        DarkHeroButton(
-                            label = stringResource(R.string.run_relayer_read_docs),
-                            primary = false,
-                            onClick = { openUrl(context, "https://github.com/onymchat/onym-relayer#readme") },
-                        )
-                    }
+                    DarkHeroButton(
+                        label = stringResource(R.string.run_relayer_view_github),
+                        primary = true,
+                        onClick = { openUrl(context, "https://github.com/onymchat/onym-relayer") },
+                    )
                 }
             }
 
@@ -184,37 +177,6 @@ fun RunRelayerScreen(
                 }
             }
 
-            // ─── One-click deploy ─────────────────────────────────
-            item { SettingsSectionLabel(stringResource(R.string.run_relayer_deploy_section)) }
-            item {
-                SettingsCard {
-                    SettingsRow(
-                        leading = { SettingsTileLabel("FLY", Color(0xFF7B3FE4)) },
-                        title = stringResource(R.string.run_relayer_deploy_fly),
-                        subtitle = stringResource(R.string.run_relayer_deploy_fly_subtitle),
-                        showChevron = false,
-                        trailing = { ExternalGlyph() },
-                        onClick = { openUrl(context, "https://fly.io/launch") },
-                    )
-                    SettingsRow(
-                        leading = { SettingsTileLabel("RWY", Color(0xFF1F1F1F)) },
-                        title = stringResource(R.string.run_relayer_deploy_railway),
-                        subtitle = stringResource(R.string.run_relayer_deploy_railway_subtitle),
-                        showChevron = false,
-                        trailing = { ExternalGlyph() },
-                        onClick = { openUrl(context, "https://railway.app/new") },
-                    )
-                    SettingsRow(
-                        leading = { SettingsTileLabel("DKR", Color(0xFF0080FF)) },
-                        title = stringResource(R.string.run_relayer_deploy_docker),
-                        subtitle = stringResource(R.string.run_relayer_deploy_docker_subtitle),
-                        showChevron = false,
-                        trailing = { ExternalGlyph() },
-                        onClick = { openUrl(context, "https://github.com/onymchat/onym-relayer#docker") },
-                        isLast = true,
-                    )
-                }
-            }
             item { SettingsFootnote(stringResource(R.string.run_relayer_footnote)) }
             item { Spacer(Modifier.height(40.dp)) }
         }

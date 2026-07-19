@@ -273,12 +273,12 @@
     <string name="run_relayer_read_docs">Документация</string>
     <string name="run_relayer_step1_title">Клонируйте репозиторий</string>
     <string name="run_relayer_step1_body">onym-relayer — открытый исходный код. Получите его на GitHub.</string>
-    <string name="run_relayer_step2_title">Настройте домен</string>
-    <string name="run_relayer_step2_body">Установите RELAYER_URL в .env. Этот URL будут использовать пользователи.</string>
-    <string name="run_relayer_step3_title">Разверните</string>
-    <string name="run_relayer_step3_body">Выберите хостинг. У Fly.io и Railway есть развёртывание в один клик.</string>
+    <string name="run_relayer_step2_title">Настройте .env</string>
+    <string name="run_relayer_step2_body">Скопируйте шаблон, затем укажите свой ключ подписи Stellar и слушайте на 0.0.0.0, чтобы Docker имел доступ.</string>
+    <string name="run_relayer_step3_title">Запустите через Docker</string>
+    <string name="run_relayer_step3_body">Соберите образ и запустите контейнер на порту 8080.</string>
     <string name="run_relayer_step4_title">Добавьте в Onym</string>
-    <string name="run_relayer_step4_body">Вернитесь в раздел «Релеер» и вставьте свой URL в «Добавить произвольный URL».</string>
+    <string name="run_relayer_step4_body">Вернитесь в раздел «Релеер» и вставьте свой URL (например, http://your-host:8080) в «Добавить произвольный URL».</string>
     <string name="run_relayer_deploy_section">Развёртывание в один клик</string>
     <string name="run_relayer_deploy_fly">Развернуть на Fly.io</string>
     <string name="run_relayer_deploy_fly_subtitle">Бесплатный тариф · глобальный edge</string>
