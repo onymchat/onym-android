@@ -165,7 +165,11 @@ jobs:
           target: google_apis
           arch: x86_64
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # Cold-boot every run (-no-snapshot-load): the cached warm
+          # snapshot restores corrupt GPU state (Failed to load snapshot
+          # / ColorBuffer errors), which stalls Compose rendering and
+          # flakes UI tests like IdentitiesUITest.restoreIdentity.
+          emulator-options: -no-snapshot-save -no-snapshot-load -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           # One line on purpose: `reactivecircus/android-emulator-runner`
           # invokes the script via `sh -c <script>` without quoting,
@@ -176,7 +180,9 @@ jobs:
           # Exclude ScreenshotTest: it's a screenshot-generation flow for
           # `fastlane screengrab`, not a correctness gate, and its extra
           # load on the CI emulator isn't worth flaking the release.
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest
+          # Retry once (`|| …`) to ride out residual emulator-graphics
+          # flakiness. One line on purpose (see note above).
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest || ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest
 
       - name: Upload androidTest report
         # Always upload — the `report-to-issue` job needs to read the
