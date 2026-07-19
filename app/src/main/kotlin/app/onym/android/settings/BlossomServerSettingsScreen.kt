@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.Button
@@ -53,6 +54,7 @@ import app.onym.android.transport.blossom.BlossomServerEndpoint
 fun BlossomServerSettingsScreen(
     viewModel: BlossomServerSettingsViewModel,
     onBack: () -> Unit,
+    onRunYourOwn: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -103,6 +105,19 @@ fun BlossomServerSettingsScreen(
                     "Changes apply on the next app launch. Uploads target the first " +
                         "configured server.",
                 )
+            }
+            item { SettingsSectionLabel("SELF-HOST") }
+            item {
+                SettingsCard {
+                    SettingsRow(
+                        leading = { SettingsTileBox(Icons.Filled.Dns, SettingsTile.GitHub) },
+                        title = "Run your own server",
+                        subtitle = "Deploy a Blossom server with Docker",
+                        onClick = onRunYourOwn,
+                        isLast = true,
+                        modifier = Modifier.testTag("blossom.run_your_own"),
+                    )
+                }
             }
         }
     }

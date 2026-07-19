@@ -450,6 +450,12 @@ fun RootScreen(
                 app.onym.android.settings.NostrRelaySettingsScreen(
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
+                    onRunYourOwn = { navController.navigate(ROUTE_RUN_NOSTR) },
+                )
+            }
+            composable(ROUTE_RUN_NOSTR) {
+                app.onym.android.settings.RunNostrRelayScreen(
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(ROUTE_BLOSSOM_RELAYS) {
@@ -460,6 +466,12 @@ fun RootScreen(
                 ) as app.onym.android.settings.BlossomServerSettingsViewModel
                 app.onym.android.settings.BlossomServerSettingsScreen(
                     viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onRunYourOwn = { navController.navigate(ROUTE_RUN_BLOSSOM) },
+                )
+            }
+            composable(ROUTE_RUN_BLOSSOM) {
+                app.onym.android.settings.RunBlossomServerScreen(
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -619,6 +631,8 @@ private const val ROUTE_ABOUT = "about_onym"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_NOSTR_RELAYS = "nostr_relays"
 private const val ROUTE_BLOSSOM_RELAYS = "blossom_relays"
+private const val ROUTE_RUN_NOSTR = "run_nostr_relay"
+private const val ROUTE_RUN_BLOSSOM = "run_blossom_server"
 private const val ROUTE_RUN_RELAYER = "run_relayer"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"

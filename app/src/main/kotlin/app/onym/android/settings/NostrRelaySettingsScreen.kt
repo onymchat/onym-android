@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,6 +55,7 @@ import app.onym.android.transport.nostr.NostrRelayEndpoint
 fun NostrRelaySettingsScreen(
     viewModel: NostrRelaySettingsViewModel,
     onBack: () -> Unit,
+    onRunYourOwn: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -103,6 +105,19 @@ fun NostrRelaySettingsScreen(
                     "Changes apply on the next app launch. The inbox transport reads " +
                         "relays once at boot.",
                 )
+            }
+            item { SettingsSectionLabel("SELF-HOST") }
+            item {
+                SettingsCard {
+                    SettingsRow(
+                        leading = { SettingsTileBox(Icons.Filled.Dns, SettingsTile.GitHub) },
+                        title = "Run your own relay",
+                        subtitle = "Deploy a Nostr relay with Docker",
+                        onClick = onRunYourOwn,
+                        isLast = true,
+                        modifier = Modifier.testTag("nostr.run_your_own"),
+                    )
+                }
             }
         }
     }
