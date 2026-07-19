@@ -181,19 +181,10 @@ fun SettingsScreen(
                 }
             }
 
-            // ─── NETWORK ───────────────────────────────────────────
-            item { SettingsSectionLabel(stringResource(R.string.settings_network).uppercase()) }
+            // ─── ANCHORS ───────────────────────────────────────────
+            item { SettingsSectionLabel("ANCHORS") }
             item {
                 SettingsCard {
-                    SettingsRow(
-                        leading = {
-                            SettingsTileBox(Icons.Filled.Cloud, SettingsTile.Indigo)
-                        },
-                        title = stringResource(R.string.relayer_title),
-                        subtitle = stringResource(R.string.settings_relayer_subtitle),
-                        onClick = onRelayerClick,
-                        modifier = Modifier.testTag("settings.relayer_row"),
-                    )
                     SettingsRow(
                         leading = {
                             SettingsTileBox(Icons.Filled.Anchor, SettingsTile.Orange)
@@ -227,7 +218,16 @@ fun SettingsScreen(
                             )
                         },
                         onClick = { onToggleMainnet(!useMainnet) },
+                    )
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.Cloud, SettingsTile.Indigo)
+                        },
+                        title = stringResource(R.string.relayer_title),
+                        subtitle = stringResource(R.string.settings_relayer_subtitle),
+                        onClick = onRelayerClick,
                         isLast = true,
+                        modifier = Modifier.testTag("settings.relayer_row"),
                     )
                 }
             }
