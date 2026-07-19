@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.onym.android.R
 import app.onym.android.group.LocalOnymTokens
 import app.onym.android.identity.IdentitiesViewModel
 import app.onym.android.identity.IdentitySummary
@@ -258,7 +260,7 @@ private fun IdentityPage(
                 .testTag("identity.rename.${summary.id.value}"),
         ) {
             Text(
-                text = summary.name.ifBlank { "Identity" },
+                text = summary.name.ifBlank { stringResource(R.string.identity_default_name) },
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = if (isActive) accent else tokens.text,
@@ -267,14 +269,14 @@ private fun IdentityPage(
             )
             Icon(
                 Icons.Filled.Edit,
-                contentDescription = "Rename",
+                contentDescription = stringResource(R.string.rename_cd),
                 tint = tokens.text3,
                 modifier = Modifier.size(15.dp),
             )
         }
         if (isActive) {
             Text(
-                text = "ACTIVE",
+                text = stringResource(R.string.identity_active_pill),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = accent,
@@ -285,13 +287,13 @@ private fun IdentityPage(
             )
         } else {
             Text(
-                text = "Swipe here to switch",
+                text = stringResource(R.string.identity_swipe_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = tokens.text3,
             )
         }
         Text(
-            text = "Start a chat by scanning",
+            text = stringResource(R.string.settings_invite_qr_title),
             style = MaterialTheme.typography.bodySmall,
             color = tokens.text2,
         )
@@ -311,7 +313,7 @@ private fun IdentityPage(
         ) {
             CarouselAction(
                 icon = Icons.Filled.Share,
-                label = "Share",
+                label = stringResource(R.string.identity_detail_invite_share),
                 accent = accent,
                 modifier = Modifier
                     .weight(1f)
@@ -320,7 +322,7 @@ private fun IdentityPage(
             )
             CarouselAction(
                 icon = Icons.Filled.VpnKey,
-                label = "Backup",
+                label = stringResource(R.string.identity_detail_backup_section),
                 accent = accent,
                 modifier = Modifier
                     .weight(1f)
@@ -329,7 +331,7 @@ private fun IdentityPage(
             )
             CarouselAction(
                 icon = Icons.Filled.Delete,
-                label = "Delete",
+                label = stringResource(R.string.identity_detail_delete_dialog_confirm),
                 accent = MaterialTheme.colorScheme.error,
                 modifier = Modifier
                     .weight(1f)
@@ -395,13 +397,13 @@ private fun AddIdentityPage(
             )
         }
         Text(
-            text = "Add identity",
+            text = stringResource(R.string.identities_add_button),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             color = tokens.text,
         )
         Text(
-            text = "A fresh key — separate contacts and chats from your other identities.",
+            text = stringResource(R.string.add_identity_fresh_body),
             style = MaterialTheme.typography.bodySmall,
             color = tokens.text2,
             textAlign = TextAlign.Center,
@@ -410,7 +412,7 @@ private fun AddIdentityPage(
             value = name,
             onValueChange = onNameChange,
             singleLine = true,
-            placeholder = { Text("Name (optional)") },
+            placeholder = { Text(stringResource(R.string.identities_add_name_label)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onCreate() }),
             modifier = Modifier
@@ -423,13 +425,13 @@ private fun AddIdentityPage(
                 .fillMaxWidth()
                 .testTag("identity.add.create"),
         ) {
-            Text("Create identity")
+            Text(stringResource(R.string.create_identity))
         }
         TextButton(
             onClick = onRestore,
             modifier = Modifier.testTag("identity.add.restore"),
         ) {
-            Text("Restore from recovery phrase")
+            Text(stringResource(R.string.restore_from_recovery_phrase))
         }
     }
 }
@@ -451,11 +453,11 @@ private fun RenameIdentityDialog(
     val canSave = trimmed.isNotEmpty()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Rename identity") },
+        title = { Text(stringResource(R.string.identity_detail_rename_action)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "A name only you see. It doesn't change your keys or your invite link.",
+                    text = stringResource(R.string.rename_identity_helper),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
@@ -476,10 +478,10 @@ private fun RenameIdentityDialog(
                 onClick = { onConfirm(trimmed) },
                 enabled = canSave,
                 modifier = Modifier.testTag("identity.rename.confirm"),
-            ) { Text("Save") }
+            ) { Text(stringResource(R.string.save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         },
     )
 }
@@ -519,12 +521,11 @@ private fun RestoreIdentityDialog(
 
     AlertDialog(
         onDismissRequest = { viewModel.clearAddResult(); onDismiss() },
-        title = { Text("Restore identity") },
+        title = { Text(stringResource(R.string.restore_identity_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Enter the 12 or 24-word recovery phrase to restore an identity " +
-                        "on this device.",
+                    text = stringResource(R.string.restore_identity_helper),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
@@ -543,7 +544,7 @@ private fun RestoreIdentityDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { if (it.length <= 30) name = it },
-                    placeholder = { Text("Name (optional)") },
+                    placeholder = { Text(stringResource(R.string.identities_add_name_label)) },
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -564,10 +565,10 @@ private fun RestoreIdentityDialog(
                 onClick = { viewModel.add(name = name, restoreMnemonic = phrase) },
                 enabled = canRestore,
                 modifier = Modifier.testTag("identity.restore.confirm"),
-            ) { Text("Restore") }
+            ) { Text(stringResource(R.string.restore)) }
         },
         dismissButton = {
-            TextButton(onClick = { viewModel.clearAddResult(); onDismiss() }) { Text("Cancel") }
+            TextButton(onClick = { viewModel.clearAddResult(); onDismiss() }) { Text(stringResource(R.string.cancel)) }
         },
     )
 }
@@ -580,5 +581,5 @@ private fun shareInvite(context: android.content.Context?, summary: IdentitySumm
         putExtra(Intent.EXTRA_TEXT, summary.inviteUrl())
         type = "text/plain"
     }
-    ctx.startActivity(Intent.createChooser(sendIntent, "Share invite link"))
+    ctx.startActivity(Intent.createChooser(sendIntent, ctx.getString(R.string.share_invite_chooser_title)))
 }

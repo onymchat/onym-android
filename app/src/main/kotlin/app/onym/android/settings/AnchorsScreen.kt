@@ -77,7 +77,7 @@ fun AnchorsRootScreen(
     ) { padding ->
         LazyColumn(contentPadding = padding) {
             // ─── Active network selector (replaces the Use Mainnet toggle)
-            item { SectionHeader("ACTIVE NETWORK") }
+            item { SectionHeader(stringResource(R.string.anchors_section_active_network)) }
             items(ContractNetwork.entries) { network ->
                 val available = state.networkAvailability[network] == true
                 ActiveNetworkRow(
@@ -341,7 +341,7 @@ private fun ActiveNetworkRow(
                 tint = MaterialTheme.colorScheme.primary,
             )
             !available -> Text(
-                "Soon",
+                stringResource(R.string.create_group_soon_badge),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

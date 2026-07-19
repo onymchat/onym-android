@@ -84,9 +84,10 @@ class ApproveRequestsViewModel(
             when (outcome) {
                 is JoinRequestApprover.ApproveOutcome.Sent -> {
                     _lastError.value = null
-                    val trimmed = joinerAlias?.trim().orEmpty()
-                    val label = if (trimmed.isEmpty()) "this person" else trimmed
-                    _lastSuccessMessage.value = "$label is now in the group."
+                    // Store just the joiner's label (empty = unknown); the
+                    // screen formats the localized "… is now in the group."
+                    // banner (this VM has no resources/Context).
+                    _lastSuccessMessage.value = joinerAlias?.trim().orEmpty()
                     scheduleSuccessDismiss()
                 }
                 else -> {

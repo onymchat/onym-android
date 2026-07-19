@@ -66,6 +66,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import app.onym.android.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -491,7 +493,7 @@ private fun AttachmentImage(
         if (shown != null) {
             Image(
                 bitmap = shown.asImageBitmap(),
-                contentDescription = "Photo",
+                contentDescription = stringResource(R.string.attachment_photo_cd),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -545,7 +547,7 @@ private fun AttachmentVideo(
         if (shown != null) {
             Image(
                 bitmap = shown.asImageBitmap(),
-                contentDescription = "Video",
+                contentDescription = stringResource(R.string.attachment_video_cd),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -618,7 +620,7 @@ private fun MediaSendOverlay(
         } else {
             Icon(
                 imageVector = Icons.Filled.ErrorOutline,
-                contentDescription = "Failed — tap to resend or delete",
+                contentDescription = stringResource(R.string.attachment_failed_cd),
                 tint = Color.White,
                 modifier = Modifier.size(32.dp),
             )
@@ -805,7 +807,7 @@ private fun VoiceMessageBubble(
                 Icon(
                     imageVector = icon,
                     contentDescription = if (failed) {
-                        "Failed — tap to resend or delete"
+                        stringResource(R.string.attachment_failed_cd)
                     } else {
                         "Play voice message"
                     },
@@ -1013,7 +1015,7 @@ private fun StatusIndicator(
     }
     Icon(
         imageVector = visual.icon,
-        contentDescription = visual.contentDescription,
+        contentDescription = stringResource(visual.contentDescriptionRes),
         tint = tint,
         modifier = Modifier
             .size(STATUS_ICON_SIZE)
@@ -1036,27 +1038,27 @@ internal fun statusVisualFor(status: MessageStatus): StatusVisual? = when (statu
     MessageStatus.PENDING -> StatusVisual(
         icon = Icons.Outlined.Schedule,
         tint = ChatStatusTint.Muted,
-        contentDescription = "Sending",
+        contentDescriptionRes = R.string.msg_status_sending_cd,
     )
     MessageStatus.SENT -> StatusVisual(
         icon = Icons.Filled.Check,
         tint = ChatStatusTint.Muted,
-        contentDescription = "Sent",
+        contentDescriptionRes = R.string.msg_status_sent_cd,
     )
     MessageStatus.DELIVERED -> StatusVisual(
         icon = Icons.Filled.DoneAll,
         tint = ChatStatusTint.Muted,
-        contentDescription = "Delivered",
+        contentDescriptionRes = R.string.msg_status_delivered_cd,
     )
     MessageStatus.READ -> StatusVisual(
         icon = Icons.Filled.DoneAll,
         tint = ChatStatusTint.Accent,
-        contentDescription = "Read",
+        contentDescriptionRes = R.string.msg_status_read_cd,
     )
     MessageStatus.FAILED -> StatusVisual(
         icon = Icons.Filled.ErrorOutline,
         tint = ChatStatusTint.Error,
-        contentDescription = "Failed — tap to retry",
+        contentDescriptionRes = R.string.msg_status_failed_cd,
     )
     MessageStatus.RECEIVED -> null
 }
@@ -1081,7 +1083,9 @@ internal fun canRetry(message: ChatMessage): Boolean =
 internal data class StatusVisual(
     val icon: ImageVector,
     val tint: ChatStatusTint,
-    val contentDescription: String,
+    /** String-resource id for the a11y label (resolved at the Composable
+     *  call site — `statusVisualFor` stays non-Composable). */
+    val contentDescriptionRes: Int,
 )
 
 internal enum class ChatStatusTint { Muted, Error, Accent }

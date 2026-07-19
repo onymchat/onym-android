@@ -50,6 +50,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import app.onym.android.R
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -167,7 +170,7 @@ fun ChatThreadScreen(
                     ) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.back),
                         )
                     }
                 },
@@ -178,7 +181,7 @@ fun ChatThreadScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Info,
-                            contentDescription = "Members",
+                            contentDescription = stringResource(R.string.members_cd),
                         )
                     }
                 },
@@ -754,7 +757,7 @@ private fun FullScreenImageViewer(
             if (shown != null) {
                 androidx.compose.foundation.Image(
                     bitmap = shown.asImageBitmap(),
-                    contentDescription = "Photo",
+                    contentDescription = stringResource(R.string.attachment_photo_cd),
                     contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxSize()
@@ -874,7 +877,7 @@ private fun GalleryImagePage(
     if (shown != null) {
         androidx.compose.foundation.Image(
             bitmap = shown.asImageBitmap(),
-            contentDescription = "Photo",
+            contentDescription = stringResource(R.string.attachment_photo_cd),
             contentScale = androidx.compose.ui.layout.ContentScale.Fit,
             modifier = Modifier.fillMaxSize(),
         )
@@ -927,19 +930,19 @@ private fun FailedMediaActionSheet(
 ) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Message failed to send") },
-        text = { Text("Resend or delete this media?") },
+        title = { Text(stringResource(R.string.msg_failed_dialog_title)) },
+        text = { Text(stringResource(R.string.msg_failed_dialog_body)) },
         confirmButton = {
             androidx.compose.material3.TextButton(
                 onClick = onResend,
                 modifier = Modifier.testTag("chat_thread.failed_media.resend"),
-            ) { Text("Resend") }
+            ) { Text(stringResource(R.string.resend)) }
         },
         dismissButton = {
             androidx.compose.material3.TextButton(
                 onClick = onDelete,
                 modifier = Modifier.testTag("chat_thread.failed_media.delete"),
-            ) { Text("Delete") }
+            ) { Text(stringResource(R.string.identity_detail_delete_dialog_confirm)) }
         },
         modifier = Modifier.testTag("chat_thread.failed_media.sheet"),
     )
@@ -979,7 +982,7 @@ private fun EmptyThread(modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "No messages yet. Say hi.",
+            text = stringResource(R.string.thread_empty_body),
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -998,7 +1001,7 @@ private fun ChatThreadTitle(
     name: String,
     memberCount: Int,
 ) {
-    val subtitle = memberCountSubtitle(memberCount)
+    val hasSubtitle = memberCountSubtitle(memberCount) != null
     Column(
         modifier = Modifier.testTag("chat_thread.title"),
     ) {
@@ -1006,9 +1009,9 @@ private fun ChatThreadTitle(
             text = name,
             style = MaterialTheme.typography.titleMedium,
         )
-        if (subtitle != null) {
+        if (hasSubtitle) {
             Text(
-                text = subtitle,
+                text = pluralStringResource(R.plurals.members_count, memberCount, memberCount),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("chat_thread.title_subtitle"),
@@ -1040,7 +1043,7 @@ private fun MissingGroup(padding: PaddingValues) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "This chat isn't on this device.",
+            text = stringResource(R.string.thread_not_on_device),
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

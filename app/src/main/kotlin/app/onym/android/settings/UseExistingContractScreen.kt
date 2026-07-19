@@ -75,6 +75,7 @@ fun UseExistingContractScreen(
 
     val cleanAddr = addr.trim()
     val looksValid = cleanAddr.matches(Regex("^C[A-Z0-9]{55}$"))
+    val defaultLabel = stringResource(R.string.use_contract_default_label)
 
     Scaffold(
         topBar = {
@@ -218,7 +219,7 @@ fun UseExistingContractScreen(
                     Button(
                         onClick = {
                             if (!verified) verified = true
-                            else onUseContract(cleanAddr, label.ifBlank { "Custom contract" })
+                            else onUseContract(cleanAddr, label.ifBlank { defaultLabel })
                         },
                         enabled = looksValid,
                         modifier = Modifier

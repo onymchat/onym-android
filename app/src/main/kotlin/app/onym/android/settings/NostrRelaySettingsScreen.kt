@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.onym.android.R
 import app.onym.android.transport.nostr.NostrRelayEndpoint
 
 /**
@@ -62,10 +64,10 @@ fun NostrRelaySettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Nostr Relays") },
+                title = { Text(stringResource(R.string.nostr_relays_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
             )
@@ -93,8 +95,7 @@ fun NostrRelaySettingsScreen(
             }
             item {
                 SectionFootnote(
-                    "Use a private deployment, localhost, or any Nostr relay you trust. " +
-                        "URLs must use the wss:// (or ws://) scheme.",
+                    stringResource(R.string.nostr_relays_footnote),
                 )
             }
             item {
@@ -102,17 +103,16 @@ fun NostrRelaySettingsScreen(
             }
             item {
                 SectionFootnote(
-                    "Changes apply on the next app launch. The inbox transport reads " +
-                        "relays once at boot.",
+                    stringResource(R.string.nostr_relays_reboot_footnote),
                 )
             }
-            item { SettingsSectionLabel("SELF-HOST") }
+            item { SettingsSectionLabel(stringResource(R.string.settings_section_self_host)) }
             item {
                 SettingsCard {
                     SettingsRow(
                         leading = { SettingsTileBox(Icons.Filled.Dns, SettingsTile.GitHub) },
-                        title = "Run your own relay",
-                        subtitle = "Deploy a Nostr relay with Docker",
+                        title = stringResource(R.string.nostr_run_your_own_title),
+                        subtitle = stringResource(R.string.nostr_run_your_own_subtitle),
                         onClick = onRunYourOwn,
                         isLast = true,
                         modifier = Modifier.testTag("nostr.run_your_own"),
@@ -128,7 +128,7 @@ private fun ConfiguredCard(
     endpoints: List<NostrRelayEndpoint>,
     onRemove: (String) -> Unit,
 ) {
-    SectionLabel(text = "CONFIGURED · ${endpoints.size}")
+    SectionLabel(text = stringResource(R.string.endpoints_section_configured, endpoints.size))
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -137,7 +137,7 @@ private fun ConfiguredCard(
     ) {
         if (endpoints.isEmpty()) {
             Text(
-                text = "No relays configured.",
+                text = stringResource(R.string.nostr_empty_configured),
                 modifier = Modifier
                     .padding(16.dp)
                     .testTag("nostr.configured.empty"),
@@ -181,7 +181,7 @@ private fun EndpointRow(
             onClick = onRemove,
             modifier = Modifier.testTag("nostr.configured.remove.${endpoint.url}"),
         ) {
-            Icon(Icons.Filled.Delete, contentDescription = "Remove")
+            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.create_group_photo_remove))
         }
     }
 }
@@ -193,7 +193,7 @@ private fun AddCustomCard(
     onChange: (String) -> Unit,
     onAdd: () -> Unit,
 ) {
-    SectionLabel(text = "ADD CUSTOM URL")
+    SectionLabel(text = stringResource(R.string.endpoints_section_add_custom))
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -231,7 +231,7 @@ private fun AddCustomCard(
                 .fillMaxWidth()
                 .testTag("nostr.add.custom_button"),
         ) {
-            Text("Add")
+            Text(stringResource(R.string.relayer_custom_add))
         }
     }
 }
@@ -254,14 +254,14 @@ private fun ResetCard(onReset: () -> Unit) {
         ) {
             Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(20.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Restore default", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(stringResource(R.string.restore_default), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Text(
-                    text = "Re-seed the configuration with the Onym Official relay.",
+                    text = stringResource(R.string.nostr_reset_subtitle),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Button(onClick = onReset) { Text("Reset") }
+            Button(onClick = onReset) { Text(stringResource(R.string.reset)) }
         }
     }
 }
@@ -275,7 +275,7 @@ private fun DefaultPill() {
             .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
         Text(
-            "DEFAULT",
+            stringResource(R.string.default_pill),
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,

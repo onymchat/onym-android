@@ -39,9 +39,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.onym.android.R
 
 /** One numbered step in a [SelfHostGuideScreen]. */
 data class SelfHostStep(val n: Int, val title: String, val body: String, val cmd: String?)
@@ -73,7 +75,7 @@ fun SelfHostGuideScreen(
                 title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
             )
@@ -244,35 +246,31 @@ private fun SelfHostNumberedStep(
 @Composable
 fun RunNostrRelayScreen(onBack: () -> Unit) {
     SelfHostGuideScreen(
-        title = "Run your own Nostr relay",
-        heroTitle = "Run your own Nostr relay",
-        heroBody = "A Nostr relay is standard open-source software that speaks the Nostr " +
-            "protocol — nothing Onym-specific. The steps below use strfry, a popular relay; " +
-            "nostr-rs-relay is another good option.",
-        genericNote = "Generic Nostr software — not Onym",
+        title = stringResource(R.string.run_nostr_relay_title),
+        heroTitle = stringResource(R.string.run_nostr_relay_title),
+        heroBody = stringResource(R.string.run_nostr_relay_hero_body),
+        genericNote = stringResource(R.string.run_nostr_generic_note),
         steps = listOf(
             SelfHostStep(
-                1, "Run a relay with Docker",
-                "strfry listens on port 7777. Data persists in a named volume.",
+                1, stringResource(R.string.run_nostr_step1_title),
+                stringResource(R.string.run_nostr_step1_body),
                 "docker run -d --name strfry \\\n" +
                     "  -p 7777:7777 \\\n" +
                     "  -v strfry-db:/app/strfry-db \\\n" +
                     "  dockurr/strfry",
             ),
             SelfHostStep(
-                2, "Put it behind TLS",
-                "Clients connect over wss://, so terminate TLS with a reverse proxy on your " +
-                    "domain (Caddy auto-issues a certificate).",
+                2, stringResource(R.string.run_nostr_step2_title),
+                stringResource(R.string.run_nostr_step2_body),
                 "caddy reverse-proxy \\\n  --from relay.example.com \\\n  --to localhost:7777",
             ),
             SelfHostStep(
-                3, "Add it to Onym",
-                "Back on Nostr Relays, paste wss://relay.example.com into \"Add Custom URL\".",
+                3, stringResource(R.string.run_nostr_step3_title),
+                stringResource(R.string.run_nostr_step3_body),
                 null,
             ),
         ),
-        footnote = "Any spec-compliant Nostr relay works (strfry, nostr-rs-relay, and " +
-            "others). These are independent open-source projects, not Onym software.",
+        footnote = stringResource(R.string.run_nostr_footnote),
         onBack = onBack,
     )
 }
@@ -281,35 +279,31 @@ fun RunNostrRelayScreen(onBack: () -> Unit) {
 @Composable
 fun RunBlossomServerScreen(onBack: () -> Unit) {
     SelfHostGuideScreen(
-        title = "Run your own Blossom server",
-        heroTitle = "Run your own Blossom server",
-        heroBody = "Blossom is an open spec for storing media blobs addressed by hash — " +
-            "nothing Onym-specific. The steps below use blossom-server (hzrd149), a common " +
-            "implementation.",
-        genericNote = "Generic Blossom software — not Onym",
+        title = stringResource(R.string.run_blossom_title),
+        heroTitle = stringResource(R.string.run_blossom_title),
+        heroBody = stringResource(R.string.run_blossom_hero_body),
+        genericNote = stringResource(R.string.run_blossom_generic_note),
         steps = listOf(
             SelfHostStep(
-                1, "Run a server with Docker",
-                "blossom-server listens on port 3000. Blobs + config persist in a mounted folder.",
+                1, stringResource(R.string.run_blossom_step1_title),
+                stringResource(R.string.run_blossom_step1_body),
                 "docker run -d --name blossom \\\n" +
                     "  -p 3000:3000 \\\n" +
                     "  -v ./blossom-data:/app/data \\\n" +
                     "  ghcr.io/hzrd149/blossom-server:master",
             ),
             SelfHostStep(
-                2, "Put it behind TLS",
-                "Onym uploads/downloads over https://, so front it with a reverse proxy on " +
-                    "your domain (Caddy auto-issues a certificate).",
+                2, stringResource(R.string.run_blossom_step2_title),
+                stringResource(R.string.run_blossom_step2_body),
                 "caddy reverse-proxy \\\n  --from blossom.example.com \\\n  --to localhost:3000",
             ),
             SelfHostStep(
-                3, "Add it to Onym",
-                "Back on Blossom Relays, paste https://blossom.example.com into \"Add Custom URL\".",
+                3, stringResource(R.string.run_blossom_step3_title),
+                stringResource(R.string.run_blossom_step3_body),
                 null,
             ),
         ),
-        footnote = "Any Blossom-compliant server works. These are independent open-source " +
-            "projects, not Onym software.",
+        footnote = stringResource(R.string.run_blossom_footnote),
         onBack = onBack,
     )
 }

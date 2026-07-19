@@ -56,7 +56,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
+import app.onym.android.R
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -164,7 +166,7 @@ fun ChatInputPanel(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.AttachFile,
-                        contentDescription = "Attach photo or video",
+                        contentDescription = stringResource(R.string.chat_attach_cd),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -184,7 +186,7 @@ fun ChatInputPanel(
                     )
                     .testTag("chat_thread.input_field"),
                 enabled = enabled,
-                placeholder = { Text("Message") },
+                placeholder = { Text(stringResource(R.string.chat_input_placeholder)) },
                 maxLines = maxLines,
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Sentences,
@@ -237,7 +239,7 @@ fun ChatInputPanel(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
+                    contentDescription = stringResource(R.string.chat_send_cd),
                 )
             }
         }
@@ -267,7 +269,7 @@ private fun VoiceMicButton(
             onClick = onSendVoiceCanned,
             modifier = Modifier.testTag("chat_thread.mic_button"),
         ) {
-            Icon(imageVector = Icons.Filled.Mic, contentDescription = "Record voice message")
+            Icon(imageVector = Icons.Filled.Mic, contentDescription = stringResource(R.string.chat_record_voice_cd))
         }
         return
     }
@@ -345,7 +347,7 @@ private fun VoiceMicButton(
                 }
             },
     ) {
-        Icon(imageVector = Icons.Filled.Mic, contentDescription = "Record voice message")
+        Icon(imageVector = Icons.Filled.Mic, contentDescription = stringResource(R.string.chat_record_voice_cd))
     }
 }
 
@@ -453,7 +455,7 @@ private fun MediaPreviewStrip(
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Close,
-                            contentDescription = "Remove",
+                            contentDescription = stringResource(R.string.create_group_photo_remove),
                             tint = Color.White,
                             modifier = Modifier.size(14.dp),
                         )

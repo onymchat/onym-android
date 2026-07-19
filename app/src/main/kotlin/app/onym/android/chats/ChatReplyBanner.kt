@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import app.onym.android.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,7 +65,7 @@ fun ChatReplyBanner(
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text(
-                text = "Replying to $name",
+                text = stringResource(R.string.reply_replying_to, name),
                 color = accent,
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontWeight = FontWeight.SemiBold,
@@ -87,7 +89,7 @@ fun ChatReplyBanner(
         ) {
             Icon(
                 imageVector = Icons.Filled.Close,
-                contentDescription = "Cancel reply",
+                contentDescription = stringResource(R.string.reply_cancel_cd),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

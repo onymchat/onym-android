@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -139,7 +140,7 @@ fun ChatsScreen(
                             ) {
                                 Icon(
                                     Icons.Filled.PersonAdd,
-                                    contentDescription = "Join requests",
+                                    contentDescription = stringResource(R.string.join_requests_cd),
                                 )
                             }
                             // Numeric red-badge overlay anchored top-end
@@ -167,7 +168,7 @@ fun ChatsScreen(
                             ) {
                                 Icon(
                                     Icons.Filled.MailOutline,
-                                    contentDescription = "Invitations",
+                                    contentDescription = stringResource(R.string.invitations_cd),
                                 )
                             }
                             if (inviteBadgeCount > 0) {
@@ -558,10 +559,10 @@ private fun subtitleFor(group: ChatGroup): String {
         SepGroupType.OLIGARCHY -> "Oligarchy"
     }
     val memberCount = group.memberProfiles.size
-    val membersLabel = when (memberCount) {
-        0 -> ""
-        1 -> "1 member"
-        else -> "$memberCount members"
+    val membersLabel = if (memberCount == 0) {
+        ""
+    } else {
+        pluralStringResource(R.plurals.members_count, memberCount, memberCount)
     }
     val now = System.currentTimeMillis()
     val relative = DateUtils.getRelativeTimeSpanString(

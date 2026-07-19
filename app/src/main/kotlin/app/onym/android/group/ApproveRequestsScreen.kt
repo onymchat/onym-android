@@ -1,5 +1,6 @@
 package app.onym.android.group
 
+import app.onym.android.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -75,13 +77,13 @@ fun ApproveRequestsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Join requests") },
+                title = { Text(stringResource(R.string.approve_requests_title)) },
                 navigationIcon = {
                     IconButton(
                         onClick = onClose,
                         modifier = Modifier.testTag("approve_requests.close_button"),
                     ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.create_group_close))
                     }
                 },
             )
@@ -135,8 +137,13 @@ private fun SuccessBanner(message: String) {
             tint = Color(0xFF34C759),
         )
         Column {
-            Text("Approved on chain", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Text(message, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.approve_approved_on_chain), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            val label = message.ifEmpty { stringResource(R.string.approve_default_person) }
+            Text(
+                stringResource(R.string.approve_member_added_snackbar, label),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -170,7 +177,7 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
                 .size(24.dp)
                 .testTag("approve_requests.error_dismiss"),
         ) {
-            Icon(Icons.Filled.Close, contentDescription = "Dismiss", modifier = Modifier.size(14.dp))
+            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.dismiss), modifier = Modifier.size(14.dp))
         }
     }
 }
@@ -192,13 +199,13 @@ private fun EmptyState() {
         )
         Spacer(Modifier.height(14.dp))
         Text(
-            "No pending requests",
+            stringResource(R.string.approve_empty_title),
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "People who tap one of your invite links show up here.",
+            text = stringResource(R.string.approve_empty_body),
             fontSize = 13.sp,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -229,9 +236,9 @@ private fun RequestCard(
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 16.sp,
             )
-            val groupLabel = request.groupName ?: "Unknown group"
+            val groupLabel = request.groupName ?: stringResource(R.string.approve_unknown_group)
             Text(
-                text = "wants to join “$groupLabel”",
+                text = stringResource(R.string.approve_wants_to_join, groupLabel),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -241,7 +248,7 @@ private fun RequestCard(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                "inbox",
+                stringResource(R.string.approve_default_inbox_label),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -261,7 +268,7 @@ private fun RequestCard(
                     .weight(1f)
                     .testTag("approve_requests.decline_button.${request.id}"),
             ) {
-                Text("Decline")
+                Text(stringResource(R.string.decline))
             }
             Button(
                 onClick = onApprove,
@@ -292,15 +299,14 @@ private fun RequestCard(
             // — surface that explicitly so the admin doesn't think
             // the tap was lost.
             Text(
-                text = "Generating proof and updating the on-chain commitment. " +
-                    "This usually takes a few seconds.",
+                text = stringResource(R.string.approve_generating_proof),
                 modifier = Modifier.testTag("approve_requests.in_flight_hint.${request.id}"),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else if (request.groupName == null) {
             Text(
-                text = "This request is for a group that isn’t on this device. Decline to clear it.",
+                text = stringResource(R.string.approve_group_not_local),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

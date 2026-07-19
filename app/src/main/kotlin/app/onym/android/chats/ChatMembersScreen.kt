@@ -48,12 +48,15 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.onym.android.R
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupAvatarImage
@@ -136,12 +139,12 @@ fun ChatMembersScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(group?.name ?: "Group") },
+                title = { Text(group?.name ?: stringResource(R.string.group_fallback_name)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.back),
                         )
                     }
                 },
@@ -155,7 +158,7 @@ fun ChatMembersScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.Share,
-                                contentDescription = "Share invite",
+                                contentDescription = stringResource(R.string.share_invite_cd),
                             )
                         }
                     }
@@ -196,7 +199,7 @@ private fun InvitationSection(message: String) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            text = "INVITATION",
+            text = stringResource(R.string.members_section_invitation),
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -252,7 +255,7 @@ private fun ChatMembersBody(
             MembersCard(rows = rows)
             Spacer(Modifier.height(8.dp))
             Text(
-                text = if (rows.size == 1) "${rows.size} member" else "${rows.size} members",
+                text = pluralStringResource(R.plurals.members_count, rows.size, rows.size),
                 modifier = Modifier.padding(horizontal = 24.dp),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -343,7 +346,7 @@ private fun AvatarCircle(letter: String, self: Boolean) {
 @Composable
 private fun SelfPill() {
     Text(
-        text = "(you)",
+        text = stringResource(R.string.members_you_suffix),
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
@@ -368,10 +371,10 @@ private fun EmptyState(modifier: Modifier = Modifier) {
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(14.dp))
-        Text("No members yet", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.members_empty_title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Invite people from the chat to see them here.",
+            text = stringResource(R.string.members_empty_body),
             fontSize = 13.sp,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -387,10 +390,10 @@ private fun MissingGroupState(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("Group not found", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.group_not_found_title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "It may have been removed or it belongs to a different identity.",
+            text = stringResource(R.string.group_not_found_body),
             fontSize = 13.sp,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -435,7 +438,7 @@ private fun GroupAvatarHeader(
             if (avatarBitmap != null) {
                 Image(
                     bitmap = avatarBitmap.asImageBitmap(),
-                    contentDescription = "Group photo",
+                    contentDescription = stringResource(R.string.group_photo_cd),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -477,7 +480,7 @@ private fun GroupAvatarHeader(
                         onClick = onRemovePhoto,
                         modifier = Modifier.testTag("members.avatar_remove"),
                     ) {
-                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.create_group_photo_remove), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }

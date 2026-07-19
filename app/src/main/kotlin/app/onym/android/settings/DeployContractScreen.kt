@@ -39,9 +39,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.onym.android.R
 import app.onym.android.chain.ContractNetwork
 import app.onym.android.chain.GovernanceType
 
@@ -68,28 +70,28 @@ fun DeployContractScreen(
 
     val steps = listOf(
         DeployStep(
-            1, "Clone the contracts repo", "The Onym contracts are open source.",
+            1, stringResource(R.string.deploy_step1_title), stringResource(R.string.deploy_step1_body),
             "git clone https://github.com/onymchat/onym-contracts\ncd onym-contracts",
         ),
         DeployStep(
-            2, "Install the Stellar CLI", "Needs the Rust toolchain + the wasm32 target.",
+            2, stringResource(R.string.deploy_step2_title), stringResource(R.string.deploy_step2_body),
             "cargo install --locked stellar-cli",
         ),
         DeployStep(
-            3, "Build the wasm", "Compiles the contracts to a wasm artifact.",
+            3, stringResource(R.string.deploy_step3_title), stringResource(R.string.deploy_step3_body),
             "stellar contract build",
         ),
         DeployStep(
-            4, "Deploy to $cliNetwork",
-            "Sign with your own funded account; prints a C… contract address.",
+            4, stringResource(R.string.deploy_step4_title, cliNetwork),
+            stringResource(R.string.deploy_step4_body),
             "stellar contract deploy \\\n" +
                 "  --network $cliNetwork \\\n" +
                 "  --source-account onym-deploy \\\n" +
                 "  --wasm target/wasm32-unknown-unknown/release/onym_${type.wireValue}.wasm",
         ),
         DeployStep(
-            5, "Add it to Onym",
-            "Copy the C… address it prints, then go back and tap \"Use existing address\" to paste it in.",
+            5, stringResource(R.string.deploy_step5_title),
+            stringResource(R.string.deploy_step5_body),
             null,
         ),
     )
@@ -97,10 +99,10 @@ fun DeployContractScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Deploy from source") },
+                title = { Text(stringResource(R.string.deploy_contract_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
             )
@@ -135,13 +137,13 @@ fun DeployContractScreen(
                     }
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        "Deploy your own contract",
+                        stringResource(R.string.deploy_hero_title),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = Color.White,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Build and deploy the Onym contracts from your computer with the Stellar CLI, then point Onym at the deployed address.",
+                        stringResource(R.string.deploy_hero_body),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.White.copy(alpha = 0.7f),
                     )
@@ -154,7 +156,7 @@ fun DeployContractScreen(
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
                         Text(
-                            "View on GitHub",
+                            stringResource(R.string.view_on_github),
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
                             color = Color(0xFF0A0A0C),
                         )
@@ -183,8 +185,7 @@ fun DeployContractScreen(
 
             item {
                 SettingsFootnote(
-                    "Deployment runs on your computer, not on the phone — the app can't " +
-                        "build wasm or submit a deploy transaction directly.",
+                    stringResource(R.string.deploy_footnote),
                 )
             }
             item { Spacer(Modifier.height(40.dp)) }

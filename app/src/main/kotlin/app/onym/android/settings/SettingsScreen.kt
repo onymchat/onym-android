@@ -147,16 +147,15 @@ fun SettingsScreen(
 
             // ─── TRANSPORT ─────────────────────────────────────────
             if (onNostrRelaysClick != null) {
-                item { SettingsSectionLabel("TRANSPORT") }
+                item { SettingsSectionLabel(stringResource(R.string.settings_section_transport)) }
                 item {
                     SettingsCard {
                         SettingsRow(
                             leading = {
                                 SettingsTileBox(Icons.Filled.Cloud, SettingsTile.Indigo)
                             },
-                            title = "Nostr Relays",
-                            subtitle = if (nostrRelaysCount == 1) "1 configured"
-                            else "$nostrRelaysCount configured",
+                            title = stringResource(R.string.nostr_relays_title),
+                            subtitle = stringResource(R.string.endpoints_configured_count, nostrRelaysCount),
                             onClick = onNostrRelaysClick,
                             isLast = onBlossomRelaysClick == null,
                             modifier = Modifier.testTag("settings.nostr_relays_row"),
@@ -166,9 +165,8 @@ fun SettingsScreen(
                                 leading = {
                                     SettingsTileBox(Icons.Filled.Image, SettingsTile.Indigo)
                                 },
-                                title = "Blossom Relays",
-                                subtitle = if (blossomRelaysCount == 1) "1 configured"
-                                else "$blossomRelaysCount configured",
+                                title = stringResource(R.string.blossom_relays_title),
+                                subtitle = stringResource(R.string.endpoints_configured_count, blossomRelaysCount),
                                 onClick = onBlossomRelaysClick,
                                 isLast = true,
                                 modifier = Modifier.testTag("settings.blossom_relays_row"),
@@ -178,14 +176,13 @@ fun SettingsScreen(
                 }
                 item {
                     SettingsFootnote(
-                        "Nostr relays and Blossom servers carry your messages and media. " +
-                            "Replace them with your own instances for maximum privacy.",
+                        stringResource(R.string.settings_transport_footnote),
                     )
                 }
             }
 
             // ─── ANCHORS ───────────────────────────────────────────
-            item { SettingsSectionLabel("ANCHORS") }
+            item { SettingsSectionLabel(stringResource(R.string.settings_section_anchors)) }
             item {
                 SettingsCard {
                     SettingsRow(
@@ -217,13 +214,12 @@ fun SettingsScreen(
             }
             item {
                 SettingsFootnote(
-                    "Anchors and the relayer default to Onym-run instances. Replace them " +
-                        "with your own deployments for maximum privacy.",
+                    stringResource(R.string.settings_anchors_footnote),
                 )
             }
 
             // ─── DATA ──────────────────────────────────────────────
-            item { SettingsSectionLabel("DATA") }
+            item { SettingsSectionLabel(stringResource(R.string.settings_section_data)) }
             item {
                 SettingsCard {
                     SettingsRow(
@@ -233,8 +229,8 @@ fun SettingsScreen(
                                 background = if (sendReadReceipts) SettingsTile.Indigo else SettingsTile.Gray,
                             )
                         },
-                        title = "Send read receipts",
-                        subtitle = "You'll only see others' read status if this is on",
+                        title = stringResource(R.string.settings_read_receipts_title),
+                        subtitle = stringResource(R.string.settings_read_receipts_subtitle),
                         showChevron = false,
                         trailing = {
                             Switch(
@@ -249,9 +245,9 @@ fun SettingsScreen(
                         leading = {
                             SettingsTileBox(Icons.Filled.DeleteSweep, SettingsTile.Red)
                         },
-                        title = "Clear Local Message Cache",
+                        title = stringResource(R.string.settings_clear_cache_title),
                         titleColor = SettingsTile.Red,
-                        subtitle = "Delete every message on this device. Your chats stay.",
+                        subtitle = stringResource(R.string.settings_clear_cache_subtitle),
                         showChevron = false,
                         onClick = { showClearConfirm1 = true },
                         isLast = true,
@@ -279,14 +275,9 @@ fun SettingsScreen(
     if (showClearConfirm1) {
         AlertDialog(
             onDismissRequest = { showClearConfirm1 = false },
-            title = { Text("Clear all messages?") },
+            title = { Text(stringResource(R.string.settings_clear_dialog_title)) },
             text = {
-                Text(
-                    "This permanently deletes every message stored on this device. " +
-                        "Your chats stay in the list, but the messages inside them will be gone.\n\n" +
-                        "Onym keeps no copy on its servers, and messages can't be re-downloaded — " +
-                        "relay copies are best-effort and may already have expired."
-                )
+                Text(stringResource(R.string.settings_clear_dialog_body))
             },
             confirmButton = {
                 TextButton(
@@ -296,19 +287,19 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.testTag("settings.clear_messages.confirm1"),
                 ) {
-                    Text("Clear Messages", color = SettingsTile.Red)
+                    Text(stringResource(R.string.settings_clear_confirm), color = SettingsTile.Red)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearConfirm1 = false }) { Text("Cancel") }
+                TextButton(onClick = { showClearConfirm1 = false }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
     if (showClearConfirm2) {
         AlertDialog(
             onDismissRequest = { showClearConfirm2 = false },
-            title = { Text("Delete all messages?") },
-            text = { Text("This can't be undone.") },
+            title = { Text(stringResource(R.string.settings_delete_dialog_title)) },
+            text = { Text(stringResource(R.string.settings_delete_dialog_body)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -317,11 +308,11 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.testTag("settings.clear_messages.confirm2"),
                 ) {
-                    Text("Delete All Messages", color = SettingsTile.Red)
+                    Text(stringResource(R.string.settings_delete_confirm), color = SettingsTile.Red)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearConfirm2 = false }) { Text("Cancel") }
+                TextButton(onClick = { showClearConfirm2 = false }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
@@ -339,13 +330,13 @@ private fun BrandFooter() {
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
         )
         Text(
-            text = "Built by people who think privacy is a right",
+            text = stringResource(R.string.about_credits_line1),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
         Text(
-            text = "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+            text = stringResource(R.string.settings_about_subtitle, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toString()),
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
         )

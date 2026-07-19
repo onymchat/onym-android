@@ -1,5 +1,6 @@
 package app.onym.android.inbox
 
+import app.onym.android.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -71,13 +73,13 @@ fun PendingInvitesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Invitations") },
+                title = { Text(stringResource(R.string.invitations_title)) },
                 navigationIcon = {
                     IconButton(
                         onClick = onClose,
                         modifier = Modifier.testTag("pending_invites.close_button"),
                     ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.create_group_close))
                     }
                 },
             )
@@ -131,7 +133,7 @@ private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
             onClick = onDismiss,
             modifier = Modifier.size(24.dp).testTag("pending_invites.error_dismiss"),
         ) {
-            Icon(Icons.Filled.Close, contentDescription = "Dismiss", modifier = Modifier.size(14.dp))
+            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.dismiss), modifier = Modifier.size(14.dp))
         }
     }
 }
@@ -150,10 +152,10 @@ private fun EmptyState() {
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(14.dp))
-        Text("No invitations", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.invitations_empty_title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Group invites you receive show up here for you to accept.",
+            text = stringResource(R.string.invitations_empty_body),
             fontSize = 13.sp,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -185,8 +187,9 @@ private fun InviteCard(
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 16.sp,
             )
+            val groupLabel = invite.groupName ?: stringResource(R.string.invite_fallback_group)
             Text(
-                text = "invited you to “${invite.groupName ?: "a group"}”",
+                text = stringResource(R.string.invite_invited_you_to, groupLabel),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -212,7 +215,7 @@ private fun InviteCard(
                     .weight(1f)
                     .testTag("pending_invites.dismiss_button.${invite.id}"),
             ) {
-                Text("Dismiss")
+                Text(stringResource(R.string.dismiss))
             }
             Button(
                 onClick = onAccept,
@@ -273,7 +276,7 @@ private fun VerifyingCard(
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                     Text(
-                        "Verifying group state…",
+                        stringResource(R.string.invite_verifying_state),
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -281,7 +284,7 @@ private fun VerifyingCard(
             }
             PendingGroupVerification.Status.UNREACHABLE -> {
                 Text(
-                    "Couldn’t verify — the admin is offline. The group stays hidden until it can be verified on chain.",
+                    stringResource(R.string.invite_verify_failed),
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -291,7 +294,7 @@ private fun VerifyingCard(
                         .fillMaxWidth()
                         .testTag("pending_invites.verifying_retry.${entry.groupIdHex}"),
                 ) {
-                    Text("Retry")
+                    Text(stringResource(R.string.retry))
                 }
             }
         }
