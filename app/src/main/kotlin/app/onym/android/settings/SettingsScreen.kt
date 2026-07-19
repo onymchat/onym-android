@@ -210,6 +210,12 @@ fun SettingsScreen(
                     )
                 }
             }
+            item {
+                SettingsFootnote(
+                    "Anchors and the relayer default to Onym-run instances. Replace them " +
+                        "with your own deployments for maximum privacy.",
+                )
+            }
 
             // ─── DATA ──────────────────────────────────────────────
             item { SettingsSectionLabel("DATA") }
