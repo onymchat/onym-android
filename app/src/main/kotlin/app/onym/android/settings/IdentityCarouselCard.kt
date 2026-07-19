@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -40,6 +41,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
@@ -88,6 +91,12 @@ internal fun IdentityCarouselCard(
     var addName by remember { mutableStateOf("") }
     val activeName = items.firstOrNull { it.isActive }?.summary?.name.orEmpty()
 
+    // A pager won't self-size, so measure each page's natural content height
+    // and pin the pager to the tallest ever seen (grow-only, so swiping
+    // between pages of different content never makes it jump).
+    var maxPageHeightPx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+
     // Land on the active identity's page on first composition.
     var didInitialScroll by remember { mutableStateOf(false) }
     LaunchedEffect(items.size) {
@@ -120,30 +129,44 @@ internal fun IdentityCarouselCard(
         HorizontalPager(
             state = pagerState,
             pageSpacing = 12.dp,
+            verticalAlignment = Alignment.Top,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(470.dp)
+                // Until measured, hold an upper-bound height so the first
+                // frame never clips; then settle to the tallest page.
+                .height(if (maxPageHeightPx > 0) with(density) { maxPageHeightPx.toDp() } else 470.dp)
                 .testTag("identity.carousel"),
         ) { page ->
-            if (page < items.size) {
-                val row = items[page]
-                IdentityPage(
-                    summary = row.summary,
-                    isActive = row.isActive,
-                    onBackup = {
-                        viewModel.select(row.summary.id)
-                        onBackup()
+            // Measure natural content height (unbounded so the fixed pager
+            // height doesn't feed back into the measurement).
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                    .onSizeChanged {
+                        if (it.height > maxPageHeightPx) maxPageHeightPx = it.height
                     },
-                    onDelete = { pendingRemoval = row.summary },
-                    onRename = { pendingRename = row.summary },
-                )
-            } else {
-                AddIdentityPage(
-                    name = addName,
-                    onNameChange = { addName = it },
-                    onCreate = { viewModel.add(name = addName) },
-                    onRestore = { showRestore = true },
-                )
+            ) {
+                if (page < items.size) {
+                    val row = items[page]
+                    IdentityPage(
+                        summary = row.summary,
+                        isActive = row.isActive,
+                        onBackup = {
+                            viewModel.select(row.summary.id)
+                            onBackup()
+                        },
+                        onDelete = { pendingRemoval = row.summary },
+                        onRename = { pendingRename = row.summary },
+                    )
+                } else {
+                    AddIdentityPage(
+                        name = addName,
+                        onNameChange = { addName = it },
+                        onCreate = { viewModel.add(name = addName) },
+                        onRestore = { showRestore = true },
+                    )
+                }
             }
         }
         // Test/semantics hook: always reflects the active identity's alias
@@ -268,11 +291,19 @@ private fun IdentityPage(
             )
         }
         Text(
-            text = "Start a chat by scanning · BLS ${heroHex(summary.blsPublicKey)}",
+            text = "Start a chat by scanning",
             style = MaterialTheme.typography.bodySmall,
             color = tokens.text2,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            // A fingerprint, not a truncated key — drop heroHex's trailing
+            // ellipsis so it doesn't read as cut off.
+            text = "BLS ${heroHex(summary.blsPublicKey).trimEnd('…')}",
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            ),
+            color = tokens.text3,
+            textAlign = TextAlign.Center,
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
