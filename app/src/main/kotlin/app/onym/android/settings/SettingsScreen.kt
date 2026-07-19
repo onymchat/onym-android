@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -268,27 +267,6 @@ fun SettingsScreen(
                 )
             }
 
-            // ─── APP ───────────────────────────────────────────────
-            item { SettingsSectionLabel(stringResource(R.string.settings_app_section).uppercase()) }
-            item {
-                SettingsCard {
-                    SettingsRow(
-                        leading = {
-                            SettingsTileBox(Icons.Filled.Info, SettingsTile.Teal)
-                        },
-                        title = stringResource(R.string.settings_about_title),
-                        subtitle = stringResource(
-                            R.string.settings_about_subtitle,
-                            BuildConfig.VERSION_NAME,
-                            BuildConfig.VERSION_CODE.toString(),
-                        ),
-                        onClick = onAboutClick,
-                        isLast = true,
-                        modifier = Modifier.testTag("settings.about_row"),
-                    )
-                }
-            }
-
             // ─── Brand watermark ───────────────────────────────────
             item { Spacer(Modifier.height(28.dp)) }
             item { BrandFooter() }
@@ -352,17 +330,23 @@ fun SettingsScreen(
 @Composable
 private fun BrandFooter() {
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         OnymMark(
             size = 26.dp,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
         )
         Text(
-            text = stringResource(R.string.brand_tagline),
-            style = MaterialTheme.typography.labelSmall,
+            text = "Built by people who think privacy is a right",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Text(
+            text = "Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
         )
     }
