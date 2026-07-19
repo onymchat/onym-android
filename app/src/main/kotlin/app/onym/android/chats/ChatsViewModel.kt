@@ -123,4 +123,16 @@ class ChatsViewModel(
             broadcaster.setAvatar(groupId, avatar)
         }
     }
+
+    /**
+     * Admin-only: rename the group and broadcast the change. No-op when
+     * the broadcaster wasn't wired. The broadcaster enforces the admin
+     * gate + trims/ignores a blank name.
+     */
+    fun setGroupName(groupId: String, name: String) {
+        val broadcaster = avatarBroadcaster ?: return
+        viewModelScope.launch {
+            broadcaster.setName(groupId, name)
+        }
+    }
 }

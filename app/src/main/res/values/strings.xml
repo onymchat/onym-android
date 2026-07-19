@@ -645,4 +645,8 @@
   <string name="group_fallback_name">Group</string>
   <string name="identity_default_name">Identity</string>
   <string name="share_invite_chooser_title">Share invite link</string>
+  <string name="group_rename_title">Rename group</string>
+  <string name="group_rename_placeholder">Group name</string>
+  <string name="group_rename_message">Everyone in the group will see the new name.</string>
+  <string name="group_rename_cd">Rename group</string>
 </resources>

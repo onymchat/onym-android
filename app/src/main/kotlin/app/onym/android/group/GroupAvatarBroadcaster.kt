@@ -106,6 +106,60 @@ class GroupAvatarBroadcaster(
         return Outcome.Sent
     }
 
+    /**
+     * Rename the group and broadcast the change. Same admin gate + best-
+     * effort per-member fan-out as [setAvatar]. Whitespace-trimmed; a
+     * blank name (or one equal to the current) is a no-op returning
+     * [Outcome.Sent].
+     */
+    suspend fun setName(groupId: String, name: String): Outcome {
+        val trimmed = name.trim()
+        val group = groupRepository.snapshots.value
+            .firstOrNull { it.id.equals(groupId, ignoreCase = true) }
+            ?: return Outcome.UnknownGroup
+
+        val activeId = activeIdentity.currentIdentityId.value ?: return Outcome.NoIdentity
+        val activeBls = identitiesFlow.value
+            .firstOrNull { it.id == activeId }
+            ?.blsPublicKey
+            ?: return Outcome.NoIdentity
+        val activeBlsHex = activeBls.toHexLowercase()
+
+        val adminHex = group.adminPubkeyHex?.lowercase() ?: return Outcome.NotAdmin
+        if (activeBlsHex != adminHex) return Outcome.NotAdmin
+
+        if (trimmed.isEmpty() || trimmed == group.name) return Outcome.Sent
+
+        // Apply + persist first; broadcast is best-effort.
+        groupRepository.insert(group.copy(name = trimmed))
+
+        val payload = GroupNamePayload(
+            version = 1,
+            groupId = group.groupIdBytes,
+            senderBlsHex = activeBlsHex,
+            sentAtMillis = System.currentTimeMillis(),
+            name = trimmed,
+        )
+        val payloadBytes = try {
+            jsonFormat.encodeToString(GroupNamePayload.serializer(), payload)
+                .toByteArray(Charsets.UTF_8)
+        } catch (_: Throwable) {
+            return Outcome.Sent
+        }
+
+        for ((memberKey, profile) in group.memberProfiles) {
+            if (memberKey.equals(activeBlsHex, ignoreCase = true)) continue // skip self
+            val sealed = try {
+                envelopeSealer.sealInvitation(payloadBytes, profile.inboxPublicKey)
+            } catch (_: Throwable) {
+                continue
+            }
+            val tag = TransportInboxId(IdentityRepository.inboxTag(profile.inboxPublicKey))
+            runCatching { inboxTransport.send(sealed, tag) }
+        }
+        return Outcome.Sent
+    }
+
     private companion object {
         /** `encodeDefaults = false` so a null avatar (removal) omits the
          *  `avatar` key entirely, matching the iOS removal wire shape. */

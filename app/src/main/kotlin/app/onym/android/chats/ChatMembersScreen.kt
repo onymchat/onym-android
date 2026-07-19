@@ -27,8 +27,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +41,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -123,6 +128,9 @@ fun ChatMembersScreen(
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Admin-only rename dialog state.
+    var showRename by remember { mutableStateOf(false) }
+    var renameText by remember { mutableStateOf("") }
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -149,6 +157,21 @@ fun ChatMembersScreen(
                     }
                 },
                 actions = {
+                    // Admin-only rename (same gate as the avatar edit).
+                    if (canEditAvatar && group != null) {
+                        IconButton(
+                            onClick = {
+                                renameText = group.name
+                                showRename = true
+                            },
+                            modifier = Modifier.testTag("members.rename_button"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.DriveFileRenameOutline,
+                                contentDescription = stringResource(R.string.group_rename_cd),
+                            )
+                        }
+                    }
                     // PR 86 wires the share-invite toolbar; PR 94
                     // hides it for non-admins.
                     if (showShareInvite) {
@@ -185,6 +208,38 @@ fun ChatMembersScreen(
                 modifier = Modifier.padding(padding).fillMaxSize(),
             )
         }
+    }
+
+    if (showRename && group != null) {
+        AlertDialog(
+            onDismissRequest = { showRename = false },
+            title = { Text(stringResource(R.string.group_rename_title)) },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.group_rename_placeholder)) },
+                    supportingText = { Text(stringResource(R.string.group_rename_message)) },
+                    modifier = Modifier.testTag("members.rename_field"),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        chatsViewModel.setGroupName(group.id, renameText)
+                        showRename = false
+                    },
+                    enabled = renameText.isNotBlank(),
+                    modifier = Modifier.testTag("members.rename_save"),
+                ) { Text(stringResource(R.string.save)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRename = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 

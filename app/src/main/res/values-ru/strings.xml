@@ -643,4 +643,8 @@
   <string name="group_fallback_name">Группа</string>
   <string name="identity_default_name">Личность</string>
   <string name="share_invite_chooser_title">Поделиться ссылкой-приглашением</string>
+  <string name="group_rename_title">Переименовать группу</string>
+  <string name="group_rename_placeholder">Название группы</string>
+  <string name="group_rename_message">Все участники группы увидят новое название.</string>
+  <string name="group_rename_cd">Переименовать группу</string>
 </resources>

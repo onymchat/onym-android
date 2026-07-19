@@ -14,6 +14,7 @@ import app.onym.android.chats.MessageRepository
 import app.onym.android.chats.MessageStatus
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupAvatarPayload
+import app.onym.android.group.GroupNamePayload
 import app.onym.android.group.GroupCommitmentBuilder
 import app.onym.android.group.GroupInvitationPayload
 import app.onym.android.group.GroupInviteOfferPayload
@@ -182,6 +183,15 @@ class IncomingMessageDispatcher(
         val avatarUpdate = tryDecodeGroupAvatar(envelope.plaintext)
         if (avatarUpdate != null) {
             applyAvatar(avatarUpdate, envelope.senderEd25519PublicKey)
+            return
+        }
+
+        // Fast path: GroupNamePayload — admin-signed group rename. Same
+        // admin-Ed25519 trust gate as the avatar; unique `name_*` keys
+        // keep it disjoint from every other payload.
+        val nameUpdate = tryDecodeGroupName(envelope.plaintext)
+        if (nameUpdate != null) {
+            applyName(nameUpdate, envelope.senderEd25519PublicKey)
             return
         }
 
@@ -509,6 +519,36 @@ class IncomingMessageDispatcher(
         if (unchanged) return
 
         groupRepository.insert(group.copy(avatar = incoming))
+    }
+
+    private suspend fun applyName(
+        payload: GroupNamePayload,
+        senderEd25519PublicKey: ByteArray?,
+    ) {
+        val trimmed = payload.name.trim()
+        if (trimmed.isEmpty()) return
+        val group = groupRepository.snapshots.value.firstOrNull {
+            it.groupIdBytes.contentEquals(payload.groupId)
+        } ?: return
+
+        // Trust gate: the rename must be signed by the group's known admin.
+        val storedAdmin = group.adminEd25519PubkeyHex
+        if (storedAdmin != null) {
+            val sender = senderEd25519PublicKey ?: return
+            if (sender.toHexLowercase() != storedAdmin.lowercase()) return
+        }
+
+        if (group.name == trimmed) return
+        groupRepository.insert(group.copy(name = trimmed))
+    }
+
+    private fun tryDecodeGroupName(bytes: ByteArray): GroupNamePayload? = try {
+        permissiveJson.decodeFromString(
+            GroupNamePayload.serializer(),
+            bytes.toString(Charsets.UTF_8),
+        )
+    } catch (_: Throwable) {
+        null
     }
 
     private fun tryDecodeGroupAvatar(bytes: ByteArray): GroupAvatarPayload? = try {
