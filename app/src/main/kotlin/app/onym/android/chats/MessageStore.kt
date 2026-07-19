@@ -68,4 +68,9 @@ interface MessageStore {
     /** Cascade delete for the group-deletion flow, scoped to the
      *  owner. Returns the number of rows deleted. */
     suspend fun deleteForGroup(groupId: String, ownerIdentityId: String): Int
+
+    /** Wipe every message across all identities and groups (the Settings
+     *  "clear local message cache" action). Chats/groups are a separate
+     *  database and survive. Returns the number of rows deleted. */
+    suspend fun deleteAll(): Int
 }

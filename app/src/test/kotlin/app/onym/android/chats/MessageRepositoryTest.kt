@@ -180,6 +180,34 @@ class MessageRepositoryTest {
         assertEquals(1, store.listForGroup(bobId.value, groupA).size)
     }
 
+    // ─── clearAll (Settings → clear local message cache) ──────────
+
+    @Test
+    fun clearAll_wipesEveryOwnerAndGroup_andEmptiesCachedFlows() = runTest {
+        val store = InMemoryMessageStore()
+        // Two identities, two groups — everything must go.
+        store.preload(listOf(
+            makeMessage(owner = aliceId, group = groupA, body = "a-a"),
+            makeMessage(owner = aliceId, group = groupB, body = "a-b"),
+            makeMessage(owner = bobId, group = groupA, body = "b-a"),
+        ))
+        val repo = makeRepo(store, active = aliceId)
+        val flowA = repo.snapshots(groupA)
+        val flowB = repo.snapshots(groupB)
+        assertEquals(1, flowA.first().size)
+        assertEquals(1, flowB.first().size)
+
+        repo.clearAll()
+
+        // Active identity's cached flows drain live.
+        assertTrue("group A cache empty", flowA.first().isEmpty())
+        assertTrue("group B cache empty", flowB.first().isEmpty())
+        // The store is wiped for every owner, not just the active one.
+        assertTrue(store.listForGroup(aliceId.value, groupA).isEmpty())
+        assertTrue(store.listForGroup(aliceId.value, groupB).isEmpty())
+        assertTrue(store.listForGroup(bobId.value, groupA).isEmpty())
+    }
+
     // ─── removeForGroup cascade ───────────────────────────────────
 
     @Test

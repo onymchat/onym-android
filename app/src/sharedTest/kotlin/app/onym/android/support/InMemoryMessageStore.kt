@@ -113,4 +113,10 @@ class InMemoryMessageStore : MessageStore {
         rows.values.removeAll { it.groupId == groupId && it.ownerIdentityId == ownerIdentityId }
         before - rows.size
     }
+
+    override suspend fun deleteAll(): Int = mutex.withLock {
+        val before = rows.size
+        rows.clear()
+        before
+    }
 }

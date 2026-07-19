@@ -809,6 +809,7 @@ class OnymApplication : Application() {
                 )
             },
             nostrRelaysFlow = nostrRelaysRepository.snapshots,
+            clearAllMessages = { messageRepository.clearAll() },
             makeJoinViewModel = { capability ->
                 // PR 92: prefill the display-name field from the
                 // active identity's alias. Empty when the identity

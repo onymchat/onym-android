@@ -81,4 +81,8 @@ class AppDependencies(
     /** Live snapshot of configured Nostr relays — drives the
      *  Settings entry's "{n} configured" subtitle. */
     val nostrRelaysFlow: kotlinx.coroutines.flow.StateFlow<app.onym.android.transport.nostr.NostrRelaysConfiguration>,
+    /** Wipe every local message (keeps chats). Wired to
+     *  `MessageRepository.clearAll`; run behind a two-step confirm from
+     *  Settings → Data → Clear local message cache. */
+    val clearAllMessages: suspend () -> Unit,
 )

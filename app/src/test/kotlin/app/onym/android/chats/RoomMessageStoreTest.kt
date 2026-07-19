@@ -328,6 +328,21 @@ class RoomMessageStoreTest {
     }
 
     @Test
+    fun deleteAll_removesEveryRowAcrossOwnersAndGroups() = runTest {
+        val groupA = "aa".repeat(32)
+        val groupB = "bb".repeat(32)
+        store.insert(makeMessage(owner = "alice", group = groupA, body = "a-A"))
+        store.insert(makeMessage(owner = "alice", group = groupB, body = "a-B"))
+        store.insert(makeMessage(owner = "bob", group = groupA, body = "b-A"))
+
+        val deleted = store.deleteAll()
+        assertEquals(3, deleted)
+        assertTrue(store.listForGroup("alice", groupA).isEmpty())
+        assertTrue(store.listForGroup("alice", groupB).isEmpty())
+        assertTrue(store.listForGroup("bob", groupA).isEmpty())
+    }
+
+    @Test
     fun deleteForGroup_removesEveryRowForThatGroup() = runTest {
         val groupA = "aa".repeat(32)
         val groupB = "bb".repeat(32)

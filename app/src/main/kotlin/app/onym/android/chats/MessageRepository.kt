@@ -229,6 +229,22 @@ class MessageRepository(
     }
 
     /**
+     * Wipe every message on the device (Settings "clear local message
+     * cache"). Chats/groups live in a separate database and survive.
+     * Refreshes every cached group so open threads empty out immediately;
+     * the chat list reacts via the store's change token (Room
+     * invalidation), recomputing each chat's latest-message + unread to
+     * empty.
+     */
+    suspend fun clearAll() = mutex.withLock {
+        store.deleteAll()
+        val activeOwnerId = identity.currentIdentityId.value?.value
+        for ((groupId, _) in perGroup) {
+            refreshGroupLocked(activeOwnerId, groupId)
+        }
+    }
+
+    /**
      * Delete a single message (the failed-media Delete action) and
      * refresh the group's cached flow so the bubble disappears.
      */

@@ -95,6 +95,9 @@ class RoomMessageStore(
     override suspend fun deleteForGroup(groupId: String, ownerIdentityId: String): Int =
         withContext(ioDispatcher) { dao.deleteForGroup(groupId, ownerIdentityId) }
 
+    override suspend fun deleteAll(): Int =
+        withContext(ioDispatcher) { dao.deleteAll() }
+
     // ─── encode / decode boundary ──────────────────────────────────
 
     private fun encode(message: ChatMessage): PersistedMessage = PersistedMessage(

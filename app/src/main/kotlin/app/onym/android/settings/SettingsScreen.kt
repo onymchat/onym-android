@@ -20,22 +20,28 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -95,7 +101,13 @@ fun SettingsScreen(
     /** Live count of configured Nostr relays — drives the Settings
      *  row's subtitle. */
     nostrRelaysCount: Int = 0,
+    /** Wipe every local message (keeps chats). Invoked only after the
+     *  Data → "Clear local message cache" two-step confirmation. */
+    onClearMessages: () -> Unit = {},
 ) {
+    // Two gates of the "clear message cache" double-confirm.
+    var showClearConfirm1 by remember { mutableStateOf(false) }
+    var showClearConfirm2 by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
         rememberTopAppBarState()
     )
@@ -250,6 +262,32 @@ fun SettingsScreen(
                 }
             }
 
+            // ─── DATA ──────────────────────────────────────────────
+            item { SettingsSectionLabel("DATA") }
+            item {
+                SettingsCard {
+                    SettingsRow(
+                        leading = {
+                            SettingsTileBox(Icons.Filled.DeleteSweep, SettingsTile.Red)
+                        },
+                        title = "Clear Local Message Cache",
+                        titleColor = SettingsTile.Red,
+                        subtitle = "Delete every message on this device. Your chats stay.",
+                        showChevron = false,
+                        onClick = { showClearConfirm1 = true },
+                        isLast = true,
+                        modifier = Modifier.testTag("settings.clear_messages_row"),
+                    )
+                }
+            }
+            item {
+                SettingsFootnote(
+                    "Onym keeps no copy of your messages on any server — this device is " +
+                        "the only place they live. Cleared messages can't be downloaded " +
+                        "again: relays hold them only briefly and may already have dropped them."
+                )
+            }
+
             // ─── APP ───────────────────────────────────────────────
             item { SettingsSectionLabel(stringResource(R.string.settings_app_section).uppercase()) }
             item {
@@ -276,6 +314,58 @@ fun SettingsScreen(
             item { BrandFooter() }
             item { Spacer(Modifier.height(32.dp)) }
         }
+    }
+
+    // Double confirmation: the first dialog explains what's lost and that
+    // it can't be re-downloaded; the second is a final are-you-sure.
+    if (showClearConfirm1) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm1 = false },
+            title = { Text("Clear all messages?") },
+            text = {
+                Text(
+                    "This permanently deletes every message stored on this device. " +
+                        "Your chats stay in the list, but the messages inside them will be gone.\n\n" +
+                        "Onym keeps no copy on its servers, and messages can't be re-downloaded — " +
+                        "relay copies are best-effort and may already have expired."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirm1 = false
+                        showClearConfirm2 = true
+                    },
+                    modifier = Modifier.testTag("settings.clear_messages.confirm1"),
+                ) {
+                    Text("Clear Messages", color = SettingsTile.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm1 = false }) { Text("Cancel") }
+            },
+        )
+    }
+    if (showClearConfirm2) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm2 = false },
+            title = { Text("Delete all messages?") },
+            text = { Text("This can't be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirm2 = false
+                        onClearMessages()
+                    },
+                    modifier = Modifier.testTag("settings.clear_messages.confirm2"),
+                ) {
+                    Text("Delete All Messages", color = SettingsTile.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm2 = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 

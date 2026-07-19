@@ -33,6 +33,7 @@ class SettingsScreenObject(private val rule: ComposeContentTestRule) {
     fun tapRelayerRow() = scrollAndClick("settings.relayer_row")
     fun tapAnchorsRow() = scrollAndClick("settings.anchors_row")
     fun tapIdentitiesRow() = scrollAndClick("settings.identities_row")
+    fun tapClearMessagesRow() = scrollAndClick("settings.clear_messages_row")
 
     private fun scrollAndClick(tag: String) {
         openSettingsTab()

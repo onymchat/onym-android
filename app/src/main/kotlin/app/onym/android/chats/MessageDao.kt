@@ -116,4 +116,10 @@ interface MessageDao {
      *  of the same group intact. Returns the number of rows deleted. */
     @Query("DELETE FROM messages WHERE groupId = :groupId AND ownerIdentityId = :ownerIdentityId")
     suspend fun deleteForGroup(groupId: String, ownerIdentityId: String): Int
+
+    /** Wipe every message across all identities and groups (the Settings
+     *  "clear local message cache" action). Groups live in a separate
+     *  database, so this can't touch chats. Returns the rows deleted. */
+    @Query("DELETE FROM messages")
+    suspend fun deleteAll(): Int
 }

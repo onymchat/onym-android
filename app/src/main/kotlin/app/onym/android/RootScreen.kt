@@ -318,6 +318,9 @@ fun RootScreen(
                     },
                     onNostrRelaysClick = { navController.navigate(ROUTE_NOSTR_RELAYS) },
                     nostrRelaysCount = nostrRelays.endpoints.size,
+                    onClearMessages = {
+                        coroutineScope.launch { dependencies.clearAllMessages() }
+                    },
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
