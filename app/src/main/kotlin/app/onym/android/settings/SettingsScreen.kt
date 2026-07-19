@@ -221,8 +221,8 @@ fun SettingsScreen(
                 )
             }
 
-            // ─── CHAT ──────────────────────────────────────────────
-            item { SettingsSectionLabel("CHAT") }
+            // ─── DATA ──────────────────────────────────────────────
+            item { SettingsSectionLabel("DATA") }
             item {
                 SettingsCard {
                     SettingsRow(
@@ -243,15 +243,7 @@ fun SettingsScreen(
                             )
                         },
                         onClick = { onToggleReadReceipts(!sendReadReceipts) },
-                        isLast = true,
                     )
-                }
-            }
-
-            // ─── DATA ──────────────────────────────────────────────
-            item { SettingsSectionLabel("DATA") }
-            item {
-                SettingsCard {
                     SettingsRow(
                         leading = {
                             SettingsTileBox(Icons.Filled.DeleteSweep, SettingsTile.Red)
