@@ -573,7 +573,6 @@ fun RootScreen(
                     network = net,
                     type = gov,
                     onBack = { navController.popBackStack() },
-                    onUseDeployed = { navController.popBackStack() },
                 )
             }
             composable(ROUTE_RECOVERY_BACKUP) {
