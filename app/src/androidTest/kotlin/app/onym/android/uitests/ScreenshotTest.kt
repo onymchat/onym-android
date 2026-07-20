@@ -30,7 +30,6 @@ import tools.fastlane.screengrab.Screengrab
 import tools.fastlane.screengrab.locale.LocaleTestRule
 import tools.fastlane.screengrab.UiAutomatorScreenshotStrategy
 import java.security.Security
-import java.util.UUID
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -78,7 +77,7 @@ class ScreenshotTest {
             val ctx = ApplicationProvider.getApplicationContext<app.onym.android.OnymApplication>()
             identityStore = IdentitySecretStore(
                 ctx,
-                prefsFileName = "app.onym.android.identity.screenshots.${UUID.randomUUID()}",
+                prefsFileName = "app.onym.android.identity.screenshotuitests",
             )
             LoopbackRegistryHarness.configure(identityStore, chainLedger)
             ctx.rebuildDependenciesForTest()

@@ -26,7 +26,6 @@ import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 import org.junit.runner.RunWith
 import java.security.Security
-import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -62,7 +61,7 @@ class IdentitiesUITest {
             val ctx = ApplicationProvider.getApplicationContext<app.onym.android.OnymApplication>()
             identityStore = IdentitySecretStore(
                 ctx,
-                prefsFileName = "app.onym.android.identity.uitests.${UUID.randomUUID()}",
+                prefsFileName = "app.onym.android.identity.identitiesuitests",
             )
             // Seed every other store IdentitiesUITest doesn't directly
             // assert on, so MainActivity's Application.onCreate doesn't

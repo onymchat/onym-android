@@ -18,7 +18,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.security.SecureRandom
 import java.security.Security
-import java.util.UUID
 
 /**
  * End-to-end test of [IdentityRepository.decryptInvitation] against
@@ -65,7 +64,7 @@ class IdentityRepositoryInvitationDecryptTest {
         ctx = ApplicationProvider.getApplicationContext()
         store = IdentitySecretStore(
             ctx,
-            prefsFileName = "app.onym.android.identity.invitedecrypt.${UUID.randomUUID()}",
+            prefsFileName = "app.onym.android.identity.invitedecrypt",
         )
         repo = IdentityRepository(store)
         runBlocking { repo.restore(testMnemonic) }
