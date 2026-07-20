@@ -1,0 +1,92 @@
+name: UI tests
+
+# The Compose UI test suite (`app/src/androidTest/.../uitests`, e.g.
+# IdentitiesUITest, MultiIdentityChatUITest, SearchUITest). These drive
+# real Poseidon-proof + Compose flows and are deliberately NOT part of
+# the release gate: they render reliably on a real GPU (they pass
+# locally: `./gradlew connectedDebugAndroidTest`), but STALL on GitHub's
+# software-GPU (swiftshader) emulator — the screens don't render within
+# their waits, independent of test count / RAM / GPU image (google_apis
+# and ATD both reproduced it). Kept here as a manual + nightly signal so
+# the release workflow (release.yml) stays green on the non-UI
+# instrumented suite. To get these green in CI, run them on a
+# self-hosted runner with a real GPU (as onym-ios does for its UI tests).
+#
+# Mirrors onym-ios keeping its heavy E2E tests off the release gate.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:00 UTC nightly — non-blocking signal, not a release gate.
+    - cron: "0 4 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  ui-tests:
+    name: Compose UI tests on emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # AAPT2 needs the real launcher PNGs (Git LFS), not the pointers.
+          lfs: true
+
+      - name: Enable KVM group permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
+
+      - name: Cache AVD snapshot
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-api-34-google-apis-x86_64
+
+      - name: Create AVD + warm snapshot
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@70f4dee990796918b78d040e3278474bdbd348a7  # v2.37.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "AVD warm snapshot created"
+
+      - name: Run Compose UI tests on emulator
+        # Only the uitests package; ScreenshotTest is a screengrab flow
+        # (covered by `fastlane screenshots`), not a correctness test.
+        uses: reactivecircus/android-emulator-runner@70f4dee990796918b78d040e3278474bdbd348a7  # v2.37.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.package=app.onym.android.uitests -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest
+
+      - name: Upload androidTest report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: ui-tests-report
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
