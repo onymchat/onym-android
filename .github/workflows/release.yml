@@ -168,13 +168,22 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
+          # Two-phase run on the same emulator boot. The app process
+          # accumulates state over a long instrumentation run — after
+          # ~120 tests the heavy restore/search Compose flows stall past
+          # their waits (not GPU/RAM/flake: ATD, 6 GB, fresh boots, and
+          # sharding all reproduced it; a separate `am instrument` with a
+          # fresh app process does not). So run those two classes in
+          # their own second invocation (fresh process, few predecessors)
+          # after the bulk. Both must pass (&&). ScreenshotTest is a
+          # screengrab flow (covered by `fastlane screenshots`), excluded.
+          #
           # One line on purpose: `reactivecircus/android-emulator-runner`
-          # invokes the script via `sh -c <script>` without quoting,
-          # so YAML-block backslash continuations (`\<newline>`) get
-          # split into separate sh arguments and gradle sees a literal
-          # `\` task name. Run #25262842752 failed exactly that way;
-          # keep the gradle invocation single-line to dodge the issue.
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest
+          # invokes the script via `sh -c <script>` without quoting, so
+          # YAML-block backslash continuations split into separate sh
+          # args and gradle sees a literal `\` task name (run
+          # #25262842752 failed exactly that way).
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notClass=app.onym.android.uitests.ScreenshotTest,app.onym.android.uitests.IdentitiesUITest,app.onym.android.uitests.SearchUITest && ./gradlew :app:connectedDebugAndroidTest --no-daemon --rerun-tasks -Pandroid.testInstrumentationRunnerArguments.class=app.onym.android.uitests.IdentitiesUITest,app.onym.android.uitests.SearchUITest
 
       - name: Upload androidTest report
         # Always upload — the `report-to-issue` job needs to read the
