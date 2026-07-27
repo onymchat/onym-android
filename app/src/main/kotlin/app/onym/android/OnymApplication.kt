@@ -41,6 +41,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.lang.ref.WeakReference
@@ -212,22 +213,25 @@ class OnymApplication : Application() {
         val clipboard = AndroidClipboardWriter(applicationContext)
         val strings = AndroidStringProvider(applicationContext)
 
-        // Single OkHttpClient with the relayer Bearer auth
-        // interceptor installed once. The relayer's `validate_auth`
-        // requires the header on every contract-call POST; the
-        // interceptor adds it transparently so callers (relayer
-        // fetcher, contracts manifest fetcher, SEP contract client)
-        // don't have to know about the token.
+        // ONY-001: the relayer bearer token must NEVER leave the relayer
+        // origin. This `httpClient` is the *unauthenticated* client — it
+        // carries NO `Authorization` header — and is the one shared with
+        // every cross-origin consumer: the GitHub release fetchers, the
+        // Nostr relay fetcher, and (crucially) the user-configurable
+        // Blossom media client. Attaching the relayer credential to any
+        // of those would leak it to hosts the user, or an attacker who
+        // can configure a Blossom server, controls.
         //
+        // The relayer credential is attached only by the per-transport
+        // client built in `contractTransportFactory` below, host-scoped
+        // to the relayer endpoint.
+        val httpClient = OkHttpClient.Builder().build()
+
         // `takeIf { isNotBlank() }` keeps the dev experience honest:
         // if `local.properties` is missing the token, no header is
         // added (relayer 401s with a clear message) instead of
         // `Authorization: Bearer ""` (also 401, but more confusing).
-        val httpClient = OkHttpClient.Builder()
-            .addInterceptor(BearerAuthInterceptor(
-                token = BuildConfig.RELAYER_AUTH_TOKEN.takeIf { it.isNotBlank() },
-            ))
-            .build()
+        val relayerAuthToken = BuildConfig.RELAYER_AUTH_TOKEN.takeIf { it.isNotBlank() }
 
         // Relayer wiring (PR #17). Bootstrap loads cached + selection
         // from disk; start() fires the network fetch. Both run on the
@@ -437,7 +441,26 @@ class OnymApplication : Application() {
             if (UITestRegistry.enabled && UITestRegistry.contractTransportFactory != null) {
                 UITestRegistry.contractTransportFactory!!
             } else {
-                { url -> OkHttpSepContractTransport(httpClient = httpClient, endpointUrl = url) }
+                { url ->
+                    // ONY-001: this is the ONLY place the relayer bearer
+                    // token is attached. Derive a client from the shared
+                    // (bearer-free) `httpClient` via `newBuilder()` so we
+                    // reuse its connection pool + dispatcher, then add a
+                    // bearer interceptor scoped to THIS relayer endpoint's
+                    // host. A cross-origin redirect therefore can't carry
+                    // the token off the relayer (OkHttp also strips
+                    // `Authorization` on cross-host redirects).
+                    val relayerHost = url.toHttpUrlOrNull()?.host
+                    val relayerClient = httpClient.newBuilder()
+                        .addInterceptor(
+                            BearerAuthInterceptor(
+                                token = relayerAuthToken,
+                                allowedHost = relayerHost,
+                            ),
+                        )
+                        .build()
+                    OkHttpSepContractTransport(httpClient = relayerClient, endpointUrl = url)
+                }
             }
         // Blossom media server for image messages + the lazy loader.
         // Swapped for an in-memory store under the UI-test harness.
