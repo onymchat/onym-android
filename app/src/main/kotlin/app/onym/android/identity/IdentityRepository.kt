@@ -617,9 +617,25 @@ class IdentityRepository(
             }
             val envelope = parseEnvelope(envelopeBytes)
             val plaintext = openEnvelope(envelope, recipientX25519PrivateKey)
+            // C-1: surface the sender Ed25519 pubkey as authenticated
+            // provenance ONLY when the envelope actually carried a
+            // signature over the ephemeral key. By this point
+            // parseEnvelope() has VERIFIED that signature (and thrown
+            // SignatureFailed / MalformedEnvelope otherwise), so a
+            // non-null signature guarantees the pubkey is trustworthy.
+            // When the signature is absent we return null even if the
+            // wire carried a `sender_ed25519_public_key` block — an
+            // unsigned pubkey is an unauthenticated claim (an attacker
+            // who knows the recipient's public inbox key can seal a
+            // valid envelope and stamp any pubkey they like), so
+            // callers MUST treat it as "no proof of sender". Senders
+            // always sign, so this is receiver-side hardening with no
+            // wire change.
+            val authenticatedSender: ByteArray? =
+                envelope.ephemeralKeySignature?.let { envelope.senderEd25519PublicKey }
             return DecryptedEnvelope(
                 plaintext = plaintext,
-                senderEd25519PublicKey = envelope.senderEd25519PublicKey,
+                senderEd25519PublicKey = authenticatedSender,
             )
         }
 

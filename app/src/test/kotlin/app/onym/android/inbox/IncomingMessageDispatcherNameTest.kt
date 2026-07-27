@@ -6,6 +6,7 @@ import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupNamePayload
 import app.onym.android.group.GroupRepository
 import app.onym.android.group.GroupStore
+import app.onym.android.group.MemberProfile
 import app.onym.android.identity.ActiveIdentityProvider
 import app.onym.android.identity.DecryptedEnvelope
 import app.onym.android.identity.IdentityId
@@ -34,6 +35,14 @@ class IncomingMessageDispatcherNameTest {
     private val adminEd25519 = ByteArray(32) { 0x10 }
     private val adminEd25519Hex = adminEd25519.toHex()
     private val ownerIdentity = IdentityId("owner")
+    // A current member's Ed25519 sending pubkey, used for the
+    // admin-less-group authorization cases.
+    private val memberSending = ByteArray(32) { 0x55 }
+    private val memberProfileEntry = "ab".repeat(48) to MemberProfile(
+        alias = "Member",
+        inboxPublicKey = ByteArray(32) { 0x66 },
+        sendingPubkey = memberSending,
+    )
 
     private lateinit var groupRepository: GroupRepository
     private lateinit var invitationsRepository: IncomingInvitationsRepository
@@ -85,10 +94,40 @@ class IncomingMessageDispatcherNameTest {
     }
 
     @Test
-    fun name_appliedBestEffortWhenNoStoredAdmin() = runTest {
-        seed(group(adminEd25519Hex = null))
-        dispatch(payload(name = "Renamed"), senderPub = null)
+    fun name_appliedWhenAdminlessGroupAndSignerIsMember() = runTest {
+        // H-2: an admin-less group (Anarchy / OneOnOne / legacy row)
+        // no longer skips the sender check — a rename from a CURRENT
+        // member is still honored.
+        seed(group(adminEd25519Hex = null, memberProfiles = mapOf(memberProfileEntry)))
+        dispatch(payload(name = "Renamed"), senderPub = memberSending)
         assertEquals("Renamed", groupRepository.snapshots.value.single().name)
+    }
+
+    @Test
+    fun name_rejectedWhenAdminlessGroupAndSignerNotMember() = runTest {
+        // H-2 fix: admin-less group must reject a rename from a signer
+        // who isn't a current member (previously this was skipped and
+        // any outsider could rename).
+        seed(group(adminEd25519Hex = null, memberProfiles = mapOf(memberProfileEntry)))
+        dispatch(payload(name = "Hacked"), senderPub = ByteArray(32) { 0x99.toByte() })
+        assertEquals(
+            "outsider rename on an admin-less group must not mutate",
+            "Family",
+            groupRepository.snapshots.value.single().name,
+        )
+    }
+
+    @Test
+    fun name_rejectedWhenAdminlessGroupAndNoSigner() = runTest {
+        // H-2 fix: a missing (unauthenticated) signer is never trusted,
+        // even on an admin-less group.
+        seed(group(adminEd25519Hex = null, memberProfiles = mapOf(memberProfileEntry)))
+        dispatch(payload(name = "Hacked"), senderPub = null)
+        assertEquals(
+            "unauthenticated rename must not mutate",
+            "Family",
+            groupRepository.snapshots.value.single().name,
+        )
     }
 
     private suspend fun seed(group: ChatGroup) {
@@ -115,14 +154,17 @@ class IncomingMessageDispatcherNameTest {
         name = name,
     )
 
-    private fun group(adminEd25519Hex: String?): ChatGroup =
+    private fun group(
+        adminEd25519Hex: String?,
+        memberProfiles: Map<String, MemberProfile> = emptyMap(),
+    ): ChatGroup =
         ChatGroup(
             id = groupId.toHex(),
             name = "Family",
             groupSecret = ByteArray(32),
             createdAtMillis = 0L,
             members = emptyList(),
-            memberProfiles = emptyMap(),
+            memberProfiles = memberProfiles,
             epoch = 0uL,
             salt = ByteArray(32),
             commitment = null,

@@ -411,9 +411,10 @@ class IncomingMessageDispatcher(
      *     (re-delivery, or the admin's own approve loop
      *     re-broadcasting).
      *
-     * PR 84 adds the admin-Ed25519 trust check. Until then the only
-     * provenance gate is the outer envelope's signature (verified by
-     * [InvitationEnvelopeDecrypter]).
+     * Authorization gate ([senderAuthorizedToMutate]): the verified
+     * envelope signer must be the group's stored admin, or — for
+     * admin-less groups — a current member. A missing/unverified
+     * signer is rejected.
      */
     private suspend fun applyAnnouncement(
         payload: MemberAnnouncementPayload,
@@ -434,17 +435,12 @@ class IncomingMessageDispatcher(
         val key = payload.newMember.blsPub.toHexLowercase()
         if (group.memberProfiles[key] != null) return  // dedup
 
-        // PR 84 trust check: announcement must be signed by the
-        // group's known admin. Skipped (best-effort) when the group
-        // has no stored admin Ed25519 — happens for governance
-        // models without an admin (Anarchy / OneOnOne) or pre-PR-84
-        // rows that materialized before the field existed.
-        val storedAdmin = group.adminEd25519PubkeyHex
-        if (storedAdmin != null) {
-            val sender = senderEd25519PublicKey ?: return
-            val senderHex = sender.toHexLowercase()
-            if (senderHex != storedAdmin.lowercase()) return
-        }
+        // Trust check: the roster delta must be authorized. When the
+        // group has a stored admin Ed25519 the signer must equal it;
+        // for admin-less groups the signer must be a current member
+        // (H-2 fix — see [senderAuthorizedToMutate]). A missing/
+        // unverified signer is never trusted.
+        if (!senderAuthorizedToMutate(group, senderEd25519PublicKey)) return
 
         // PR 89: chain-state check. For Tyranny groups, the announced
         // `commitment + epoch` must match what's actually anchored.
@@ -477,12 +473,12 @@ class IncomingMessageDispatcher(
      * group's [ChatGroup.avatar]. No-op when:
      *
      *   - The group isn't on this device (drop unknown group ids).
-     *   - The trust gate fails: a group with a stored admin Ed25519 key
-     *     requires the envelope's verified signer to equal it
-     *     (lowercased hex). Skipped (best-effort) only for admin-less
-     *     governance models / legacy rows with no stored admin — same
-     *     rule as [applyAnnouncement]. There is NO on-chain commitment
-     *     check; the avatar isn't part of the cryptographic group state.
+     *   - The trust gate fails ([senderAuthorizedToMutate]): a group
+     *     with a stored admin Ed25519 key requires the envelope's
+     *     verified signer to equal it; an admin-less group / legacy row
+     *     requires the signer to be a current member — same rule as
+     *     [applyAnnouncement]. There is NO on-chain commitment check;
+     *     the avatar isn't part of the cryptographic group state.
      *   - The stored avatar already equals the incoming bytes
      *     (idempotent re-delivery).
      *
@@ -500,12 +496,10 @@ class IncomingMessageDispatcher(
         } ?: return
 
         // Trust gate (same as member announcements): the change must be
-        // signed by the group's known admin.
-        val storedAdmin = group.adminEd25519PubkeyHex
-        if (storedAdmin != null) {
-            val sender = senderEd25519PublicKey ?: return
-            if (sender.toHexLowercase() != storedAdmin.lowercase()) return
-        }
+        // authorized — signed by the group's known admin, or by a
+        // current member for admin-less groups (H-2 fix). A missing/
+        // unverified signer is never trusted.
+        if (!senderAuthorizedToMutate(group, senderEd25519PublicKey)) return
 
         // Idempotency: no-op when the stored avatar already matches
         // (both absent, or byte-equal).
@@ -531,12 +525,10 @@ class IncomingMessageDispatcher(
             it.groupIdBytes.contentEquals(payload.groupId)
         } ?: return
 
-        // Trust gate: the rename must be signed by the group's known admin.
-        val storedAdmin = group.adminEd25519PubkeyHex
-        if (storedAdmin != null) {
-            val sender = senderEd25519PublicKey ?: return
-            if (sender.toHexLowercase() != storedAdmin.lowercase()) return
-        }
+        // Trust gate: the rename must be authorized — signed by the
+        // group's known admin, or by a current member for admin-less
+        // groups (H-2 fix). A missing/unverified signer is never trusted.
+        if (!senderAuthorizedToMutate(group, senderEd25519PublicKey)) return
 
         if (group.name == trimmed) return
         groupRepository.insert(group.copy(name = trimmed))
@@ -699,6 +691,39 @@ class IncomingMessageDispatcher(
         groupType: SepGroupType,
     ): Boolean = when (variant) {
         is ChatMessageVariant.Tyranny -> groupType == SepGroupType.TYRANNY
+    }
+
+    /**
+     * Shared authorization gate for the admin-signed group-mutation
+     * fast paths (rename / avatar / member announcement).
+     *
+     * [senderEd25519PublicKey] is the envelope's *verified* signer —
+     * the decrypter surfaces it as non-null ONLY after a present-and-
+     * valid Ed25519 signature over the ephemeral key (C-1). A `null`
+     * signer is an unauthenticated message and is ALWAYS rejected here;
+     * we never fall back to "no signer means trust it".
+     *
+     *   - Group has a stored admin Ed25519 → the signer must equal it.
+     *   - Admin-less group (Anarchy / OneOnOne / legacy row with no
+     *     stored admin) → the signer must be a CURRENT member of the
+     *     group, matched by [MemberProfile.sendingPubkey] (H-2 fix).
+     *     Previously the check was skipped entirely for these rows,
+     *     letting any outsider rename the group, swap its avatar, or
+     *     inject a member. Requiring current-membership closes that
+     *     without a wire change — an outsider can't produce an
+     *     envelope signed by an existing member's key.
+     */
+    private fun senderAuthorizedToMutate(
+        group: ChatGroup,
+        senderEd25519PublicKey: ByteArray?,
+    ): Boolean {
+        val sender = senderEd25519PublicKey ?: return false
+        val storedAdmin = group.adminEd25519PubkeyHex
+        return if (storedAdmin != null) {
+            sender.toHexLowercase() == storedAdmin.lowercase()
+        } else {
+            group.memberProfiles.values.any { it.sendingPubkey.contentEquals(sender) }
+        }
     }
 
     /**

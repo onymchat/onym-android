@@ -6,6 +6,7 @@ import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupAvatarPayload
 import app.onym.android.group.GroupRepository
 import app.onym.android.group.GroupStore
+import app.onym.android.group.MemberProfile
 import app.onym.android.identity.ActiveIdentityProvider
 import app.onym.android.identity.DecryptedEnvelope
 import app.onym.android.identity.IdentityId
@@ -39,6 +40,14 @@ class IncomingMessageDispatcherAvatarTest {
     private val adminEd25519Hex = adminEd25519.toHex()
     private val ownerIdentity = IdentityId("owner")
     private val newAvatar = ByteArray(48) { 0x5A }
+    // A current member's Ed25519 sending pubkey, used for the
+    // admin-less-group authorization cases.
+    private val memberSending = ByteArray(32) { 0x55 }
+    private val memberProfileEntry = "ab".repeat(48) to MemberProfile(
+        alias = "Member",
+        inboxPublicKey = ByteArray(32) { 0x66 },
+        sendingPubkey = memberSending,
+    )
 
     private lateinit var groupStore: AvatarInMemoryGroupStore
     private lateinit var groupRepository: GroupRepository
@@ -109,13 +118,38 @@ class IncomingMessageDispatcherAvatarTest {
     }
 
     @Test
-    fun avatar_appliedBestEffortWhenNoStoredAdmin() = runTest {
-        // Admin-less / legacy group (no stored admin Ed25519) → trust
-        // gate skipped, same as member announcements.
-        seed(group(adminEd25519Hex = null, avatar = null))
-        dispatch(payload(avatar = newAvatar), senderPub = null)
+    fun avatar_appliedWhenAdminlessGroupAndSignerIsMember() = runTest {
+        // H-2: an admin-less group no longer skips the sender check —
+        // an avatar change from a CURRENT member is still honored.
+        seed(group(adminEd25519Hex = null, avatar = null, memberProfiles = mapOf(memberProfileEntry)))
+        dispatch(payload(avatar = newAvatar), senderPub = memberSending)
 
         assertArrayEquals(newAvatar, groupRepository.snapshots.value.single().avatar)
+    }
+
+    @Test
+    fun avatar_rejectedWhenAdminlessGroupAndSignerNotMember() = runTest {
+        // H-2 fix: an outsider (non-member) signer must not mutate an
+        // admin-less group's avatar.
+        seed(group(adminEd25519Hex = null, avatar = null, memberProfiles = mapOf(memberProfileEntry)))
+        dispatch(payload(avatar = newAvatar), senderPub = ByteArray(32) { 0x99.toByte() })
+
+        assertNull(
+            "outsider avatar change on an admin-less group must not mutate",
+            groupRepository.snapshots.value.single().avatar,
+        )
+    }
+
+    @Test
+    fun avatar_rejectedWhenAdminlessGroupAndNoSigner() = runTest {
+        // H-2 fix: a missing (unauthenticated) signer is never trusted.
+        seed(group(adminEd25519Hex = null, avatar = null, memberProfiles = mapOf(memberProfileEntry)))
+        dispatch(payload(avatar = newAvatar), senderPub = null)
+
+        assertNull(
+            "unauthenticated avatar change must not mutate",
+            groupRepository.snapshots.value.single().avatar,
+        )
     }
 
     // ─── helpers ──────────────────────────────────────────────────
@@ -149,14 +183,18 @@ class IncomingMessageDispatcherAvatarTest {
         avatar = avatar,
     )
 
-    private fun group(adminEd25519Hex: String?, avatar: ByteArray?): ChatGroup =
+    private fun group(
+        adminEd25519Hex: String?,
+        avatar: ByteArray?,
+        memberProfiles: Map<String, MemberProfile> = emptyMap(),
+    ): ChatGroup =
         ChatGroup(
             id = groupId.toHex(),
             name = "Family",
             groupSecret = ByteArray(32),
             createdAtMillis = 0L,
             members = emptyList(),
-            memberProfiles = emptyMap(),
+            memberProfiles = memberProfiles,
             epoch = 0uL,
             salt = ByteArray(32),
             commitment = null,

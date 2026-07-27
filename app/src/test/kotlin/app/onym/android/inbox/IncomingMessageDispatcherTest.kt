@@ -51,6 +51,8 @@ class IncomingMessageDispatcherTest {
     private val newMemberBlsPub = ByteArray(48) { 0xBB.toByte() }
     private val newMemberInbox = ByteArray(32) { 0xCC.toByte() }
     private val ownerIdentity = IdentityId("owner")
+    private val admin = ByteArray(32) { 0x10 }
+    private val adminHex = admin.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
     private lateinit var groupStore: InMemoryGroupStore
     private lateinit var groupRepository: GroupRepository
@@ -77,11 +79,16 @@ class IncomingMessageDispatcherTest {
 
     @Test
     fun announcement_appendsToLocalGroupAndDoesNotQueue() = runTest {
+        // Seed the group with a stored admin and sign as that admin so
+        // the roster delta is authorized (the routing/no-queue behavior
+        // under test is independent of which trust branch fires).
+        groupStore.replaceForTest(makeGroup(groupId).copy(adminEd25519PubkeyHex = adminHex))
+        groupRepository.reload()
         val payload = announcementPayload()
         val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
             .toByteArray(Charsets.UTF_8)
         val dispatcher = IncomingMessageDispatcher(
-            envelopeDecrypter = StubDecrypter(plaintext, senderPub = ByteArray(32)),
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = admin),
             groupRepository = groupRepository,
             invitationsRepository = invitationsRepository,
         )
@@ -142,11 +149,13 @@ class IncomingMessageDispatcherTest {
 
     @Test
     fun announcement_idempotentOnRedelivery() = runTest {
+        groupStore.replaceForTest(makeGroup(groupId).copy(adminEd25519PubkeyHex = adminHex))
+        groupRepository.reload()
         val payload = announcementPayload()
         val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
             .toByteArray(Charsets.UTF_8)
         val dispatcher = IncomingMessageDispatcher(
-            envelopeDecrypter = StubDecrypter(plaintext, senderPub = ByteArray(32)),
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = admin),
             groupRepository = groupRepository,
             invitationsRepository = invitationsRepository,
         )
@@ -156,6 +165,95 @@ class IncomingMessageDispatcherTest {
 
         val final = groupRepository.snapshots.value.single()
         assertEquals(1, final.memberProfiles.size)
+    }
+
+    @Test
+    fun announcement_adminlessGroup_appliedWhenSignerIsMember() = runTest {
+        // H-2: admin-less group (no stored admin) authorizes a roster
+        // delta from a CURRENT member (matched by sendingPubkey).
+        val memberSending = ByteArray(32) { 0x55 }
+        val memberKey = "ab".repeat(48)
+        groupStore.replaceForTest(
+            makeGroup(groupId).copy(
+                memberProfiles = mapOf(
+                    memberKey to MemberProfile(
+                        alias = "Member",
+                        inboxPublicKey = ByteArray(32) { 0x66 },
+                        sendingPubkey = memberSending,
+                    ),
+                ),
+            ),
+        )
+        groupRepository.reload()
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), announcementPayload())
+            .toByteArray(Charsets.UTF_8)
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = memberSending),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+        )
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        // Existing member profile (1) + the newly announced Bob (1) = 2.
+        assertEquals(2, groupRepository.snapshots.value.single().memberProfiles.size)
+    }
+
+    @Test
+    fun announcement_adminlessGroup_droppedWhenSignerNotMember() = runTest {
+        // H-2 fix: admin-less group must reject a roster delta from a
+        // signer who isn't a current member (previously skipped, so any
+        // outsider could inject a member).
+        val memberSending = ByteArray(32) { 0x55 }
+        val memberKey = "ab".repeat(48)
+        groupStore.replaceForTest(
+            makeGroup(groupId).copy(
+                memberProfiles = mapOf(
+                    memberKey to MemberProfile(
+                        alias = "Member",
+                        inboxPublicKey = ByteArray(32) { 0x66 },
+                        sendingPubkey = memberSending,
+                    ),
+                ),
+            ),
+        )
+        groupRepository.reload()
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), announcementPayload())
+            .toByteArray(Charsets.UTF_8)
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = ByteArray(32) { 0x99.toByte() }),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+        )
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        // Only the pre-existing member remains; the injected Bob dropped.
+        assertEquals(1, groupRepository.snapshots.value.single().memberProfiles.size)
+    }
+
+    @Test
+    fun announcement_adminlessGroup_droppedWhenNoSigner() = runTest {
+        // H-2 fix: a missing (unauthenticated) signer is never trusted.
+        val memberSending = ByteArray(32) { 0x55 }
+        val memberKey = "ab".repeat(48)
+        groupStore.replaceForTest(
+            makeGroup(groupId).copy(
+                memberProfiles = mapOf(
+                    memberKey to MemberProfile(
+                        alias = "Member",
+                        inboxPublicKey = ByteArray(32) { 0x66 },
+                        sendingPubkey = memberSending,
+                    ),
+                ),
+            ),
+        )
+        groupRepository.reload()
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), announcementPayload())
+            .toByteArray(Charsets.UTF_8)
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = null),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+        )
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        assertEquals(1, groupRepository.snapshots.value.single().memberProfiles.size)
     }
 
     @Test
