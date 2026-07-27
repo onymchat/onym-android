@@ -1,5 +1,8 @@
 package app.onym.android.transport.nostr
 
+import app.onym.android.security.TrustedAssetVerifier
+import app.onym.android.security.fetchDetachedSignature
+import app.onym.android.security.signatureUrlFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -34,16 +37,22 @@ data class KnownNostrRelaysDocument(
 class GitHubReleasesKnownNostrRelaysFetcher(
     private val httpClient: OkHttpClient,
     private val url: String = DEFAULT_URL,
+    private val verifier: TrustedAssetVerifier = TrustedAssetVerifier(),
 ) : KnownNostrRelaysFetcher {
 
     override suspend fun fetch(): List<NostrRelayEndpoint> = withContext(Dispatchers.IO) {
+        // H-3: verify raw asset bytes against the offline-signing key
+        // before trusting the relay list (soft mode by default).
+        val signature = httpClient.fetchDetachedSignature(signatureUrlFor(url))
         val request = Request.Builder()
             .url(url.toHttpUrl())
             .header("Accept", "application/json")
             .build()
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("bad status ${response.code}")
-            val body = response.body?.string() ?: throw IOException("empty response body")
+            val bytes = response.body?.bytes() ?: throw IOException("empty response body")
+            verifier.gate("nostr-relays.json", bytes, signature)
+            val body = String(bytes, Charsets.UTF_8)
             jsonFormat.decodeFromString(KnownNostrRelaysDocument.serializer(), body).relays
         }
     }
