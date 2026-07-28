@@ -1,0 +1,152 @@
+name: Play Publish
+
+# Builds a signed Android App Bundle (AAB) and uploads it to a Google
+# Play track (default: internal). Companion to release.yml, which ships
+# the universal APK to the GitHub Release — this workflow is the Play
+# Store distribution path and is dispatched independently so a Play
+# push never gates (or is gated by) the APK release.
+#
+# Signing model: Play App Signing. AGP emits an UNSIGNED release AAB
+# (no signingConfig on the release buildType — same as assembleRelease
+# in release.yml). We sign it here with the existing keystore, which
+# acts as the *upload key*; Google re-signs with the app-signing key it
+# holds. APKs are signed with apksigner; AABs are signed with jarsigner
+# (JAR/v1 signature) — apksigner does not sign bundles.
+#
+# Trigger:
+#   gh workflow run "Play Publish" -f tag=v0.0.69
+#   gh workflow run "Play Publish" -f tag=v0.0.69 -f track=alpha
+#
+# One-time Play Console prerequisites (cannot be automated):
+#   - App must exist in the Play Console under app.onym.android.
+#   - The very first AAB for the package must be uploaded manually in
+#     the console (that enrolls Play App Signing). Subsequent builds
+#     upload automatically via this workflow.
+#
+# Required repo/org secrets:
+#   PLAY_SERVICE_ACCOUNT_JSON  — JSON key of a Google Cloud service
+#                                account granted "Release to testing
+#                                tracks" on app.onym.android in the
+#                                Play Console. Authenticates to the
+#                                Play Developer API.
+#   ANDROID_KEYSTORE_BASE64    — base64-encoded JKS keystore (upload key)
+#   ANDROID_KEYSTORE_PASSWORD  — keystore password
+#   ANDROID_KEY_ALIAS          — alias inside the keystore
+#   ANDROID_KEY_PASSWORD       — password for that alias
+#   RELAYER_AUTH_TOKEN         — inlined into BuildConfig.RELAYER_AUTH_TOKEN
+#                                at bundleRelease; consumed at runtime by
+#                                BearerAuthInterceptor. Same consumer as
+#                                the APK build in release.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.0.69) — sets versionName + versionCode'
+        required: true
+        type: string
+      track:
+        description: 'Play track (internal | alpha | beta | production)'
+        required: false
+        type: string
+        default: 'internal'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build + sign AAB, upload to Play
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # bundleRelease runs AAPT2 over app/src/main/res/, which
+          # includes LFS-tracked launcher PNGs. Without lfs: true AAPT2
+          # sees the pointer text and fails to compile. Same reason as
+          # release.yml.
+          lfs: true
+          # Full history + tags so resolveReleaseVersion() in
+          # app/build.gradle.kts can fall back to `git describe` if the
+          # explicit RELEASE_VERSION env below isn't honoured.
+          fetch-depth: 0
+
+      - name: Validate tag input
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "tag must look like vX.Y.Z (got: $TAG)" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
+
+      - name: bundleRelease
+        # Produces app/build/outputs/bundle/release/app-release.aab
+        # (unsigned — no signingConfig on the release buildType).
+        #
+        # RELEASE_VERSION pipes the dispatch tag into
+        # resolveReleaseVersion(), which sets BuildConfig.VERSION_NAME
+        # and versionCode (MAJOR*10000 + MINOR*100 + PATCH). versionCode
+        # must be strictly greater than any build already on the track.
+        env:
+          RELEASE_VERSION: ${{ inputs.tag }}
+          RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
+        run: ./gradlew :app:bundleRelease --no-daemon
+
+      - name: Locate AAB
+        id: aab
+        run: |
+          set -eu
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          [ -f "$AAB" ] || {
+            echo "expected AAB at $AAB" >&2
+            ls -la app/build/outputs/bundle/release/ 2>&1 >&2 || true
+            exit 1
+          }
+          echo "path=$AAB" >> "$GITHUB_OUTPUT"
+
+      - name: Sign AAB with upload key
+        # AABs use JAR (v1) signing via jarsigner — apksigner cannot
+        # sign bundles. jarsigner picks the digest/signature algorithm
+        # from the key type, so no explicit -sigalg is needed. Signing
+        # is in-place; -verify then fails the build on a bad signature
+        # rather than shipping a broken bundle to Play.
+        env:
+          KEYSTORE_BASE64:   ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS:         ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD:      ${{ secrets.ANDROID_KEY_PASSWORD }}
+          AAB:               ${{ steps.aab.outputs.path }}
+        run: |
+          set -eu
+          [ -n "$KEYSTORE_BASE64" ]   || { echo "secret ANDROID_KEYSTORE_BASE64 unset"   >&2; exit 1; }
+          [ -n "$KEYSTORE_PASSWORD" ] || { echo "secret ANDROID_KEYSTORE_PASSWORD unset" >&2; exit 1; }
+          [ -n "$KEY_ALIAS" ]         || { echo "secret ANDROID_KEY_ALIAS unset"         >&2; exit 1; }
+          [ -n "$KEY_PASSWORD" ]      || { echo "secret ANDROID_KEY_PASSWORD unset"      >&2; exit 1; }
+
+          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/keystore.jks
+          jarsigner \
+            -keystore /tmp/keystore.jks \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            "$AAB" "$KEY_ALIAS"
+          rm /tmp/keystore.jks
+          jarsigner -verify "$AAB"
+
+      - name: Upload to Google Play
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5  # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: app.onym.android
+          releaseFiles: ${{ steps.aab.outputs.path }}
+          track: ${{ inputs.track }}
+          status: completed
