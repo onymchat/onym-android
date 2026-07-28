@@ -1,5 +1,8 @@
 package app.onym.android.chain
 
+import app.onym.android.security.TrustedAssetVerifier
+import app.onym.android.security.fetchDetachedSignature
+import app.onym.android.security.signatureUrlFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
@@ -44,9 +47,14 @@ interface ContractsManifestFetcher {
 class GitHubReleasesContractsManifestFetcher(
     private val httpClient: OkHttpClient,
     private val url: String = DEFAULT_URL,
+    private val verifier: TrustedAssetVerifier = TrustedAssetVerifier(),
 ) : ContractsManifestFetcher {
 
     override suspend fun fetch(): ContractsManifestFetcher.FetchResult = withContext(Dispatchers.IO) {
+        // H-3: fetch the detached signature first (best-effort), then
+        // verify the raw asset bytes before trusting them. Soft mode
+        // (default) only warns on a missing/invalid signature.
+        val signature = httpClient.fetchDetachedSignature(signatureUrlFor(url))
         val request = Request.Builder()
             .url(url.toHttpUrl())
             .header("Accept", "application/json")
@@ -55,7 +63,9 @@ class GitHubReleasesContractsManifestFetcher(
             if (!response.isSuccessful) {
                 throw IOException("GET $url returned HTTP ${response.code}")
             }
-            val body = response.body?.string() ?: throw IOException("empty response body")
+            val bytes = response.body?.bytes() ?: throw IOException("empty response body")
+            verifier.gate("contracts-manifest.json", bytes, signature)
+            val body = String(bytes, Charsets.UTF_8)
             val raw = try {
                 jsonFormat.decodeFromString(RawContractsManifest.serializer(), body)
             } catch (e: SerializationException) {

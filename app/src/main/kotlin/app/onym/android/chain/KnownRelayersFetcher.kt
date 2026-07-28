@@ -1,5 +1,8 @@
 package app.onym.android.chain
 
+import app.onym.android.security.TrustedAssetVerifier
+import app.onym.android.security.fetchDetachedSignature
+import app.onym.android.security.signatureUrlFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
@@ -43,9 +46,13 @@ interface KnownRelayersFetcher {
 class GitHubReleasesKnownRelayersFetcher(
     private val httpClient: OkHttpClient,
     private val url: String = DEFAULT_URL,
+    private val verifier: TrustedAssetVerifier = TrustedAssetVerifier(),
 ) : KnownRelayersFetcher {
 
     override suspend fun fetch(): List<RelayerEndpoint> = withContext(Dispatchers.IO) {
+        // H-3: verify the raw asset bytes against the offline-signing
+        // key before trusting the relayer list (soft mode by default).
+        val signature = httpClient.fetchDetachedSignature(signatureUrlFor(url))
         val request = Request.Builder()
             .url(url.toHttpUrl())
             .header("Accept", "application/json")
@@ -59,7 +66,9 @@ class GitHubReleasesKnownRelayersFetcher(
             if (!response.isSuccessful) {
                 throw RelayersFetchError.BadStatus(response.code)
             }
-            val body = response.body?.string() ?: throw IOException("empty response body")
+            val bytes = response.body?.bytes() ?: throw IOException("empty response body")
+            verifier.gate("relayers.json", bytes, signature)
+            val body = String(bytes, Charsets.UTF_8)
             try {
                 jsonFormat.decodeFromString(KnownRelayersDocument.serializer(), body).relayers
             } catch (e: SerializationException) {
