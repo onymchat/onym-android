@@ -5,6 +5,7 @@ import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.fragment.app.FragmentActivity
+import app.onym.android.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -58,6 +59,11 @@ class BiometricAuthException(
  */
 class AndroidBiometricAuthenticator(
     private val activityProvider: () -> FragmentActivity,
+    /** Whether fail-open is permitted when no usable authenticator is
+     *  available. Defaults to [BuildConfig.DEBUG] so it's only ever
+     *  true in developer builds; release builds fail CLOSED. Injectable
+     *  so the gate decision can be unit-tested for both build types. */
+    private val isDebugBuild: Boolean = BuildConfig.DEBUG,
 ) : BiometricAuthenticator {
 
     /** `BIOMETRIC_WEAK` lets users with face-only auth (e.g. older
@@ -74,8 +80,8 @@ class AndroidBiometricAuthenticator(
             val activity = activityProvider()
             val manager = BiometricManager.from(activity)
 
-            when (manager.canAuthenticate(authenticators)) {
-                BiometricManager.BIOMETRIC_SUCCESS -> {
+            when (biometricGateDecision(manager.canAuthenticate(authenticators), isDebugBuild)) {
+                BiometricGateDecision.PROMPT -> {
                     suspendCancellableCoroutine { continuation ->
                         val callback = object : BiometricPrompt.AuthenticationCallback() {
                             override fun onAuthenticationSucceeded(
@@ -116,17 +122,66 @@ class AndroidBiometricAuthenticator(
                     }
                 }
 
-                else -> {
-                    // No enrolled biometric AND no device credential. Match
-                    // the iOS "fail open in dev" behaviour — return success
-                    // without prompting. Production devices in this state
-                    // are extremely rare and the user has explicitly opted
-                    // out of device security.
+                BiometricGateDecision.BYPASS -> {
+                    // DEBUG builds only: no enrolled biometric / no device
+                    // credential / unavailable hardware. Match the iOS
+                    // "fail open in dev" behaviour — return success without
+                    // prompting so simulator/dev flows keep working.
+                }
+
+                BiometricGateDecision.DENY -> {
+                    // RELEASE: fail CLOSED. Without a usable authenticator we
+                    // cannot show a real prompt, so refuse to reveal the
+                    // recovery phrase. Thrown the same way a denied/cancelled
+                    // prompt is (see onAuthenticationError above) so callers
+                    // handle it uniformly.
+                    throw BiometricAuthException(
+                        BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL,
+                        NO_DEVICE_CREDENTIAL_MESSAGE,
+                    )
                 }
             }
         }
     }
 }
+
+/** Outcome of the pre-prompt authenticator probe. */
+internal enum class BiometricGateDecision {
+    /** A usable authenticator is enrolled — show the system prompt. */
+    PROMPT,
+
+    /** DEBUG fail-open — authorize without a prompt. */
+    BYPASS,
+
+    /** RELEASE fail-closed — refuse; no usable authenticator. */
+    DENY,
+}
+
+/** User-facing message for the fail-closed path — guides the user to
+ *  enrol a device credential so they can reach their recovery phrase. */
+internal const val NO_DEVICE_CREDENTIAL_MESSAGE =
+    "Set up a screen lock (PIN, pattern, password, or biometric) in " +
+        "your device settings to reveal your recovery phrase."
+
+/**
+ * Pure decision for how to gate on a [BiometricManager.canAuthenticate]
+ * status. Extracted so the DEBUG/RELEASE fail-open-vs-fail-closed policy
+ * is unit-testable without a real [BiometricPrompt].
+ *
+ * [BiometricManager.BIOMETRIC_SUCCESS] → [PROMPT][BiometricGateDecision.PROMPT].
+ * Any other status (no enrolled credential, hardware unavailable,
+ * security update required, unsupported) → fail OPEN
+ * ([BYPASS][BiometricGateDecision.BYPASS]) only when [isDebugBuild];
+ * otherwise fail CLOSED ([DENY][BiometricGateDecision.DENY]).
+ */
+internal fun biometricGateDecision(
+    canAuthenticateStatus: Int,
+    isDebugBuild: Boolean,
+): BiometricGateDecision =
+    when (canAuthenticateStatus) {
+        BiometricManager.BIOMETRIC_SUCCESS -> BiometricGateDecision.PROMPT
+        else -> if (isDebugBuild) BiometricGateDecision.BYPASS else BiometricGateDecision.DENY
+    }
 
 /** Spelled funny so it doesn't shadow [androidx.core.content.ContextCompat]
  *  (the ContextCompat reference is only needed for the executor and
