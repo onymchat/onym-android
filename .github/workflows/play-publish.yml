@@ -148,5 +148,5 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: app.onym.android
           releaseFiles: ${{ steps.aab.outputs.path }}
-          track: ${{ inputs.track }}
+          tracks: ${{ inputs.track }}
           status: completed
