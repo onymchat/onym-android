@@ -16,9 +16,11 @@ name: UI tests
 
 on:
   workflow_dispatch:
-  schedule:
-    # 04:00 UTC nightly — non-blocking signal, not a release gate.
-    - cron: "0 4 * * *"
+  # No nightly schedule: these UI tests can't pass on GitHub's
+  # software-GPU (swiftshader) emulator (see the note above), so a
+  # scheduled run failed every night and emailed a false alarm. Run
+  # manually via workflow_dispatch, or wire up a self-hosted GPU
+  # runner (as onym-ios does) before re-adding a `schedule:` trigger.
 
 permissions:
   contents: read
