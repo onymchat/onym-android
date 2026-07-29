@@ -44,10 +44,9 @@ import kotlin.time.Duration.Companion.seconds
  * captures the key screens; [LocaleTestRule] + screengrab re-run the
  * whole flow once per configured locale (en-US, ru-RU).
  *
- * All seeded content (group name, invitation, messages) is user text —
- * identical across locales — so the waits below are language-independent.
- * Navigation avoids localized button text: it pops the create flow with
- * back, not by tapping "Done"/"Готово".
+ * Seeded content (group name, invitation, messages) is localized for each
+ * store listing. Navigation still avoids localized button text: it pops the
+ * create flow with back, not by tapping "Done"/"Готово".
  *
  * FLAG_SECURE (set unconditionally in production) is suppressed while
  * [UITestRegistry.enabled] is true — see MainActivity.onCreate — so the
@@ -103,6 +102,22 @@ class ScreenshotTest {
         composeRule.waitUntil(10.seconds.inWholeMilliseconds) {
             identityStore.listIds().isNotEmpty()
         }
+        val isRussian = composeRule.activity.resources.configuration.locales[0].language == "ru"
+        val groupName = if (isRussian) "Поездка на выходные" else "Weekend Trip"
+        val invitation = if (isRussian) INVITATION_RU else INVITATION_EN
+        val invitationHeading = if (isRussian) "Правила" else "House rules"
+        val firstMessage = if (isRussian) {
+            "Буду в 16:00 — кто заберёт ключи?"
+        } else {
+            "Landing at 4 — who's grabbing the keys?"
+        }
+        val firstMessageWait = if (isRussian) "кто заберёт ключи" else "Landing at 4"
+        val secondMessage = if (isRussian) {
+            "Ключи у меня 🔑 До встречи в домике"
+        } else {
+            "Got them 🔑 see you at the cabin"
+        }
+        val secondMessageWait = if (isRussian) "До встречи" else "see you at the cabin"
 
         // 1 — Identity & invite (Settings carousel). Capture first so
         // every locale starts from the same known tab/navigation state.
@@ -114,9 +129,9 @@ class ScreenshotTest {
         // 2 — Create Group: name + invitation message.
         openCreateGroup()
         composeRule.onNodeWithTag("create_group.name")
-            .performTextInput("Weekend Trip")
+            .performTextInput(groupName)
         composeRule.onNodeWithTag("create_group.invitation")
-            .performTextInput(INVITATION)
+            .performTextInput(invitation)
         composeRule.waitForIdle()
         Screengrab.screenshot("02_create_group")
 
@@ -129,24 +144,35 @@ class ScreenshotTest {
         goToChats()
 
         // 3 — Chats list with the new group.
-        waitForText("Weekend Trip")
+        waitForText(groupName)
         Screengrab.screenshot("03_chats")
 
         // 4 — Chat welcome: the rich empty state (invitation + privacy).
-        clickRowContaining("chats.row.", "Weekend Trip")
+        clickRowContaining("chats.row.", groupName)
         waitForTag("chat_thread.input_field")
         waitForTag("chat_thread.empty")
-        waitForText("House rules") // the invitation is user text (any locale)
+        waitForText(invitationHeading)
         Screengrab.screenshot("04_welcome")
 
         // 5 — A conversation.
-        sendMessage("Landing at 4 — who's grabbing the keys?")
-        waitForText("Landing at 4")
-        sendMessage("Got them 🔑 see you at the cabin")
-        waitForText("see you at the cabin")
+        sendMessage(firstMessage)
+        waitForText(firstMessageWait)
+        sendMessage(secondMessage)
+        waitForText(secondMessageWait)
         Espresso.closeSoftKeyboard()
         composeRule.waitForIdle()
         Screengrab.screenshot("05_chat")
+
+        // 6 — Courier: configured Nostr relays + self-hosting option.
+        openSettingsDestination("settings.nostr_relays_row", "nostr.list")
+        waitForText("wss://nostr.onym.app")
+        composeRule.waitForIdle()
+        Screengrab.screenshot("06_nostr_relays")
+
+        // 7 — Notary: Stellar anchor network selection.
+        openSettingsDestination("settings.anchors_row", "anchors.network.testnet")
+        composeRule.waitForIdle()
+        Screengrab.screenshot("07_anchors")
     }
 
     // ─── helpers (subset of MultiIdentityChatUITest) ──────────────
@@ -174,6 +200,16 @@ class ScreenshotTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings.list")
             .performScrollToNode(hasTestTag("identity.carousel"))
+    }
+
+    private fun openSettingsDestination(rowTag: String, destinationTag: String) {
+        backToTabBar()
+        composeRule.onNodeWithTag("nav.tab.settings").performClick()
+        waitForTag("settings.list")
+        composeRule.onNodeWithTag("settings.list")
+            .performScrollToNode(hasTestTag(rowTag))
+        composeRule.onNodeWithTag(rowTag).performClick()
+        waitForTag(destinationTag)
     }
 
     private fun backToTabBar() {
@@ -217,8 +253,11 @@ class ScreenshotTest {
         }
 
     private companion object {
-        const val INVITATION =
+        const val INVITATION_EN =
             "House rules: be kind, share the good photos, no spoilers. " +
                 "Glad you're here — let's plan the weekend."
+        const val INVITATION_RU =
+            "Правила: будьте добрее, делитесь удачными фото и никаких спойлеров. " +
+                "Рады вам — давайте спланируем выходные."
     }
 }

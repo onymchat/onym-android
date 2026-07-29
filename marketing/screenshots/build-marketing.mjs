@@ -14,18 +14,18 @@ const shell = { x: 164, y: 607, w: 916, h: 1751, r: 101 };
 
 const campaigns = {
   "en-US": [
-    ["Private by default.", "End-to-end encrypted. No phone number. No central server."],
-    ["Make the group yours.", "Set the tone, choose how it works, and invite with one link."],
-    ["No account clutter.", "Private groups and familiar chats. No profile to maintain."],
-    ["Only your group reads it.", "Messages are encrypted before they leave your device."],
-    ["No contact details required.", "No phone number. No email. Just conversations you control."]
+    ["It starts as a messenger.", "Chats, groups, and private conversations. No architecture lesson required."],
+    ["Open a chat. Just talk.", "End-to-end encryption protects the conversation underneath."],
+    ["Then the identity is yours.", "It lives on your device—not in an Onym account."],
+    ["The courier is separate.", "Use our Nostr relay, choose another, or run your own."],
+    ["The notary is separate too.", "Stellar verifies hidden membership—not your roster or conversation."]
   ],
   "ru-RU": [
-    ["Приватность по умолчанию.", "Сквозное шифрование. Без номера и центрального сервера."],
-    ["Создайте свою группу.", "Задайте правила, выберите тип и пригласите одной ссылкой."],
-    ["Никаких лишних аккаунтов.", "Закрытые группы и привычные чаты. Без профиля."],
-    ["Читает только ваша группа.", "Сообщения шифруются ещё на вашем устройстве."],
-    ["Контактные данные не нужны.", "Без номера и почты. Только беседы под вашим контролем."]
+    ["Сначала это просто мессенджер.", "Чаты, группы и личные беседы. Никаких лекций об архитектуре."],
+    ["Откройте чат. Просто общайтесь.", "А сквозное шифрование защищает разговор."],
+    ["Личность принадлежит вам.", "Она живёт на устройстве, а не в аккаунте Onym."],
+    ["Курьер существует отдельно.", "Используйте наш релей Nostr, выберите другой или запустите свой."],
+    ["Нотариус тоже отдельно.", "Stellar проверяет скрытый состав, но не хранит список или переписку."]
   ]
 };
 
@@ -45,33 +45,37 @@ const textLines = (a, x, y, lh, attrs) => a.map((s, i) => `<text x="${x}" y="${y
 
 function headerSvg(locale, i) {
   const [headline, detail] = campaigns[locale][i];
+  const campaignLabel = locale === "ru-RU"
+    ? "ONYM · БЕЗ ЕДИНОГО ВЛАДЕЛЬЦА"
+    : "ONYM · WITHOUT A CENTRAL OWNER";
   // Helvetica's Cyrillic glyphs are wider than its Latin glyphs. Keep
   // localized copy comfortably inside Play's preview-safe margins.
   const widthFactor = locale === "ru-RU" ? .59 : .535;
   const title = wrap(headline, 116, 1100, 2, widthFactor);
   const titleLH = Math.round(title.size * 1.02);
   const sub = wrap(detail, 43, 1085, 2, widthFactor);
-  const subY = 215 + titleLH * title.out.length + 28;
+  const subY = 235 + titleLH * title.out.length + 28;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="2424" height="2424">
 <rect width="2424" height="2424" fill="#00ff00"/>
-<text x="72" y="76" fill="#6e6e73" font-family="SF Mono,Menlo,monospace" font-size="21" font-weight="600" letter-spacing="5">ONYM&#160;·&#160;PRIVATE&#160;MESSENGER</text>
-<text x="1172" y="76" text-anchor="end" fill="#6e6e73" font-family="SF Mono,Menlo,monospace" font-size="21">${String(i + 1).padStart(2, "0")}&#160;/&#160;05</text>
-<line x1="72" y1="111" x2="1172" y2="111" stroke="#0a0a0a" stroke-opacity=".10"/>
-${textLines(title.out, 72, 215, titleLH, `fill="#0a0a0a" font-family="SF Pro Display,Helvetica Neue,sans-serif" font-size="${title.size}" font-weight="750" letter-spacing="-4.5"`)}
-${textLines(sub.out, 76, subY, 52, `fill="#5f5f64" font-family="SF Pro Display,Helvetica Neue,sans-serif" font-size="${sub.size}" font-weight="400"`)}
+${textLines(title.out, 72, 235, titleLH, `fill="#f5f5f7" font-family="SF Pro Display,Helvetica Neue,sans-serif" font-size="${title.size}" font-weight="bold" letter-spacing="-4.5"`)}
+${textLines(sub.out, 76, subY, 52, `fill="#919197" font-family="SF Pro Display,Helvetica Neue,sans-serif" font-size="${sub.size}" font-weight="400"`)}
+<line x1="72" y1="111" x2="1172" y2="111" stroke="#f5f5f7" stroke-opacity=".11"/>
+<text x="72" y="76" fill="#919197" font-family="SF Mono,Menlo,monospace" font-size="19" font-weight="600" letter-spacing="4">${xml(campaignLabel)}</text>
+<text x="1172" y="76" text-anchor="end" fill="#919197" font-family="SF Mono,Menlo,monospace" font-size="21">${String(i + 1).padStart(2, "0")}&#160;/&#160;05</text>
 <circle cx="622" cy="657" r="22" fill="#08080a"/>
 </svg>`;
 }
 
-function ql(svgText, name) {
+function rasterSvg(svgText, name) {
   const svg = path.join(tmp, `${name}.svg`);
+  const png = `${svg}.png`;
   fs.writeFileSync(svg, svgText);
-  execFileSync("/usr/bin/qlmanage", ["-t", "-s", "2424", "-o", tmp, svg], { stdio: "ignore" });
-  return `${svg}.png`;
+  execFileSync("/usr/bin/sips", ["-s", "format", "png", svg, "--out", png], { stdio: "ignore" });
+  return png;
 }
 
-const mask = ql(`<svg xmlns="http://www.w3.org/2000/svg" width="2424" height="2424"><rect width="2424" height="2424" fill="#000"/><rect width="${screen.w}" height="${screen.h}" rx="${screen.r}" fill="#fff"/></svg>`, "mask");
-const shellLayer = ql(`<svg xmlns="http://www.w3.org/2000/svg" width="2424" height="2424">
+const mask = rasterSvg(`<svg xmlns="http://www.w3.org/2000/svg" width="2424" height="2424"><rect width="2424" height="2424" fill="#000"/><rect width="${screen.w}" height="${screen.h}" rx="${screen.r}" fill="#fff"/></svg>`, "mask");
+const shellLayer = rasterSvg(`<svg xmlns="http://www.w3.org/2000/svg" width="2424" height="2424">
 <rect width="2424" height="2424" fill="#00ff00"/>
 <rect x="${shell.x}" y="${shell.y}" width="${shell.w}" height="${shell.h}" rx="${shell.r}" fill="#0a0a0c"/>
 <rect x="${shell.x + 5}" y="${shell.y + 5}" width="${shell.w - 10}" height="${shell.h - 10}" rx="${shell.r - 5}" fill="none" stroke="#4a4a4e" stroke-width="4"/>
@@ -84,11 +88,11 @@ for (const locale of Object.keys(campaigns)) {
   fs.mkdirSync(outDir, { recursive: true });
   const actualDir = path.join(root, "fastlane/metadata/android", locale, "images/phoneScreenshots");
   const sources = [
-    path.join(actualDir, "04_welcome.png"),
-    path.join(actualDir, "02_create_group.png"),
     path.join(actualDir, "03_chats.png"),
     path.join(actualDir, "05_chat.png"),
     path.join(actualDir, "01_identity.png"),
+    path.join(actualDir, "06_nostr_relays.png"),
+    path.join(actualDir, "07_anchors.png"),
   ];
   for (let i = 0; i < 5; i++) {
     const source = sources[i];
@@ -96,10 +100,10 @@ for (const locale of Object.keys(campaigns)) {
     execFileSync(ffmpeg, ["-y", "-loglevel", "error", "-i", source, "-i", mask,
       "-filter_complex", `[0:v]scale=${screen.w}:${screen.h}[s];[1:v]crop=${screen.w}:${screen.h}:0:0,format=gray[m];[s][m]alphamerge[o]`,
       "-map", "[o]", "-frames:v", "1", rounded]);
-    const header = ql(headerSvg(locale, i), `${locale}-header-${i}`);
+    const header = rasterSvg(headerSvg(locale, i), `${locale}-header-${i}`);
     const output = path.join(outDir, `${String(i + 1).padStart(2, "0")}-onym-android.png`);
     execFileSync(ffmpeg, ["-y", "-loglevel", "error",
-      "-f", "lavfi", "-i", `color=c=0xf5f5f7:s=${W}x${H}`, "-i", rounded, "-i", header, "-i", shellLayer,
+      "-f", "lavfi", "-i", `color=c=0x08080a:s=${W}x${H}`, "-i", rounded, "-i", header, "-i", shellLayer,
       "-filter_complex",
       `[2:v]crop=${W}:${H}:0:0,format=rgba,colorkey=0x00FF00:0.30:0.10[h];` +
       `[3:v]crop=${W}:${H}:0:0,format=rgba,colorkey=0x00FF00:0.30:0.10[f];` +
