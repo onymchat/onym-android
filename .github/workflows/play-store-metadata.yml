@@ -1,0 +1,61 @@
+name: Play Store Metadata
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: play-store-metadata
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Upload listing text and marketing graphics
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          lfs: true
+
+      - uses: ruby/setup-ruby@a4effe49ee8ee5b8b5091268c473a4628afb5651 # v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install Fastlane
+        run: gem install fastlane --version 2.234.0 --no-document
+
+      - name: Stage marketing screenshots
+        run: |
+          set -eu
+          for locale in en-US ru-RU; do
+            source_dir="marketing/screenshots/$locale"
+            target_dir="fastlane/metadata/android/$locale/images/phoneScreenshots"
+            test "$(find "$source_dir" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" = "5"
+            mkdir -p "$target_dir"
+            cp "$source_dir"/*.png "$target_dir"/
+          done
+
+      - name: Validate listing assets
+        run: |
+          set -eu
+          for locale in en-US ru-RU; do
+            test -s "fastlane/metadata/android/$locale/title.txt"
+            test -s "fastlane/metadata/android/$locale/short_description.txt"
+            test -s "fastlane/metadata/android/$locale/full_description.txt"
+            test -s "fastlane/metadata/android/$locale/images/icon.png"
+            test -s "fastlane/metadata/android/$locale/images/featureGraphic.png"
+            test "$(find "fastlane/metadata/android/$locale/images/phoneScreenshots" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ')" = "5"
+          done
+
+      - name: Upload localized Play Store listing
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -eu
+          test -n "$PLAY_SERVICE_ACCOUNT_JSON"
+          json_key="$RUNNER_TEMP/play-service-account.json"
+          printf '%s' "$PLAY_SERVICE_ACCOUNT_JSON" > "$json_key"
+          SUPPLY_JSON_KEY="$json_key" fastlane android upload_all

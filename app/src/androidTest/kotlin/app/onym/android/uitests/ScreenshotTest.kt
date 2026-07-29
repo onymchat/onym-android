@@ -104,7 +104,14 @@ class ScreenshotTest {
             identityStore.listIds().isNotEmpty()
         }
 
-        // 1 — Create Group: name + invitation message.
+        // 1 — Identity & invite (Settings carousel). Capture first so
+        // every locale starts from the same known tab/navigation state.
+        openSettingsCarousel()
+        waitForTag("identity.carousel.settled")
+        composeRule.waitForIdle()
+        Screengrab.screenshot("01_identity")
+
+        // 2 — Create Group: name + invitation message.
         openCreateGroup()
         composeRule.onNodeWithTag("create_group.name")
             .performTextInput("Weekend Trip")
@@ -121,29 +128,25 @@ class ScreenshotTest {
         waitForTag("create_group.share_invite", timeout = 90.seconds)
         goToChats()
 
-        // 2 — Chats list with the new group.
+        // 3 — Chats list with the new group.
         waitForText("Weekend Trip")
         Screengrab.screenshot("03_chats")
 
-        // 3 — Chat welcome: the rich empty state (invitation + privacy).
+        // 4 — Chat welcome: the rich empty state (invitation + privacy).
         clickRowContaining("chats.row.", "Weekend Trip")
         waitForTag("chat_thread.input_field")
         waitForTag("chat_thread.empty")
         waitForText("House rules") // the invitation is user text (any locale)
         Screengrab.screenshot("04_welcome")
 
-        // 4 — A conversation.
+        // 5 — A conversation.
         sendMessage("Landing at 4 — who's grabbing the keys?")
         waitForText("Landing at 4")
         sendMessage("Got them 🔑 see you at the cabin")
         waitForText("see you at the cabin")
-        Screengrab.screenshot("05_chat")
-
-        // 5 — Identity & invite (Settings carousel). Captured last: by now
-        // the bootstrapped identity is fully loaded.
-        openSettingsCarousel()
+        Espresso.closeSoftKeyboard()
         composeRule.waitForIdle()
-        Screengrab.screenshot("01_identity")
+        Screengrab.screenshot("05_chat")
     }
 
     // ─── helpers (subset of MultiIdentityChatUITest) ──────────────
