@@ -10,7 +10,11 @@ plugins {
 
 android {
     namespace = "app.onym.android"
-    compileSdk = 35
+    // Android 16. `targetSdk` (below) is what Play gates on; `compileSdk`
+    // only needs to be >= it. Independent of `minSdk = 26` — raising the
+    // target does NOT drop support for older devices, it opts the app
+    // into API 36 runtime behaviours.
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.onym.android"
@@ -18,7 +22,7 @@ android {
         // also unlocks AEAD ciphers + the keystore-backed master key
         // path with no compatibility shims.
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         // Single source of truth: the GitHub release tag. See
         // `resolveReleaseVersion()` for the resolution order
         // (release-workflow env → -PreleaseVersion → git describe →

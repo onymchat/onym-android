@@ -1,8 +1,12 @@
 [versions]
-# AGP 8.7 — paired with Kotlin 2.0.21 (the matching kotlin-compose-compiler
-# plugin shipped with Kotlin 2.0+ replaces the standalone Compose Compiler
-# Gradle plugin from earlier toolchains).
-agp = "8.7.3"
+# AGP 8.11 — required to compile against `compileSdk = 36` (Android 16)
+# with 36 recognised as a *finalised* API level (8.9.x shipped while 36
+# was still a preview, which would force `compileSdkPreview`). Needed for
+# Play's "target API 36" requirement (enforced from 2026-08-31). Pairs
+# with Gradle 8.14 (>= 8.13 required by AGP 8.11) and JDK 17. Kotlin
+# 2.0.21 + the bundled kotlin-compose-compiler plugin are independent of
+# the AGP version, so no Kotlin/KSP bump is coupled to this.
+agp = "8.11.2"
 kotlin = "2.0.21"
 kotlinx-coroutines = "1.9.0"
 kotlinx-serialization = "1.7.3"
