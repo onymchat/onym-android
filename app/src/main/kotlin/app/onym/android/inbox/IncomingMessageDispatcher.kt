@@ -188,7 +188,7 @@ class IncomingMessageDispatcher(
         // an additive one.
         val removal = tryDecodeRemoval(envelope.plaintext)
         if (removal != null) {
-            applyRemoval(removal, ownerIdentityId, envelope.senderEd25519PublicKey, attempt = 0)
+            applyRemovalWithRetry(removal, ownerIdentityId, envelope.senderEd25519PublicKey)
             return
         }
 
@@ -516,6 +516,17 @@ class IncomingMessageDispatcher(
         null
     }
 
+    /** Result of one [applyRemoval] pass. */
+    private enum class RemovalApplyResult {
+        /** Applied, or dropped for a terminal reason — do not retry. */
+        DONE,
+
+        /** The chain read was behind the claimed epoch (or the
+         *  relayer was unreachable) — worth re-checking after the
+         *  cache TTL. */
+        CHAIN_BEHIND,
+    }
+
     /**
      * Apply an inbound [MemberRemovalPayload].
      *
@@ -533,56 +544,73 @@ class IncomingMessageDispatcher(
      *    the victim's inbox and every trust gate rejects their key.
      *
      * Order of gates (cheapest first, mirroring [applyAnnouncement]):
-     * group lookup → idempotency (relays replay the full inbox on
-     * every reconnect — bail BEFORE any chain read) → admin-Ed25519
-     * authorization → on-chain converge-forward check.
+     * group lookup → fail-closed admin requirement → local
+     * converge-forward guard (BEFORE any chain read — relays replay
+     * the full inbox on every reconnect) → self classification →
+     * admin-Ed25519 authorization → on-chain converge-forward check.
      *
-     * ## Chain-behind retry
+     * ## Local converge-forward guard
      *
-     * A removal usually lands seconds after the admin anchors, while
-     * [app.onym.android.chain.CachingChainStateReader] may serve a
-     * ≤10s-old entry — the chain read looks *behind* the claimed
-     * epoch. For announcements that case is a plain drop (later
-     * activity backfills); a dropped removal would leave the victim
-     * trusted, so instead we re-check after [removalRetryDelayMillis]
-     * (then 2×) — each attempt past the cache TTL. After
-     * [removalMaxRetries] the payload is dropped for THIS delivery;
-     * the next inbox replay retries from scratch, so the removal is
-     * never permanently lost.
+     * `group.epoch >= payload.epoch` drops the payload outright: a
+     * removal may only ever advance local state. Without this, a
+     * relay-replayed removal envelope arriving AFTER the member was
+     * re-admitted would pass the on-chain "ahead → accept" branch and
+     * roll epoch / salt / groupSecret back to the old rotated values
+     * while re-tombstoning the re-admitted member. It also makes
+     * re-delivery idempotent without any per-profile bookkeeping.
+     *
+     * ## Fail closed on a missing admin key
+     *
+     * Groups materialized from an unsigned invitation envelope store
+     * `adminEd25519PubkeyHex == null`. [senderAuthorizedToMutate]'s
+     * any-current-member fallback is tolerable for additive
+     * announcements, but a subtractive op would let any member evict
+     * any other member from every peer's local view — so removal
+     * requires the stored admin key, full stop.
      */
     private suspend fun applyRemoval(
         payload: MemberRemovalPayload,
         ownerIdentityId: IdentityId,
         senderEd25519PublicKey: ByteArray?,
-        attempt: Int,
-    ) {
+    ): RemovalApplyResult {
         val groupIdHex = payload.groupId.toHexLowercase()
-        val group = groupRepository.findForOwner(ownerIdentityId.value, groupIdHex) ?: return
-        if (group.groupType != SepGroupType.TYRANNY) return
+        val group = groupRepository.findForOwner(ownerIdentityId.value, groupIdHex)
+            ?: return RemovalApplyResult.DONE
+        if (group.groupType != SepGroupType.TYRANNY) return RemovalApplyResult.DONE
 
+        // Subtractive ops fail CLOSED without a stored admin key —
+        // see KDoc. (senderAuthorizedToMutate would otherwise fall
+        // back to any-current-member.)
+        if (group.adminEd25519PubkeyHex == null) return RemovalApplyResult.DONE
+
+        // Local converge-forward guard — see KDoc. Cheap, local, and
+        // BEFORE any chain read (launch-storm pattern).
+        if (group.epoch >= payload.epoch) return RemovalApplyResult.DONE
+
+        // Self classification. If we can't resolve our own BLS key we
+        // can't tell which branch is safe — drop rather than let the
+        // victim's own device take the remaining-member branch and
+        // delete itself from its own roster. (Production always wires
+        // identitiesFlow; this is the fallback posture.)
         val victimHex = payload.removedBlsHex.lowercase()
         val selfHex = identitiesFlow?.value
             ?.firstOrNull { it.id == ownerIdentityId }
             ?.blsPublicKey
             ?.toHexLowercase()
-        val isSelf = selfHex != null && selfHex == victimHex
-
-        // Idempotency BEFORE any chain read (launch-storm pattern —
-        // see applyAnnouncement).
-        if (isSelf && group.membershipRevoked) return
-        if (!isSelf) {
-            val existing = group.memberProfiles[victimHex]
-            if (existing != null && existing.revoked && group.epoch >= payload.epoch) return
-        }
+            ?: return RemovalApplyResult.DONE
+        val isSelf = selfHex == victimHex
+        if (isSelf && group.membershipRevoked) return RemovalApplyResult.DONE
 
         // Trust gate: only the stored admin may shrink the roster.
-        if (!senderAuthorizedToMutate(group, senderEd25519PublicKey)) return
+        if (!senderAuthorizedToMutate(group, senderEd25519PublicKey)) {
+            return RemovalApplyResult.DONE
+        }
 
         // On-chain converge-forward gate (same posture as
         // verifyTyrannyAnnouncement: no roster recompute, the anchor
         // is the strong check). chain ahead → accept (we missed
         // updates; the admin-signed removal is still legitimate),
-        // exact epoch → byte-verify, chain behind → bounded retry.
+        // exact epoch → byte-verify, chain behind → caller retries.
         val reader = chainState
         if (reader != null) {
             val onchain = try {
@@ -591,23 +619,19 @@ class IncomingMessageDispatcher(
                 // Unreachable relayer is not evidence of forgery, but
                 // accepting unverified would let a stolen admin key
                 // shrink rosters offline. Retry like chain-behind.
-                scheduleRemovalRetry(payload, ownerIdentityId, senderEd25519PublicKey, attempt)
-                return
+                return RemovalApplyResult.CHAIN_BEHIND
             }
-            if (onchain.epoch < payload.epoch) {
-                scheduleRemovalRetry(payload, ownerIdentityId, senderEd25519PublicKey, attempt)
-                return
-            }
+            if (onchain.epoch < payload.epoch) return RemovalApplyResult.CHAIN_BEHIND
             if (onchain.epoch == payload.epoch &&
                 !onchain.commitment.contentEquals(payload.commitment)
             ) {
-                return
+                return RemovalApplyResult.DONE
             }
         }
 
         if (isSelf) {
             groupRepository.insert(group.copy(membershipRevoked = true))
-            return
+            return RemovalApplyResult.DONE
         }
 
         val victimProfile = group.memberProfiles[victimHex]
@@ -628,18 +652,40 @@ class IncomingMessageDispatcher(
                 groupSecret = payload.groupSecretNew ?: group.groupSecret,
             ),
         )
+        return RemovalApplyResult.DONE
     }
 
-    /** Schedule one delayed [applyRemoval] re-attempt, deduped so a
-     *  relay re-delivery inside the delay window can't stack timers. */
-    private suspend fun scheduleRemovalRetry(
+    /**
+     * One initial [applyRemoval] pass plus a bounded retry loop for
+     * the chain-behind case.
+     *
+     * A removal usually lands seconds after the admin anchors, while
+     * [app.onym.android.chain.CachingChainStateReader] may serve a
+     * ≤10s-old entry — the chain read looks *behind* the claimed
+     * epoch. For announcements that case is a plain drop (later
+     * activity backfills); a dropped removal would leave the victim
+     * trusted, so we re-check after [removalRetryDelayMillis] (then
+     * 2×) — each attempt past the cache TTL. After
+     * [removalMaxRetries] the payload is dropped for THIS delivery;
+     * the next inbox replay retries from scratch, so the removal is
+     * never permanently lost.
+     *
+     * The dedup key is held for the WHOLE retry loop — including the
+     * network-bound [applyRemoval] re-attempts — so a relay
+     * re-delivery at any point while a retry chain is live can't
+     * stack a parallel chain. It's released when the loop ends, so a
+     * later replay gets a fresh retry budget.
+     */
+    private suspend fun applyRemovalWithRetry(
         payload: MemberRemovalPayload,
         ownerIdentityId: IdentityId,
         senderEd25519PublicKey: ByteArray?,
-        attempt: Int,
     ) {
+        val first = applyRemoval(payload, ownerIdentityId, senderEd25519PublicKey)
+        if (first != RemovalApplyResult.CHAIN_BEHIND) return
         val scope = retryScope ?: return
-        if (attempt >= removalMaxRetries) return
+        if (removalMaxRetries <= 0) return
+
         val key = "${payload.groupId.toHexLowercase()}:" +
             "${payload.removedBlsHex.lowercase()}:${payload.epoch}"
         removalRetryMutex.withLock {
@@ -647,11 +693,14 @@ class IncomingMessageDispatcher(
         }
         scope.launch {
             try {
-                delay(removalRetryDelayMillis * (attempt + 1))
+                for (attempt in 1..removalMaxRetries) {
+                    delay(removalRetryDelayMillis * attempt)
+                    val result = applyRemoval(payload, ownerIdentityId, senderEd25519PublicKey)
+                    if (result != RemovalApplyResult.CHAIN_BEHIND) return@launch
+                }
             } finally {
                 removalRetryMutex.withLock { pendingRemovalRetries.remove(key) }
             }
-            applyRemoval(payload, ownerIdentityId, senderEd25519PublicKey, attempt + 1)
         }
     }
 

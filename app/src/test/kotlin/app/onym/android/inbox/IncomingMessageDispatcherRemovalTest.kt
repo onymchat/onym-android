@@ -240,6 +240,92 @@ class IncomingMessageDispatcherRemovalTest {
         assertEquals(3, reader.calls)
     }
 
+    // ─── review regressions ────────────────────────────────────────
+
+    @Test
+    fun removal_replayAfterReadmission_doesNotRollStateBack() = runTest {
+        // 1. Removal (epoch 2) applies.
+        val reader = FakeChainReader(
+            SepCommitmentEntry(commitment = newCommitment, epoch = 2uL),
+            // Later reads: chain moved on past the re-admission.
+            SepCommitmentEntry(commitment = ByteArray(32) { 0x70 }, epoch = 3uL),
+        )
+        val dispatcher = makeDispatcher(payloadForMembers(), chainReader = reader)
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        assertTrue(groupRepository.snapshots.value.single().memberProfiles[victimHex]!!.revoked)
+
+        // 2. Re-admission: the announcement path resets the tombstone
+        //    (local epoch stays at 2 — announcements don't carry state).
+        val readmitted = groupRepository.snapshots.value.single()
+        groupStore.replaceForTest(
+            readmitted.copy(
+                memberProfiles = readmitted.memberProfiles +
+                    (victimHex to readmitted.memberProfiles[victimHex]!!.copy(revoked = false)),
+                groupSecret = ByteArray(32) { 0x71 }, // post-readmission secret
+            ),
+        )
+        groupRepository.reload()
+
+        // 3. The relay replays the OLD epoch-2 removal envelope. The
+        //    chain (epoch 3) is ahead — without the local
+        //    converge-forward guard this would re-tombstone the member
+        //    and roll groupSecret/epoch back to the removal values.
+        dispatcher.dispatch("m2", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        val final = groupRepository.snapshots.value.single()
+        assertFalse("re-admitted member must stay active", final.memberProfiles[victimHex]!!.revoked)
+        assertTrue(
+            "post-readmission secret must survive the replay",
+            final.groupSecret.contentEquals(ByteArray(32) { 0x71 }),
+        )
+        assertEquals(2uL, final.epoch)
+        // And the replay never even hit the chain (local guard fires first).
+        assertEquals(1, reader.calls)
+    }
+
+    @Test
+    fun removal_failsClosedWhenGroupHasNoStoredAdminKey() = runTest {
+        // A group materialized from an unsigned invitation stores no
+        // admin Ed25519. senderAuthorizedToMutate's any-current-member
+        // fallback must NOT apply to a subtractive op — a member's
+        // valid signature is not authority to evict another member.
+        val memberSending = ByteArray(32) { 0x42 }
+        groupStore.replaceForTest(
+            makeGroup().copy(
+                adminEd25519PubkeyHex = null,
+                memberProfiles = makeGroup().memberProfiles +
+                    (otherHex to makeGroup().memberProfiles[otherHex]!!.copy(
+                        sendingPubkey = memberSending,
+                    )),
+            ),
+        )
+        groupRepository.reload()
+        val reader = FakeChainReader(
+            SepCommitmentEntry(commitment = newCommitment, epoch = 2uL),
+        )
+        val dispatcher = makeDispatcher(
+            payloadForMembers(),
+            senderPub = memberSending, // valid CURRENT member signature
+            chainReader = reader,
+        )
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        val group = groupRepository.snapshots.value.single()
+        assertFalse(group.memberProfiles[victimHex]!!.revoked)
+        assertEquals(1uL, group.epoch)
+        assertEquals(0, reader.calls) // fails closed before any chain read
+    }
+
+    @Test
+    fun removal_droppedWhenSelfUnresolvable() = runTest {
+        // No identitiesFlow → can't classify self vs remaining-member.
+        // The safe posture is drop (previously the victim's own device
+        // would take the remaining-member branch and delete itself).
+        val dispatcher = makeDispatcher(payloadForMembers(), identities = null)
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        assertUntouched()
+    }
+
     // ─── idempotency ───────────────────────────────────────────────
 
     @Test
@@ -290,10 +376,25 @@ class IncomingMessageDispatcherRemovalTest {
         assertFalse(group.membershipRevoked)
     }
 
+    /** Default self-identity: a non-victim member, so the dispatcher
+     *  can classify the removal (an unresolvable self now DROPS —
+     *  see removal_droppedWhenSelfUnresolvable). */
+    private fun nonVictimSelf(): StateFlow<List<IdentitySummary>> = MutableStateFlow(
+        listOf(
+            IdentitySummary(
+                id = ownerIdentity,
+                name = "Me",
+                blsPublicKey = ByteArray(48) { 0x99.toByte() },
+                inboxPublicKey = ByteArray(32) { 0x21 },
+                sendingPublicKey = ByteArray(32) { 0x22 },
+            ),
+        ),
+    ).asStateFlow()
+
     private fun makeDispatcher(
         payload: MemberRemovalPayload,
         senderPub: ByteArray? = adminSending,
-        identities: StateFlow<List<IdentitySummary>>? = null,
+        identities: StateFlow<List<IdentitySummary>>? = nonVictimSelf(),
         chainReader: ChainStateReading? = null,
         retryScope: CoroutineScope? = null,
     ): IncomingMessageDispatcher {

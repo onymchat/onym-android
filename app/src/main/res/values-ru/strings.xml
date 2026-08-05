@@ -652,5 +652,8 @@
   <string name="member_remove_message">Участник больше не будет получать сообщения этой группы. Ключ группы будет обновлён для остальных.</string>
   <string name="member_remove_confirm">Удалить</string>
   <string name="member_remove_error_title">Не удалось удалить участника</string>
+  <string name="member_remove_error_not_admin">Удалять участников может только основатель группы.</string>
+  <string name="member_remove_error_network">Не удалось подключиться к сети. Проверьте соединение и попробуйте ещё раз.</string>
+  <string name="member_remove_error_generic">Что-то пошло не так. Попробуйте ещё раз.</string>
   <string name="chat_removed_from_group">Вас удалили из этой группы</string>
 </resources>

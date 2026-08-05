@@ -252,11 +252,16 @@ fun ChatMembersScreen(
         }
     }
 
-    removalError?.let { error ->
+    removalError?.let { outcome ->
         AlertDialog(
             onDismissRequest = { chatsViewModel.clearRemovalError() },
             title = { Text(stringResource(R.string.member_remove_error_title)) },
-            text = { Text(error, modifier = Modifier.testTag("members.remove_error")) },
+            text = {
+                Text(
+                    stringResource(removalErrorText(outcome)),
+                    modifier = Modifier.testTag("members.remove_error"),
+                )
+            },
             confirmButton = {
                 TextButton(onClick = { chatsViewModel.clearRemovalError() }) {
                     Text(stringResource(android.R.string.ok))
@@ -648,6 +653,20 @@ private fun GroupAvatarHeader(
         }
     }
 }
+
+/** Maps a removal failure to user-facing copy. The VM surfaces the
+ *  typed outcome; localization happens here. */
+private fun removalErrorText(outcome: app.onym.android.group.GroupMemberRemover.Outcome): Int =
+    when (outcome) {
+        is app.onym.android.group.GroupMemberRemover.Outcome.NotAdminOfThisGroup ->
+            R.string.member_remove_error_not_admin
+        is app.onym.android.group.GroupMemberRemover.Outcome.NoActiveRelayer,
+        is app.onym.android.group.GroupMemberRemover.Outcome.NoContractBinding,
+        is app.onym.android.group.GroupMemberRemover.Outcome.TransportFailed,
+        is app.onym.android.group.GroupMemberRemover.Outcome.AnchorRejected,
+        -> R.string.member_remove_error_network
+        else -> R.string.member_remove_error_generic
+    }
 
 internal data class MemberRow(
     val blsHex: String,

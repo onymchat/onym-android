@@ -188,26 +188,26 @@ class ChatsViewModelTest {
     }
 
     @Test
-    fun removeMember_surfacesFailureReason_andClearsOnRequest() = runTest {
-        val remover = RecordingRemover(
-            GroupMemberRemover.Outcome.AnchorRejected("stale epoch"),
-        )
-        val vm = makeVM(InMemoryGroupStore(), remover = remover)
+    fun removeMember_surfacesTypedOutcome_andClearsOnRequest() = runTest {
+        // The VM exposes the raw Outcome — localization is the
+        // screen's job (removalErrorText), never the VM's.
+        val outcome = GroupMemberRemover.Outcome.AnchorRejected("stale epoch")
+        val vm = makeVM(InMemoryGroupStore(), remover = RecordingRemover(outcome))
 
         vm.removeMember("aa".repeat(32), "bb".repeat(48))
 
-        assertEquals("stale epoch", vm.removalError.value)
+        assertEquals(outcome, vm.removalError.value)
         assertEquals(null, vm.removalInFlight.value)
         vm.clearRemovalError()
         assertEquals(null, vm.removalError.value)
     }
 
     @Test
-    fun removeMember_mapsSingletonOutcomeToName() = runTest {
+    fun removeMember_surfacesSingletonOutcome() = runTest {
         val remover = RecordingRemover(GroupMemberRemover.Outcome.NotAdminOfThisGroup)
         val vm = makeVM(InMemoryGroupStore(), remover = remover)
         vm.removeMember("aa".repeat(32), "bb".repeat(48))
-        assertEquals("NotAdminOfThisGroup", vm.removalError.value)
+        assertEquals(GroupMemberRemover.Outcome.NotAdminOfThisGroup, vm.removalError.value)
     }
 
     private class RecordingRemover(

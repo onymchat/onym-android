@@ -74,10 +74,11 @@ class ChatsViewModel(
     private val _removalInFlight = MutableStateFlow<String?>(null)
     val removalInFlight: StateFlow<String?> = _removalInFlight.asStateFlow()
 
-    /** One-shot human-readable removal failure, or `null`. Cleared
-     *  via [clearRemovalError]. */
-    private val _removalError = MutableStateFlow<String?>(null)
-    val removalError: StateFlow<String?> = _removalError.asStateFlow()
+    /** One-shot removal failure outcome, or `null`. The VM stays
+     *  resource-free: the screen maps the typed outcome to localized
+     *  copy. Cleared via [clearRemovalError]. */
+    private val _removalError = MutableStateFlow<GroupMemberRemover.Outcome?>(null)
+    val removalError: StateFlow<GroupMemberRemover.Outcome?> = _removalError.asStateFlow()
 
     /**
      * Enriched + sorted chat-list rows. Recomputes whenever the group set
@@ -168,12 +169,8 @@ class ChatsViewModel(
         viewModelScope.launch {
             try {
                 val outcome = remover.remove(groupId, victimBlsHex)
-                _removalError.value = when (outcome) {
-                    is GroupMemberRemover.Outcome.Sent -> null
-                    is GroupMemberRemover.Outcome.ProofFailed -> outcome.reason
-                    is GroupMemberRemover.Outcome.AnchorRejected -> outcome.reason
-                    is GroupMemberRemover.Outcome.TransportFailed -> outcome.reason
-                    else -> outcome::class.simpleName
+                _removalError.value = outcome.takeIf {
+                    it !is GroupMemberRemover.Outcome.Sent
                 }
             } finally {
                 _removalInFlight.value = null
