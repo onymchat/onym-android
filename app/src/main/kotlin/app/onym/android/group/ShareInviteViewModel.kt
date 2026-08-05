@@ -41,10 +41,12 @@ class ShareInviteViewModel(
     val state: StateFlow<State> = _state.asStateFlow()
 
     /**
-     * Mint a fresh capability for the group with hex id [groupId] and
-     * surface the share link. Idempotent for repeated taps from the
-     * same screen — re-mints a fresh keypair so each share goes
-     * through a distinct intro slot (per-link revocation friendly).
+     * Resolve the share link for the group with hex id [groupId] and
+     * surface it. Idempotent: repeated calls (screen re-entry, retry
+     * tap) return the *same* link while the group's intro key is
+     * inside its 24h [IntroKeyEntry.LIFETIME_MILLIS] window, and only
+     * mint a fresh keypair once that key has expired. One link, many
+     * joiners — each still gated by an explicit Approve.
      *
      * If [groupId] does not resolve to a local group (race between
      * persistence + navigation, or a stale deeplink back into share)
@@ -65,7 +67,7 @@ class ShareInviteViewModel(
         _state.value = State.Minting
         viewModelScope.launch {
             try {
-                val capability = introducer.mint(
+                val capability = introducer.currentOrMint(
                     ownerIdentityId = activeIdentityId,
                     groupId = group.groupIdBytes,
                     groupName = group.name,
