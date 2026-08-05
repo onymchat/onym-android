@@ -168,8 +168,15 @@ class RemoveMemberTyrannyE2ETest {
         val victimSummary = victim.identities.value.single()
         val victimBls = victimSummary.blsPublicKey
         val victimHex = victimBls.toHexLower()
+        // Test-fixture identities restored from public BIP39 vectors —
+        // not real user secrets. The admit leg drives Tyranny.proveUpdate
+        // directly (the approver's anchor leg is private), which needs
+        // the admin secret as prover witness and Poseidon(victim sk) as
+        // the new leaf.
+        // onym:allow-secret-read
         val victimLeafHash = GroupCommitmentBuilder.computeLeafHash(victim.blsSecretKey())
 
+        // onym:allow-secret-read (same fixture rationale as above)
         val adminBlsSecret = admin.blsSecretKey()
         val newMembers = (created.members + GovernanceMember(
             publicKeyCompressed = victimBls,
@@ -217,6 +224,7 @@ class RemoveMemberTyrannyE2ETest {
         val remover = GroupMemberRemover(
             activeIdentity = admin,
             envelopeSealer = admin,
+            // onym:allow-secret-read (fixture identity; see admit leg above)
             blsSecretKey = admin::blsSecretKey,
             groupRepository = env.groups,
             inboxTransport = inbox,
