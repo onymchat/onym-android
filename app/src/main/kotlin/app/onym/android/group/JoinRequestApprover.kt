@@ -86,6 +86,13 @@ open class JoinRequestApprover(
     private val makeContractTransport: (String) -> SepContractTransport = { url ->
         OkHttpSepContractTransport(httpClient = OkHttpClient(), endpointUrl = url)
     },
+    /** Serializes the read-prove-anchor-persist critical section.
+     *  Production shares ONE instance with [GroupMemberRemover] — an
+     *  approve and a removal on the same group are both Tyranny
+     *  `update_commitment`s and must not interleave (the loser would
+     *  prove against a stale epoch and be rejected on chain).
+     *  Defaulted so existing construction sites / tests keep working. */
+    private val mutex: Mutex = Mutex(),
 ) : JoinRequestApproving {
     /** UI-renderable view of one decrypted, awaiting-action request. */
     data class PendingRequest(
@@ -166,7 +173,6 @@ open class JoinRequestApprover(
         class AnchorRejected(val reason: String) : ApproveOutcome()
     }
 
-    private val mutex = Mutex()
     private val _pending = MutableStateFlow<List<PendingRequest>>(emptyList())
     override val pending: StateFlow<List<PendingRequest>> = _pending.asStateFlow()
 
@@ -409,9 +415,10 @@ open class JoinRequestApprover(
 
         for ((memberKey, profile) in group.memberProfiles) {
             // Skip self (admin) + the new joiner (covered by the
-            // GroupInvitationPayload above).
+            // GroupInvitationPayload above) + removed members.
             if (memberKey == joinerKey) continue
             if (adminKey != null && memberKey == adminKey) continue
+            if (profile.revoked) continue
 
             val sealed = try {
                 identity.sealInvitation(payloadBytes, profile.inboxPublicKey)
