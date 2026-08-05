@@ -18,7 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
  *     payload.
  *  4. On Approve, sender seals the existing
  *     [GroupInvitationPayload] to the joiner's identity inbox key.
- *     [revoke] is called to retire the intro slot.
+ *     The intro key is NOT retired: one link serves many joiners
+ *     until [IntroKeyEntry.LIFETIME_MILLIS] expires.
  *
  * Owner-scoping: every entry carries an [IdentityId]. Removing an
  * identity (multi-identity PR-3) cascades a [deleteForOwner] so
@@ -64,9 +65,16 @@ interface IntroKeyStore {
      *  list reads here. */
     suspend fun listForOwner(ownerIdentityId: IdentityId): List<IntroKeyEntry>
 
-    /** Single-entry deletion. Called after a request is accepted
-     *  + sealed → the intro slot is no longer useful. No-op if
-     *  the pubkey isn't present. */
+    /** Single-entry deletion. **No production caller** since invite
+     *  links went multi-use: Approve and Decline both leave the key
+     *  alive so the rest of the link's holders can still join, and
+     *  expiry is handled by the lazy purge in the store's read path.
+     *
+     *  Retained as the seam a future per-link "revoke this invite"
+     *  affordance would use, because the store must be able to
+     *  destroy one intro *private* key on demand, and to keep parity
+     *  with `IntroKeyStore.swift`'s protocol. Exercised by
+     *  `InviteIntroducerTest`. No-op if the pubkey isn't present. */
     suspend fun revoke(introPublicKey: ByteArray)
 
     /** Cascade for the identity-removal flow. Returns the count

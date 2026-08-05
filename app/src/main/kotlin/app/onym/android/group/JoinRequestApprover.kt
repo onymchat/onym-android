@@ -49,11 +49,14 @@ import kotlinx.serialization.json.Json
  *     Approve?" prompts.
  *  3. On Approve → seals the existing [GroupInvitationPayload]
  *     (built from the local [ChatGroup]) to the joiner's identity
- *     inbox key, ships via [inboxTransport.send], revokes the
- *     intro key. The fan-out from PR-3 stops listening on that
- *     intro tag within one emission window.
- *  4. On Decline → drop the request, revoke the intro key. No
- *     NACK to the joiner; their JoinScreen times out gracefully.
+ *     inbox key and ships via [inboxTransport.send]. The intro key
+ *     is deliberately NOT retired: invite links are multi-use, so
+ *     the same [IntroKeyEntry] must keep decrypting requests from
+ *     everyone else the inviter shared the link with. The link's
+ *     only bound is [IntroKeyEntry.LIFETIME_MILLIS] (24h).
+ *  4. On Decline → drop that one request. Nothing else: the link
+ *     stays live so declining Bob can't silently lock out Carol.
+ *     No NACK to the joiner; their JoinScreen times out gracefully.
  */
 /**
  * Test seam consumed by [ApproveRequestsViewModel]. The production
@@ -266,8 +269,11 @@ open class JoinRequestApprover(
     /**
      * Approve a pending request: build the [GroupInvitationPayload]
      * from the local group state, seal to the joiner's inbox key,
-     * ship via Nostr, then revoke the intro slot + drop the
-     * pending entry.
+     * ship via Nostr, then drop the pending entry. The intro key
+     * survives — invite links are multi-use.
+     *
+     * A joiner already in `group.members` skips the anchor leg and
+     * only gets the current snapshot re-shipped.
      */
     override suspend fun approve(requestId: String): ApproveOutcome = mutex.withLock {
         val req = _pending.value.firstOrNull { it.id == requestId }
@@ -282,10 +288,37 @@ open class JoinRequestApprover(
             it.groupIdBytes.contentEquals(req.groupId)
         } ?: return@withLock ApproveOutcome.UnknownGroup
 
+        // Re-join recovery path: this joiner is ALREADY in the
+        // group's cryptographic roster. They reinstalled and lost
+        // local state, the relay replayed an old request on this
+        // still-live intro tag, or an earlier approve anchored and
+        // then failed at seal+ship. Extending the Merkle tree again
+        // would push a duplicate leaf and burn an epoch for nothing,
+        // so skip the anchor and just re-seal + re-ship the current
+        // snapshot below.
+        //
+        // Keyed on `members` — the roster [anchorTyrannyJoin] actually
+        // mutates — and not on `memberProfiles`, which is an
+        // independent app-level directory that can hold entries with
+        // no corresponding leaf. A null BLS pubkey yields false,
+        // preserving today's behaviour exactly: Tyranny already
+        // short-circuits to OutdatedJoinerClient, and the ship-only
+        // path already gates its side effects on `blsPub != null`.
+        //
+        // This also hardens the double-tapped-Approve race: `approve`
+        // reads its row from `_pending`, which the collector only
+        // refreshes asynchronously, so two taps can both find it. The
+        // mutex serializes them, so the second pass reads the roster
+        // the first pass persisted and degrades to a safe re-ship.
+        val blsPub = req.joinerBlsPublicKey
+        val alreadyInRoster = blsPub != null && group.members.any {
+            it.publicKeyCompressed.contentEquals(blsPub)
+        }
+
         // PR 88 admin-anchor leg — Tyranny only. Other governance
         // types fall through to the pre-PR-88 ship-only flow below.
         var anchored = group
-        if (group.groupType == SepGroupType.TYRANNY) {
+        if (group.groupType == SepGroupType.TYRANNY && !alreadyInRoster) {
             when (val outcome = anchorTyrannyJoin(req, group)) {
                 is AnchorOutcome.Failed -> return@withLock outcome.outcome
                 is AnchorOutcome.Ok -> {
@@ -351,8 +384,11 @@ open class JoinRequestApprover(
         // no stable cross-device key under which to record. Use the
         // post-anchor group snapshot so PR-88's `commitment + epoch`
         // ship in the announcement.
-        val blsPub = req.joinerBlsPublicKey
         if (blsPub != null) {
+            // Idempotent on the BLS hex key. On the re-join path this
+            // is the whole point of still calling it: a reinstalled
+            // joiner has a new inbox pubkey, and future fanouts read
+            // it from here.
             recordJoiner(
                 group = anchored,
                 blsPub = blsPub,
@@ -360,6 +396,12 @@ open class JoinRequestApprover(
                 sendingPub = req.joinerSendingPublicKey,
                 alias = req.joinerDisplayLabel,
             )
+            // Kept on the re-join path too, unlike iOS. Receivers
+            // dedup it for free (applyAnnouncement bails on a known
+            // non-revoked BLS hex before any chain read), and it is
+            // the only thing that heals peers after an approve that
+            // anchored and then failed at seal+ship — that retry sees
+            // the joiner already in `members`.
             broadcastJoin(
                 group = anchored,
                 joinerBlsPub = blsPub,
@@ -369,11 +411,13 @@ open class JoinRequestApprover(
             )
         }
 
-        // Best-effort cleanup. Both calls run regardless of failures
-        // because the request is conceptually consumed at this point;
-        // a leaked intro key is benign (sender ignores future
-        // requests on it via UnknownGroup or just not approving).
-        revokeAndConsume(introPub = findIntroPubFor(requestId), requestId = requestId)
+        // Drop this request and its collapsed siblings. The intro key
+        // is intentionally left alive: one invite link is redeemable
+        // by many joiners inside its 24h lifetime, and revoking here
+        // would make `decode` return null for every other joiner's
+        // pending request — their rows would vanish from the approval
+        // surface with no explanation.
+        consumeRequestAndSiblings(requestId)
         ApproveOutcome.Sent
     }
 
@@ -490,10 +534,18 @@ open class JoinRequestApprover(
         }
     }
 
-    /** Decline a pending request: drop it + revoke the intro slot.
+    /** Decline a pending request: drop that one request and its
+     *  collapsed siblings, and nothing else.
+     *
+     *  The invite link stays live until [IntroKeyEntry.LIFETIME_MILLIS]
+     *  expires. A decline is a judgement about one requester, not about
+     *  the link — declining Bob must not silently lock out Carol, who
+     *  is holding the same shared link. There is deliberately no "kill
+     *  this link" action; the 24h lifetime is the only bound.
+     *
      *  No NACK to the joiner — their JoinScreen times out. */
     override suspend fun decline(requestId: String): Unit = mutex.withLock {
-        revokeAndConsume(introPub = findIntroPubFor(requestId), requestId = requestId)
+        consumeRequestAndSiblings(requestId)
     }
 
     // ─── private ──────────────────────────────────────────────────
@@ -550,17 +602,16 @@ open class JoinRequestApprover(
         )
     }
 
-    private suspend fun findIntroPubFor(requestId: String): ByteArray? {
-        // PendingRequest doesn't carry the introPub (intentional —
-        // UI should never need it). Resolve via the raw store.
-        val raw = introRequestStore.requests.value.firstOrNull { it.id == requestId }
-            ?: return null
-        return raw.targetIntroPublicKey
-    }
-
-    private suspend fun revokeAndConsume(introPub: ByteArray?, requestId: String) {
-        if (introPub != null) introKeyStore.revoke(introPub)
-        introRequestStore.consume(requestId)
+    /** Drop the request behind [requestId] plus every sibling copy
+     *  that collapsed into the same pending row (see [refresh]).
+     *  Consuming only the winner would let a sibling surface as a
+     *  fresh row on the very next emission.
+     *
+     *  The intro key is deliberately NOT revoked: links are multi-use
+     *  for their full [IntroKeyEntry.LIFETIME_MILLIS] window. */
+    private suspend fun consumeRequestAndSiblings(requestId: String) {
+        val ids = collapsedIds.value[requestId] ?: listOf(requestId)
+        for (id in ids) introRequestStore.consume(id)
     }
 
     /** Outcome shape for [anchorTyrannyJoin]. */

@@ -6,11 +6,11 @@ import org.junit.Test
 
 /**
  * Unit-test coverage for [JoinRequestApprover]'s value types. The
- * full behavioral suite (decode pipeline + approve happy path +
- * fanout shape) needs the OnymSDK FFI for Common.publicKey /
- * Common.leafHash, which isn't loaded on the JVM unit-test path —
- * those tests live in [app.onym.android.group.JoinRequestApproverBehaviorTest]
- * under `androidTest/`.
+ * behavioral suite — decode pipeline, approve/decline, the
+ * multi-use-link contract — lives alongside this file in
+ * [JoinRequestApproverBehaviorTest]. Anything needing the OnymSDK FFI
+ * for Common.publicKey / Common.leafHash still can't run on the JVM
+ * path and stays in `androidTest/`.
  *
  * What this file exercises (no FFI required):
  *   - [JoinRequestApprover.PendingRequest] equality / hashCode
