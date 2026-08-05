@@ -8,6 +8,7 @@ import app.onym.android.group.ChatGroup
 import app.onym.android.group.GovernanceMember
 import app.onym.android.group.GroupRepository
 import app.onym.android.group.GroupStore
+import app.onym.android.group.MemberAnnouncementPayload
 import app.onym.android.group.MemberProfile
 import app.onym.android.group.MemberRemovalPayload
 import app.onym.android.identity.DecryptedEnvelope
@@ -376,6 +377,158 @@ class IncomingMessageDispatcherRemovalTest {
     }
 
     @Test
+    fun removal_chainBehindRetryIsScopedPerOwnerIdentity() = runTest {
+        // Two local identities hold the same on-chain group. Both get
+        // the removal, both see a chain-behind read. An unscoped retry
+        // key would let the first identity's claim starve the second's
+        // retry budget entirely.
+        val secondOwner = IdentityId("owner-2")
+        groupStore.replaceForTest(
+            makeGroup().copy(ownerIdentityId = secondOwner.value),
+        )
+        groupRepository.reload()
+        val reader = FakeChainReader(
+            SepCommitmentEntry(commitment = ByteArray(32) { 0x66 }, epoch = 1uL),
+        )
+        val identitiesBoth = MutableStateFlow(
+            listOf(
+                IdentitySummary(
+                    id = ownerIdentity,
+                    name = "Me",
+                    blsPublicKey = ByteArray(48) { 0x99.toByte() },
+                    inboxPublicKey = ByteArray(32) { 0x21 },
+                    sendingPublicKey = ByteArray(32) { 0x22 },
+                ),
+                IdentitySummary(
+                    id = secondOwner,
+                    name = "Me2",
+                    blsPublicKey = ByteArray(48) { 0x98.toByte() },
+                    inboxPublicKey = ByteArray(32) { 0x23 },
+                    sendingPublicKey = ByteArray(32) { 0x24 },
+                ),
+            ),
+        ).asStateFlow()
+        val dispatcher = makeDispatcher(
+            payloadForMembers(),
+            identities = identitiesBoth,
+            chainReader = reader,
+            retryScope = this,
+        )
+
+        dispatcher.dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        dispatcher.dispatch("m2", secondOwner, byteArrayOf(), Instant.EPOCH)
+        advanceUntilIdle()
+
+        // Per owner: 1 initial read + removalMaxRetries (2) = 3, so 6
+        // total. An unscoped key would starve owner 2 at 4.
+        assertEquals(6, reader.calls)
+    }
+
+    @Test
+    fun announcement_staleAdmissionReplay_doesNotResurrectRemovedMember() = runTest {
+        // The victim's ORIGINAL admission announcement is re-delivered
+        // on every relay reconnect. It must NOT clear the tombstone —
+        // its epoch predates the removal that set it.
+        val base = makeGroup()
+        groupStore.replaceForTest(
+            base.copy(
+                epoch = 2uL,
+                memberProfiles = base.memberProfiles +
+                    (victimHex to base.memberProfiles[victimHex]!!.copy(
+                        revoked = true,
+                        statusEpoch = 2uL,
+                    )),
+            ),
+        )
+        groupRepository.reload()
+
+        dispatchAnnouncement(epoch = 1uL, chainEpoch = 2uL)
+
+        assertTrue(
+            "stale admission must not resurrect a removed member",
+            groupRepository.snapshots.value.single().memberProfiles[victimHex]!!.revoked,
+        )
+    }
+
+    @Test
+    fun announcement_newerReadmission_clearsTombstone() = runTest {
+        // The legitimate case: the admin re-admits the member, so the
+        // announcement's epoch is NEWER than the removal's.
+        val base = makeGroup()
+        groupStore.replaceForTest(
+            base.copy(
+                epoch = 2uL,
+                memberProfiles = base.memberProfiles +
+                    (victimHex to base.memberProfiles[victimHex]!!.copy(
+                        revoked = true,
+                        statusEpoch = 2uL,
+                    )),
+            ),
+        )
+        groupRepository.reload()
+
+        dispatchAnnouncement(epoch = 3uL, chainEpoch = 3uL)
+
+        val profile = groupRepository.snapshots.value.single().memberProfiles[victimHex]!!
+        assertFalse("re-admission must clear the tombstone", profile.revoked)
+        assertEquals(3uL, profile.statusEpoch)
+    }
+
+    @Test
+    fun announcement_withoutEpoch_doesNotResurrectRemovedMember() = runTest {
+        // A legacy sender ships no epoch — we can't prove the
+        // announcement is newer than the removal, so keep the tombstone.
+        val base = makeGroup()
+        groupStore.replaceForTest(
+            base.copy(
+                memberProfiles = base.memberProfiles +
+                    (victimHex to base.memberProfiles[victimHex]!!.copy(
+                        revoked = true,
+                        statusEpoch = 2uL,
+                    )),
+            ),
+        )
+        groupRepository.reload()
+
+        dispatchAnnouncement(epoch = null, chainEpoch = 2uL)
+
+        assertTrue(
+            groupRepository.snapshots.value.single().memberProfiles[victimHex]!!.revoked,
+        )
+    }
+
+    /** Dispatch a victim-readmitting [MemberAnnouncementPayload]. */
+    private suspend fun dispatchAnnouncement(epoch: ULong?, chainEpoch: ULong) {
+        val commitment = ByteArray(32) { 0x90.toByte() }
+        val announcement = MemberAnnouncementPayload(
+            version = 1,
+            groupId = groupId,
+            newMember = MemberAnnouncementPayload.AnnouncedMember(
+                blsPub = victimBls,
+                inboxPub = ByteArray(32) { 0x31 },
+                alias = "Victim",
+                sendingPub = ByteArray(32) { 0x32 },
+            ),
+            adminAlias = "Admin",
+            commitment = commitment.takeIf { epoch != null },
+            epoch = epoch,
+        )
+        val plaintext = Json.encodeToString(
+            MemberAnnouncementPayload.serializer(),
+            announcement,
+        ).toByteArray(Charsets.UTF_8)
+        IncomingMessageDispatcher(
+            envelopeDecrypter = StubRemovalDecrypter(plaintext, adminSending),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            identitiesFlow = nonVictimSelf(),
+            chainState = FakeChainReader(
+                SepCommitmentEntry(commitment = commitment, epoch = chainEpoch),
+            ),
+        ).dispatch("a1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+    }
+
+    @Test
     fun removal_failsClosedWhenGroupHasNoStoredAdminKey() = runTest {
         // A group materialized from an unsigned invitation stores no
         // admin Ed25519. senderAuthorizedToMutate's any-current-member
@@ -584,8 +737,12 @@ private class StubRemovalDecrypter(
     ): DecryptedEnvelope = DecryptedEnvelope(plaintext, senderPub)
 }
 
+/** Keyed by the COMPOSITE (id, ownerIdentityId) like production Room —
+ *  the owner-scoped retry test needs two identities to hold the same
+ *  group id simultaneously. */
 private class RemovalTestGroupStore : GroupStore {
     private val rows = mutableMapOf<String, ChatGroup>()
+    private fun keyOf(id: String, owner: String) = "$id:$owner"
     override suspend fun list(): List<ChatGroup> = rows.values.toList()
     override suspend fun listForOwner(ownerIdentityId: String): List<ChatGroup> =
         rows.values.filter { it.ownerIdentityId == ownerIdentityId }
@@ -595,24 +752,29 @@ private class RemovalTestGroupStore : GroupStore {
         return before - rows.size
     }
     override suspend fun insertOrUpdate(group: ChatGroup): Boolean {
-        val isNew = !rows.containsKey(group.id)
-        rows[group.id] = group
+        val key = keyOf(group.id, group.ownerIdentityId)
+        val isNew = !rows.containsKey(key)
+        rows[key] = group
         return isNew
     }
     override suspend fun markPublished(id: String, ownerIdentityId: String, commitment: ByteArray?) {
-        val existing = rows[id] ?: return
-        rows[id] = existing.copy(
+        val key = keyOf(id, ownerIdentityId)
+        val existing = rows[key] ?: return
+        rows[key] = existing.copy(
             isPublishedOnChain = true,
             commitment = commitment ?: existing.commitment,
         )
     }
     override suspend fun markRead(id: String, ownerIdentityId: String, lastReadAtMillis: Long) {
-        val existing = rows[id] ?: return
-        rows[id] = existing.copy(lastReadAtMillis = lastReadAtMillis)
+        val key = keyOf(id, ownerIdentityId)
+        val existing = rows[key] ?: return
+        rows[key] = existing.copy(lastReadAtMillis = lastReadAtMillis)
     }
-    override suspend fun delete(id: String, ownerIdentityId: String) { rows.remove(id) }
+    override suspend fun delete(id: String, ownerIdentityId: String) {
+        rows.remove(keyOf(id, ownerIdentityId))
+    }
 
     fun replaceForTest(group: ChatGroup) {
-        rows[group.id] = group
+        rows[keyOf(group.id, group.ownerIdentityId)] = group
     }
 }

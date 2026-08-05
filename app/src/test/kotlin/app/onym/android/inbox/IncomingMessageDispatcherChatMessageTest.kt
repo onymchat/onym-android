@@ -98,6 +98,35 @@ class IncomingMessageDispatcherChatMessageTest {
         )
     }
 
+    @Test
+    fun chatMessage_droppedAndUnacked_whenWeWereRemovedFromTheGroup() = runTest {
+        // A stale peer can still seal to our unchanged inbox key until
+        // they apply the removal. Once membershipRevoked is set the
+        // thread is read-only history: drop the message AND send no
+        // delivered receipt (which would advertise reachability).
+        val fixture = newFixture()
+        fixture.seedGroup(ownerIdentity, withSenderProfile = true)
+        val seeded = fixture.groupStore.listForOwner(ownerIdentity.value).single()
+        fixture.groupStore.preload(listOf(seeded.copy(membershipRevoked = true)))
+        val receipts = SpyReceiptSender()
+
+        fixture.dispatchChat(
+            owner = ownerIdentity,
+            payload = chatPayload(UUID.randomUUID(), body = "after removal"),
+            signer = senderSendingKey,
+            receiptSender = receipts,
+        )
+
+        assertTrue(
+            "a removed member must not persist new group traffic",
+            fixture.messageStore.listForGroup(ownerIdentity.value, groupIdHex).isEmpty(),
+        )
+        assertTrue("no delivered receipt from a revoked membership", receipts.sends.isEmpty())
+        // Not a legacy-queue candidate either — it decoded fine.
+        fixture.invitationsRepository.bootstrap()
+        assertTrue(fixture.invitationsRepository.invitations.value.isEmpty())
+    }
+
     // ─── trust-chain failures all drop without falling through ───
 
     @Test

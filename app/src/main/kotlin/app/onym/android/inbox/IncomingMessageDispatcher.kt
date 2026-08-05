@@ -478,6 +478,22 @@ class IncomingMessageDispatcher(
         val existing = group.memberProfiles[key]
         if (existing != null && !existing.revoked) return  // dedup
 
+        // Re-admission guard. A tombstoned profile is resurrected ONLY
+        // by an announcement provably newer than the removal that
+        // tombstoned it ([MemberProfile.statusEpoch]). Every relay
+        // reconnect replays the member's ORIGINAL admission event;
+        // without this, that stale announcement clears the tombstone and
+        // re-trusts a removed member (their own removal replay would
+        // usually re-apply, but the trust window is real and closes only
+        // while that envelope is still replayable). An announcement with
+        // no epoch on the wire can't prove it's newer — keep the
+        // tombstone.
+        if (existing != null && existing.revoked) {
+            val announcedEpoch = payload.epoch ?: return
+            val removedAtEpoch = existing.statusEpoch
+            if (removedAtEpoch != null && announcedEpoch <= removedAtEpoch) return
+        }
+
         // Trust check: the roster delta must be authorized. When the
         // group has a stored admin Ed25519 the signer must equal it;
         // for admin-less groups the signer must be a current member
@@ -736,7 +752,11 @@ class IncomingMessageDispatcher(
         val scope = retryScope ?: return
         if (removalMaxRetries <= 0) return
 
-        val key = "${payload.groupId.toHexLowercase()}:" +
+        // Owner-scoped: the same on-chain group can be held by two local
+        // identities, each with its own row and its own delivery. An
+        // unscoped key would let the first identity's claim starve the
+        // second's retry entirely.
+        val key = "${ownerIdentityId.value}:${payload.groupId.toHexLowercase()}:" +
             "${payload.removedBlsHex.lowercase()}:${payload.epoch}"
         removalRetryMutex.withLock {
             if (!pendingRemovalRetries.add(key)) return
@@ -919,6 +939,14 @@ class IncomingMessageDispatcher(
         val signerPubkey = senderEd25519PublicKey ?: return
         val groupIdHex = payload.groupId.toHexLowercase()
         val group = groupRepository.findForOwner(ownerIdentityId.value, groupIdHex) ?: return
+        // We were removed from this group: refuse new traffic even
+        // though a stale peer can still seal to our unchanged inbox key
+        // until they converge (their fanout skips us only once they
+        // apply the removal). Symmetric with the send-side
+        // RemovedFromGroup gate — the thread is read-only history from
+        // the moment the removal lands. Also suppresses the delivered
+        // receipt below, so we don't advertise reachability.
+        if (group.membershipRevoked) return
         val claimedSenderHex = payload.senderBlsPubkeyHex.lowercase()
         val profile = group.memberProfiles[claimedSenderHex] ?: return
         // Removed members are tombstoned, not deleted — their key
