@@ -95,6 +95,7 @@ class SendMessageInteractor(
             ?: throw SendMessageError.NoIdentityLoaded
         val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
             ?: throw SendMessageError.UnknownGroup
+        if (group.membershipRevoked) throw SendMessageError.RemovedFromGroup
 
         val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
         if (group.memberProfiles[myBlsHex] == null) {
@@ -171,6 +172,7 @@ class SendMessageInteractor(
             ?: throw SendMessageError.NoIdentityLoaded
         val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
             ?: throw SendMessageError.UnknownGroup
+        if (group.membershipRevoked) throw SendMessageError.RemovedFromGroup
         val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
         if (group.memberProfiles[myBlsHex] == null) throw SendMessageError.SenderNotAMember
         val variant: ChatMessageVariant = when (group.groupType) {
@@ -255,6 +257,7 @@ class SendMessageInteractor(
             ?: throw SendMessageError.NoIdentityLoaded
         val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
             ?: throw SendMessageError.UnknownGroup
+        if (group.membershipRevoked) throw SendMessageError.RemovedFromGroup
         val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
         if (group.memberProfiles[myBlsHex] == null) throw SendMessageError.SenderNotAMember
         val variant: ChatMessageVariant = when (group.groupType) {
@@ -356,6 +359,7 @@ class SendMessageInteractor(
             ?: throw SendMessageError.NoIdentityLoaded
         val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
             ?: throw SendMessageError.UnknownGroup
+        if (group.membershipRevoked) throw SendMessageError.RemovedFromGroup
         val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
         if (group.memberProfiles[myBlsHex] == null) throw SendMessageError.SenderNotAMember
         val variant: ChatMessageVariant = when (group.groupType) {
@@ -480,6 +484,7 @@ class SendMessageInteractor(
             ?: throw SendMessageError.NoIdentityLoaded
         val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
             ?: throw SendMessageError.UnknownGroup
+        if (group.membershipRevoked) throw SendMessageError.RemovedFromGroup
         val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
         if (group.memberProfiles[myBlsHex] == null) throw SendMessageError.SenderNotAMember
         val variant: ChatMessageVariant = when (group.groupType) {
@@ -577,6 +582,7 @@ class SendMessageInteractor(
             ?: return@withContext
         val group = groupRepository.findForOwner(activeIdentityId.value, groupId)
             ?: return@withContext
+        if (group.membershipRevoked) return@withContext
         val myBlsHex = activeSummary.blsPublicKey.toHexLowercase()
         if (group.memberProfiles[myBlsHex] == null) return@withContext
 
@@ -746,6 +752,9 @@ class SendMessageInteractor(
         selfBlsHex: String,
     ): List<ByteArray> = group.memberProfiles
         .filterKeys { it != selfBlsHex }
+        // Removed members are tombstoned in place — never seal a new
+        // message to a revoked inbox.
+        .filterValues { !it.revoked }
         .map { (_, profile) -> profile.inboxPublicKey }
 
     private class EncodingException(message: String) : Exception(message)
@@ -789,6 +798,14 @@ sealed class SendMessageError(message: String) : Exception(message) {
      *  mid-flight. */
     object SenderNotAMember : SendMessageError("Active identity is not a member of this group") {
         private fun readResolve(): Any = SenderNotAMember
+    }
+
+    /** The admin removed this identity from the group
+     *  ([app.onym.android.group.ChatGroup.membershipRevoked]) — the
+     *  thread is read-only. Defense-in-depth behind the UI's disabled
+     *  composer. */
+    object RemovedFromGroup : SendMessageError("You were removed from this group") {
+        private fun readResolve(): Any = RemovedFromGroup
     }
 
     /** Today only the Tyranny variant ships; other governance types

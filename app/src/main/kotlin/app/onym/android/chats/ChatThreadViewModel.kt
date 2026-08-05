@@ -295,6 +295,7 @@ class ChatThreadViewModel(
     private suspend fun sendReadReceipts(snapshot: List<ChatMessage>) {
         if (!readReceiptsEnabled()) return
         val grp = group.value ?: return
+        if (grp.membershipRevoked) return
         val bySender = LinkedHashMap<String, MutableList<java.util.UUID>>()
         for (message in snapshot) {
             if (message.direction == MessageDirection.INCOMING && message.id !in ackedReadIds) {
@@ -303,7 +304,11 @@ class ChatThreadViewModel(
         }
         if (bySender.isEmpty()) return
         for ((senderHex, ids) in bySender) {
-            val inbox = grp.memberProfiles[senderHex]?.inboxPublicKey ?: continue
+            // Skip removed (tombstoned) senders — no receipts to an
+            // inbox that's no longer in the group.
+            val profile = grp.memberProfiles[senderHex] ?: continue
+            if (profile.revoked) continue
+            val inbox = profile.inboxPublicKey
             chatReceiptSender.send(
                 kind = ChatReceiptPayload.Kind.READ,
                 messageIds = ids,

@@ -243,6 +243,11 @@ class GroupStateVerifier(
         // a forged request can't redirect the salt elsewhere.
         val key = request.requesterBlsPublicKey.toHexLowercase()
         val profile = group.memberProfiles[key] ?: return
+        // A removed (tombstoned) member is no longer entitled to the
+        // salt/groupSecret-bearing snapshot — the rotated secrets are
+        // exactly what removal takes away from them. Likewise never
+        // answer from a group WE were removed from (stale authority).
+        if (profile.revoked || group.membershipRevoked) return
         if (requesterEd25519 == null || !requesterEd25519.contentEquals(profile.sendingPubkey)) return
         if (!request.requesterInboxPublicKey.contentEquals(profile.inboxPublicKey)) return
 

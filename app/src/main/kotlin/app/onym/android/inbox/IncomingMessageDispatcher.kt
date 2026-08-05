@@ -22,11 +22,17 @@ import app.onym.android.group.GroupRepository
 import app.onym.android.group.GroupStateRefreshRequest
 import app.onym.android.group.MemberAnnouncementPayload
 import app.onym.android.group.MemberProfile
+import app.onym.android.group.MemberRemovalPayload
 import app.onym.android.identity.DecryptedEnvelope
 import app.onym.android.identity.IdentityId
 import app.onym.android.identity.IdentitySummary
 import app.onym.android.identity.InvitationEnvelopeDecrypter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import java.time.Instant
 
@@ -104,7 +110,23 @@ class IncomingMessageDispatcher(
      *  sends read receipts. Defaulted to `true` (the shipping
      *  default). */
     private val readReceiptsEnabled: () -> Boolean = { true },
+    /** Scope for the member-removal chain-behind retry (see
+     *  [applyRemoval]). `null` (the test default) disables retries —
+     *  a chain-behind removal is simply dropped and re-applies on the
+     *  next inbox replay. Production passes the application scope. */
+    private val retryScope: CoroutineScope? = null,
+    /** Base delay before re-checking the chain for a removal whose
+     *  claimed epoch is ahead of our read. Must exceed
+     *  [app.onym.android.chain.CachingChainStateReader]'s 10s TTL or
+     *  the retry re-reads the same cached entry. */
+    private val removalRetryDelayMillis: Long = 12_000,
+    private val removalMaxRetries: Int = 2,
 ) {
+    /** Dedup keys of removal retries currently scheduled, so a relay
+     *  re-delivery during the delay window can't stack a second timer
+     *  for the same removal. */
+    private val pendingRemovalRetries = mutableSetOf<String>()
+    private val removalRetryMutex = Mutex()
 
     suspend fun dispatch(
         messageId: String,
@@ -155,6 +177,18 @@ class IncomingMessageDispatcher(
                 ownerIdentityId,
                 envelope.senderEd25519PublicKey,
             )
+            return
+        }
+
+        // Fast path 0.7: MemberRemovalPayload — the admin removed a
+        // member (possibly us). Its required `removal_*` keys are
+        // unique to this type, so the trial-decode is unambiguous.
+        // Tried before the announcement branch: a removal is the only
+        // subtractive roster mutation and must never be mistaken for
+        // an additive one.
+        val removal = tryDecodeRemoval(envelope.plaintext)
+        if (removal != null) {
+            applyRemoval(removal, ownerIdentityId, envelope.senderEd25519PublicKey, attempt = 0)
             return
         }
 
@@ -432,8 +466,13 @@ class IncomingMessageDispatcher(
         // each launch — bailing here keeps those replays from each firing
         // a `get_commitment` against the relayer (the launch-time storm).
         // Cheap, local, and idempotent.
+        // A tombstoned (revoked) profile does NOT dedup: the admin may
+        // have re-admitted a previously-removed member, and that
+        // announcement must overwrite the tombstone (revoked = false
+        // via the fresh MemberProfile below).
         val key = payload.newMember.blsPub.toHexLowercase()
-        if (group.memberProfiles[key] != null) return  // dedup
+        val existing = group.memberProfiles[key]
+        if (existing != null && !existing.revoked) return  // dedup
 
         // Trust check: the roster delta must be authorized. When the
         // group has a stored admin Ed25519 the signer must equal it;
@@ -466,6 +505,154 @@ class IncomingMessageDispatcher(
         )
     } catch (_: Throwable) {
         null
+    }
+
+    private fun tryDecodeRemoval(bytes: ByteArray): MemberRemovalPayload? = try {
+        permissiveJson.decodeFromString(
+            MemberRemovalPayload.serializer(),
+            bytes.toString(Charsets.UTF_8),
+        )
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
+     * Apply an inbound [MemberRemovalPayload].
+     *
+     * Two apply shapes, split on whether the removal names *us*:
+     *
+     *  - **Self (victim device):** flip [ChatGroup.membershipRevoked].
+     *    History, profiles, and secrets stay untouched (the victim's
+     *    payload variant carries no new secrets anyway); the UI swaps
+     *    the composer for a "you were removed" banner.
+     *  - **Remaining member:** tombstone the victim's [MemberProfile]
+     *    (`revoked = true` — never deleted), drop them from the
+     *    on-chain [ChatGroup.members] roster, and advance
+     *    epoch / commitment / salt / groupSecret to the payload's
+     *    post-removal values. From this point every fanout excludes
+     *    the victim's inbox and every trust gate rejects their key.
+     *
+     * Order of gates (cheapest first, mirroring [applyAnnouncement]):
+     * group lookup → idempotency (relays replay the full inbox on
+     * every reconnect — bail BEFORE any chain read) → admin-Ed25519
+     * authorization → on-chain converge-forward check.
+     *
+     * ## Chain-behind retry
+     *
+     * A removal usually lands seconds after the admin anchors, while
+     * [app.onym.android.chain.CachingChainStateReader] may serve a
+     * ≤10s-old entry — the chain read looks *behind* the claimed
+     * epoch. For announcements that case is a plain drop (later
+     * activity backfills); a dropped removal would leave the victim
+     * trusted, so instead we re-check after [removalRetryDelayMillis]
+     * (then 2×) — each attempt past the cache TTL. After
+     * [removalMaxRetries] the payload is dropped for THIS delivery;
+     * the next inbox replay retries from scratch, so the removal is
+     * never permanently lost.
+     */
+    private suspend fun applyRemoval(
+        payload: MemberRemovalPayload,
+        ownerIdentityId: IdentityId,
+        senderEd25519PublicKey: ByteArray?,
+        attempt: Int,
+    ) {
+        val groupIdHex = payload.groupId.toHexLowercase()
+        val group = groupRepository.findForOwner(ownerIdentityId.value, groupIdHex) ?: return
+        if (group.groupType != SepGroupType.TYRANNY) return
+
+        val victimHex = payload.removedBlsHex.lowercase()
+        val selfHex = identitiesFlow?.value
+            ?.firstOrNull { it.id == ownerIdentityId }
+            ?.blsPublicKey
+            ?.toHexLowercase()
+        val isSelf = selfHex != null && selfHex == victimHex
+
+        // Idempotency BEFORE any chain read (launch-storm pattern —
+        // see applyAnnouncement).
+        if (isSelf && group.membershipRevoked) return
+        if (!isSelf) {
+            val existing = group.memberProfiles[victimHex]
+            if (existing != null && existing.revoked && group.epoch >= payload.epoch) return
+        }
+
+        // Trust gate: only the stored admin may shrink the roster.
+        if (!senderAuthorizedToMutate(group, senderEd25519PublicKey)) return
+
+        // On-chain converge-forward gate (same posture as
+        // verifyTyrannyAnnouncement: no roster recompute, the anchor
+        // is the strong check). chain ahead → accept (we missed
+        // updates; the admin-signed removal is still legitimate),
+        // exact epoch → byte-verify, chain behind → bounded retry.
+        val reader = chainState
+        if (reader != null) {
+            val onchain = try {
+                reader.tyrannyCommitment(payload.groupId)
+            } catch (_: Throwable) {
+                // Unreachable relayer is not evidence of forgery, but
+                // accepting unverified would let a stolen admin key
+                // shrink rosters offline. Retry like chain-behind.
+                scheduleRemovalRetry(payload, ownerIdentityId, senderEd25519PublicKey, attempt)
+                return
+            }
+            if (onchain.epoch < payload.epoch) {
+                scheduleRemovalRetry(payload, ownerIdentityId, senderEd25519PublicKey, attempt)
+                return
+            }
+            if (onchain.epoch == payload.epoch &&
+                !onchain.commitment.contentEquals(payload.commitment)
+            ) {
+                return
+            }
+        }
+
+        if (isSelf) {
+            groupRepository.insert(group.copy(membershipRevoked = true))
+            return
+        }
+
+        val victimProfile = group.memberProfiles[victimHex]
+        val victimBytes = ChatGroup.bytesFromHex(victimHex)
+        groupRepository.insert(
+            group.copy(
+                members = group.members.filterNot {
+                    it.publicKeyCompressed.contentEquals(victimBytes)
+                },
+                memberProfiles = if (victimProfile != null) {
+                    group.memberProfiles + (victimHex to victimProfile.copy(revoked = true))
+                } else {
+                    group.memberProfiles
+                },
+                epoch = payload.epoch,
+                commitment = payload.commitment,
+                salt = payload.saltNew ?: group.salt,
+                groupSecret = payload.groupSecretNew ?: group.groupSecret,
+            ),
+        )
+    }
+
+    /** Schedule one delayed [applyRemoval] re-attempt, deduped so a
+     *  relay re-delivery inside the delay window can't stack timers. */
+    private suspend fun scheduleRemovalRetry(
+        payload: MemberRemovalPayload,
+        ownerIdentityId: IdentityId,
+        senderEd25519PublicKey: ByteArray?,
+        attempt: Int,
+    ) {
+        val scope = retryScope ?: return
+        if (attempt >= removalMaxRetries) return
+        val key = "${payload.groupId.toHexLowercase()}:" +
+            "${payload.removedBlsHex.lowercase()}:${payload.epoch}"
+        removalRetryMutex.withLock {
+            if (!pendingRemovalRetries.add(key)) return
+        }
+        scope.launch {
+            try {
+                delay(removalRetryDelayMillis * (attempt + 1))
+            } finally {
+                removalRetryMutex.withLock { pendingRemovalRetries.remove(key) }
+            }
+            applyRemoval(payload, ownerIdentityId, senderEd25519PublicKey, attempt + 1)
+        }
     }
 
     /**
@@ -635,6 +822,10 @@ class IncomingMessageDispatcher(
         val group = groupRepository.findForOwner(ownerIdentityId.value, groupIdHex) ?: return
         val claimedSenderHex = payload.senderBlsPubkeyHex.lowercase()
         val profile = group.memberProfiles[claimedSenderHex] ?: return
+        // Removed members are tombstoned, not deleted — their key
+        // still resolves, so the trust chain must check the flag:
+        // a removed member's post-removal sends are dropped here.
+        if (profile.revoked) return
         if (!profile.sendingPubkey.contentEquals(signerPubkey)) return
         if (!variantMatchesGroup(payload.variant, group.groupType)) return
 
@@ -722,7 +913,11 @@ class IncomingMessageDispatcher(
         return if (storedAdmin != null) {
             sender.toHexLowercase() == storedAdmin.lowercase()
         } else {
-            group.memberProfiles.values.any { it.sendingPubkey.contentEquals(sender) }
+            // Tombstoned (removed) members are no longer CURRENT
+            // members — their signature stops authorizing mutations.
+            group.memberProfiles.values.any {
+                !it.revoked && it.sendingPubkey.contentEquals(sender)
+            }
         }
     }
 

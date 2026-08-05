@@ -93,6 +93,7 @@ class GroupAvatarBroadcaster(
 
         for ((memberKey, profile) in group.memberProfiles) {
             if (memberKey.equals(activeBlsHex, ignoreCase = true)) continue // skip self
+            if (profile.revoked) continue // removed members get nothing
             val sealed = try {
                 envelopeSealer.sealInvitation(payloadBytes, profile.inboxPublicKey)
             } catch (_: Throwable) {
@@ -149,6 +150,7 @@ class GroupAvatarBroadcaster(
 
         for ((memberKey, profile) in group.memberProfiles) {
             if (memberKey.equals(activeBlsHex, ignoreCase = true)) continue // skip self
+            if (profile.revoked) continue // removed members get nothing
             val sealed = try {
                 envelopeSealer.sealInvitation(payloadBytes, profile.inboxPublicKey)
             } catch (_: Throwable) {
