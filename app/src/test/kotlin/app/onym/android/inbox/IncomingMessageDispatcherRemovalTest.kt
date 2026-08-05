@@ -6,6 +6,7 @@ import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GovernanceMember
+import app.onym.android.group.GroupInvitationPayload
 import app.onym.android.group.GroupRepository
 import app.onym.android.group.GroupStore
 import app.onym.android.group.MemberAnnouncementPayload
@@ -341,9 +342,16 @@ class IncomingMessageDispatcherRemovalTest {
 
     @Test
     fun removal_replayAfterOwnReadmission_doesNotRelockComposer() = runTest {
-        // Victim device: removed, then re-admitted (fresh invitation
-        // stamps their own profile's statusEpoch). A replayed stale
-        // self-removal must not re-set membershipRevoked.
+        // Victim device: removed at epoch 2, then re-admitted. A
+        // replayed stale self-removal must not re-set
+        // membershipRevoked.
+        //
+        // The post-readmission state here is produced by DISPATCHING a
+        // real re-admission invitation (the path the admin's approve
+        // actually drives), not hand-written — an earlier version of
+        // this test stamped `statusEpoch` itself and therefore passed
+        // while the real path shipped a null marker and re-locked the
+        // composer for good.
         val selfSummary = IdentitySummary(
             id = ownerIdentity,
             name = "Me",
@@ -352,28 +360,224 @@ class IncomingMessageDispatcherRemovalTest {
             sendingPublicKey = ByteArray(32) { 0x22 },
         )
         val identities = MutableStateFlow(listOf(selfSummary)).asStateFlow()
-        val reader = FakeChainReader(
+
+        // 1. Removed at epoch 2 (self branch → membershipRevoked).
+        val removalReader = FakeChainReader(
             SepCommitmentEntry(commitment = newCommitment, epoch = 2uL),
         )
-        // Post-readmission state: not revoked, own profile stamped at
-        // the admission epoch, group advanced past the removal.
-        val base = makeGroup()
-        groupStore.replaceForTest(
-            base.copy(
-                membershipRevoked = false,
-                epoch = 3uL,
-                memberProfiles = base.memberProfiles +
-                    (victimHex to base.memberProfiles[victimHex]!!.copy(statusEpoch = 3uL)),
+        makeDispatcher(payloadForVictim(), identities = identities, chainReader = removalReader)
+            .dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        assertTrue(groupRepository.snapshots.value.single().membershipRevoked)
+
+        // 2. Re-admitted at epoch 3: the admin's approve records the
+        //    joiner BEFORE building the snapshot, so the invitation
+        //    carries our own un-revoked, epoch-stamped profile.
+        val readmitCommitment = ByteArray(32) { 0xA0.toByte() }
+        val readmitSecret = ByteArray(32) { 0xA1.toByte() }
+        val readmitSalt = ByteArray(32) { 0xA2.toByte() }
+        val invitation = GroupInvitationPayload(
+            version = 1,
+            groupId = groupId,
+            groupSecret = readmitSecret,
+            name = "Family",
+            members = listOf(
+                GovernanceMember(publicKeyCompressed = victimBls, leafHash = ByteArray(32) { 0x0B }),
+                GovernanceMember(publicKeyCompressed = otherBls, leafHash = ByteArray(32) { 0x0C }),
+            ),
+            epoch = 3uL,
+            salt = readmitSalt,
+            commitment = readmitCommitment,
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = "de".repeat(48),
+            memberProfiles = mapOf(
+                victimHex to MemberProfile(
+                    alias = "Victim",
+                    inboxPublicKey = ByteArray(32) { 0x31 },
+                    sendingPubkey = ByteArray(32) { 0x32 },
+                    revoked = false,
+                    statusEpoch = 3uL,
+                ),
+                otherHex to MemberProfile(
+                    alias = "Other",
+                    inboxPublicKey = ByteArray(32) { 0x41 },
+                    sendingPubkey = ByteArray(32) { 0x42 },
+                ),
             ),
         )
-        groupRepository.reload()
+        val invitePlaintext = Json.encodeToString(
+            GroupInvitationPayload.serializer(),
+            invitation,
+        ).toByteArray(Charsets.UTF_8)
+        IncomingMessageDispatcher(
+            envelopeDecrypter = StubRemovalDecrypter(invitePlaintext, adminSending),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            identitiesFlow = identities,
+            // Exact-epoch match so the Tyranny invitation verifier
+            // accepts without a JNI recompute path.
+            chainState = null,
+        ).dispatch("i1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
 
-        makeDispatcher(payloadForVictim(), identities = identities, chainReader = reader)
-            .dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        val readmitted = groupRepository.snapshots.value.single()
+        assertFalse("re-admission must unlock the thread", readmitted.membershipRevoked)
+        assertEquals(
+            "our own profile must carry the admission epoch after materialize",
+            3uL,
+            readmitted.memberProfiles[victimHex]!!.statusEpoch,
+        )
+
+        // 3. Relay replays the OLD epoch-2 removal.
+        val replayReader = FakeChainReader(
+            SepCommitmentEntry(commitment = readmitCommitment, epoch = 3uL),
+        )
+        makeDispatcher(payloadForVictim(), identities = identities, chainReader = replayReader)
+            .dispatch("m2", ownerIdentity, byteArrayOf(), Instant.EPOCH)
 
         val final = groupRepository.snapshots.value.single()
         assertFalse("stale self-removal must not re-lock the thread", final.membershipRevoked)
-        assertEquals(0, reader.calls)
+        assertEquals("local guard fires before any chain read", 0, replayReader.calls)
+    }
+
+    @Test
+    fun invitation_withoutOwnProfile_defaultsStatusEpochSoReplayCannotRelock() = runTest {
+        // Belt-and-braces for the sender side: if a re-admission
+        // snapshot omits OUR profile (legacy sender, or an admin build
+        // that filters tombstones before recording the re-joiner),
+        // materializeGroup must still default our statusEpoch to the
+        // invitation's epoch — being in a snapshot at epoch N means
+        // every removal at or before N is stale for us. Without the
+        // default our marker is null, `selfApplies` is true, and the
+        // replayed removal re-locks the thread permanently.
+        val selfSummary = IdentitySummary(
+            id = ownerIdentity,
+            name = "Me",
+            blsPublicKey = victimBls,
+            inboxPublicKey = ByteArray(32) { 0x21 },
+            sendingPublicKey = ByteArray(32) { 0x22 },
+        )
+        val identities = MutableStateFlow(listOf(selfSummary)).asStateFlow()
+
+        makeDispatcher(
+            payloadForVictim(),
+            identities = identities,
+            chainReader = FakeChainReader(
+                SepCommitmentEntry(commitment = newCommitment, epoch = 2uL),
+            ),
+        ).dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        assertTrue(groupRepository.snapshots.value.single().membershipRevoked)
+
+        // Re-admission snapshot at epoch 3 that ships only the OTHER
+        // member's profile — ours is absent from the wire.
+        val readmitCommitment = ByteArray(32) { 0xA0.toByte() }
+        val invitation = GroupInvitationPayload(
+            version = 1,
+            groupId = groupId,
+            groupSecret = ByteArray(32) { 0xA1.toByte() },
+            name = "Family",
+            members = listOf(
+                GovernanceMember(publicKeyCompressed = victimBls, leafHash = ByteArray(32) { 0x0B }),
+            ),
+            epoch = 3uL,
+            salt = ByteArray(32) { 0xA2.toByte() },
+            commitment = readmitCommitment,
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = "de".repeat(48),
+            memberProfiles = mapOf(
+                otherHex to MemberProfile(
+                    alias = "Other",
+                    inboxPublicKey = ByteArray(32) { 0x41 },
+                    sendingPubkey = ByteArray(32) { 0x42 },
+                ),
+            ),
+        )
+        val plaintext = Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
+            .toByteArray(Charsets.UTF_8)
+        IncomingMessageDispatcher(
+            envelopeDecrypter = StubRemovalDecrypter(plaintext, adminSending),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            identitiesFlow = identities,
+            chainState = null,
+        ).dispatch("i1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        val readmitted = groupRepository.snapshots.value.single()
+        assertFalse(readmitted.membershipRevoked)
+        assertEquals(
+            "self statusEpoch must default to the invitation epoch",
+            3uL,
+            readmitted.memberProfiles[victimHex]!!.statusEpoch,
+        )
+
+        // The stale epoch-2 removal replays and must be refused.
+        makeDispatcher(
+            payloadForVictim(),
+            identities = identities,
+            chainReader = FakeChainReader(
+                SepCommitmentEntry(commitment = readmitCommitment, epoch = 3uL),
+            ),
+        ).dispatch("m2", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        assertFalse(
+            "replayed removal must not re-lock after re-admission",
+            groupRepository.snapshots.value.single().membershipRevoked,
+        )
+    }
+
+    @Test
+    fun invitation_staleSnapshotDoesNotUnlockRemovedMember() = runTest {
+        // materializeGroup rebuilds the row from scratch, so without a
+        // guard ANY accepted invitation clears membershipRevoked — e.g.
+        // a stale peer answering a refresh request. A snapshot at or
+        // before the removal's epoch must not unlock the composer.
+        val selfSummary = IdentitySummary(
+            id = ownerIdentity,
+            name = "Me",
+            blsPublicKey = victimBls,
+            inboxPublicKey = ByteArray(32) { 0x21 },
+            sendingPublicKey = ByteArray(32) { 0x22 },
+        )
+        val identities = MutableStateFlow(listOf(selfSummary)).asStateFlow()
+
+        makeDispatcher(
+            payloadForVictim(),
+            identities = identities,
+            chainReader = FakeChainReader(
+                SepCommitmentEntry(commitment = newCommitment, epoch = 2uL),
+            ),
+        ).dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        assertTrue(groupRepository.snapshots.value.single().membershipRevoked)
+
+        // A snapshot from BEFORE the removal (epoch 1).
+        val stale = GroupInvitationPayload(
+            version = 1,
+            groupId = groupId,
+            groupSecret = ByteArray(32) { 0x01 },
+            name = "Family",
+            members = emptyList(),
+            epoch = 1uL,
+            salt = ByteArray(32) { 0x02 },
+            commitment = ByteArray(32) { 0x50 },
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = "de".repeat(48),
+            memberProfiles = null,
+        )
+        val plaintext = Json.encodeToString(GroupInvitationPayload.serializer(), stale)
+            .toByteArray(Charsets.UTF_8)
+        IncomingMessageDispatcher(
+            envelopeDecrypter = StubRemovalDecrypter(plaintext, adminSending),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            identitiesFlow = identities,
+            chainState = null,
+        ).dispatch("i1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        assertTrue(
+            "a stale snapshot must not unlock a removed member",
+            groupRepository.snapshots.value.single().membershipRevoked,
+        )
     }
 
     @Test

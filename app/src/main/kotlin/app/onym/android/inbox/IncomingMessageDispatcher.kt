@@ -128,6 +128,18 @@ class IncomingMessageDispatcher(
     private val pendingRemovalRetries = mutableSetOf<String>()
     private val removalRetryMutex = Mutex()
 
+    /**
+     * Serializes [applyRemoval]'s read-modify-write. The retry
+     * coroutine runs OFF the inbox pump, so a retry firing at t=12s
+     * can interleave with the pump applying a second removal for the
+     * same group: both read the same snapshot, both `copy`, and the
+     * later `insert` wins — silently losing one tombstone, the exact
+     * failure the retry exists to prevent.
+     * [GroupRepository.insert] only locks the write, so the guard has
+     * to live here, spanning read→write.
+     */
+    private val removalApplyMutex = Mutex()
+
     suspend fun dispatch(
         messageId: String,
         ownerIdentityId: IdentityId,
@@ -309,15 +321,36 @@ class IncomingMessageDispatcher(
 
         // Wire-shipped profiles first; receiver's own entry overwrites
         // any same-keyed wire entry (sender shouldn't be able to
-        // assert our alias). The wire entry's statusEpoch is PRESERVED
-        // through the overwrite: a re-admitted member's own status
-        // marker is what refuses a replayed stale self-removal —
-        // erasing it would re-lock the composer on the next inbox
-        // replay.
+        // assert our alias). Our own statusEpoch is preserved from the
+        // wire when present, else DEFAULTED to the invitation's epoch:
+        // being in a snapshot at epoch N means every removal at or
+        // before N is stale for us. Without that default a re-admitted
+        // member whose entry didn't ship (pre-record snapshots, legacy
+        // senders) would materialize with a null marker and the next
+        // replay of their old removal would re-lock the composer for
+        // good.
         val profiles = (invitation.memberProfiles ?: emptyMap()).toMutableMap()
         selfMemberProfileEntry(ownerIdentityId)?.let { (key, profile) ->
-            profiles[key] = profile.copy(statusEpoch = profiles[key]?.statusEpoch)
+            profiles[key] = profile.copy(
+                statusEpoch = profiles[key]?.statusEpoch ?: invitation.epoch,
+            )
         }
+
+        // Preserve a prior removal unless this snapshot post-dates it.
+        // materializeGroup rebuilds the row from scratch, so any
+        // accepted invitation would otherwise clear membershipRevoked —
+        // leaving the exact-epoch chain gate as the only thing between
+        // a stale (or stale-peer-answered refresh) invitation and an
+        // unlocked composer.
+        val priorRemovalEpoch = groupRepository
+            .findForOwner(ownerIdentityId.value, invitation.groupId.toHexLowercase())
+            ?.takeIf { it.membershipRevoked }
+            ?.let { prior ->
+                selfMemberProfileEntry(ownerIdentityId)?.first
+                    ?.let { selfKey -> prior.memberProfiles[selfKey]?.statusEpoch }
+                    ?: prior.epoch
+            }
+        val stillRevoked = priorRemovalEpoch != null && invitation.epoch <= priorRemovalEpoch
 
         // PR 84: stamp the inviting envelope's Ed25519 pubkey as the
         // group's admin signing key. Subsequent
@@ -353,6 +386,7 @@ class IncomingMessageDispatcher(
             avatar = invitation.avatar,
             // The group's invitation/intro, as the sender wrote it.
             invitationMessage = invitation.invitationMessage,
+            membershipRevoked = stillRevoked,
         )
         groupRepository.insert(group)
     }
@@ -612,6 +646,17 @@ class IncomingMessageDispatcher(
         payload: MemberRemovalPayload,
         ownerIdentityId: IdentityId,
         senderEd25519PublicKey: ByteArray?,
+    ): RemovalApplyResult = removalApplyMutex.withLock {
+        applyRemovalLocked(payload, ownerIdentityId, senderEd25519PublicKey)
+    }
+
+    /** [applyRemoval]'s body — always called under
+     *  [removalApplyMutex] so the snapshot read and the write can't
+     *  interleave with a concurrent removal for the same group. */
+    private suspend fun applyRemovalLocked(
+        payload: MemberRemovalPayload,
+        ownerIdentityId: IdentityId,
+        senderEd25519PublicKey: ByteArray?,
     ): RemovalApplyResult {
         val groupIdHex = payload.groupId.toHexLowercase()
         val group = groupRepository.findForOwner(ownerIdentityId.value, groupIdHex)
@@ -691,8 +736,15 @@ class IncomingMessageDispatcher(
         val victimBytes = ChatGroup.bytesFromHex(victimHex)
         groupRepository.insert(
             group.copy(
-                // Tombstone effect — order-independent (see KDoc).
-                members = if (tombstoneApplies) {
+                // Tombstone effect — order-independent (see KDoc). The
+                // leaf also goes whenever we accept the state advance:
+                // in the directory/roster-divergence case (no local
+                // profile for the victim, the receive-side twin of
+                // MemberNotInRoster) the anchored commitment we're
+                // adopting is over the SHRUNKEN tree, so keeping the
+                // leaf would leave the local roster disagreeing with
+                // the commitment we just stored.
+                members = if (tombstoneApplies || advancesState) {
                     group.members.filterNot {
                         it.publicKeyCompressed.contentEquals(victimBytes)
                     }

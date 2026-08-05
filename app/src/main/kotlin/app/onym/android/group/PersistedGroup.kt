@@ -113,7 +113,14 @@ data class PersistedGroup(
      * the admin. Plain (a boolean flag isn't user-identifying, same
      * rationale as [isPublishedOnChain]) and defaulted so the v8→v9
      * migration lands the column on existing rows without a wipe.
+     *
+     * [androidx.room.ColumnInfo.defaultValue] mirrors the migration's
+     * `DEFAULT 0` so a fresh install's `CREATE TABLE` and a migrated
+     * install's `ALTER TABLE` produce the SAME column definition —
+     * without it the two drift, which is precisely the class of bug
+     * MIGRATION_8_9 exists to repair.
      */
+    @androidx.room.ColumnInfo(defaultValue = "0")
     val membershipRevoked: Boolean = false,
 ) {
     override fun equals(other: Any?): Boolean {

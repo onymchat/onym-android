@@ -240,6 +240,28 @@ open class JoinRequestApprover(
             }
         }
 
+        // Record the joiner BEFORE building the invitation snapshot.
+        // Ordering is load-bearing for RE-admission: the joiner's own
+        // entry is still the tombstone from their earlier removal, so
+        // the `!revoked` filter below would drop it off the wire, the
+        // receiver would materialize with a null
+        // [MemberProfile.statusEpoch], and the next relay replay of
+        // that old removal would re-lock their composer for good.
+        // Recording first un-revokes + epoch-stamps the entry so it
+        // survives the filter and carries its status marker across.
+        // Skipped when the joiner shipped a pre-PR-78 request — no
+        // stable cross-device key to record under.
+        val blsPub = req.joinerBlsPublicKey
+        if (blsPub != null) {
+            anchored = recordJoiner(
+                group = anchored,
+                blsPub = blsPub,
+                inboxPub = req.joinerInboxPublicKey,
+                sendingPub = req.joinerSendingPublicKey,
+                alias = req.joinerDisplayLabel,
+            )
+        }
+
         val invitePayload = GroupInvitationPayload(
             version = 1,
             groupId = anchored.groupIdBytes,
@@ -293,21 +315,10 @@ open class JoinRequestApprover(
             return@withLock ApproveOutcome.TransportFailed("no relay accepted the invitation")
         }
 
-        // Record the joiner in the local group's view-facing roster
-        // (alias / inbox-pub) so the admin sees them by alias in the
-        // UI. Skipped when the joiner shipped a pre-PR-78 request —
-        // no stable cross-device key under which to record. Use the
-        // post-anchor group snapshot so PR-88's `commitment + epoch`
-        // ship in the announcement.
-        val blsPub = req.joinerBlsPublicKey
+        // The joiner is already recorded above (before the invitation
+        // snapshot — see the ordering comment there). Announce them to
+        // the existing members from the post-record snapshot.
         if (blsPub != null) {
-            recordJoiner(
-                group = anchored,
-                blsPub = blsPub,
-                inboxPub = req.joinerInboxPublicKey,
-                sendingPub = req.joinerSendingPublicKey,
-                alias = req.joinerDisplayLabel,
-            )
             broadcastJoin(
                 group = anchored,
                 joinerBlsPub = blsPub,
@@ -331,6 +342,12 @@ open class JoinRequestApprover(
      * overwrites the entry (alias, inbox-pub) rather than minting a
      * duplicate. Goes through [GroupRepository.insert] which
      * delegates to [RoomGroupStore.insertOrUpdate].
+     *
+     * Returns the updated snapshot so the caller can build the
+     * invitation + announcement from state that already includes the
+     * joiner — for a RE-admission that's what un-revokes the entry and
+     * stamps its [MemberProfile.statusEpoch] before the `!revoked`
+     * filter runs.
      */
     private suspend fun recordJoiner(
         group: ChatGroup,
@@ -338,7 +355,7 @@ open class JoinRequestApprover(
         inboxPub: ByteArray,
         sendingPub: ByteArray,
         alias: String,
-    ) {
+    ): ChatGroup {
         val key = blsPub.toHexLowercase()
         val updated = group.copy(
             memberProfiles = group.memberProfiles +
@@ -355,6 +372,7 @@ open class JoinRequestApprover(
                 )),
         )
         groupRepository.insert(updated)
+        return updated
     }
 
     /**
