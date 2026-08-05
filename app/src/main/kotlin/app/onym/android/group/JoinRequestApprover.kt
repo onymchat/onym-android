@@ -192,6 +192,13 @@ open class JoinRequestApprover(
      *  link campaign or a corrupted intro key). */
     private val _decryptFailures = MutableStateFlow(0)
 
+    /** Surviving pending-row id → every raw [IntroRequest.id] that
+     *  collapsed into it (the winner included). Rebuilt by [refresh],
+     *  read by [consumeRequestAndSiblings]. A StateFlow rather than a
+     *  plain var so the collector coroutine's write is visible to the
+     *  approve/decline caller without extra synchronisation. */
+    private val collapsedIds = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+
     @Suppress("unused")
     val decryptFailures: StateFlow<Int> = _decryptFailures.asStateFlow()
 
@@ -202,10 +209,7 @@ open class JoinRequestApprover(
      */
     override fun start() {
         scope.launch {
-            introRequestStore.requests.collectLatest { raw ->
-                val decoded = raw.mapNotNull { decode(it) }
-                _pending.value = decoded
-            }
+            introRequestStore.requests.collectLatest { raw -> refresh(raw) }
         }
     }
 
@@ -214,8 +218,49 @@ open class JoinRequestApprover(
      *  fighting collector scheduling. */
     @androidx.annotation.VisibleForTesting
     internal suspend fun pumpOnce() {
-        val raw = introRequestStore.requests.value
-        _pending.value = raw.mapNotNull { decode(it) }
+        refresh(introRequestStore.requests.value)
+    }
+
+    /**
+     * Decode every raw request and collapse the copies that represent
+     * the same logical join — same joiner identity, same group.
+     *
+     * The joiner re-taps the deeplink or re-opens the join screen, and
+     * the relay replays the whole intro tag on every reconnect. Each
+     * copy is a distinct Nostr event with its own id, because
+     * `NostrInboxTransport.send` signs with a fresh ephemeral key per
+     * send, so [IntroRequestStore]'s event-id dedup can't catch them.
+     * Without this, one person retrying shows up as several rows and
+     * acting on one leaves the siblings behind — which reads as "the
+     * buttons don't work".
+     *
+     * Keeps the most recently received copy, positioned at the
+     * first-seen index: `LinkedHashMap` preserves first-insert order
+     * even when the value is later replaced.
+     *
+     * Identity key is `joinerBlsPublicKey ?: joinerInboxPublicKey` —
+     * the BLS key is the stable cross-device choice, the inbox key the
+     * pre-PR-78 fallback.
+     *
+     * Mirrors `refresh(from:)` in onym-ios `JoinRequestApprover.swift`.
+     */
+    private suspend fun refresh(raw: List<IntroRequest>) {
+        val winners = LinkedHashMap<String, Pair<PendingRequest, IntroRequest>>()
+        val siblings = LinkedHashMap<String, MutableList<String>>()
+        for (r in raw) {
+            val decoded = decode(r) ?: continue
+            val joinerKey = decoded.joinerBlsPublicKey ?: decoded.joinerInboxPublicKey
+            val key = joinerKey.toHexLowercase() + ":" + decoded.groupId.toHexLowercase()
+            siblings.getOrPut(key) { mutableListOf() } += r.id
+            val incumbent = winners[key]
+            if (incumbent == null || r.receivedAt.isAfter(incumbent.second.receivedAt)) {
+                winners[key] = decoded to r
+            }
+        }
+        _pending.value = winners.values.map { it.first }
+        collapsedIds.value = winners.entries.associate { (key, win) ->
+            win.first.id to (siblings[key]?.toList() ?: listOf(win.first.id))
+        }
     }
 
     /**

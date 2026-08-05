@@ -26,7 +26,14 @@ interface IntroRequestStore {
     suspend fun record(request: IntroRequest): Boolean
 
     /** Drop a request after the user has acted on it (Approve or
-     *  Decline) so it stops cluttering the surface. */
+     *  Decline) so it stops cluttering the surface, and remember its
+     *  id so a replay can't resurrect it.
+     *
+     *  Implementations MUST tombstone. `NostrInboxTransport`'s REQ
+     *  carries no `since` and no `limit`, so every relay reconnect
+     *  re-delivers the intro inbox in full. Dropping the row from
+     *  `pending` alone means the next replay re-records it and the
+     *  user sees a request they already handled. */
     suspend fun consume(id: String)
 }
 
@@ -35,10 +42,17 @@ class InMemoryIntroRequestStore : IntroRequestStore {
     private val mutex = Mutex()
     private val pending = mutableListOf<IntroRequest>()
 
+    /** Event ids the user already acted on. Process-lifetime, matching
+     *  [pending]: a relaunch legitimately re-surfaces anything the user
+     *  never got round to, but within a session an approved or declined
+     *  row must stay gone. */
+    private val consumed = mutableSetOf<String>()
+
     private val _requests = MutableStateFlow<List<IntroRequest>>(emptyList())
     override val requests: StateFlow<List<IntroRequest>> = _requests.asStateFlow()
 
     override suspend fun record(request: IntroRequest): Boolean = mutex.withLock {
+        if (request.id in consumed) return@withLock false
         if (pending.any { it.id == request.id }) return@withLock false
         pending += request
         _requests.value = pending.sortedByDescending { it.receivedAt }
@@ -46,6 +60,9 @@ class InMemoryIntroRequestStore : IntroRequestStore {
     }
 
     override suspend fun consume(id: String) = mutex.withLock {
+        // Tombstone unconditionally, even when the id isn't pending, so
+        // a tombstone can be laid ahead of a replay that hasn't landed.
+        consumed += id
         if (pending.removeAll { it.id == id }) {
             _requests.value = pending.sortedByDescending { it.receivedAt }
         }
