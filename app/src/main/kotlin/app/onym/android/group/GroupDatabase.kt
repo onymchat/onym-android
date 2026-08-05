@@ -31,7 +31,16 @@ import androidx.room.RoomDatabase
     // v8 (last-read): adds nullable `lastReadAtMillis` INTEGER for the
     // chat-list unread badge. Additive; existing rows decode to null
     // (never opened → everything unread until first open).
-    version = 8,
+    // v9 (member removal): adds `membershipRevoked` INTEGER NOT NULL
+    // DEFAULT 0 for the "you were removed" state, and retroactively
+    // lands `encryptedInvitationMessage` (nullable BLOB) — that column
+    // was added to the entity without a version bump, so v8 installs
+    // that migrated 7→8 lack it and hit Room's identity-hash check
+    // (which the OnymApplication catch block turns into a silent
+    // in-memory fallback). The migration probes PRAGMA table_info
+    // first because fresh v8 installs created after the entity change
+    // DO have the column.
+    version = 9,
     exportSchema = false,
 )
 abstract class GroupDatabase : RoomDatabase() {
@@ -139,6 +148,40 @@ object GroupDatabaseMigrations {
     val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE groups ADD COLUMN lastReadAtMillis INTEGER")
+        }
+    }
+
+    /**
+     * v8 → v9: two additive columns.
+     *
+     *  - `membershipRevoked` INTEGER NOT NULL DEFAULT 0 — the "this
+     *    identity was removed from the group" flag. Existing rows
+     *    default to active membership.
+     *  - `encryptedInvitationMessage` BLOB — repairs a schema drift:
+     *    the entity gained this column with no version bump, so a
+     *    device that migrated 7→8 stores no such column while a fresh
+     *    install does. Guarded by a PRAGMA probe because SQLite's
+     *    ALTER ADD COLUMN throws on duplicates.
+     */
+    val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE groups ADD COLUMN membershipRevoked INTEGER NOT NULL DEFAULT 0",
+            )
+            val hasInvitationMessage = db.query("PRAGMA table_info(`groups`)").use { cursor ->
+                val nameIdx = cursor.getColumnIndex("name")
+                var found = false
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(nameIdx) == "encryptedInvitationMessage") {
+                        found = true
+                        break
+                    }
+                }
+                found
+            }
+            if (!hasInvitationMessage) {
+                db.execSQL("ALTER TABLE groups ADD COLUMN encryptedInvitationMessage BLOB")
+            }
         }
     }
 }

@@ -119,6 +119,7 @@ class RoomGroupStore(
             encryptedAvatar = group.avatar?.let(encryption::encrypt),
             lastReadAtMillis = group.lastReadAtMillis,
             encryptedInvitationMessage = group.invitationMessage?.let(encryption::encrypt),
+            membershipRevoked = group.membershipRevoked,
         )
     }
 
@@ -182,6 +183,7 @@ class RoomGroupStore(
             avatar = avatar,
             lastReadAtMillis = row.lastReadAtMillis,
             invitationMessage = invitationMessage,
+            membershipRevoked = row.membershipRevoked,
         )
     }
 

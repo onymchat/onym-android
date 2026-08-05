@@ -108,6 +108,13 @@ data class PersistedGroup(
      * columns. Nullable so Room's migration lands the column without a wipe.
      */
     val encryptedInvitationMessage: ByteArray? = null,
+    /**
+     * `true` once the owning identity was removed from this group by
+     * the admin. Plain (a boolean flag isn't user-identifying, same
+     * rationale as [isPublishedOnChain]) and defaulted so the v8→v9
+     * migration lands the column on existing rows without a wipe.
+     */
+    val membershipRevoked: Boolean = false,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -129,7 +136,8 @@ data class PersistedGroup(
             (encryptedMemberProfilesJson?.contentEquals(other.encryptedMemberProfilesJson) ?: (other.encryptedMemberProfilesJson == null)) &&
             (encryptedAdminEd25519PubkeyHex?.contentEquals(other.encryptedAdminEd25519PubkeyHex) ?: (other.encryptedAdminEd25519PubkeyHex == null)) &&
             (encryptedAvatar?.contentEquals(other.encryptedAvatar) ?: (other.encryptedAvatar == null)) &&
-            (encryptedInvitationMessage?.contentEquals(other.encryptedInvitationMessage) ?: (other.encryptedInvitationMessage == null))
+            (encryptedInvitationMessage?.contentEquals(other.encryptedInvitationMessage) ?: (other.encryptedInvitationMessage == null)) &&
+            membershipRevoked == other.membershipRevoked
     }
 
     override fun hashCode(): Int {
@@ -151,6 +159,7 @@ data class PersistedGroup(
         h = 31 * h + (encryptedAdminEd25519PubkeyHex?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedAvatar?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedInvitationMessage?.contentHashCode() ?: 0)
+        h = 31 * h + membershipRevoked.hashCode()
         return h
     }
 }

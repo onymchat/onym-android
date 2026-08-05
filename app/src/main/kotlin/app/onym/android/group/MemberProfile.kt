@@ -48,6 +48,19 @@ data class MemberProfile(
     @SerialName("sending_pubkey")
     @Serializable(with = Base64ByteArraySerializer::class)
     val sendingPubkey: ByteArray,
+    /**
+     * Tombstone for a member removed from the group. A revoked
+     * profile stays in the map so past-message alias rendering and
+     * BLS-fingerprint lookups keep working, but every trust surface
+     * treats the member as gone: sender-auth paths reject their
+     * envelopes, fanout loops skip their inbox, and the members UI
+     * hides the row. Defaulted so legacy persisted JSON and
+     * pre-removal wire payloads decode as active members; serializes
+     * as `"revoked"` inside [GroupInvitationPayload]'s
+     * `member_profiles` (iOS decoders ignore unknown keys).
+     */
+    @SerialName("revoked")
+    val revoked: Boolean = false,
 ) {
     init {
         require(inboxPublicKey.size == 32) {
@@ -62,12 +75,14 @@ data class MemberProfile(
         (other is MemberProfile &&
             alias == other.alias &&
             inboxPublicKey.contentEquals(other.inboxPublicKey) &&
-            sendingPubkey.contentEquals(other.sendingPubkey))
+            sendingPubkey.contentEquals(other.sendingPubkey) &&
+            revoked == other.revoked)
 
     override fun hashCode(): Int {
         var h = alias.hashCode()
         h = 31 * h + inboxPublicKey.contentHashCode()
         h = 31 * h + sendingPubkey.contentHashCode()
+        h = 31 * h + revoked.hashCode()
         return h
     }
 }

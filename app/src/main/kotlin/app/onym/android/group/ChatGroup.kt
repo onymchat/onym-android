@@ -149,6 +149,15 @@ data class ChatGroup(
      */
     @SerialName("invitation_message")
     val invitationMessage: String? = null,
+    /**
+     * `true` once this device's owner has been removed from the group
+     * by the admin (a self-targeting [MemberRemovalPayload] landed).
+     * The thread stays readable but the composer is replaced by a
+     * "you were removed" banner and [app.onym.android.chats.SendMessageInteractor]
+     * refuses sends. Local-only — never on the wire; defaulted so wire
+     * decoders + existing construction sites need no change.
+     */
+    val membershipRevoked: Boolean = false,
 ) {
     /** Strongly-typed accessor — same value as [ownerIdentityId] but
      *  wrapped so callers don't carry stringly-typed identity ids
@@ -180,7 +189,8 @@ data class ChatGroup(
             ownerIdentityId == other.ownerIdentityId &&
             (avatar?.contentEquals(other.avatar) ?: (other.avatar == null)) &&
             lastReadAtMillis == other.lastReadAtMillis &&
-            invitationMessage == other.invitationMessage
+            invitationMessage == other.invitationMessage &&
+            membershipRevoked == other.membershipRevoked
     }
 
     override fun hashCode(): Int {
@@ -202,6 +212,7 @@ data class ChatGroup(
         h = 31 * h + (avatar?.contentHashCode() ?: 0)
         h = 31 * h + (lastReadAtMillis?.hashCode() ?: 0)
         h = 31 * h + (invitationMessage?.hashCode() ?: 0)
+        h = 31 * h + membershipRevoked.hashCode()
         return h
     }
 
