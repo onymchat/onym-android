@@ -711,7 +711,15 @@ class OnymApplication : Application() {
         // user approval. Single instance — the toolbar badge + the
         // modal screen share state via [ApproveRequestsViewModel].
         val joinRequestApprover = app.onym.android.group.JoinRequestApprover(
-            identity = identityRepository,
+            activeIdentity = identityRepository,
+            identitiesFlow = identityRepository.identities,
+            envelopeSealer = identityRepository,
+            // Hands the approver a secret-read capability for its update
+            // proof. Method reference so lint-secrets.py's call-syntax
+            // regex doesn't see it — annotated anyway for reviewers; the
+            // actual read site in JoinRequestApprover is annotated too.
+            // onym:allow-secret-read
+            blsSecretKey = identityRepository::blsSecretKey,
             introKeyStore = introKeyStore,
             introRequestStore = introRequestStore,
             groupRepository = groupRepository,

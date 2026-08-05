@@ -14,9 +14,13 @@ import app.onym.android.chain.SepContractClient
 import app.onym.android.chain.SepContractError
 import app.onym.android.chain.SepContractTransport
 import app.onym.android.chain.SepGroupType
+import app.onym.android.chain.SepTier
 import app.onym.android.chain.TyrannyUpdateCommitmentPayload
+import app.onym.android.identity.ActiveIdentityProvider
 import app.onym.android.identity.IdentityRepository
+import app.onym.android.identity.IdentitySummary
 import app.onym.android.identity.InvitationDecryptError
+import app.onym.android.identity.InvitationEnvelopeSealer
 import app.onym.android.transport.InboxTransport
 import app.onym.android.transport.TransportInboxId
 import kotlinx.coroutines.CoroutineScope
@@ -66,8 +70,29 @@ interface JoinRequestApproving {
     suspend fun decline(requestId: String)
 }
 
+/**
+ * ## Dependencies
+ *
+ * Takes [ActiveIdentityProvider] + [identitiesFlow] + [envelopeSealer]
+ * + [blsSecretKey] instead of the concrete
+ * [app.onym.android.identity.IdentityRepository] so [approve] is
+ * unit-testable without standing up the real keychain — the same seam
+ * split [GroupMemberRemover] and [app.onym.android.chats.SendMessageInteractor]
+ * already use. Production wiring in `OnymApplication` passes the
+ * `IdentityRepository` for the first three slots and a method reference
+ * for the fourth.
+ */
 open class JoinRequestApprover(
-    private val identity: IdentityRepository,
+    private val activeIdentity: ActiveIdentityProvider,
+    /** Every identity on the device. Read only to resolve the admin's
+     *  display name for the join announcement. */
+    private val identitiesFlow: StateFlow<List<IdentitySummary>>,
+    private val envelopeSealer: InvitationEnvelopeSealer,
+    /** Reads the active identity's BLS secret for the update proof.
+     *  Injectable closure (production:
+     *  `identityRepository::blsSecretKey`) so JVM tests don't stand up
+     *  the whole keychain stack. */
+    private val blsSecretKey: suspend () -> ByteArray,
     private val introKeyStore: IntroKeyStore,
     private val introRequestStore: IntroRequestStore,
     private val groupRepository: GroupRepository,
@@ -93,6 +118,13 @@ open class JoinRequestApprover(
      *  prove against a stale epoch and be rejected on chain).
      *  Defaulted so existing construction sites / tests keep working. */
     private val mutex: Mutex = Mutex(),
+    /** Test seams for the JNI-backed commitment math — the OnymSDK
+     *  `.so` only loads on-device, so JVM unit tests inject pure-Kotlin
+     *  stand-ins. Mirrors [GroupMemberRemover]. */
+    private val computeMerkleRoot: (List<GovernanceMember>, SepTier) -> ByteArray =
+        GroupCommitmentBuilder::computeMerkleRoot,
+    private val computePublicKey: (ByteArray) -> ByteArray =
+        GroupCommitmentBuilder::computePublicKey,
 ) : JoinRequestApproving {
     /** UI-renderable view of one decrypted, awaiting-action request. */
     data class PendingRequest(
@@ -217,8 +249,9 @@ open class JoinRequestApprover(
     override suspend fun approve(requestId: String): ApproveOutcome = mutex.withLock {
         val req = _pending.value.firstOrNull { it.id == requestId }
             ?: return@withLock ApproveOutcome.UnknownRequest
-        val activeIdentity = identity.currentIdentity()
-            ?: return@withLock ApproveOutcome.NoIdentityLoaded
+        if (activeIdentity.currentIdentityId.value == null) {
+            return@withLock ApproveOutcome.NoIdentityLoaded
+        }
 
         val group = groupRepository.snapshots.value.firstOrNull {
             it.groupIdBytes.contentEquals(req.groupId)
@@ -301,7 +334,7 @@ open class JoinRequestApprover(
             return@withLock ApproveOutcome.TransportFailed("encode: ${e.message ?: e.javaClass.simpleName}")
         }
         val sealed = try {
-            identity.sealInvitation(payloadBytes, req.joinerInboxPublicKey)
+            envelopeSealer.sealInvitation(payloadBytes, req.joinerInboxPublicKey)
         } catch (e: Throwable) {
             return@withLock ApproveOutcome.TransportFailed("seal: ${e.message ?: e.javaClass.simpleName}")
         }
@@ -400,8 +433,8 @@ open class JoinRequestApprover(
         // per-identity summary carries it. Fall back to empty when
         // unresolved (best-effort — receivers always display the
         // BLS fingerprint alongside the alias).
-        val activeId = identity.currentIdentityId.value
-        val adminAlias = identity.identities.value
+        val activeId = activeIdentity.currentIdentityId.value
+        val adminAlias = identitiesFlow.value
             .firstOrNull { it.id == activeId }
             ?.name
             .orEmpty()
@@ -451,7 +484,7 @@ open class JoinRequestApprover(
             if (profile.revoked) continue
 
             val sealed = try {
-                identity.sealInvitation(payloadBytes, profile.inboxPublicKey)
+                envelopeSealer.sealInvitation(payloadBytes, profile.inboxPublicKey)
             } catch (_: Throwable) {
                 continue
             }
@@ -596,10 +629,7 @@ open class JoinRequestApprover(
         val newMembers = (group.members + joinerMember)
             .sortedWith(compareBy(byteArrayLexComparator()) { it.publicKeyCompressed })
         val memberRootNew = try {
-            GroupCommitmentBuilder.computeMerkleRoot(
-                members = newMembers,
-                tier = group.tier,
-            )
+            computeMerkleRoot(newMembers, group.tier)
         } catch (e: Throwable) {
             return AnchorOutcome.Failed(ApproveOutcome.ProofFailed("merkle_root: ${e.message ?: e}"))
         }
@@ -607,7 +637,7 @@ open class JoinRequestApprover(
 
         val blsSecret = try {
             // onym:allow-secret-read
-            identity.blsSecretKey()
+            blsSecretKey()
         } catch (e: Throwable) {
             return AnchorOutcome.Failed(
                 ApproveOutcome.TransportFailed("bls_secret: ${e.message ?: e}"),
@@ -622,7 +652,7 @@ open class JoinRequestApprover(
         // `Poseidon(admin_secret_key) != supplied leaf hash` error
         // ~3-5s later (after the prover's pre-witness checks fail).
         val activePubFromSecret = try {
-            GroupCommitmentBuilder.computePublicKey(blsSecret)
+            computePublicKey(blsSecret)
         } catch (e: Throwable) {
             return AnchorOutcome.Failed(
                 ApproveOutcome.TransportFailed("derive_pub: ${e.message ?: e::class.simpleName}"),
