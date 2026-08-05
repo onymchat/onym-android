@@ -5,6 +5,8 @@ package app.onym.android.chats
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
 import app.onym.android.group.ChatGroup
+import app.onym.android.group.GroupMemberRemover
+import app.onym.android.group.GroupMemberRemoving
 import app.onym.android.group.GroupRepository
 import app.onym.android.identity.IdentityId
 import app.onym.android.support.FakeActiveIdentityProvider
@@ -41,6 +43,7 @@ class ChatsViewModelTest {
     private suspend fun makeVM(
         groupStore: InMemoryGroupStore,
         messageStore: InMemoryMessageStore = InMemoryMessageStore(),
+        remover: GroupMemberRemoving? = null,
     ): ChatsViewModel {
         val identity = FakeActiveIdentityProvider(initial = owner)
         val groupRepo = GroupRepository(
@@ -55,7 +58,11 @@ class ChatsViewModelTest {
             identity = identity,
             scope = TestScope(UnconfinedTestDispatcher()),
         )
-        return ChatsViewModel(repository = groupRepo, messageRepository = messageRepo)
+        return ChatsViewModel(
+            repository = groupRepo,
+            messageRepository = messageRepo,
+            memberRemover = remover,
+        )
     }
 
     @Test
@@ -155,6 +162,63 @@ class ChatsViewModelTest {
         replyToMessageId = null,
         groupType = SepGroupType.TYRANNY,
     )
+
+    // ─── member removal delegation ────────────────────────────────
+
+    @Test
+    fun removeMember_noOpWithoutRemover() = runTest {
+        val vm = makeVM(InMemoryGroupStore())
+        vm.removeMember("aa".repeat(32), "bb".repeat(48))
+        assertEquals(null, vm.removalError.value)
+        assertEquals(null, vm.removalInFlight.value)
+    }
+
+    @Test
+    fun removeMember_delegatesAndClearsInFlight_onSuccess() = runTest {
+        val remover = RecordingRemover(GroupMemberRemover.Outcome.Sent)
+        val vm = makeVM(InMemoryGroupStore(), remover = remover)
+
+        vm.removeMember("aa".repeat(32), "BB".repeat(48))
+
+        assertEquals(1, remover.calls.size)
+        assertEquals("aa".repeat(32) to "BB".repeat(48), remover.calls.single())
+        // Unconfined main dispatcher → the launch completed inline.
+        assertEquals(null, vm.removalInFlight.value)
+        assertEquals(null, vm.removalError.value)
+    }
+
+    @Test
+    fun removeMember_surfacesFailureReason_andClearsOnRequest() = runTest {
+        val remover = RecordingRemover(
+            GroupMemberRemover.Outcome.AnchorRejected("stale epoch"),
+        )
+        val vm = makeVM(InMemoryGroupStore(), remover = remover)
+
+        vm.removeMember("aa".repeat(32), "bb".repeat(48))
+
+        assertEquals("stale epoch", vm.removalError.value)
+        assertEquals(null, vm.removalInFlight.value)
+        vm.clearRemovalError()
+        assertEquals(null, vm.removalError.value)
+    }
+
+    @Test
+    fun removeMember_mapsSingletonOutcomeToName() = runTest {
+        val remover = RecordingRemover(GroupMemberRemover.Outcome.NotAdminOfThisGroup)
+        val vm = makeVM(InMemoryGroupStore(), remover = remover)
+        vm.removeMember("aa".repeat(32), "bb".repeat(48))
+        assertEquals("NotAdminOfThisGroup", vm.removalError.value)
+    }
+
+    private class RecordingRemover(
+        private val outcome: GroupMemberRemover.Outcome,
+    ) : GroupMemberRemoving {
+        val calls = mutableListOf<Pair<String, String>>()
+        override suspend fun remove(groupId: String, victimBlsHex: String): GroupMemberRemover.Outcome {
+            calls.add(groupId to victimBlsHex)
+            return outcome
+        }
+    }
 
     private fun makeGroup(
         id: String,

@@ -84,6 +84,46 @@ class RoomGroupStoreTest {
         )
     }
 
+    @Test
+    fun insertOrUpdate_roundtripsRemovalFlags() = runTest {
+        val victimHex = "bb".repeat(48)
+        val group = makeGroup(
+            id = "aa".repeat(32),
+            name = "Family",
+            memberProfiles = mapOf(
+                victimHex to MemberProfile(
+                    alias = "Removed",
+                    inboxPublicKey = ByteArray(32) { 0x31 },
+                    sendingPubkey = ByteArray(32) { 0x32 },
+                    revoked = true,
+                ),
+            ),
+        ).copy(membershipRevoked = true)
+        store.insertOrUpdate(group)
+
+        val listed = store.list().single()
+        assertTrue(listed.membershipRevoked)
+        assertTrue(listed.memberProfiles[victimHex]!!.revoked)
+    }
+
+    @Test
+    fun decode_legacyProfileJsonWithoutRevokedKey_defaultsToActive() {
+        // Rows written before the removal feature carry profile JSON
+        // with no `revoked` key — same decoder settings as
+        // RoomGroupStore's jsonFormat.
+        val legacyJson = """
+            {
+              "alias": "Legacy",
+              "inbox_public_key": "${java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 0x31 })}",
+              "sending_pubkey": "${java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 0x32 })}"
+            }
+        """.trimIndent()
+        val decoded = kotlinx.serialization.json.Json {
+            encodeDefaults = true; ignoreUnknownKeys = true
+        }.decodeFromString(MemberProfile.serializer(), legacyJson)
+        assertFalse(decoded.revoked)
+    }
+
     // ─── encryption-at-rest ───────────────────────────────────────
 
     @Test

@@ -85,6 +85,52 @@ class SendMessageInteractorTest {
         )
     }
 
+    // ─── member removal ──────────────────────────────────────────
+
+    @Test
+    fun send_throwsRemovedFromGroup_whenMembershipRevoked() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+        val seeded = fixture.groupStore.listForOwner(activeId.value).single()
+        fixture.groupStore.preload(listOf(seeded.copy(membershipRevoked = true)))
+
+        assertThrows(SendMessageError.RemovedFromGroup::class.java) {
+            kotlinx.coroutines.runBlocking { fixture.interactor.send(groupIdHex, "hello") }
+        }
+        assertTrue(fixture.transport.sends().isEmpty())
+    }
+
+    @Test
+    fun send_skipsRevokedRecipients() = runTest {
+        val fixture = newFixture()
+        val extraInbox = ByteArray(32) { 0x66 }
+        fixture.seedGroup(
+            includePeer = true,
+            extraPeerBlsHex = "ee".repeat(48),
+            extraPeerInbox = extraInbox,
+        )
+        // Tombstone the first peer; only Peer2 should receive.
+        val seeded = fixture.groupStore.listForOwner(activeId.value).single()
+        fixture.groupStore.preload(
+            listOf(
+                seeded.copy(
+                    memberProfiles = seeded.memberProfiles +
+                        (peerBlsHex to seeded.memberProfiles[peerBlsHex]!!.copy(revoked = true)),
+                ),
+            ),
+        )
+
+        val result = fixture.interactor.send(groupIdHex, "hello")
+
+        assertEquals(MessageStatus.SENT, result.status)
+        val sends = fixture.transport.sends()
+        assertEquals(1, sends.size)
+        assertEquals(
+            TransportInboxId(IdentityRepository.inboxTag(extraInbox)),
+            sends.single().inbox,
+        )
+    }
+
     // ─── image send ──────────────────────────────────────────────
 
     @Test

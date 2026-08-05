@@ -207,6 +207,48 @@ class GroupStateVerifierTest {
         assertEquals("current member should receive the snapshot", 1, transport.sends().size)
     }
 
+    /** A removed (tombstoned) member is refused: the snapshot carries
+     *  the rotated salt + groupSecret — exactly what removal takes
+     *  away from them. */
+    @Test
+    fun handleRefreshRequest_revokedMember_doesNotReply() = runTest {
+        val verifier = makeVerifier()
+        val groupId = ByteArray(32) { 0x42 }
+        val reqBls = ByteArray(48) { 0x07 }
+        val reqBlsHex = reqBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val reqInbox = ByteArray(32) { 0x08 }
+        val reqEd = ByteArray(32) { 0x09 }
+        groups.insert(
+            seededGroup(
+                groupId = groupId,
+                memberProfiles = mapOf(
+                    reqBlsHex to MemberProfile(
+                        alias = "Removed",
+                        inboxPublicKey = reqInbox,
+                        sendingPubkey = reqEd,
+                        revoked = true,
+                    ),
+                ),
+            ),
+        )
+
+        verifier.handleRefreshRequest(
+            GroupStateRefreshRequest(
+                groupId = groupId,
+                requesterInboxPublicKey = reqInbox,
+                requesterBlsPublicKey = reqBls,
+            ),
+            ownerIdentityId = owner,
+            requesterEd25519 = reqEd,
+        )
+
+        assertEquals(
+            "removed member must not receive the secret-bearing snapshot",
+            0,
+            transport.sends().size,
+        )
+    }
+
     /** Even a member is refused when the envelope's Ed25519 signer
      *  doesn't match their stored sending key (insider-spoof defense). */
     @Test

@@ -101,6 +101,26 @@ class GroupAvatarBroadcasterTest {
     }
 
     @Test
+    fun setAvatar_skipsRevokedMembers() = runTest {
+        // Tombstone m2 — the fanout must exclude their inbox.
+        val m2Key = ByteArray(48) { 0x33 }.toHex()
+        val base = group()
+        groupRepository.insert(
+            base.copy(
+                memberProfiles = base.memberProfiles +
+                    (m2Key to base.memberProfiles[m2Key]!!.copy(revoked = true)),
+            ),
+        )
+        groupRepository.reload()
+
+        val outcome = broadcaster().setAvatar(groupIdHex, newAvatar)
+
+        assertEquals(GroupAvatarBroadcaster.Outcome.Sent, outcome)
+        assertEquals(setOf(m1Inbox.toHex()), sealer.recipients())
+        assertEquals(1, transport.sends.size)
+    }
+
+    @Test
     fun setAvatar_unknownGroup() = runTest {
         val outcome = broadcaster().setAvatar("ff".repeat(32), newAvatar)
         assertEquals(GroupAvatarBroadcaster.Outcome.UnknownGroup, outcome)
