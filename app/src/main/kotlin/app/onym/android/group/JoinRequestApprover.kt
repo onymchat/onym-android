@@ -15,7 +15,10 @@ import app.onym.android.chain.SepContractError
 import app.onym.android.chain.SepContractTransport
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.TyrannyUpdateCommitmentPayload
+import app.onym.android.identity.ActiveIdentityProvider
 import app.onym.android.identity.IdentityRepository
+import app.onym.android.identity.IdentitySummary
+import app.onym.android.identity.InvitationEnvelopeSealer
 import app.onym.android.identity.InvitationDecryptError
 import app.onym.android.transport.InboxTransport
 import app.onym.android.transport.TransportInboxId
@@ -67,12 +70,25 @@ interface JoinRequestApproving {
 }
 
 open class JoinRequestApprover(
-    private val identity: IdentityRepository,
+    /** Gate for "is an identity selected", plus the fanout's
+     *  self-skip. Narrowed from the concrete [IdentityRepository]
+     *  (which conforms) so JVM unit tests can drive approve/decline
+     *  without the Android Keystore and the OnymSDK JNI. */
+    private val activeIdentity: ActiveIdentityProvider,
+    private val envelopeSealer: InvitationEnvelopeSealer,
+    /** Reads the admin's BLS secret for the Tyranny update proof.
+     *  Production passes `identityRepository::blsSecretKey`; the read
+     *  site is in [anchorTyrannyJoin]. */
+    private val blsSecretKey: suspend () -> ByteArray,
     private val introKeyStore: IntroKeyStore,
     private val introRequestStore: IntroRequestStore,
     private val groupRepository: GroupRepository,
     private val inboxTransport: InboxTransport,
     private val scope: CoroutineScope,
+    /** Display names for the fanout's `adminAlias`. Production passes
+     *  `identityRepository.identities`; tests pass a static flow. */
+    private val identitySummaries: StateFlow<List<IdentitySummary>> =
+        MutableStateFlow(emptyList()),
     /** Chain-relayer dependencies for the on-chain anchor flow. PR 88
      *  drives [anchorTyrannyJoin] through these. Optional so existing
      *  unit tests that don't need the anchor leg can keep working. */
@@ -211,8 +227,11 @@ open class JoinRequestApprover(
     override suspend fun approve(requestId: String): ApproveOutcome = mutex.withLock {
         val req = _pending.value.firstOrNull { it.id == requestId }
             ?: return@withLock ApproveOutcome.UnknownRequest
-        val activeIdentity = identity.currentIdentity()
-            ?: return@withLock ApproveOutcome.NoIdentityLoaded
+        // Pure gate — the approver needs an identity selected, but
+        // nothing downstream reads which one.
+        if (activeIdentity.currentIdentityId.value == null) {
+            return@withLock ApproveOutcome.NoIdentityLoaded
+        }
 
         val group = groupRepository.snapshots.value.firstOrNull {
             it.groupIdBytes.contentEquals(req.groupId)
@@ -267,7 +286,7 @@ open class JoinRequestApprover(
             return@withLock ApproveOutcome.TransportFailed("encode: ${e.message ?: e.javaClass.simpleName}")
         }
         val sealed = try {
-            identity.sealInvitation(payloadBytes, req.joinerInboxPublicKey)
+            envelopeSealer.sealInvitation(payloadBytes, req.joinerInboxPublicKey)
         } catch (e: Throwable) {
             return@withLock ApproveOutcome.TransportFailed("seal: ${e.message ?: e.javaClass.simpleName}")
         }
@@ -364,8 +383,8 @@ open class JoinRequestApprover(
         // per-identity summary carries it. Fall back to empty when
         // unresolved (best-effort — receivers always display the
         // BLS fingerprint alongside the alias).
-        val activeId = identity.currentIdentityId.value
-        val adminAlias = identity.identities.value
+        val activeId = activeIdentity.currentIdentityId.value
+        val adminAlias = identitySummaries.value
             .firstOrNull { it.id == activeId }
             ?.name
             .orEmpty()
@@ -414,7 +433,7 @@ open class JoinRequestApprover(
             if (adminKey != null && memberKey == adminKey) continue
 
             val sealed = try {
-                identity.sealInvitation(payloadBytes, profile.inboxPublicKey)
+                envelopeSealer.sealInvitation(payloadBytes, profile.inboxPublicKey)
             } catch (_: Throwable) {
                 continue
             }
@@ -570,7 +589,7 @@ open class JoinRequestApprover(
 
         val blsSecret = try {
             // onym:allow-secret-read
-            identity.blsSecretKey()
+            blsSecretKey()
         } catch (e: Throwable) {
             return AnchorOutcome.Failed(
                 ApproveOutcome.TransportFailed("bls_secret: ${e.message ?: e}"),
