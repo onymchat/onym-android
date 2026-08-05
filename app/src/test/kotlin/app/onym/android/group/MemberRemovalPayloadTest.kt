@@ -136,6 +136,79 @@ class MemberRemovalPayloadTest {
             ),
         )
         assertNull(tryDecode(MemberRemovalPayload.serializer(), invitation))
+
+        // The types tried AFTER removal in the dispatcher's chain are
+        // the ones a removal false-positive would steal, so they matter
+        // most in this direction.
+        val avatar = json.encodeToString(
+            GroupAvatarPayload.serializer(),
+            GroupAvatarPayload(
+                version = 1,
+                groupId = groupId,
+                senderBlsHex = victimHex,
+                sentAtMillis = 1L,
+                avatar = ByteArray(8) { 0x7 },
+            ),
+        )
+        assertNull(tryDecode(MemberRemovalPayload.serializer(), avatar))
+
+        val name = json.encodeToString(
+            GroupNamePayload.serializer(),
+            GroupNamePayload(
+                version = 1,
+                groupId = groupId,
+                senderBlsHex = victimHex,
+                sentAtMillis = 1L,
+                name = "Family",
+            ),
+        )
+        assertNull(tryDecode(MemberRemovalPayload.serializer(), name))
+
+        val receipt = json.encodeToString(
+            ChatReceiptPayload.serializer(),
+            ChatReceiptPayload(
+                version = 1,
+                groupId = groupId,
+                kind = ChatReceiptPayload.Kind.DELIVERED,
+                senderBlsPubkeyHex = victimHex,
+                messageIds = listOf(java.util.UUID.randomUUID()),
+            ),
+        )
+        assertNull(tryDecode(MemberRemovalPayload.serializer(), receipt))
+
+        val chat = json.encodeToString(
+            ChatMessagePayload.serializer(),
+            ChatMessagePayload(
+                version = 1,
+                messageId = java.util.UUID.randomUUID(),
+                groupId = groupId,
+                senderBlsPubkeyHex = victimHex,
+                sentAtMillis = 1L,
+                variant = app.onym.android.chats.ChatMessageVariant.Tyranny(body = "hi"),
+            ),
+        )
+        assertNull(tryDecode(MemberRemovalPayload.serializer(), chat))
+
+        val offer = json.encodeToString(
+            GroupInviteOfferPayload.serializer(),
+            GroupInviteOfferPayload(
+                groupId = groupId,
+                groupName = "Family",
+                introPublicKey = ByteArray(32) { 0x11 },
+                inviterAlias = "Admin",
+            ),
+        )
+        assertNull(tryDecode(MemberRemovalPayload.serializer(), offer))
+
+        val refresh = json.encodeToString(
+            GroupStateRefreshRequest.serializer(),
+            GroupStateRefreshRequest(
+                groupId = groupId,
+                requesterInboxPublicKey = ByteArray(32) { 0x12 },
+                requesterBlsPublicKey = ByteArray(48) { 0x13 },
+            ),
+        )
+        assertNull(tryDecode(MemberRemovalPayload.serializer(), refresh))
     }
 
     @Test

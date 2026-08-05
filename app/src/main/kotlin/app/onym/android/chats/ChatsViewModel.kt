@@ -67,24 +67,22 @@ class ChatsViewModel(
     private val memberRemover: GroupMemberRemoving? = null,
 ) : ViewModel() {
 
-    /** In-flight removals as `removalKey(groupId, victimHex)` entries
-     *  (drives the row spinner on the members screen). Keyed, not a
-     *  single slot: the VM is app-scoped, so group A's in-flight
-     *  removal must not block or bleed into group B's screen. The
-     *  PLONK prove + relayer round-trip takes seconds — the UI needs
-     *  a busy state. */
-    private val _removalsInFlight = MutableStateFlow<Set<String>>(emptySet())
-    val removalsInFlight: StateFlow<Set<String>> = _removalsInFlight.asStateFlow()
-
-    /** Latest removal failure per group id. The VM stays
-     *  resource-free: the screen maps the typed outcome to localized
-     *  copy, and reads only its OWN group's entry — an error raised
-     *  on group A never pops a dialog over group B. Cleared per
-     *  group via [clearRemovalError]. */
-    private val _removalErrors =
-        MutableStateFlow<Map<String, GroupMemberRemover.Outcome>>(emptyMap())
+    /**
+     * Removal progress + failures, surfaced straight from the
+     * app-scoped [GroupMemberRemover].
+     *
+     * This VM is created per `NavBackStackEntry` (see the
+     * `chat_members/{groupId}` route), so it is NOT a safe owner for
+     * either: back-nav or a rotation would drop the row spinner and
+     * silently discard a failure the user never saw — and running the
+     * removal itself on [viewModelScope] would cancel a seconds-long
+     * anchor mid-flight. Keys are per (group, member) / per group so
+     * one group's state never bleeds into another's screen.
+     */
+    val removalsInFlight: StateFlow<Set<String>> =
+        memberRemover?.removalsInFlight ?: MutableStateFlow(emptySet())
     val removalErrors: StateFlow<Map<String, GroupMemberRemover.Outcome>> =
-        _removalErrors.asStateFlow()
+        memberRemover?.removalErrors ?: MutableStateFlow(emptyMap())
 
     /**
      * Enriched + sorted chat-list rows. Recomputes whenever the group set
@@ -171,31 +169,22 @@ class ChatsViewModel(
      * the repository snapshot re-emits and the row disappears.
      */
     fun removeMember(groupId: String, victimBlsHex: String) {
-        val remover = memberRemover ?: return
-        val key = removalKey(groupId, victimBlsHex)
-        if (key in _removalsInFlight.value) return
-        _removalsInFlight.value = _removalsInFlight.value + key
-        viewModelScope.launch {
-            try {
-                val outcome = remover.remove(groupId, victimBlsHex)
-                _removalErrors.value = if (outcome is GroupMemberRemover.Outcome.Sent) {
-                    _removalErrors.value - groupId.lowercase()
-                } else {
-                    _removalErrors.value + (groupId.lowercase() to outcome)
-                }
-            } finally {
-                _removalsInFlight.value = _removalsInFlight.value - key
-            }
-        }
+        // Deliberately NOT viewModelScope.launch: this VM dies with the
+        // members screen, and cancelling between the relayer accepting
+        // the anchor and the local write would leave the chain ahead of
+        // local state — bricking every later update_commitment for this
+        // group. The remover owns an application-lifetime scope.
+        memberRemover?.removeAsync(groupId, victimBlsHex)
     }
 
     fun clearRemovalError(groupId: String) {
-        _removalErrors.value = _removalErrors.value - groupId.lowercase()
+        memberRemover?.clearRemovalError(groupId)
     }
 
     companion object {
-        /** Stable key for one (group, member) removal. */
+        /** Stable key for one (group, member) removal — delegates to
+         *  the remover so screen and interactor can't drift. */
         fun removalKey(groupId: String, victimBlsHex: String): String =
-            "${groupId.lowercase()}:${victimBlsHex.lowercase()}"
+            GroupMemberRemover.removalKey(groupId, victimBlsHex)
     }
 }

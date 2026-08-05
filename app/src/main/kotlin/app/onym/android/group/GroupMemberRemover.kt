@@ -21,8 +21,18 @@ import app.onym.android.identity.IdentityRepository
 import app.onym.android.identity.InvitationEnvelopeSealer
 import app.onym.android.transport.InboxTransport
 import app.onym.android.transport.TransportInboxId
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
@@ -34,6 +44,31 @@ import okhttp3.OkHttpClient
  */
 interface GroupMemberRemoving {
     suspend fun remove(groupId: String, victimBlsHex: String): GroupMemberRemover.Outcome
+
+    /**
+     * In-flight removals as `"groupId:victimBlsHex"` keys, and the
+     * latest failure per group id. Both live HERE rather than in a
+     * ViewModel because the members screen's VM is scoped to its
+     * `NavBackStackEntry`: back-nav or a rotation would otherwise take
+     * the row spinner and the error dialog with it, and a failed
+     * removal could vanish without ever being shown.
+     */
+    val removalsInFlight: StateFlow<Set<String>>
+    val removalErrors: StateFlow<Map<String, GroupMemberRemover.Outcome>>
+
+    /**
+     * Fire-and-forget [remove] on an application-lifetime scope, with
+     * [removalsInFlight] / [removalErrors] bookkeeping. Must NOT run on
+     * a screen-scoped coroutine: the anchor→persist span is seconds
+     * long (PLONK prove + relayer round-trip) and cancelling between
+     * the relayer accepting the anchor and the local write would leave
+     * the chain ahead of local state — after which every subsequent
+     * `proveUpdate` proves against a stale `epochOld` and is rejected,
+     * bricking joins AND removals for that group with nobody notified.
+     */
+    fun removeAsync(groupId: String, victimBlsHex: String)
+
+    fun clearRemovalError(groupId: String)
 }
 
 /**
@@ -98,7 +133,39 @@ class GroupMemberRemover(
         GroupCommitmentBuilder::computeMerkleRoot,
     private val computePublicKey: (ByteArray) -> ByteArray =
         GroupCommitmentBuilder::computePublicKey,
+    /** Application-lifetime scope for [removeAsync]. Screen-scoped
+     *  scopes are unsafe here — see [GroupMemberRemoving.removeAsync]. */
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : GroupMemberRemoving {
+
+    private val _removalsInFlight = MutableStateFlow<Set<String>>(emptySet())
+    override val removalsInFlight: StateFlow<Set<String>> = _removalsInFlight.asStateFlow()
+
+    private val _removalErrors = MutableStateFlow<Map<String, Outcome>>(emptyMap())
+    override val removalErrors: StateFlow<Map<String, Outcome>> = _removalErrors.asStateFlow()
+
+    override fun removeAsync(groupId: String, victimBlsHex: String) {
+        val key = removalKey(groupId, victimBlsHex)
+        if (key in _removalsInFlight.value) return
+        _removalsInFlight.value = _removalsInFlight.value + key
+        scope.launch {
+            try {
+                val outcome = remove(groupId, victimBlsHex)
+                val groupKey = groupId.lowercase()
+                _removalErrors.value = if (outcome is Outcome.Sent) {
+                    _removalErrors.value - groupKey
+                } else {
+                    _removalErrors.value + (groupKey to outcome)
+                }
+            } finally {
+                _removalsInFlight.value = _removalsInFlight.value - key
+            }
+        }
+    }
+
+    override fun clearRemovalError(groupId: String) {
+        _removalErrors.value = _removalErrors.value - groupId.lowercase()
+    }
     sealed class Outcome {
         /** Anchored on chain, persisted locally, fanned out (best-effort). */
         object Sent : Outcome()
@@ -199,6 +266,8 @@ class GroupMemberRemover(
         }
         val memberRootNew = try {
             computeMerkleRoot(newMembers, group.tier)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             return@withLock Outcome.ProofFailed("merkle_root: ${e.message ?: e}")
         }
@@ -208,6 +277,8 @@ class GroupMemberRemover(
         val blsSecret = try {
             // onym:allow-secret-read
             blsSecretKey()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             return@withLock Outcome.TransportFailed("bls_secret: ${e.message ?: e}")
         }
@@ -217,6 +288,8 @@ class GroupMemberRemover(
         // the prover — catches "user switched identities" cleanly.
         val activePubFromSecret = try {
             computePublicKey(blsSecret)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             return@withLock Outcome.TransportFailed(
                 "derive_pub: ${e.message ?: e::class.simpleName}",
@@ -243,6 +316,8 @@ class GroupMemberRemover(
             )
         } catch (e: GroupProofGeneratorError) {
             return@withLock Outcome.ProofFailed(e.message ?: e.javaClass.simpleName)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             return@withLock Outcome.ProofFailed(e.message ?: e.toString())
         }
@@ -253,54 +328,65 @@ class GroupMemberRemover(
             network = networkPref.sepNetwork,
             transport = makeContractTransport(relayerUrl),
         )
-        val response = try {
-            client.updateCommitmentTyranny(
-                TyrannyUpdateCommitmentPayload(
-                    groupId = group.groupIdBytes,
-                    proof = proof.proof,
-                    publicInputs = proof.publicInputs,
-                ),
+
+        // ─── anchor → persist → fan out: NON-CANCELLABLE ────────────
+        // Once the relayer accepts, the chain epoch HAS moved. If the
+        // local write were skipped — a cancelled screen-scoped caller,
+        // or a `catch (Throwable)` swallowing CancellationException —
+        // local state would sit behind the chain forever, and every
+        // later proveUpdate would prove against a stale `epochOld` and
+        // be rejected: no more joins AND no more removals for this
+        // group, with no member ever learning why. So the POST and the
+        // write share one NonCancellable span; the best-effort fanout
+        // rides along so in-flight sends aren't torn down either.
+        withContext(NonCancellable) {
+            val response = try {
+                client.updateCommitmentTyranny(
+                    TyrannyUpdateCommitmentPayload(
+                        groupId = group.groupIdBytes,
+                        proof = proof.proof,
+                        publicInputs = proof.publicInputs,
+                    ),
+                )
+            } catch (e: SepContractError) {
+                return@withContext Outcome.TransportFailed("anchor: ${e.message ?: e}")
+            } catch (e: Throwable) {
+                return@withContext Outcome.TransportFailed("anchor: ${e.message ?: e}")
+            }
+            if (!response.accepted) {
+                return@withContext Outcome.AnchorRejected(response.message ?: "(no message)")
+            }
+
+            // The anchor landed: the removal is now the on-chain truth.
+            // Persist BEFORE fanning out so a crash mid-fanout can't
+            // lose the transition (peers converge via inbox replay).
+            val anchored = group.copy(
+                members = newMembers,
+                commitment = proof.commitmentNew,
+                epoch = group.epoch + 1uL,
+                salt = saltNew,
+                groupSecret = groupSecretNew,
+                memberProfiles = group.memberProfiles +
+                    (victimHex to victimProfile.copy(
+                        revoked = true,
+                        // Removal epoch — lets receive-side tombstone
+                        // decisions stay order-independent under relay
+                        // replay (MemberProfile.statusEpoch).
+                        statusEpoch = group.epoch + 1uL,
+                    )),
             )
-        } catch (e: SepContractError) {
-            return@withLock Outcome.TransportFailed("anchor: ${e.message ?: e}")
-        } catch (e: Throwable) {
-            return@withLock Outcome.TransportFailed("anchor: ${e.message ?: e}")
-        }
-        if (!response.accepted) {
-            return@withLock Outcome.AnchorRejected(response.message ?: "(no message)")
-        }
+            groupRepository.insert(anchored)
 
-        // ─── persist ────────────────────────────────────────────────
-        // The anchor landed: the removal is now the on-chain truth.
-        // Persist BEFORE fanning out so a crash mid-fanout can't lose
-        // the transition (peers converge via inbox replay).
-        val anchored = group.copy(
-            members = newMembers,
-            commitment = proof.commitmentNew,
-            epoch = group.epoch + 1uL,
-            salt = saltNew,
-            groupSecret = groupSecretNew,
-            memberProfiles = group.memberProfiles +
-                (victimHex to victimProfile.copy(
-                    revoked = true,
-                    // Removal epoch — lets receive-side tombstone
-                    // decisions stay order-independent under relay
-                    // replay (MemberProfile.statusEpoch).
-                    statusEpoch = group.epoch + 1uL,
-                )),
-        )
-        groupRepository.insert(anchored)
-
-        // ─── fan out (best-effort) ──────────────────────────────────
-        broadcastRemoval(
-            group = anchored,
-            victimHex = victimHex,
-            victimProfile = victimProfile,
-            adminHex = adminPubkeyHex,
-            groupSecretNew = groupSecretNew,
-            saltNew = saltNew,
-        )
-        Outcome.Sent
+            broadcastRemoval(
+                group = anchored,
+                victimHex = victimHex,
+                victimProfile = victimProfile,
+                adminHex = adminPubkeyHex,
+                groupSecretNew = groupSecretNew,
+                saltNew = saltNew,
+            )
+            Outcome.Sent
+        }
     }
 
     /**
@@ -382,10 +468,15 @@ class GroupMemberRemover(
         }
     }
 
-    private companion object {
+    companion object {
         /** `encodeDefaults = false` so the victim's copy omits the
          *  `group_secret_new` / `salt_new` keys entirely (matches the
          *  [GroupAvatarBroadcaster] null-omission convention). */
         private val jsonFormat = Json { encodeDefaults = false; ignoreUnknownKeys = true }
+
+        /** Stable key for one (group, member) removal — the unit of
+         *  [GroupMemberRemoving.removalsInFlight]. */
+        fun removalKey(groupId: String, victimBlsHex: String): String =
+            "${groupId.lowercase()}:${victimBlsHex.lowercase()}"
     }
 }

@@ -164,9 +164,14 @@ class ChatsViewModelTest {
     )
 
     // ─── member removal delegation ────────────────────────────────
+    //
+    // Removal state + execution now live on the app-scoped
+    // GroupMemberRemover (this VM is per-NavBackStackEntry, so it can
+    // neither own a seconds-long anchor nor survive back-nav). These
+    // tests pin the delegation; the keying/scoping behaviour itself is
+    // covered in GroupMemberRemoverTest.
 
     private val groupA = "aa".repeat(32)
-    private val groupB = "cc".repeat(32)
     private val victim = "bb".repeat(48)
 
     @Test
@@ -178,94 +183,67 @@ class ChatsViewModelTest {
     }
 
     @Test
-    fun removeMember_delegatesAndClearsInFlight_onSuccess() = runTest {
-        val remover = RecordingRemover(GroupMemberRemover.Outcome.Sent)
+    fun removeMember_delegatesToTheAppScopedRemover() = runTest {
+        val remover = RecordingRemover()
         val vm = makeVM(InMemoryGroupStore(), remover = remover)
 
         vm.removeMember(groupA, "BB".repeat(48))
 
-        assertEquals(1, remover.calls.size)
-        assertEquals(groupA to "BB".repeat(48), remover.calls.single())
-        // Unconfined main dispatcher → the launch completed inline.
-        assertTrue(vm.removalsInFlight.value.isEmpty())
-        assertTrue(vm.removalErrors.value.isEmpty())
+        // Must go through removeAsync (app-lifetime scope), never
+        // through a viewModelScope launch of remove().
+        assertEquals(listOf(groupA to "BB".repeat(48)), remover.asyncCalls)
+        assertTrue("remove() must not be driven from the VM", remover.directCalls.isEmpty())
     }
 
     @Test
-    fun removeMember_surfacesTypedOutcomePerGroup_andClearsOnRequest() = runTest {
-        // The VM exposes the raw Outcome — localization is the
-        // screen's job (removalErrorText), never the VM's.
-        val outcome = GroupMemberRemover.Outcome.AnchorRejected("stale epoch")
-        val vm = makeVM(InMemoryGroupStore(), remover = RecordingRemover(outcome))
-
-        vm.removeMember(groupA, victim)
-
-        assertEquals(outcome, vm.removalErrors.value[groupA])
-        assertTrue(vm.removalsInFlight.value.isEmpty())
-        vm.clearRemovalError(groupA)
-        assertTrue(vm.removalErrors.value.isEmpty())
-    }
-
-    @Test
-    fun removeMember_errorIsScopedToItsOwnGroup() = runTest {
-        // The VM is app-scoped: a failure on group A must not surface
-        // on group B's members screen.
-        val vm = makeVM(
-            InMemoryGroupStore(),
-            remover = RecordingRemover(GroupMemberRemover.Outcome.NotAdminOfThisGroup),
-        )
-
-        vm.removeMember(groupA, victim)
-
-        assertEquals(
-            GroupMemberRemover.Outcome.NotAdminOfThisGroup,
-            vm.removalErrors.value[groupA],
-        )
-        assertEquals(null, vm.removalErrors.value[groupB])
-    }
-
-    @Test
-    fun removeMember_inFlightKeyIsPerGroupAndMember() = runTest {
-        // A never-completing removal on group A must not block a
-        // removal on group B (or a different member of group A).
-        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
-        val remover = object : GroupMemberRemoving {
-            val calls = mutableListOf<Pair<String, String>>()
-            override suspend fun remove(
-                groupId: String,
-                victimBlsHex: String,
-            ): GroupMemberRemover.Outcome {
-                calls.add(groupId to victimBlsHex)
-                gate.await()
-                return GroupMemberRemover.Outcome.Sent
-            }
-        }
+    fun removalState_isSurfacedFromTheRemover() = runTest {
+        val remover = RecordingRemover()
         val vm = makeVM(InMemoryGroupStore(), remover = remover)
+        val outcome = GroupMemberRemover.Outcome.AnchorRejected("stale epoch")
 
-        vm.removeMember(groupA, victim)
-        vm.removeMember(groupA, victim) // duplicate → ignored
-        vm.removeMember(groupB, victim) // other group → allowed
-        vm.removeMember(groupA, "dd".repeat(48)) // other member → allowed
-
-        assertEquals(3, remover.calls.size)
-        assertEquals(
-            setOf(
-                ChatsViewModel.removalKey(groupA, victim),
-                ChatsViewModel.removalKey(groupB, victim),
-                ChatsViewModel.removalKey(groupA, "dd".repeat(48)),
-            ),
-            vm.removalsInFlight.value,
+        remover.emit(
+            inFlight = setOf(GroupMemberRemover.removalKey(groupA, victim)),
+            errors = mapOf(groupA to outcome),
         )
-        gate.complete(Unit)
+
+        assertEquals(setOf(GroupMemberRemover.removalKey(groupA, victim)), vm.removalsInFlight.value)
+        assertEquals(outcome, vm.removalErrors.value[groupA])
+
+        vm.clearRemovalError(groupA)
+        assertEquals(listOf(groupA), remover.cleared)
     }
 
-    private class RecordingRemover(
-        private val outcome: GroupMemberRemover.Outcome,
-    ) : GroupMemberRemoving {
-        val calls = mutableListOf<Pair<String, String>>()
-        override suspend fun remove(groupId: String, victimBlsHex: String): GroupMemberRemover.Outcome {
-            calls.add(groupId to victimBlsHex)
-            return outcome
+    private class RecordingRemover : GroupMemberRemoving {
+        val directCalls = mutableListOf<Pair<String, String>>()
+        val asyncCalls = mutableListOf<Pair<String, String>>()
+        val cleared = mutableListOf<String>()
+
+        private val _inFlight = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+        override val removalsInFlight = _inFlight
+
+        private val _errors =
+            kotlinx.coroutines.flow.MutableStateFlow<Map<String, GroupMemberRemover.Outcome>>(emptyMap())
+        override val removalErrors = _errors
+
+        fun emit(inFlight: Set<String>, errors: Map<String, GroupMemberRemover.Outcome>) {
+            _inFlight.value = inFlight
+            _errors.value = errors
+        }
+
+        override suspend fun remove(
+            groupId: String,
+            victimBlsHex: String,
+        ): GroupMemberRemover.Outcome {
+            directCalls.add(groupId to victimBlsHex)
+            return GroupMemberRemover.Outcome.Sent
+        }
+
+        override fun removeAsync(groupId: String, victimBlsHex: String) {
+            asyncCalls.add(groupId to victimBlsHex)
+        }
+
+        override fun clearRemovalError(groupId: String) {
+            cleared.add(groupId)
         }
     }
 

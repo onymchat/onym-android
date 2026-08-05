@@ -129,16 +129,22 @@ class IncomingMessageDispatcher(
     private val removalRetryMutex = Mutex()
 
     /**
-     * Serializes [applyRemoval]'s read-modify-write. The retry
-     * coroutine runs OFF the inbox pump, so a retry firing at t=12s
-     * can interleave with the pump applying a second removal for the
-     * same group: both read the same snapshot, both `copy`, and the
-     * later `insert` wins — silently losing one tombstone, the exact
-     * failure the retry exists to prevent.
-     * [GroupRepository.insert] only locks the write, so the guard has
-     * to live here, spanning read→write.
+     * Serializes EVERY group-state read-modify-write in this
+     * dispatcher — removal, announcement, avatar, name, and
+     * materialize. They all do `findForOwner` → `copy` → `insert`, and
+     * [GroupRepository.insert] locks only the write, so two appliers
+     * that interleave silently drop one of the two updates.
+     *
+     * Not removal-only: the removal retry coroutine runs OFF the inbox
+     * pump, so a retry firing at t=12s races whatever the pump is
+     * applying right then — a concurrently-applied announcement or
+     * avatar would be clobbered just as easily as a second removal.
+     *
+     * Held across read→write only; never across a retry delay. Not
+     * reentrant, so every guarded path is entered from [dispatch]
+     * directly and none of them calls another.
      */
-    private val removalApplyMutex = Mutex()
+    private val groupApplyMutex = Mutex()
 
     suspend fun dispatch(
         messageId: String,
@@ -290,6 +296,15 @@ class IncomingMessageDispatcher(
      * materialize a partial group.
      */
     private suspend fun materializeGroup(
+        invitation: GroupInvitationPayload,
+        ownerIdentityId: IdentityId,
+        senderEd25519PublicKey: ByteArray?,
+    ) = groupApplyMutex.withLock {
+        materializeGroupLocked(invitation, ownerIdentityId, senderEd25519PublicKey)
+    }
+
+    /** See [groupApplyMutex] — always called under the lock. */
+    private suspend fun materializeGroupLocked(
         invitation: GroupInvitationPayload,
         ownerIdentityId: IdentityId,
         senderEd25519PublicKey: ByteArray?,
@@ -491,6 +506,14 @@ class IncomingMessageDispatcher(
     private suspend fun applyAnnouncement(
         payload: MemberAnnouncementPayload,
         senderEd25519PublicKey: ByteArray?,
+    ) = groupApplyMutex.withLock {
+        applyAnnouncementLocked(payload, senderEd25519PublicKey)
+    }
+
+    /** See [groupApplyMutex] — always called under the lock. */
+    private suspend fun applyAnnouncementLocked(
+        payload: MemberAnnouncementPayload,
+        senderEd25519PublicKey: ByteArray?,
     ) {
         val groups = groupRepository.snapshots.value
         val group = groups.firstOrNull {
@@ -646,7 +669,7 @@ class IncomingMessageDispatcher(
         payload: MemberRemovalPayload,
         ownerIdentityId: IdentityId,
         senderEd25519PublicKey: ByteArray?,
-    ): RemovalApplyResult = removalApplyMutex.withLock {
+    ): RemovalApplyResult = groupApplyMutex.withLock {
         applyRemovalLocked(payload, ownerIdentityId, senderEd25519PublicKey)
     }
 
@@ -847,6 +870,14 @@ class IncomingMessageDispatcher(
     private suspend fun applyAvatar(
         payload: GroupAvatarPayload,
         senderEd25519PublicKey: ByteArray?,
+    ) = groupApplyMutex.withLock {
+        applyAvatarLocked(payload, senderEd25519PublicKey)
+    }
+
+    /** See [groupApplyMutex] — always called under the lock. */
+    private suspend fun applyAvatarLocked(
+        payload: GroupAvatarPayload,
+        senderEd25519PublicKey: ByteArray?,
     ) {
         val groups = groupRepository.snapshots.value
         val group = groups.firstOrNull {
@@ -874,6 +905,14 @@ class IncomingMessageDispatcher(
     }
 
     private suspend fun applyName(
+        payload: GroupNamePayload,
+        senderEd25519PublicKey: ByteArray?,
+    ) = groupApplyMutex.withLock {
+        applyNameLocked(payload, senderEd25519PublicKey)
+    }
+
+    /** See [groupApplyMutex] — always called under the lock. */
+    private suspend fun applyNameLocked(
         payload: GroupNamePayload,
         senderEd25519PublicKey: ByteArray?,
     ) {

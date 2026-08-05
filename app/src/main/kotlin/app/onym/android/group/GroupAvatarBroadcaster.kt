@@ -72,6 +72,11 @@ class GroupAvatarBroadcaster(
         // Admin gate: only the group's admin may change the photo.
         val adminHex = group.adminPubkeyHex?.lowercase() ?: return Outcome.NotAdmin
         if (activeBlsHex != adminHex) return Outcome.NotAdmin
+        // Unreachable while the admin can't remove themself, but keep
+        // the trust surface symmetric with SendMessageInteractor and
+        // GroupStateVerifier: a revoked membership never mutates group
+        // state for anyone.
+        if (group.membershipRevoked) return Outcome.NotAdmin
 
         // Apply + persist first; broadcast is best-effort.
         groupRepository.insert(group.copy(avatar = avatar))
@@ -128,6 +133,11 @@ class GroupAvatarBroadcaster(
 
         val adminHex = group.adminPubkeyHex?.lowercase() ?: return Outcome.NotAdmin
         if (activeBlsHex != adminHex) return Outcome.NotAdmin
+        // Unreachable while the admin can't remove themself, but keep
+        // the trust surface symmetric with SendMessageInteractor and
+        // GroupStateVerifier: a revoked membership never mutates group
+        // state for anyone.
+        if (group.membershipRevoked) return Outcome.NotAdmin
 
         if (trimmed.isEmpty() || trimmed == group.name) return Outcome.Sent
 

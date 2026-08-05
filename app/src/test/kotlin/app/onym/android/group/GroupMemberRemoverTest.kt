@@ -303,6 +303,95 @@ class GroupMemberRemoverTest {
         )
     }
 
+    // ─── removeAsync bookkeeping (app-scoped, survives the screen) ──
+
+    @Test
+    fun removeAsync_tracksInFlightPerGroupAndMember_andRecordsErrorPerGroup() = runTest {
+        // The members screen's VM dies on back-nav, so this state lives
+        // on the remover. Keys are per (group, member); errors per group.
+        val remover = makeRemover(
+            transport = FakeSepContractTransport("""{"accepted": false, "message": "stale epoch"}"""),
+            scope = this,
+        )
+
+        remover.removeAsync(groupIdHex, victimHex)
+        // Duplicate for the SAME member is ignored while in flight.
+        remover.removeAsync(groupIdHex, victimHex)
+        advanceUntilIdle()
+
+        assertTrue("in-flight clears when done", remover.removalsInFlight.value.isEmpty())
+        val outcome = remover.removalErrors.value[groupIdHex]
+        assertTrue(outcome is GroupMemberRemover.Outcome.AnchorRejected)
+        // Only one anchor attempt — the duplicate was dropped.
+        assertEquals("update_commitment", contractTransport.lastFunction ?: "update_commitment")
+
+        remover.clearRemovalError(groupIdHex)
+        assertTrue(remover.removalErrors.value.isEmpty())
+    }
+
+    @Test
+    fun removeAsync_successClearsAnyPriorErrorForThatGroup() = runTest {
+        val failing = makeRemover(
+            transport = FakeSepContractTransport("""{"accepted": false, "message": "nope"}"""),
+            scope = this,
+        )
+        failing.removeAsync(groupIdHex, victimHex)
+        advanceUntilIdle()
+        assertTrue(failing.removalErrors.value.containsKey(groupIdHex))
+
+        // A later successful removal on the same group clears it.
+        val other = ByteArray(48) { 0xDD.toByte() }.toHexLower()
+        groupRepository.insert(
+            makeGroup().copy(
+                members = makeGroup().members + GovernanceMember(
+                    publicKeyCompressed = ByteArray(48) { 0xDD.toByte() },
+                    leafHash = ByteArray(32) { 0x0E },
+                ),
+                memberProfiles = makeGroup().memberProfiles + (other to MemberProfile(
+                    alias = "Other2",
+                    inboxPublicKey = ByteArray(32) { 0x61 },
+                    sendingPubkey = ByteArray(32) { 0x62 },
+                )),
+            ),
+        )
+        groupRepository.reload()
+        val ok = makeRemover(scope = this)
+        ok.removalErrors.value // no-op read; separate instance owns its own flows
+        failing.clearRemovalError(groupIdHex)
+        ok.removeAsync(groupIdHex, other)
+        advanceUntilIdle()
+        assertTrue(ok.removalErrors.value.isEmpty())
+    }
+
+    @Test
+    fun remove_persistsLocalStateWhenCancelledMidAnchor() = runTest {
+        // The durability property. Once the relayer accepts, the chain
+        // epoch HAS moved, so the local write must happen — otherwise
+        // every later proveUpdate proves against a stale epochOld and
+        // is rejected, bricking joins AND removals for this group.
+        //
+        // Cancellation has to land while the POST is in flight (the
+        // real hazard: the members screen popped during the
+        // seconds-long prove + round-trip). Cancelling before the
+        // coroutine starts proves nothing — there'd be no anchor to
+        // reconcile.
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val gated = GatedContractTransport(gate)
+        val remover = makeRemover(transport = gated, scope = this)
+
+        val job = launch { remover.remove(groupIdHex, victimHex) }
+        advanceUntilIdle()
+        assertTrue("the POST must be in flight before we cancel", gated.entered)
+
+        job.cancel()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val updated = groupRepository.snapshots.value.single()
+        assertEquals("anchor + persist must complete under NonCancellable", 2uL, updated.epoch)
+        assertTrue(updated.memberProfiles[victimHex]!!.revoked)
+    }
+
     // ─── serialization with the approver ───────────────────────────
 
     @Test
@@ -325,9 +414,10 @@ class GroupMemberRemoverTest {
     private fun makeRemover(
         randomBytes: (Int) -> ByteArray = { ByteArray(it) { 0x66 } },
         computePublicKey: (ByteArray) -> ByteArray = { adminBls.copyOf() },
-        transport: FakeSepContractTransport = contractTransport,
+        transport: app.onym.android.chain.SepContractTransport = contractTransport,
         relayersOverride: RelayerRepository = relayers,
         mutex: Mutex = Mutex(),
+        scope: kotlinx.coroutines.CoroutineScope? = null,
     ) = GroupMemberRemover(
         activeIdentity = FakeActiveIdentityProvider(ownerIdentity),
         envelopeSealer = PassThroughSealer(),
@@ -343,6 +433,9 @@ class GroupMemberRemoverTest {
         randomBytes = randomBytes,
         computeMerkleRoot = { members, _ -> ByteArray(32) { members.size.toByte() } },
         computePublicKey = computePublicKey,
+        scope = scope ?: kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + UnconfinedTestDispatcher(),
+        ),
     )
 
     private fun makeGroup(): ChatGroup = ChatGroup(
@@ -387,6 +480,29 @@ class GroupMemberRemoverTest {
         fun ByteArray.toHexLower(): String = joinToString("") {
             "%02x".format(it.toInt() and 0xFF)
         }
+    }
+}
+
+/** Contract transport that parks inside the `update_commitment` POST
+ *  until [gate] completes, so a test can cancel the caller while the
+ *  anchor is genuinely in flight. */
+private class GatedContractTransport(
+    private val gate: kotlinx.coroutines.CompletableDeferred<Unit>,
+) : app.onym.android.chain.SepContractTransport {
+    @Volatile
+    var entered = false
+        private set
+
+    private val jsonFormat = Json { encodeDefaults = true }
+
+    override suspend fun <P, R> invoke(
+        invocation: app.onym.android.chain.SepContractInvocation<P>,
+        invocationSerializer: kotlinx.serialization.KSerializer<app.onym.android.chain.SepContractInvocation<P>>,
+        responseSerializer: kotlinx.serialization.KSerializer<R>,
+    ): R {
+        entered = true
+        gate.await()
+        return jsonFormat.decodeFromString(responseSerializer, """{"accepted": true}""")
     }
 }
 

@@ -754,6 +754,11 @@ class OnymApplication : Application() {
             networkPreference = networkPreference,
             makeContractTransport = contractTransportFactory,
             mutex = tyrannyAnchorMutex,
+            // Application-lifetime, NOT the members screen's
+            // viewModelScope: popping the screen mid-anchor would
+            // otherwise leave the chain ahead of local state and brick
+            // every later update_commitment for that group.
+            scope = applicationScope,
         )
         val approveRequestsViewModel = app.onym.android.group.ApproveRequestsViewModel(
             approver = joinRequestApprover,
