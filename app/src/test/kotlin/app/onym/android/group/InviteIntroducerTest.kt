@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.runTest
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -162,5 +163,104 @@ class InviteIntroducerTest {
         val cap = introducer.mint(alice, sampleGroupId)
         val entry = store.find(cap.introPublicKey)!!
         assertEquals(frozenNow, entry.createdAtMillis)
+    }
+
+    // ─── currentOrMint (multi-use links) ──────────────────────────
+
+    @Test
+    fun currentOrMint_firstCall_mintsAndPersists() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        val cap = introducer.currentOrMint(alice, sampleGroupId)
+
+        val listed = store.listForOwner(alice)
+        assertEquals(1, listed.size)
+        assertTrue(listed.first().introPublicKey.contentEquals(cap.introPublicKey))
+    }
+
+    @Test
+    fun currentOrMint_secondCall_reusesSameKey_andDoesNotGrowTheStore() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        val first = introducer.currentOrMint(alice, sampleGroupId)
+        val second = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertTrue(first.introPublicKey.contentEquals(second.introPublicKey))
+        // The count is what stops this from being "returns the same
+        // link but still writes a row".
+        assertEquals(1, store.listForOwner(alice).size)
+    }
+
+    @Test
+    fun currentOrMint_doesNotSlideTheExpiryWindow() = runTest {
+        var now = 1_700_000_000_000L
+        val store = InMemoryIntroKeyStore(clock = { now })
+        val introducer = InviteIntroducer(
+            store,
+            ioDispatcher = Dispatchers.Unconfined,
+            clock = { now },
+        )
+
+        introducer.currentOrMint(alice, sampleGroupId)
+        val mintedAt = store.listForOwner(alice).single().createdAtMillis
+        now += IntroKeyEntry.LIFETIME_MILLIS / 2
+        introducer.currentOrMint(alice, sampleGroupId)
+
+        // The 24h cap is absolute per link, not a sliding window.
+        assertEquals(mintedAt, store.listForOwner(alice).single().createdAtMillis)
+    }
+
+    @Test
+    fun currentOrMint_afterLifetimeElapsed_mintsAFreshKeypair() = runTest {
+        var now = 1_700_000_000_000L
+        val store = InMemoryIntroKeyStore(clock = { now })
+        val introducer = InviteIntroducer(
+            store,
+            ioDispatcher = Dispatchers.Unconfined,
+            clock = { now },
+        )
+
+        val first = introducer.currentOrMint(alice, sampleGroupId)
+        now += IntroKeyEntry.LIFETIME_MILLIS + 1
+        val second = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertFalse(first.introPublicKey.contentEquals(second.introPublicKey))
+        assertEquals(1, store.listForOwner(alice).size)
+    }
+
+    @Test
+    fun currentOrMint_isScopedPerGroupAndPerOwner() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+        val otherGroup = ByteArray(32) { 0x5A }
+
+        val aliceG1 = introducer.currentOrMint(alice, sampleGroupId)
+        val aliceG2 = introducer.currentOrMint(alice, otherGroup)
+        // The intro pump only subscribes the *active* identity's tags,
+        // so reusing Bob's key for Alice would hand out a link nobody
+        // is listening on.
+        val bobG1 = introducer.currentOrMint(bob, sampleGroupId)
+        val aliceG1Again = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertFalse(aliceG1.introPublicKey.contentEquals(aliceG2.introPublicKey))
+        assertFalse(aliceG1.introPublicKey.contentEquals(bobG1.introPublicKey))
+        assertTrue(aliceG1.introPublicKey.contentEquals(aliceG1Again.introPublicKey))
+    }
+
+    @Test
+    fun mint_alwaysMintsFresh_evenWhenALiveKeyExists() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        // Locks in the two-entry-point split: collapsing `mint` into
+        // `currentOrMint` would silently break the create-time offers'
+        // 1:1 request-to-invitee mapping.
+        val shared = introducer.currentOrMint(alice, sampleGroupId)
+        val fresh = introducer.mint(alice, sampleGroupId)
+
+        assertFalse(shared.introPublicKey.contentEquals(fresh.introPublicKey))
+        assertEquals(2, store.listForOwner(alice).size)
     }
 }
