@@ -315,6 +315,7 @@ class OnymApplication : Application() {
                     GroupDatabaseMigrations.MIGRATION_5_6,
                     GroupDatabaseMigrations.MIGRATION_6_7,
                     GroupDatabaseMigrations.MIGRATION_7_8,
+                    GroupDatabaseMigrations.MIGRATION_8_9,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -610,6 +611,9 @@ class OnymApplication : Application() {
             groupStateRefresher = groupStateVerifier,
             receiptSender = chatReceiptSender,
             readReceiptsEnabled = { readReceiptsPreference.current() },
+            // Member-removal chain-behind retry (the caching chain
+            // reader can lag the admin's just-landed anchor by ≤10s).
+            retryScope = applicationScope,
         )
         // Filter the invites surface to the active identity, and cascade
         // a wipe on identity removal — mirrors the per-identity wiring
@@ -696,6 +700,12 @@ class OnymApplication : Application() {
             inboxTransport = inboxTransport,
         )
 
+        // One mutex serializes EVERY Tyranny update_commitment this
+        // device can produce (join-approve + member-removal): both
+        // flows are read-prove-anchor-persist on the same group, and
+        // interleaving would prove against a stale epoch.
+        val tyrannyAnchorMutex = kotlinx.coroutines.sync.Mutex()
+
         // Approver-side: turn raw IntroRequests into UI-renderable
         // pending requests + ship sealed GroupInvitationPayloads on
         // user approval. Single instance — the toolbar badge + the
@@ -714,6 +724,23 @@ class OnymApplication : Application() {
             contracts = contractsRepository,
             networkPreference = networkPreference,
             makeContractTransport = contractTransportFactory,
+            mutex = tyrannyAnchorMutex,
+        )
+
+        // Admin-side member removal (anchor → persist → fanout), with
+        // groupSecret rotation. Shares the anchor mutex with the
+        // approver — see its KDoc.
+        val groupMemberRemover = app.onym.android.group.GroupMemberRemover(
+            activeIdentity = identityRepository,
+            envelopeSealer = identityRepository,
+            blsSecretKey = identityRepository::blsSecretKey,
+            groupRepository = groupRepository,
+            inboxTransport = inboxTransport,
+            relayers = relayerRepository,
+            contracts = contractsRepository,
+            networkPreference = networkPreference,
+            makeContractTransport = contractTransportFactory,
+            mutex = tyrannyAnchorMutex,
         )
         val approveRequestsViewModel = app.onym.android.group.ApproveRequestsViewModel(
             approver = joinRequestApprover,
@@ -804,6 +831,7 @@ class OnymApplication : Application() {
                         groupRepository = groupRepository,
                         inboxTransport = inboxTransport,
                     ),
+                    memberRemover = groupMemberRemover,
                 )
             },
             makeChatThreadViewModel = { groupId ->

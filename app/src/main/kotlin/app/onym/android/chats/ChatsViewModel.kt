@@ -4,10 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupAvatarBroadcaster
+import app.onym.android.group.GroupMemberRemover
+import app.onym.android.group.GroupMemberRemoving
 import app.onym.android.group.GroupRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -60,7 +64,20 @@ class ChatsViewModel(
     private val repository: GroupRepository,
     private val messageRepository: MessageRepository,
     private val avatarBroadcaster: GroupAvatarBroadcaster? = null,
+    private val memberRemover: GroupMemberRemoving? = null,
 ) : ViewModel() {
+
+    /** BLS hex of the member whose removal is in flight (drives the
+     *  row spinner on the members screen), or `null` when idle. The
+     *  PLONK prove + relayer round-trip takes seconds — the UI needs
+     *  a busy state. */
+    private val _removalInFlight = MutableStateFlow<String?>(null)
+    val removalInFlight: StateFlow<String?> = _removalInFlight.asStateFlow()
+
+    /** One-shot human-readable removal failure, or `null`. Cleared
+     *  via [clearRemovalError]. */
+    private val _removalError = MutableStateFlow<String?>(null)
+    val removalError: StateFlow<String?> = _removalError.asStateFlow()
 
     /**
      * Enriched + sorted chat-list rows. Recomputes whenever the group set
@@ -134,5 +151,37 @@ class ChatsViewModel(
         viewModelScope.launch {
             broadcaster.setName(groupId, name)
         }
+    }
+
+    /**
+     * Admin-only: remove [victimBlsHex] from [groupId] (on-chain
+     * anchor + groupSecret rotation + fanout — see
+     * [GroupMemberRemover]). No-op when the remover wasn't wired or a
+     * removal is already in flight. Failures surface via
+     * [removalError]; success needs no signal — the repository
+     * snapshot re-emits and the row disappears.
+     */
+    fun removeMember(groupId: String, victimBlsHex: String) {
+        val remover = memberRemover ?: return
+        if (_removalInFlight.value != null) return
+        _removalInFlight.value = victimBlsHex.lowercase()
+        viewModelScope.launch {
+            try {
+                val outcome = remover.remove(groupId, victimBlsHex)
+                _removalError.value = when (outcome) {
+                    is GroupMemberRemover.Outcome.Sent -> null
+                    is GroupMemberRemover.Outcome.ProofFailed -> outcome.reason
+                    is GroupMemberRemover.Outcome.AnchorRejected -> outcome.reason
+                    is GroupMemberRemover.Outcome.TransportFailed -> outcome.reason
+                    else -> outcome::class.simpleName
+                }
+            } finally {
+                _removalInFlight.value = null
+            }
+        }
+    }
+
+    fun clearRemovalError() {
+        _removalError.value = null
     }
 }

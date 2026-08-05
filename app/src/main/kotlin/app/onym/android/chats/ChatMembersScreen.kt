@@ -25,10 +25,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PersonOutline
+import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
@@ -131,6 +133,13 @@ fun ChatMembersScreen(
     // Admin-only rename dialog state.
     var showRename by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
+    // Admin-only member-removal state. Only the cryptographic admin
+    // may remove — the same gate as Share Invite; the remover
+    // interactor re-checks server-side of the UI anyway.
+    val canRemoveMembers = canShareInvite
+    var removeTarget by remember { mutableStateOf<MemberRow?>(null) }
+    val removalInFlight by chatsViewModel.removalInFlight.collectAsStateWithLifecycle()
+    val removalError by chatsViewModel.removalError.collectAsStateWithLifecycle()
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -205,9 +214,55 @@ fun ChatMembersScreen(
                     )
                 },
                 onRemovePhoto = { chatsViewModel.setGroupAvatar(group.id, null) },
+                canRemoveMembers = canRemoveMembers,
+                removalInFlightHex = removalInFlight,
+                onRemoveMember = { removeTarget = it },
                 modifier = Modifier.padding(padding).fillMaxSize(),
             )
         }
+    }
+
+    removeTarget?.let { target ->
+        if (group != null) {
+            AlertDialog(
+                onDismissRequest = { removeTarget = null },
+                title = { Text(stringResource(R.string.member_remove_title, target.displayAlias)) },
+                text = { Text(stringResource(R.string.member_remove_message)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            chatsViewModel.removeMember(group.id, target.blsHex)
+                            removeTarget = null
+                        },
+                        modifier = Modifier.testTag("members.remove_confirm"),
+                    ) {
+                        Text(
+                            stringResource(R.string.member_remove_confirm),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { removeTarget = null },
+                        modifier = Modifier.testTag("members.remove_cancel"),
+                    ) { Text(stringResource(R.string.cancel)) }
+                },
+            )
+        }
+    }
+
+    removalError?.let { error ->
+        AlertDialog(
+            onDismissRequest = { chatsViewModel.clearRemovalError() },
+            title = { Text(stringResource(R.string.member_remove_error_title)) },
+            text = { Text(error, modifier = Modifier.testTag("members.remove_error")) },
+            confirmButton = {
+                TextButton(onClick = { chatsViewModel.clearRemovalError() }) {
+                    Text(stringResource(android.R.string.ok))
+                }
+            },
+        )
     }
 
     if (showRename && group != null) {
@@ -280,18 +335,25 @@ private fun ChatMembersBody(
     canEditAvatar: Boolean,
     onPickPhoto: () -> Unit,
     onRemovePhoto: () -> Unit,
+    canRemoveMembers: Boolean = false,
+    removalInFlightHex: String? = null,
+    onRemoveMember: (MemberRow) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val rows = remember(group.memberProfiles, activeBlsHex) {
-        group.memberProfiles.map { (key, profile) ->
-            MemberRow(
-                blsHex = key,
-                blsPrefix = key.take(12),
-                displayAlias = profile.alias.ifEmpty { "(unnamed)" },
-                isSelf = activeBlsHex != null &&
-                    key.equals(activeBlsHex, ignoreCase = true),
-            )
-        }.sortedWith(compareBy({ !it.isSelf }, { it.displayAlias.lowercase() }))
+        group.memberProfiles
+            // Removed members are tombstoned in the map, not deleted —
+            // the roster renders only active membership.
+            .filterValues { !it.revoked }
+            .map { (key, profile) ->
+                MemberRow(
+                    blsHex = key,
+                    blsPrefix = key.take(12),
+                    displayAlias = profile.alias.ifEmpty { "(unnamed)" },
+                    isSelf = activeBlsHex != null &&
+                        key.equals(activeBlsHex, ignoreCase = true),
+                )
+            }.sortedWith(compareBy({ !it.isSelf }, { it.displayAlias.lowercase() }))
     }
 
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
@@ -307,7 +369,12 @@ private fun ChatMembersBody(
         if (rows.isEmpty()) {
             EmptyState(modifier = Modifier.fillMaxSize())
         } else {
-            MembersCard(rows = rows)
+            MembersCard(
+                rows = rows,
+                canRemoveMembers = canRemoveMembers,
+                removalInFlightHex = removalInFlightHex,
+                onRemoveMember = onRemoveMember,
+            )
             Spacer(Modifier.height(8.dp))
             Text(
                 text = pluralStringResource(R.plurals.members_count, rows.size, rows.size),
@@ -320,7 +387,12 @@ private fun ChatMembersBody(
 }
 
 @Composable
-private fun MembersCard(rows: List<MemberRow>) {
+private fun MembersCard(
+    rows: List<MemberRow>,
+    canRemoveMembers: Boolean = false,
+    removalInFlightHex: String? = null,
+    onRemoveMember: (MemberRow) -> Unit = {},
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -329,7 +401,15 @@ private fun MembersCard(rows: List<MemberRow>) {
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         rows.forEachIndexed { idx, row ->
-            MemberRowView(row = row)
+            MemberRowView(
+                row = row,
+                // The admin can't remove themself; the interactor
+                // rejects it anyway (CannotRemoveSelf) — no affordance.
+                canRemove = canRemoveMembers && !row.isSelf,
+                removalInFlight = removalInFlightHex != null &&
+                    removalInFlightHex.equals(row.blsHex, ignoreCase = true),
+                onRemove = { onRemoveMember(row) },
+            )
             if (idx != rows.lastIndex) {
                 HorizontalDivider(thickness = 0.5.dp)
             }
@@ -338,7 +418,12 @@ private fun MembersCard(rows: List<MemberRow>) {
 }
 
 @Composable
-private fun MemberRowView(row: MemberRow) {
+private fun MemberRowView(
+    row: MemberRow,
+    canRemove: Boolean = false,
+    removalInFlight: Boolean = false,
+    onRemove: () -> Unit = {},
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -366,6 +451,27 @@ private fun MemberRowView(row: MemberRow) {
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        if (removalInFlight) {
+            // The PLONK prove + relayer round-trip takes seconds —
+            // show the busy state in place of the remove affordance.
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .size(20.dp)
+                    .testTag("members.remove_progress.${row.blsHex}"),
+                strokeWidth = 2.dp,
+            )
+        } else if (canRemove) {
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.testTag("members.remove_button.${row.blsHex}"),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PersonRemove,
+                    contentDescription = stringResource(R.string.member_remove_cd),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
         }
     }
 }

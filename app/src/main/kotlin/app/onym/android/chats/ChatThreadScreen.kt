@@ -214,6 +214,7 @@ fun ChatThreadScreen(
                 // recomposes the `remember(memberProfiles)` below.
                 memberProfiles = group?.memberProfiles.orEmpty(),
                 invitationMessage = group?.invitationMessage,
+                membershipRevoked = group?.membershipRevoked == true,
                 padding = padding,
                 onSend = viewModel::send,
                 onRetry = viewModel::retry,
@@ -302,6 +303,7 @@ private fun ChatThreadBody(
     messages: List<ChatMessage>,
     memberProfiles: Map<String, MemberProfile>,
     invitationMessage: String? = null,
+    membershipRevoked: Boolean = false,
     padding: PaddingValues,
     onSend: (String) -> Unit,
     onRetry: (java.util.UUID) -> Unit,
@@ -518,6 +520,14 @@ private fun ChatThreadBody(
             }
         }
         HorizontalDivider(thickness = 0.5.dp)
+        if (membershipRevoked) {
+            // The admin removed this identity: history stays readable,
+            // but the composer (and reply/attach affordances) is
+            // replaced by a static banner. SendMessageInteractor
+            // enforces the same as RemovedFromGroup underneath.
+            RemovedFromGroupBanner()
+            return@Column
+        }
         // Reply banner sits between the message list and the composer
         // while a reply is armed. Resolved live from the loaded
         // messages; if the target vanished, the banner just doesn't show.
@@ -554,6 +564,29 @@ private fun ChatThreadBody(
             pendingMedia = pendingMedia,
             onRemovePending = onRemovePending,
             onSendMedia = onSendMedia,
+        )
+    }
+}
+
+/**
+ * Static banner shown in place of the composer once the admin removed
+ * this identity from the group ([ChatGroup.membershipRevoked]). The
+ * thread above stays readable.
+ */
+@Composable
+private fun RemovedFromGroupBanner() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 18.dp)
+            .testTag("chat_thread.removed_banner"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = stringResource(R.string.chat_removed_from_group),
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

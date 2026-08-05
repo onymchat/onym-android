@@ -649,4 +649,10 @@
   <string name="group_rename_placeholder">Group name</string>
   <string name="group_rename_message">Everyone in the group will see the new name.</string>
   <string name="group_rename_cd">Rename group</string>
+  <string name="member_remove_cd">Remove member</string>
+  <string name="member_remove_title">Remove %1$s?</string>
+  <string name="member_remove_message">They will no longer receive messages from this group. The group key is rotated for everyone else.</string>
+  <string name="member_remove_confirm">Remove</string>
+  <string name="member_remove_error_title">Couldn\'t remove member</string>
+  <string name="chat_removed_from_group">You were removed from this group</string>
 </resources>
