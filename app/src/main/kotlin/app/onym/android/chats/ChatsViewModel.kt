@@ -67,18 +67,24 @@ class ChatsViewModel(
     private val memberRemover: GroupMemberRemoving? = null,
 ) : ViewModel() {
 
-    /** BLS hex of the member whose removal is in flight (drives the
-     *  row spinner on the members screen), or `null` when idle. The
+    /** In-flight removals as `removalKey(groupId, victimHex)` entries
+     *  (drives the row spinner on the members screen). Keyed, not a
+     *  single slot: the VM is app-scoped, so group A's in-flight
+     *  removal must not block or bleed into group B's screen. The
      *  PLONK prove + relayer round-trip takes seconds — the UI needs
      *  a busy state. */
-    private val _removalInFlight = MutableStateFlow<String?>(null)
-    val removalInFlight: StateFlow<String?> = _removalInFlight.asStateFlow()
+    private val _removalsInFlight = MutableStateFlow<Set<String>>(emptySet())
+    val removalsInFlight: StateFlow<Set<String>> = _removalsInFlight.asStateFlow()
 
-    /** One-shot removal failure outcome, or `null`. The VM stays
+    /** Latest removal failure per group id. The VM stays
      *  resource-free: the screen maps the typed outcome to localized
-     *  copy. Cleared via [clearRemovalError]. */
-    private val _removalError = MutableStateFlow<GroupMemberRemover.Outcome?>(null)
-    val removalError: StateFlow<GroupMemberRemover.Outcome?> = _removalError.asStateFlow()
+     *  copy, and reads only its OWN group's entry — an error raised
+     *  on group A never pops a dialog over group B. Cleared per
+     *  group via [clearRemovalError]. */
+    private val _removalErrors =
+        MutableStateFlow<Map<String, GroupMemberRemover.Outcome>>(emptyMap())
+    val removalErrors: StateFlow<Map<String, GroupMemberRemover.Outcome>> =
+        _removalErrors.asStateFlow()
 
     /**
      * Enriched + sorted chat-list rows. Recomputes whenever the group set
@@ -157,28 +163,39 @@ class ChatsViewModel(
     /**
      * Admin-only: remove [victimBlsHex] from [groupId] (on-chain
      * anchor + groupSecret rotation + fanout — see
-     * [GroupMemberRemover]). No-op when the remover wasn't wired or a
-     * removal is already in flight. Failures surface via
-     * [removalError]; success needs no signal — the repository
-     * snapshot re-emits and the row disappears.
+     * [GroupMemberRemover]). No-op when the remover wasn't wired or
+     * THIS exact removal is already in flight; removals on other
+     * groups may run concurrently (the remover's shared Tyranny
+     * mutex serializes the anchors underneath). Failures surface via
+     * [removalErrors] under the group's id; success needs no signal —
+     * the repository snapshot re-emits and the row disappears.
      */
     fun removeMember(groupId: String, victimBlsHex: String) {
         val remover = memberRemover ?: return
-        if (_removalInFlight.value != null) return
-        _removalInFlight.value = victimBlsHex.lowercase()
+        val key = removalKey(groupId, victimBlsHex)
+        if (key in _removalsInFlight.value) return
+        _removalsInFlight.value = _removalsInFlight.value + key
         viewModelScope.launch {
             try {
                 val outcome = remover.remove(groupId, victimBlsHex)
-                _removalError.value = outcome.takeIf {
-                    it !is GroupMemberRemover.Outcome.Sent
+                _removalErrors.value = if (outcome is GroupMemberRemover.Outcome.Sent) {
+                    _removalErrors.value - groupId.lowercase()
+                } else {
+                    _removalErrors.value + (groupId.lowercase() to outcome)
                 }
             } finally {
-                _removalInFlight.value = null
+                _removalsInFlight.value = _removalsInFlight.value - key
             }
         }
     }
 
-    fun clearRemovalError() {
-        _removalError.value = null
+    fun clearRemovalError(groupId: String) {
+        _removalErrors.value = _removalErrors.value - groupId.lowercase()
+    }
+
+    companion object {
+        /** Stable key for one (group, member) removal. */
+        fun removalKey(groupId: String, victimBlsHex: String): String =
+            "${groupId.lowercase()}:${victimBlsHex.lowercase()}"
     }
 }

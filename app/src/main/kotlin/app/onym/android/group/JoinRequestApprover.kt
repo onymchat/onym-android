@@ -256,7 +256,13 @@ open class JoinRequestApprover(
             // peers + admin by name from the moment they land. The
             // joiner's own profile gets backfilled by the receiver's
             // materializer (PR 83) from their active identity.
-            memberProfiles = anchored.memberProfiles.takeIf { it.isNotEmpty() },
+            // Tombstoned (removed) members are filtered out: a fresh
+            // joiner has no history to render and no replayed
+            // announcements to dedup, so ex-members' aliases + keys
+            // would be pure disclosure (see MemberProfile.revoked).
+            memberProfiles = anchored.memberProfiles
+                .filterValues { !it.revoked }
+                .takeIf { it.isNotEmpty() },
             // Carry the group photo so a create-time member sees it the
             // moment the snapshot lands — the only delivery path for
             // members who join via the full snapshot rather than a later
@@ -340,6 +346,12 @@ open class JoinRequestApprover(
                     alias = alias,
                     inboxPublicKey = inboxPub,
                     sendingPubkey = sendingPub,
+                    // (Re-)admission epoch — overwrites any tombstone's
+                    // statusEpoch so out-of-order removal replays on
+                    // OTHER devices are refused for this member. Uses
+                    // the post-anchor group snapshot's epoch (the same
+                    // value the announcement fanout claims).
+                    statusEpoch = group.epoch,
                 )),
         )
         groupRepository.insert(updated)

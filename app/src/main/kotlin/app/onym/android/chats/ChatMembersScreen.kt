@@ -138,8 +138,11 @@ fun ChatMembersScreen(
     // interactor re-checks server-side of the UI anyway.
     val canRemoveMembers = canShareInvite
     var removeTarget by remember { mutableStateOf<MemberRow?>(null) }
-    val removalInFlight by chatsViewModel.removalInFlight.collectAsStateWithLifecycle()
-    val removalError by chatsViewModel.removalError.collectAsStateWithLifecycle()
+    val removalsInFlight by chatsViewModel.removalsInFlight.collectAsStateWithLifecycle()
+    val removalErrors by chatsViewModel.removalErrors.collectAsStateWithLifecycle()
+    // Scope both to THIS group — the VM is app-scoped and another
+    // group's removal must not drive this screen's spinner or dialog.
+    val removalError = group?.let { removalErrors[it.id.lowercase()] }
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -215,7 +218,7 @@ fun ChatMembersScreen(
                 },
                 onRemovePhoto = { chatsViewModel.setGroupAvatar(group.id, null) },
                 canRemoveMembers = canRemoveMembers,
-                removalInFlightHex = removalInFlight,
+                removalInFlightKeys = removalsInFlight,
                 onRemoveMember = { removeTarget = it },
                 modifier = Modifier.padding(padding).fillMaxSize(),
             )
@@ -252,18 +255,18 @@ fun ChatMembersScreen(
         }
     }
 
-    removalError?.let { outcome ->
+    if (removalError != null && group != null) {
         AlertDialog(
-            onDismissRequest = { chatsViewModel.clearRemovalError() },
+            onDismissRequest = { chatsViewModel.clearRemovalError(group.id) },
             title = { Text(stringResource(R.string.member_remove_error_title)) },
             text = {
                 Text(
-                    stringResource(removalErrorText(outcome)),
+                    stringResource(removalErrorText(removalError)),
                     modifier = Modifier.testTag("members.remove_error"),
                 )
             },
             confirmButton = {
-                TextButton(onClick = { chatsViewModel.clearRemovalError() }) {
+                TextButton(onClick = { chatsViewModel.clearRemovalError(group.id) }) {
                     Text(stringResource(android.R.string.ok))
                 }
             },
@@ -341,15 +344,12 @@ private fun ChatMembersBody(
     onPickPhoto: () -> Unit,
     onRemovePhoto: () -> Unit,
     canRemoveMembers: Boolean = false,
-    removalInFlightHex: String? = null,
+    removalInFlightKeys: Set<String> = emptySet(),
     onRemoveMember: (MemberRow) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val rows = remember(group.memberProfiles, activeBlsHex) {
-        group.memberProfiles
-            // Removed members are tombstoned in the map, not deleted —
-            // the roster renders only active membership.
-            .filterValues { !it.revoked }
+        group.activeMemberProfiles
             .map { (key, profile) ->
                 MemberRow(
                     blsHex = key,
@@ -377,7 +377,8 @@ private fun ChatMembersBody(
             MembersCard(
                 rows = rows,
                 canRemoveMembers = canRemoveMembers,
-                removalInFlightHex = removalInFlightHex,
+                removalInFlightKeys = removalInFlightKeys,
+                groupId = group.id,
                 onRemoveMember = onRemoveMember,
             )
             Spacer(Modifier.height(8.dp))
@@ -395,7 +396,8 @@ private fun ChatMembersBody(
 private fun MembersCard(
     rows: List<MemberRow>,
     canRemoveMembers: Boolean = false,
-    removalInFlightHex: String? = null,
+    removalInFlightKeys: Set<String> = emptySet(),
+    groupId: String = "",
     onRemoveMember: (MemberRow) -> Unit = {},
 ) {
     Column(
@@ -411,8 +413,8 @@ private fun MembersCard(
                 // The admin can't remove themself; the interactor
                 // rejects it anyway (CannotRemoveSelf) — no affordance.
                 canRemove = canRemoveMembers && !row.isSelf,
-                removalInFlight = removalInFlightHex != null &&
-                    removalInFlightHex.equals(row.blsHex, ignoreCase = true),
+                removalInFlight = ChatsViewModel.removalKey(groupId, row.blsHex)
+                    in removalInFlightKeys,
                 onRemove = { onRemoveMember(row) },
             )
             if (idx != rows.lastIndex) {

@@ -1,12 +1,15 @@
 package app.onym.android.group
 
 import android.content.Context
+import androidx.room.Room
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,6 +78,73 @@ class GroupDatabaseMigrationTest {
         }
     }
 
+    // ─── end-to-end: Room actually OPENS the migrated database ─────
+
+    @Test
+    fun room_opensV8DatabaseAtV9_deviceMigratedFrom7Shape() {
+        assertRoomOpensMigratedV8(hasInvitationMessageColumn = false)
+    }
+
+    @Test
+    fun room_opensV8DatabaseAtV9_freshV8InstallShape() {
+        assertRoomOpensMigratedV8(hasInvitationMessageColumn = true)
+    }
+
+    /**
+     * The raw-SQL tests above prove the migration's DDL; this proves
+     * what actually matters — that Room OPENS the migrated database.
+     * After running migrations Room validates the resulting schema
+     * against the entity-derived expectation (`TableInfo` comparison)
+     * and throws "Migration didn't properly handle: groups" on any
+     * mismatch — including the `DEFAULT 0` on `membershipRevoked`,
+     * the first DB-side column default in this schema's history.
+     * No destructive fallback is registered here, so a validation
+     * failure fails the test instead of silently wiping.
+     */
+    private fun assertRoomOpensMigratedV8(hasInvitationMessageColumn: Boolean) {
+        val ctx: Context = ApplicationProvider.getApplicationContext()
+        val dbName = "migration-e2e-${System.nanoTime()}.db"
+        val dbFile = ctx.getDatabasePath(dbName)
+        dbFile.parentFile?.mkdirs()
+
+        // Build the v8 file with the framework (non-Room) SQLite stack,
+        // exactly like a real pre-upgrade install left it.
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(dbFile, null).use { raw ->
+            raw.execSQL(v8CreateTableSql(hasInvitationMessageColumn))
+            // Real v8 installs carry this index (created by the 6→7
+            // rebuild / fresh create). Room's post-migration validation
+            // checks indices too, so the fixture must be faithful.
+            raw.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_groups_ownerIdentityId` " +
+                    "ON `groups` (`ownerIdentityId`)",
+            )
+            raw.execSQL(v8SeedRowSql())
+            raw.version = 8
+        }
+
+        val db = Room.databaseBuilder(ctx, GroupDatabase::class.java, dbName)
+            .addMigrations(
+                GroupDatabaseMigrations.MIGRATION_3_4,
+                GroupDatabaseMigrations.MIGRATION_4_5,
+                GroupDatabaseMigrations.MIGRATION_5_6,
+                GroupDatabaseMigrations.MIGRATION_6_7,
+                GroupDatabaseMigrations.MIGRATION_7_8,
+                GroupDatabaseMigrations.MIGRATION_8_9,
+            )
+            .allowMainThreadQueries()
+            .build()
+        try {
+            // First DAO touch forces open → migrate → validate.
+            val rows = runBlocking { db.groupDao().list() }
+            assertEquals(1, rows.size)
+            assertEquals("aa".repeat(32), rows.single().id)
+            assertFalse(rows.single().membershipRevoked)
+        } finally {
+            db.close()
+            dbFile.delete()
+        }
+    }
+
     // ─── helpers ───────────────────────────────────────────────────
 
     /** Open a raw SQLite db, create the v8 `groups` table (post-7→8
@@ -99,44 +169,47 @@ class GroupDatabaseMigrationTest {
                 .build(),
         )
         helper.writableDatabase.use { db ->
-            val invitationColumn = if (hasInvitationMessageColumn) {
-                "`encryptedInvitationMessage` BLOB, "
-            } else {
-                ""
-            }
-            db.execSQL(
-                "CREATE TABLE `groups` (" +
-                    "`id` TEXT NOT NULL, " +
-                    "`createdAt` INTEGER NOT NULL, " +
-                    "`epoch` INTEGER NOT NULL, " +
-                    "`tierRaw` INTEGER NOT NULL, " +
-                    "`groupTypeRaw` TEXT NOT NULL, " +
-                    "`isPublishedOnChain` INTEGER NOT NULL, " +
-                    "`ownerIdentityId` TEXT NOT NULL, " +
-                    "`encryptedName` BLOB NOT NULL, " +
-                    "`encryptedGroupSecret` BLOB NOT NULL, " +
-                    "`encryptedMembersJson` BLOB NOT NULL, " +
-                    "`encryptedSalt` BLOB NOT NULL, " +
-                    "`encryptedCommitment` BLOB, " +
-                    "`encryptedAdminPubkeyHex` BLOB, " +
-                    "`encryptedMemberProfilesJson` BLOB, " +
-                    "`encryptedAdminEd25519PubkeyHex` BLOB, " +
-                    "`encryptedAvatar` BLOB, " +
-                    invitationColumn +
-                    "`lastReadAtMillis` INTEGER, " +
-                    "PRIMARY KEY(`id`, `ownerIdentityId`))",
-            )
-            db.execSQL(
-                "INSERT INTO `groups` (" +
-                    "id, createdAt, epoch, tierRaw, groupTypeRaw, isPublishedOnChain, " +
-                    "ownerIdentityId, encryptedName, encryptedGroupSecret, " +
-                    "encryptedMembersJson, encryptedSalt) " +
-                    "VALUES ('${"aa".repeat(32)}', 0, 3, 1, 'tyranny', 1, 'owner', " +
-                    "x'00', x'00', x'00', x'00')",
-            )
+            db.execSQL(v8CreateTableSql(hasInvitationMessageColumn))
+            db.execSQL(v8SeedRowSql())
             block(db)
         }
     }
+
+    private fun v8CreateTableSql(hasInvitationMessageColumn: Boolean): String {
+        val invitationColumn = if (hasInvitationMessageColumn) {
+            "`encryptedInvitationMessage` BLOB, "
+        } else {
+            ""
+        }
+        return "CREATE TABLE `groups` (" +
+            "`id` TEXT NOT NULL, " +
+            "`createdAt` INTEGER NOT NULL, " +
+            "`epoch` INTEGER NOT NULL, " +
+            "`tierRaw` INTEGER NOT NULL, " +
+            "`groupTypeRaw` TEXT NOT NULL, " +
+            "`isPublishedOnChain` INTEGER NOT NULL, " +
+            "`ownerIdentityId` TEXT NOT NULL, " +
+            "`encryptedName` BLOB NOT NULL, " +
+            "`encryptedGroupSecret` BLOB NOT NULL, " +
+            "`encryptedMembersJson` BLOB NOT NULL, " +
+            "`encryptedSalt` BLOB NOT NULL, " +
+            "`encryptedCommitment` BLOB, " +
+            "`encryptedAdminPubkeyHex` BLOB, " +
+            "`encryptedMemberProfilesJson` BLOB, " +
+            "`encryptedAdminEd25519PubkeyHex` BLOB, " +
+            "`encryptedAvatar` BLOB, " +
+            invitationColumn +
+            "`lastReadAtMillis` INTEGER, " +
+            "PRIMARY KEY(`id`, `ownerIdentityId`))"
+    }
+
+    private fun v8SeedRowSql(): String =
+        "INSERT INTO `groups` (" +
+            "id, createdAt, epoch, tierRaw, groupTypeRaw, isPublishedOnChain, " +
+            "ownerIdentityId, encryptedName, encryptedGroupSecret, " +
+            "encryptedMembersJson, encryptedSalt) " +
+            "VALUES ('${"aa".repeat(32)}', 0, 3, 1, 'tyranny', 1, 'owner', " +
+            "x'00', x'00', x'00', x'00')"
 
     private fun columnNames(db: SupportSQLiteDatabase): List<String> =
         db.query("PRAGMA table_info(`groups`)").use { cursor ->

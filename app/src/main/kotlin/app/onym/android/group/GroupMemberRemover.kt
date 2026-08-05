@@ -281,7 +281,13 @@ class GroupMemberRemover(
             salt = saltNew,
             groupSecret = groupSecretNew,
             memberProfiles = group.memberProfiles +
-                (victimHex to victimProfile.copy(revoked = true)),
+                (victimHex to victimProfile.copy(
+                    revoked = true,
+                    // Removal epoch — lets receive-side tombstone
+                    // decisions stay order-independent under relay
+                    // replay (MemberProfile.statusEpoch).
+                    statusEpoch = group.epoch + 1uL,
+                )),
         )
         groupRepository.insert(anchored)
 

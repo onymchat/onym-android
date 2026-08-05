@@ -173,7 +173,7 @@ fun ChatThreadScreen(
                 title = {
                     ChatThreadTitle(
                         name = group?.name ?: "Chat",
-                        memberCount = group?.memberProfiles?.size ?: 0,
+                        memberCount = group?.activeMemberProfiles?.size ?: 0,
                     )
                 },
                 navigationIcon = {
@@ -1033,6 +1033,9 @@ private fun EmptyThread(
 ) {
     val memberNames = remember(memberProfiles) {
         memberProfiles.values
+            // Removed members are tombstoned in place — the intro
+            // body enumerates only active membership.
+            .filterNot { it.revoked }
             .map { it.alias.ifBlank { "(unnamed)" } }
             .sortedBy { it.lowercase() }
     }

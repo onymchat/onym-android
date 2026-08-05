@@ -96,6 +96,7 @@ class RoomGroupStoreTest {
                     inboxPublicKey = ByteArray(32) { 0x31 },
                     sendingPubkey = ByteArray(32) { 0x32 },
                     revoked = true,
+                    statusEpoch = 7uL,
                 ),
             ),
         ).copy(membershipRevoked = true)
@@ -104,6 +105,7 @@ class RoomGroupStoreTest {
         val listed = store.list().single()
         assertTrue(listed.membershipRevoked)
         assertTrue(listed.memberProfiles[victimHex]!!.revoked)
+        assertEquals(7uL, listed.memberProfiles[victimHex]!!.statusEpoch)
     }
 
     @Test
@@ -122,6 +124,7 @@ class RoomGroupStoreTest {
             encodeDefaults = true; ignoreUnknownKeys = true
         }.decodeFromString(MemberProfile.serializer(), legacyJson)
         assertFalse(decoded.revoked)
+        assertNull("legacy profiles carry no status epoch", decoded.statusEpoch)
     }
 
     // ─── encryption-at-rest ───────────────────────────────────────

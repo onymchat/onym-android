@@ -165,12 +165,16 @@ class ChatsViewModelTest {
 
     // ─── member removal delegation ────────────────────────────────
 
+    private val groupA = "aa".repeat(32)
+    private val groupB = "cc".repeat(32)
+    private val victim = "bb".repeat(48)
+
     @Test
     fun removeMember_noOpWithoutRemover() = runTest {
         val vm = makeVM(InMemoryGroupStore())
-        vm.removeMember("aa".repeat(32), "bb".repeat(48))
-        assertEquals(null, vm.removalError.value)
-        assertEquals(null, vm.removalInFlight.value)
+        vm.removeMember(groupA, victim)
+        assertTrue(vm.removalErrors.value.isEmpty())
+        assertTrue(vm.removalsInFlight.value.isEmpty())
     }
 
     @Test
@@ -178,36 +182,81 @@ class ChatsViewModelTest {
         val remover = RecordingRemover(GroupMemberRemover.Outcome.Sent)
         val vm = makeVM(InMemoryGroupStore(), remover = remover)
 
-        vm.removeMember("aa".repeat(32), "BB".repeat(48))
+        vm.removeMember(groupA, "BB".repeat(48))
 
         assertEquals(1, remover.calls.size)
-        assertEquals("aa".repeat(32) to "BB".repeat(48), remover.calls.single())
+        assertEquals(groupA to "BB".repeat(48), remover.calls.single())
         // Unconfined main dispatcher → the launch completed inline.
-        assertEquals(null, vm.removalInFlight.value)
-        assertEquals(null, vm.removalError.value)
+        assertTrue(vm.removalsInFlight.value.isEmpty())
+        assertTrue(vm.removalErrors.value.isEmpty())
     }
 
     @Test
-    fun removeMember_surfacesTypedOutcome_andClearsOnRequest() = runTest {
+    fun removeMember_surfacesTypedOutcomePerGroup_andClearsOnRequest() = runTest {
         // The VM exposes the raw Outcome — localization is the
         // screen's job (removalErrorText), never the VM's.
         val outcome = GroupMemberRemover.Outcome.AnchorRejected("stale epoch")
         val vm = makeVM(InMemoryGroupStore(), remover = RecordingRemover(outcome))
 
-        vm.removeMember("aa".repeat(32), "bb".repeat(48))
+        vm.removeMember(groupA, victim)
 
-        assertEquals(outcome, vm.removalError.value)
-        assertEquals(null, vm.removalInFlight.value)
-        vm.clearRemovalError()
-        assertEquals(null, vm.removalError.value)
+        assertEquals(outcome, vm.removalErrors.value[groupA])
+        assertTrue(vm.removalsInFlight.value.isEmpty())
+        vm.clearRemovalError(groupA)
+        assertTrue(vm.removalErrors.value.isEmpty())
     }
 
     @Test
-    fun removeMember_surfacesSingletonOutcome() = runTest {
-        val remover = RecordingRemover(GroupMemberRemover.Outcome.NotAdminOfThisGroup)
+    fun removeMember_errorIsScopedToItsOwnGroup() = runTest {
+        // The VM is app-scoped: a failure on group A must not surface
+        // on group B's members screen.
+        val vm = makeVM(
+            InMemoryGroupStore(),
+            remover = RecordingRemover(GroupMemberRemover.Outcome.NotAdminOfThisGroup),
+        )
+
+        vm.removeMember(groupA, victim)
+
+        assertEquals(
+            GroupMemberRemover.Outcome.NotAdminOfThisGroup,
+            vm.removalErrors.value[groupA],
+        )
+        assertEquals(null, vm.removalErrors.value[groupB])
+    }
+
+    @Test
+    fun removeMember_inFlightKeyIsPerGroupAndMember() = runTest {
+        // A never-completing removal on group A must not block a
+        // removal on group B (or a different member of group A).
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val remover = object : GroupMemberRemoving {
+            val calls = mutableListOf<Pair<String, String>>()
+            override suspend fun remove(
+                groupId: String,
+                victimBlsHex: String,
+            ): GroupMemberRemover.Outcome {
+                calls.add(groupId to victimBlsHex)
+                gate.await()
+                return GroupMemberRemover.Outcome.Sent
+            }
+        }
         val vm = makeVM(InMemoryGroupStore(), remover = remover)
-        vm.removeMember("aa".repeat(32), "bb".repeat(48))
-        assertEquals(GroupMemberRemover.Outcome.NotAdminOfThisGroup, vm.removalError.value)
+
+        vm.removeMember(groupA, victim)
+        vm.removeMember(groupA, victim) // duplicate → ignored
+        vm.removeMember(groupB, victim) // other group → allowed
+        vm.removeMember(groupA, "dd".repeat(48)) // other member → allowed
+
+        assertEquals(3, remover.calls.size)
+        assertEquals(
+            setOf(
+                ChatsViewModel.removalKey(groupA, victim),
+                ChatsViewModel.removalKey(groupB, victim),
+                ChatsViewModel.removalKey(groupA, "dd".repeat(48)),
+            ),
+            vm.removalsInFlight.value,
+        )
+        gate.complete(Unit)
     }
 
     private class RecordingRemover(

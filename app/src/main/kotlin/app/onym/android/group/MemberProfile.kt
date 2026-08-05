@@ -58,9 +58,41 @@ data class MemberProfile(
      * pre-removal wire payloads decode as active members; serializes
      * as `"revoked"` inside [GroupInvitationPayload]'s
      * `member_profiles` (iOS decoders ignore unknown keys).
+     *
+     * ## Retention & disclosure
+     *
+     * Tombstones live for the group's lifetime on devices that knew
+     * the member — they're what makes removal apply idempotently and
+     * order-independently under relay replay. They are deliberately
+     * NOT shipped to brand-new joiners ([JoinRequestApprover] filters
+     * them out of the invitation snapshot): a new member has no
+     * history to render and no replayed announcements to dedup, so
+     * disclosing ex-members' aliases + keys to them buys nothing.
+     * Existing members DO receive them via
+     * [app.onym.android.inbox.GroupStateVerifier] refresh replies
+     * (convergence needs them). Bounded-retention GC is an explicit
+     * follow-up.
      */
     @SerialName("revoked")
     val revoked: Boolean = false,
+    /**
+     * Epoch of the LAST membership-status change known for this
+     * member — the removal epoch when tombstoning, the (re-)admission
+     * epoch when admitting. `null` for profiles that predate this
+     * field or whose status never changed.
+     *
+     * Why it exists: relay dispatch order is arrival order, not epoch
+     * order. A single group-level epoch guard can't distinguish "a
+     * stale removal I already superseded" from "an out-of-order
+     * removal I haven't seen yet" — a removal at epoch 5 replayed
+     * after one at epoch 6 must STILL tombstone its victim, while a
+     * removal at epoch 5 replayed after that member's epoch-7
+     * re-admission must NOT. Per-member status epochs make the
+     * tombstone decision order-independent while
+     * epoch / salt / groupSecret remain strictly converge-forward.
+     */
+    @SerialName("status_epoch")
+    val statusEpoch: ULong? = null,
 ) {
     init {
         require(inboxPublicKey.size == 32) {
@@ -76,13 +108,15 @@ data class MemberProfile(
             alias == other.alias &&
             inboxPublicKey.contentEquals(other.inboxPublicKey) &&
             sendingPubkey.contentEquals(other.sendingPubkey) &&
-            revoked == other.revoked)
+            revoked == other.revoked &&
+            statusEpoch == other.statusEpoch)
 
     override fun hashCode(): Int {
         var h = alias.hashCode()
         h = 31 * h + inboxPublicKey.contentHashCode()
         h = 31 * h + sendingPubkey.contentHashCode()
         h = 31 * h + revoked.hashCode()
+        h = 31 * h + (statusEpoch?.hashCode() ?: 0)
         return h
     }
 }

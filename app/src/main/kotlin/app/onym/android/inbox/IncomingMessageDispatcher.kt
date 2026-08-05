@@ -309,10 +309,14 @@ class IncomingMessageDispatcher(
 
         // Wire-shipped profiles first; receiver's own entry overwrites
         // any same-keyed wire entry (sender shouldn't be able to
-        // assert our alias).
+        // assert our alias). The wire entry's statusEpoch is PRESERVED
+        // through the overwrite: a re-admitted member's own status
+        // marker is what refuses a replayed stale self-removal —
+        // erasing it would re-lock the composer on the next inbox
+        // replay.
         val profiles = (invitation.memberProfiles ?: emptyMap()).toMutableMap()
         selfMemberProfileEntry(ownerIdentityId)?.let { (key, profile) ->
-            profiles[key] = profile
+            profiles[key] = profile.copy(statusEpoch = profiles[key]?.statusEpoch)
         }
 
         // PR 84: stamp the inviting envelope's Ed25519 pubkey as the
@@ -493,6 +497,12 @@ class IncomingMessageDispatcher(
                 alias = payload.newMember.alias,
                 inboxPublicKey = payload.newMember.inboxPub,
                 sendingPubkey = payload.newMember.sendingPub,
+                // Stamp the (re-)admission epoch so an out-of-order
+                // REMOVAL replayed later (with a lower epoch) can't
+                // re-tombstone this member — see
+                // MemberProfile.statusEpoch. Null only from legacy
+                // pre-PR-88 senders, which never race removals.
+                statusEpoch = payload.epoch,
             )),
         )
         groupRepository.insert(updated)
@@ -544,20 +554,34 @@ class IncomingMessageDispatcher(
      *    the victim's inbox and every trust gate rejects their key.
      *
      * Order of gates (cheapest first, mirroring [applyAnnouncement]):
-     * group lookup → fail-closed admin requirement → local
-     * converge-forward guard (BEFORE any chain read — relays replay
-     * the full inbox on every reconnect) → self classification →
+     * group lookup → fail-closed admin requirement → self
+     * classification → local applicability check (BEFORE any chain
+     * read — relays replay the full inbox on every reconnect) →
      * admin-Ed25519 authorization → on-chain converge-forward check.
      *
-     * ## Local converge-forward guard
+     * ## Two independently-guarded effects
      *
-     * `group.epoch >= payload.epoch` drops the payload outright: a
-     * removal may only ever advance local state. Without this, a
-     * relay-replayed removal envelope arriving AFTER the member was
-     * re-admitted would pass the on-chain "ahead → accept" branch and
-     * roll epoch / salt / groupSecret back to the old rotated values
-     * while re-tombstoning the re-admitted member. It also makes
-     * re-delivery idempotent without any per-profile bookkeeping.
+     * Relay dispatch order is ARRIVAL order, not epoch order — an
+     * offline device can receive "remove B (epoch 6)" before
+     * "remove A (epoch 5)". A single group-level epoch guard would
+     * drop the epoch-5 removal forever, leaving A trusted. So the
+     * apply decomposes:
+     *
+     *  - **Group-state advance** (epoch / commitment / salt /
+     *    groupSecret): strictly converge-forward — only when
+     *    `payload.epoch > group.epoch`. Never rolls backward, which
+     *    keeps the re-admission replay from restoring old secrets.
+     *  - **Tombstone** (per-member, order-independent): applies when
+     *    this removal is NEWER than the member's last known status
+     *    change ([MemberProfile.statusEpoch]) — so a stale-but-unseen
+     *    removal still lands, while a removal replayed after that
+     *    member's later re-admission is refused. The victim's
+     *    [ChatGroup.members] leaf is subtracted together with the
+     *    tombstone (a member removed at epoch 5 is not in ANY later
+     *    tree unless re-admitted, which resets statusEpoch).
+     *
+     * A payload where NEITHER effect applies is dropped before any
+     * chain read — that's the idempotency for relay re-delivery.
      *
      * ## Fail closed on a missing admin key
      *
@@ -583,10 +607,6 @@ class IncomingMessageDispatcher(
         // back to any-current-member.)
         if (group.adminEd25519PubkeyHex == null) return RemovalApplyResult.DONE
 
-        // Local converge-forward guard — see KDoc. Cheap, local, and
-        // BEFORE any chain read (launch-storm pattern).
-        if (group.epoch >= payload.epoch) return RemovalApplyResult.DONE
-
         // Self classification. If we can't resolve our own BLS key we
         // can't tell which branch is safe — drop rather than let the
         // victim's own device take the remaining-member branch and
@@ -599,7 +619,23 @@ class IncomingMessageDispatcher(
             ?.toHexLowercase()
             ?: return RemovalApplyResult.DONE
         val isSelf = selfHex == victimHex
-        if (isSelf && group.membershipRevoked) return RemovalApplyResult.DONE
+
+        // Local applicability — BEFORE any chain read (launch-storm
+        // pattern). Which effects would this payload have?
+        val victimProfile = group.memberProfiles[victimHex]
+        val advancesState = payload.epoch > group.epoch
+        val tombstoneApplies = !isSelf &&
+            victimProfile != null &&
+            !victimProfile.revoked &&
+            (victimProfile.statusEpoch == null || payload.epoch > victimProfile.statusEpoch)
+        val selfApplies = isSelf &&
+            !group.membershipRevoked &&
+            run {
+                val ownStatus = victimProfile?.statusEpoch
+                ownStatus == null || payload.epoch > ownStatus
+            }
+        if (isSelf && !selfApplies) return RemovalApplyResult.DONE
+        if (!isSelf && !tombstoneApplies && !advancesState) return RemovalApplyResult.DONE
 
         // Trust gate: only the stored admin may shrink the roster.
         if (!senderAuthorizedToMutate(group, senderEd25519PublicKey)) {
@@ -630,26 +666,40 @@ class IncomingMessageDispatcher(
         }
 
         if (isSelf) {
+            // Victim device: mark and keep everything else untouched.
+            // (No state advance from the secret-free victim variant.)
             groupRepository.insert(group.copy(membershipRevoked = true))
             return RemovalApplyResult.DONE
         }
 
-        val victimProfile = group.memberProfiles[victimHex]
         val victimBytes = ChatGroup.bytesFromHex(victimHex)
         groupRepository.insert(
             group.copy(
-                members = group.members.filterNot {
-                    it.publicKeyCompressed.contentEquals(victimBytes)
+                // Tombstone effect — order-independent (see KDoc).
+                members = if (tombstoneApplies) {
+                    group.members.filterNot {
+                        it.publicKeyCompressed.contentEquals(victimBytes)
+                    }
+                } else {
+                    group.members
                 },
-                memberProfiles = if (victimProfile != null) {
-                    group.memberProfiles + (victimHex to victimProfile.copy(revoked = true))
+                memberProfiles = if (tombstoneApplies && victimProfile != null) {
+                    group.memberProfiles + (victimHex to victimProfile.copy(
+                        revoked = true,
+                        statusEpoch = payload.epoch,
+                    ))
                 } else {
                     group.memberProfiles
                 },
-                epoch = payload.epoch,
-                commitment = payload.commitment,
-                salt = payload.saltNew ?: group.salt,
-                groupSecret = payload.groupSecretNew ?: group.groupSecret,
+                // Group-state effect — strictly converge-forward.
+                epoch = if (advancesState) payload.epoch else group.epoch,
+                commitment = if (advancesState) payload.commitment else group.commitment,
+                salt = if (advancesState) payload.saltNew ?: group.salt else group.salt,
+                groupSecret = if (advancesState) {
+                    payload.groupSecretNew ?: group.groupSecret
+                } else {
+                    group.groupSecret
+                },
             ),
         )
         return RemovalApplyResult.DONE

@@ -255,12 +255,17 @@ class IncomingMessageDispatcherRemovalTest {
         assertTrue(groupRepository.snapshots.value.single().memberProfiles[victimHex]!!.revoked)
 
         // 2. Re-admission: the announcement path resets the tombstone
-        //    (local epoch stays at 2 — announcements don't carry state).
+        //    and stamps the admission epoch (local group epoch stays at
+        //    2 — announcements don't carry group state). Mirrors what
+        //    applyAnnouncement writes.
         val readmitted = groupRepository.snapshots.value.single()
         groupStore.replaceForTest(
             readmitted.copy(
                 memberProfiles = readmitted.memberProfiles +
-                    (victimHex to readmitted.memberProfiles[victimHex]!!.copy(revoked = false)),
+                    (victimHex to readmitted.memberProfiles[victimHex]!!.copy(
+                        revoked = false,
+                        statusEpoch = 3uL,
+                    )),
                 groupSecret = ByteArray(32) { 0x71 }, // post-readmission secret
             ),
         )
@@ -279,8 +284,95 @@ class IncomingMessageDispatcherRemovalTest {
             final.groupSecret.contentEquals(ByteArray(32) { 0x71 }),
         )
         assertEquals(2uL, final.epoch)
-        // And the replay never even hit the chain (local guard fires first).
+        // And the replay never even hit the chain (local guards fire first).
         assertEquals(1, reader.calls)
+    }
+
+    @Test
+    fun removal_outOfOrderDelivery_tombstonesBothWithoutRollingStateBack() = runTest {
+        // Relay dispatch order is ARRIVAL order: an offline device can
+        // receive "remove other (epoch 3)" before "remove victim
+        // (epoch 2)". Both must land — a single group-epoch guard would
+        // drop the epoch-2 removal forever and leave the victim trusted.
+        val laterCommitment = ByteArray(32) { 0x80.toByte() }
+        val laterSecret = ByteArray(32) { 0x81.toByte() }
+        val laterSalt = ByteArray(32) { 0x82.toByte() }
+        val laterRemoval = MemberRemovalPayload(
+            version = 1,
+            groupId = groupId,
+            removedBlsHex = otherHex,
+            commitment = laterCommitment,
+            epoch = 3uL,
+            sentAtMillis = 2_000L,
+            groupSecretNew = laterSecret,
+            saltNew = laterSalt,
+        )
+        // Chain is at the latest epoch throughout (both removals are
+        // already anchored by the time this device reconnects).
+        val reader = FakeChainReader(
+            SepCommitmentEntry(commitment = laterCommitment, epoch = 3uL),
+        )
+
+        // Newest-first replay: epoch 3 lands, advancing state.
+        makeDispatcher(laterRemoval, chainReader = reader)
+            .dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        val afterLater = groupRepository.snapshots.value.single()
+        assertTrue(afterLater.memberProfiles[otherHex]!!.revoked)
+        assertEquals(3uL, afterLater.epoch)
+
+        // Then the older epoch-2 removal arrives.
+        makeDispatcher(payloadForMembers(), chainReader = reader)
+            .dispatch("m2", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        val final = groupRepository.snapshots.value.single()
+        // BOTH members tombstoned + dropped from the on-chain roster.
+        assertTrue("stale-but-unseen removal must still tombstone", final.memberProfiles[victimHex]!!.revoked)
+        assertTrue(final.memberProfiles[otherHex]!!.revoked)
+        assertTrue(final.members.none { it.publicKeyCompressed.contentEquals(victimBls) })
+        assertTrue(final.members.none { it.publicKeyCompressed.contentEquals(otherBls) })
+        // Group state stays at the NEWER removal's values — the older
+        // payload must not roll epoch / secrets backward.
+        assertEquals(3uL, final.epoch)
+        assertTrue(final.groupSecret.contentEquals(laterSecret))
+        assertTrue(final.salt.contentEquals(laterSalt))
+        assertTrue(final.commitment!!.contentEquals(laterCommitment))
+    }
+
+    @Test
+    fun removal_replayAfterOwnReadmission_doesNotRelockComposer() = runTest {
+        // Victim device: removed, then re-admitted (fresh invitation
+        // stamps their own profile's statusEpoch). A replayed stale
+        // self-removal must not re-set membershipRevoked.
+        val selfSummary = IdentitySummary(
+            id = ownerIdentity,
+            name = "Me",
+            blsPublicKey = victimBls,
+            inboxPublicKey = ByteArray(32) { 0x21 },
+            sendingPublicKey = ByteArray(32) { 0x22 },
+        )
+        val identities = MutableStateFlow(listOf(selfSummary)).asStateFlow()
+        val reader = FakeChainReader(
+            SepCommitmentEntry(commitment = newCommitment, epoch = 2uL),
+        )
+        // Post-readmission state: not revoked, own profile stamped at
+        // the admission epoch, group advanced past the removal.
+        val base = makeGroup()
+        groupStore.replaceForTest(
+            base.copy(
+                membershipRevoked = false,
+                epoch = 3uL,
+                memberProfiles = base.memberProfiles +
+                    (victimHex to base.memberProfiles[victimHex]!!.copy(statusEpoch = 3uL)),
+            ),
+        )
+        groupRepository.reload()
+
+        makeDispatcher(payloadForVictim(), identities = identities, chainReader = reader)
+            .dispatch("m1", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        val final = groupRepository.snapshots.value.single()
+        assertFalse("stale self-removal must not re-lock the thread", final.membershipRevoked)
+        assertEquals(0, reader.calls)
     }
 
     @Test

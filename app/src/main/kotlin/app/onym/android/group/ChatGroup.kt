@@ -164,6 +164,15 @@ data class ChatGroup(
      *  through the codebase. */
     val owner: IdentityId get() = IdentityId(ownerIdentityId)
 
+    /**
+     * [memberProfiles] minus tombstoned (removed) members — what the
+     * UI means by "the members": counts, rosters, alias enumerations.
+     * Message-rendering alias lookups keep using the full map so a
+     * removed member's past messages still show their name.
+     */
+    val activeMemberProfiles: Map<String, MemberProfile>
+        get() = memberProfiles.filterValues { !it.revoked }
+
     /** Group ID as the raw 32-byte payload, parsed back from [id].
      *  Used directly when building chain payloads + invitations. */
     val groupIdBytes: ByteArray

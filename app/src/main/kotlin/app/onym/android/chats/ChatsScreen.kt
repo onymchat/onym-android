@@ -561,7 +561,7 @@ private fun subtitleFor(group: ChatGroup): String {
         SepGroupType.DEMOCRACY -> "Democracy"
         SepGroupType.OLIGARCHY -> "Oligarchy"
     }
-    val memberCount = group.memberProfiles.size
+    val memberCount = group.activeMemberProfiles.size
     val membersLabel = if (memberCount == 0) {
         ""
     } else {
