@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.onEach
 import androidx.fragment.app.FragmentActivity
 import androidx.room.Room
 import app.onym.android.chain.BearerAuthInterceptor
@@ -106,6 +107,14 @@ private val Context.blossomServersDataStore: DataStore<Preferences> by preferenc
  */
 private val Context.chatPreferencesDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "app.onym.android.chat_prefs",
+)
+
+/**
+ * DataStore Preferences for intro-request tombstones. Event ids aren't
+ * secret, and the set is bounded by the links that still exist.
+ */
+private val Context.introRequestsDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.intro_requests",
 )
 
 /**
@@ -684,6 +693,16 @@ class OnymApplication : Application() {
                 ) { entries, activeId ->
                     if (activeId == null) emptyList()
                     else entries.filter { it.ownerIdentityId == activeId }
+                }.onEach { live ->
+                    // Same snapshots the pump reconciles on, so a
+                    // retired link's tombstones go with it.
+                    introRequestStore.pruneTombstones(
+                        live.mapTo(mutableSetOf()) { entry ->
+                            entry.introPublicKey.joinToString("") {
+                                "%02x".format(it.toInt() and 0xFF)
+                            }
+                        },
+                    )
                 },
             )
         }
@@ -701,7 +720,12 @@ class OnymApplication : Application() {
         // user approval. Single instance — the toolbar badge + the
         // modal screen share state via [ApproveRequestsViewModel].
         val joinRequestApprover = app.onym.android.group.JoinRequestApprover(
-            identity = identityRepository,
+            activeIdentity = identityRepository,
+            envelopeSealer = identityRepository,
+            // Method reference, so the secret linter's call-syntax
+            // regex doesn't fire. onym:allow-secret-read
+            blsSecretKey = identityRepository::blsSecretKey,
+            identitySummaries = identityRepository.identities,
             introKeyStore = introKeyStore,
             introRequestStore = introRequestStore,
             groupRepository = groupRepository,

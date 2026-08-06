@@ -175,6 +175,49 @@ fun JoinScreen(
                     )
                 }
 
+                is JoinViewModel.State.Unanswered -> {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.testTag("join.unanswered"),
+                    ) {
+                        Icon(
+                            Icons.Filled.HourglassTop,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.join_unanswered_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        // Host offline or link replaced — indistinguishable
+                        // here, since revocation is silent. Name both.
+                        Text(
+                            text = stringResource(R.string.join_unanswered_body),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(R.string.join_unanswered_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = { viewModel.send(displayLabel) },
+                            modifier = Modifier.testTag("join.retry_button"),
+                        ) {
+                            Text(stringResource(R.string.join_unanswered_retry))
+                        }
+                    }
+                }
+
                 is JoinViewModel.State.AwaitingApproval -> {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,

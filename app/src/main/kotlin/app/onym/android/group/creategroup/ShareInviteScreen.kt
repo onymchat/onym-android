@@ -7,6 +7,7 @@ import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -53,9 +54,8 @@ import app.onym.android.settings.OnymQrCode
  * deeplink capability, and surfaces the link. The user shares via
  * the system share sheet, copies it, or skips.
  *
- * Mints exactly once per screen entry — re-entry (after Done →
- * back) re-mints with a fresh intro keypair so the previous share
- * stays revocable independently.
+ * Loads the link on each entry, idempotently — a QR the user already
+ * screenshotted keeps working.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +65,8 @@ fun ShareInviteScreen(
     onDone: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val otherInvites by viewModel.otherInvites.collectAsStateWithLifecycle()
+    val isRotating by viewModel.isRotating.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
 
@@ -189,6 +191,83 @@ fun ShareInviteScreen(
                                 else R.string.share_invite_copy,
                             ),
                         )
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+                    // The only way a leaked link stops working, framed as
+                    // generate-a-new-one so a working link always remains.
+                    TextButton(
+                        onClick = {
+                            copied = false
+                            viewModel.rotateLink(groupId)
+                        },
+                        enabled = !isRotating,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("share_invite.rotate_button"),
+                    ) {
+                        Text(
+                            stringResource(
+                                if (isRotating) R.string.share_invite_rotating
+                                else R.string.share_invite_rotate,
+                            ),
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.share_invite_rotate_caption),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    // The create-time offers, one per invitee — this list
+                    // is the only way they are retired.
+                    if (otherInvites.isNotEmpty()) {
+                        Spacer(Modifier.height(24.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("share_invite.other_invites"),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.share_invite_direct_title),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = stringResource(R.string.share_invite_direct_body),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            for (row in otherInvites) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = row.label
+                                            ?: stringResource(R.string.share_invite_older_link),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(
+                                        onClick = { viewModel.revoke(row, groupId) },
+                                        modifier = Modifier
+                                            .testTag(
+                                                "share_invite.revoke_button." +
+                                                    (row.label ?: "superseded"),
+                                            ),
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.share_invite_revoke),
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 

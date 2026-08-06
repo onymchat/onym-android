@@ -15,7 +15,10 @@ import app.onym.android.chain.SepContractError
 import app.onym.android.chain.SepContractTransport
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.TyrannyUpdateCommitmentPayload
+import app.onym.android.identity.ActiveIdentityProvider
 import app.onym.android.identity.IdentityRepository
+import app.onym.android.identity.IdentitySummary
+import app.onym.android.identity.InvitationEnvelopeSealer
 import app.onym.android.identity.InvitationDecryptError
 import app.onym.android.transport.InboxTransport
 import app.onym.android.transport.TransportInboxId
@@ -46,11 +49,8 @@ import kotlinx.serialization.json.Json
  *     Approve?" prompts.
  *  3. On Approve → seals the existing [GroupInvitationPayload]
  *     (built from the local [ChatGroup]) to the joiner's identity
- *     inbox key, ships via [inboxTransport.send], revokes the
- *     intro key. The fan-out from PR-3 stops listening on that
- *     intro tag within one emission window.
- *  4. On Decline → drop the request, revoke the intro key. No
- *     NACK to the joiner; their JoinScreen times out gracefully.
+ *     inbox key and ships it. The intro key is NOT retired.
+ *  4. On Decline → drop that one request; the link stays live.
  */
 /**
  * Test seam consumed by [ApproveRequestsViewModel]. The production
@@ -67,12 +67,22 @@ interface JoinRequestApproving {
 }
 
 open class JoinRequestApprover(
-    private val identity: IdentityRepository,
+    /** Narrowed from [IdentityRepository] so JVM tests can drive
+     *  approve/decline without the Keystore and the OnymSDK JNI. */
+    private val activeIdentity: ActiveIdentityProvider,
+    private val envelopeSealer: InvitationEnvelopeSealer,
+    /** Admin's BLS secret for the update proof; the read site is
+     *  [anchorTyrannyJoin]. */
+    private val blsSecretKey: suspend () -> ByteArray,
     private val introKeyStore: IntroKeyStore,
     private val introRequestStore: IntroRequestStore,
     private val groupRepository: GroupRepository,
     private val inboxTransport: InboxTransport,
     private val scope: CoroutineScope,
+    /** Display names for the fanout's `adminAlias`. Production passes
+     *  `identityRepository.identities`; tests pass a static flow. */
+    private val identitySummaries: StateFlow<List<IdentitySummary>> =
+        MutableStateFlow(emptyList()),
     /** Chain-relayer dependencies for the on-chain anchor flow. PR 88
      *  drives [anchorTyrannyJoin] through these. Optional so existing
      *  unit tests that don't need the anchor leg can keep working. */
@@ -176,6 +186,10 @@ open class JoinRequestApprover(
      *  link campaign or a corrupted intro key). */
     private val _decryptFailures = MutableStateFlow(0)
 
+    /** Surviving row id → every raw id that collapsed into it. A
+     *  StateFlow so the collector's write is visible to the caller. */
+    private val collapsedIds = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+
     @Suppress("unused")
     val decryptFailures: StateFlow<Int> = _decryptFailures.asStateFlow()
 
@@ -186,10 +200,7 @@ open class JoinRequestApprover(
      */
     override fun start() {
         scope.launch {
-            introRequestStore.requests.collectLatest { raw ->
-                val decoded = raw.mapNotNull { decode(it) }
-                _pending.value = decoded
-            }
+            introRequestStore.requests.collectLatest { raw -> refresh(raw) }
         }
     }
 
@@ -198,30 +209,59 @@ open class JoinRequestApprover(
      *  fighting collector scheduling. */
     @androidx.annotation.VisibleForTesting
     internal suspend fun pumpOnce() {
-        val raw = introRequestStore.requests.value
-        _pending.value = raw.mapNotNull { decode(it) }
+        refresh(introRequestStore.requests.value)
     }
 
     /**
-     * Approve a pending request: build the [GroupInvitationPayload]
-     * from the local group state, seal to the joiner's inbox key,
-     * ship via Nostr, then revoke the intro slot + drop the
-     * pending entry.
+     * Collapse copies of one logical join — retries and replays each
+     * carry a distinct id. Newest copy at the first-seen index.
+     */
+    private suspend fun refresh(raw: List<IntroRequest>) {
+        val winners = LinkedHashMap<String, Pair<PendingRequest, IntroRequest>>()
+        val siblings = LinkedHashMap<String, MutableList<String>>()
+        for (r in raw) {
+            val decoded = decode(r) ?: continue
+            val key = collapseKey(decoded)
+            siblings.getOrPut(key) { mutableListOf() } += r.id
+            val incumbent = winners[key]
+            if (incumbent == null || r.receivedAt.isAfter(incumbent.second.receivedAt)) {
+                winners[key] = decoded to r
+            }
+        }
+        _pending.value = winners.values.map { it.first }
+        collapsedIds.value = winners.entries.associate { (key, win) ->
+            win.first.id to (siblings[key]?.toList() ?: listOf(win.first.id))
+        }
+    }
+
+    /**
+     * Build the [GroupInvitationPayload], seal, ship, drop the pending
+     * entry. The key survives; an existing member skips the anchor.
      */
     override suspend fun approve(requestId: String): ApproveOutcome = mutex.withLock {
         val req = _pending.value.firstOrNull { it.id == requestId }
             ?: return@withLock ApproveOutcome.UnknownRequest
-        val activeIdentity = identity.currentIdentity()
-            ?: return@withLock ApproveOutcome.NoIdentityLoaded
+        // Pure gate — the approver needs an identity selected, but
+        // nothing downstream reads which one.
+        if (activeIdentity.currentIdentityId.value == null) {
+            return@withLock ApproveOutcome.NoIdentityLoaded
+        }
 
         val group = groupRepository.snapshots.value.firstOrNull {
             it.groupIdBytes.contentEquals(req.groupId)
         } ?: return@withLock ApproveOutcome.UnknownGroup
 
+        // Already in the roster (reinstall, replay, retry) — re-anchoring
+        // would duplicate a leaf. `members`, not `memberProfiles`.
+        val blsPub = req.joinerBlsPublicKey
+        val alreadyInRoster = blsPub != null && group.members.any {
+            it.publicKeyCompressed.contentEquals(blsPub)
+        }
+
         // PR 88 admin-anchor leg — Tyranny only. Other governance
         // types fall through to the pre-PR-88 ship-only flow below.
         var anchored = group
-        if (group.groupType == SepGroupType.TYRANNY) {
+        if (group.groupType == SepGroupType.TYRANNY && !alreadyInRoster) {
             when (val outcome = anchorTyrannyJoin(req, group)) {
                 is AnchorOutcome.Failed -> return@withLock outcome.outcome
                 is AnchorOutcome.Ok -> {
@@ -267,7 +307,7 @@ open class JoinRequestApprover(
             return@withLock ApproveOutcome.TransportFailed("encode: ${e.message ?: e.javaClass.simpleName}")
         }
         val sealed = try {
-            identity.sealInvitation(payloadBytes, req.joinerInboxPublicKey)
+            envelopeSealer.sealInvitation(payloadBytes, req.joinerInboxPublicKey)
         } catch (e: Throwable) {
             return@withLock ApproveOutcome.TransportFailed("seal: ${e.message ?: e.javaClass.simpleName}")
         }
@@ -287,8 +327,9 @@ open class JoinRequestApprover(
         // no stable cross-device key under which to record. Use the
         // post-anchor group snapshot so PR-88's `commitment + epoch`
         // ship in the announcement.
-        val blsPub = req.joinerBlsPublicKey
         if (blsPub != null) {
+            // Idempotent, and the point of the re-join path: a
+            // reinstalled joiner has a new inbox pubkey.
             recordJoiner(
                 group = anchored,
                 blsPub = blsPub,
@@ -296,6 +337,8 @@ open class JoinRequestApprover(
                 sendingPub = req.joinerSendingPublicKey,
                 alias = req.joinerDisplayLabel,
             )
+            // Kept on re-join, unlike iOS: receivers dedup it free, and
+            // it heals peers after an anchor that failed at seal+ship.
             broadcastJoin(
                 group = anchored,
                 joinerBlsPub = blsPub,
@@ -305,11 +348,9 @@ open class JoinRequestApprover(
             )
         }
 
-        // Best-effort cleanup. Both calls run regardless of failures
-        // because the request is conceptually consumed at this point;
-        // a leaked intro key is benign (sender ignores future
-        // requests on it via UnknownGroup or just not approving).
-        revokeAndConsume(introPub = findIntroPubFor(requestId), requestId = requestId)
+        // Drop the request and its siblings. The key stays alive, or
+        // every other joiner's row would silently vanish.
+        consumeRequestAndSiblings(requestId)
         ApproveOutcome.Sent
     }
 
@@ -364,8 +405,8 @@ open class JoinRequestApprover(
         // per-identity summary carries it. Fall back to empty when
         // unresolved (best-effort — receivers always display the
         // BLS fingerprint alongside the alias).
-        val activeId = identity.currentIdentityId.value
-        val adminAlias = identity.identities.value
+        val activeId = activeIdentity.currentIdentityId.value
+        val adminAlias = identitySummaries.value
             .firstOrNull { it.id == activeId }
             ?.name
             .orEmpty()
@@ -414,7 +455,7 @@ open class JoinRequestApprover(
             if (adminKey != null && memberKey == adminKey) continue
 
             val sealed = try {
-                identity.sealInvitation(payloadBytes, profile.inboxPublicKey)
+                envelopeSealer.sealInvitation(payloadBytes, profile.inboxPublicKey)
             } catch (_: Throwable) {
                 continue
             }
@@ -426,10 +467,10 @@ open class JoinRequestApprover(
         }
     }
 
-    /** Decline a pending request: drop it + revoke the intro slot.
-     *  No NACK to the joiner — their JoinScreen times out. */
+    /** Drop that one request and its siblings, nothing else: a decline
+     *  judges one requester, not the link. No NACK to the joiner. */
     override suspend fun decline(requestId: String): Unit = mutex.withLock {
-        revokeAndConsume(introPub = findIntroPubFor(requestId), requestId = requestId)
+        consumeRequestAndSiblings(requestId)
     }
 
     // ─── private ──────────────────────────────────────────────────
@@ -486,17 +527,26 @@ open class JoinRequestApprover(
         )
     }
 
-    private suspend fun findIntroPubFor(requestId: String): ByteArray? {
-        // PendingRequest doesn't carry the introPub (intentional —
-        // UI should never need it). Resolve via the raw store.
-        val raw = introRequestStore.requests.value.firstOrNull { it.id == requestId }
-            ?: return null
-        return raw.targetIntroPublicKey
+    /** Drop [requestId] plus every sibling that collapsed into its row;
+     *  the winner alone would let one resurface. The key stays alive. */
+    private suspend fun consumeRequestAndSiblings(requestId: String) {
+        val ids = (collapsedIds.value[requestId] ?: listOf(requestId)).toMutableSet()
+        // The cached map is only as fresh as the last [refresh], so
+        // re-derive against the live store before consuming.
+        _pending.value.firstOrNull { it.id == requestId }?.let { target ->
+            val key = collapseKey(target)
+            for (raw in introRequestStore.requests.value) {
+                val decoded = decode(raw) ?: continue
+                if (collapseKey(decoded) == key) ids += raw.id
+            }
+        }
+        for (id in ids) introRequestStore.consume(id)
     }
 
-    private suspend fun revokeAndConsume(introPub: ByteArray?, requestId: String) {
-        if (introPub != null) introKeyStore.revoke(introPub)
-        introRequestStore.consume(requestId)
+    /** Same joiner, same group — what two copies of one join share. */
+    private fun collapseKey(request: PendingRequest): String {
+        val identity = request.joinerBlsPublicKey ?: request.joinerInboxPublicKey
+        return identity.toHexLowercase() + ":" + request.groupId.toHexLowercase()
     }
 
     /** Outcome shape for [anchorTyrannyJoin]. */
@@ -570,7 +620,7 @@ open class JoinRequestApprover(
 
         val blsSecret = try {
             // onym:allow-secret-read
-            identity.blsSecretKey()
+            blsSecretKey()
         } catch (e: Throwable) {
             return AnchorOutcome.Failed(
                 ApproveOutcome.TransportFailed("bls_secret: ${e.message ?: e}"),

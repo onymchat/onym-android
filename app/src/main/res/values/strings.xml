@@ -649,4 +649,15 @@
   <string name="group_rename_placeholder">Group name</string>
   <string name="group_rename_message">Everyone in the group will see the new name.</string>
   <string name="group_rename_cd">Rename group</string>
+    <string name="share_invite_rotate">Generate new link</string>
+    <string name="share_invite_rotating">Generating\u2026</string>
+    <string name="share_invite_rotate_caption">The old link stops working. Anyone still holding it won\'t be told.</string>
+    <string name="share_invite_direct_title">Direct invites</string>
+    <string name="share_invite_direct_body">Sent when you created the group. Each one can still be used to request to join.</string>
+    <string name="share_invite_revoke">Revoke</string>
+    <string name="join_unanswered_title">No response yet</string>
+    <string name="join_unanswered_body">The host may be offline, or this invite may no longer work. Ask them for a new link.</string>
+    <string name="join_unanswered_hint">You can leave this screen open \u2014 if they approve, the chat still appears.</string>
+    <string name="share_invite_older_link">Older link</string>
+    <string name="join_unanswered_retry">Try again</string>
 </resources>

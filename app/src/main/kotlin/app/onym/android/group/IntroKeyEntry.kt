@@ -19,11 +19,8 @@ import app.onym.android.identity.IdentityId
  * - [groupId] is the on-chain `group_id` the invite is for —
  *   needed when the inviter's app surfaces "Bob wants to join
  *   <group>?" so it can render the group's name.
- * - [createdAtMillis] drives time-based expiry. Entries older than
- *   [LIFETIME_MILLIS] are treated as revoked at the [IntroKeyStore]
- *   boundary ([IntroKeyStore.find] returns null,
- *   [IntroKeyStore.listForOwner] and [IntroKeyStore.entriesFlow]
- *   omit them) and lazily purged on the next read.
+ * - [createdAtMillis] is display-only; links live until revoked.
+ * - [label] is null for the shared link, else the invitee's fingerprint.
  */
 data class IntroKeyEntry(
     val introPublicKey: ByteArray,
@@ -31,6 +28,9 @@ data class IntroKeyEntry(
     val ownerIdentityId: IdentityId,
     val groupId: ByteArray,
     val createdAtMillis: Long,
+    /** null == the group's shared link. Non-null == a create-time
+     *  offer aimed at one invitee. */
+    val label: String? = null,
 ) {
     init {
         require(introPublicKey.size == 32) {
@@ -44,14 +44,11 @@ data class IntroKeyEntry(
         }
     }
 
-    fun isExpired(atMillis: Long, lifetimeMillis: Long = LIFETIME_MILLIS): Boolean =
-        atMillis - createdAtMillis >= lifetimeMillis
-
     companion object {
-        /** How long an invite link is honored after minting. Issue
-         *  onymchat/onym-ios#111 — rotate every 24 hours to shrink
-         *  the leak window of a forwarded or screenshotted link. */
-        const val LIFETIME_MILLIS: Long = 24L * 60L * 60L * 1000L
+        /** First 4 bytes of the inbox key — the same fingerprint
+         *  shape the approval screen shows. */
+        fun fingerprint(inboxPublicKey: ByteArray): String =
+            inboxPublicKey.take(4).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
     }
 
     override fun equals(other: Any?): Boolean {

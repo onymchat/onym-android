@@ -2,11 +2,15 @@ package app.onym.android.group
 
 import app.onym.android.identity.IdentityId
 import app.onym.android.support.InMemoryIntroKeyStore
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -148,10 +152,9 @@ class InviteIntroducerTest {
     @Test
     fun mint_clockProvider_stampsCreatedAt() = runTest {
         val frozenNow = 1_700_000_000_000L
-        // Sync the store's clock with the introducer's so the lazy
-        // expiry sweep doesn't drop a freshly-minted 2023-dated
-        // entry against today's wall clock (issue onymchat/onym-ios#111).
-        val store = InMemoryIntroKeyStore(clock = { frozenNow })
+        // The store no longer sweeps by age, so a 2023-dated entry
+        // survives against today's wall clock without syncing clocks.
+        val store = InMemoryIntroKeyStore()
         val introducer = InviteIntroducer(
             store = store,
             ioDispatcher = Dispatchers.Unconfined,
@@ -162,5 +165,237 @@ class InviteIntroducerTest {
         val cap = introducer.mint(alice, sampleGroupId)
         val entry = store.find(cap.introPublicKey)!!
         assertEquals(frozenNow, entry.createdAtMillis)
+    }
+
+    // ─── currentOrMint (multi-use links) ──────────────────────────
+
+    @Test
+    fun currentOrMint_firstCall_mintsAndPersists() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        val cap = introducer.currentOrMint(alice, sampleGroupId)
+
+        val listed = store.listForOwner(alice)
+        assertEquals(1, listed.size)
+        assertTrue(listed.first().introPublicKey.contentEquals(cap.introPublicKey))
+    }
+
+    @Test
+    fun currentOrMint_secondCall_reusesSameKey_andDoesNotGrowTheStore() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        val first = introducer.currentOrMint(alice, sampleGroupId)
+        val second = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertTrue(first.introPublicKey.contentEquals(second.introPublicKey))
+        // The count is what stops this from being "returns the same
+        // link but still writes a row".
+        assertEquals(1, store.listForOwner(alice).size)
+    }
+
+    @Test
+    fun currentOrMint_neverExpires_soAnAncientKeyIsStillReused() = runTest {
+        var now = 1_700_000_000_000L
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(
+            store,
+            ioDispatcher = Dispatchers.Unconfined,
+            clock = { now },
+        )
+
+        val first = introducer.currentOrMint(alice, sampleGroupId)
+        // A year later. Invite links have no TTL — only rotate or
+        // revoke retires one.
+        now += 365L * 24 * 60 * 60 * 1000
+        val second = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertTrue(first.introPublicKey.contentEquals(second.introPublicKey))
+        assertEquals(1, store.listForOwner(alice).size)
+    }
+
+    // ─── rotate / revoke ──────────────────────────────────────────
+
+    @Test
+    fun rotate_mintsAFreshKey_andRetiresTheOldOne() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        val old = introducer.currentOrMint(alice, sampleGroupId)
+        val new = introducer.rotate(alice, sampleGroupId)
+
+        assertFalse(old.introPublicKey.contentEquals(new.introPublicKey))
+        assertNull(
+            "the superseded link must stop decrypting requests",
+            store.find(old.introPublicKey),
+        )
+        assertNotNull(store.find(new.introPublicKey))
+        assertEquals("rotate must not leave the old slot behind", 1, store.listForOwner(alice).size)
+    }
+
+    @Test
+    fun rotate_thenCurrentOrMint_returnsTheRotatedKey() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        introducer.currentOrMint(alice, sampleGroupId)
+        val rotated = introducer.rotate(alice, sampleGroupId)
+        val resolved = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertTrue(rotated.introPublicKey.contentEquals(resolved.introPublicKey))
+    }
+
+    @Test
+    fun rotate_leavesOtherGroupsAlone() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+        val other = ByteArray(32) { 0x5A }
+
+        val untouched = introducer.currentOrMint(alice, other)
+        introducer.currentOrMint(alice, sampleGroupId)
+        introducer.rotate(alice, sampleGroupId)
+
+        assertNotNull(store.find(untouched.introPublicKey))
+    }
+
+    @Test
+    fun rotate_doesNotRetireLabelledOfferKeys() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        // Per-invitee offers are revoked one at a time from the invite
+        // list; rotating the shared link must not sweep them away.
+        val offer = introducer.mint(alice, sampleGroupId, label = "aabbccdd")
+        introducer.currentOrMint(alice, sampleGroupId)
+        introducer.rotate(alice, sampleGroupId)
+
+        assertNotNull(store.find(offer.introPublicKey))
+    }
+
+    @Test
+    fun currentOrMint_ignoresLabelledOfferKeys() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        // Create-with-invitees leaves an offer key as the newest entry;
+        // handing it out would collapse the 1:1 mapping.
+        val offer = introducer.mint(alice, sampleGroupId, label = "aabbccdd")
+        val shared = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertFalse(offer.introPublicKey.contentEquals(shared.introPublicKey))
+    }
+
+    @Test
+    fun liveInvites_listsEveryKeyForTheGroup() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+        val other = ByteArray(32) { 0x5A }
+
+        val shared = introducer.currentOrMint(alice, sampleGroupId)
+        val offer = introducer.mint(alice, sampleGroupId, label = "aabbccdd")
+        introducer.currentOrMint(alice, other)
+
+        val live = introducer.liveInvites(alice, sampleGroupId)
+
+        assertEquals(2, live.size)
+        assertTrue(live.any { it.introPublicKey.contentEquals(shared.introPublicKey) })
+        assertEquals(
+            offer.introPublicKey.toList(),
+            live.single { it.label == "aabbccdd" }.introPublicKey.toList(),
+        )
+    }
+
+    @Test
+    fun currentOrMint_isScopedPerGroupAndPerOwner() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+        val otherGroup = ByteArray(32) { 0x5A }
+
+        val aliceG1 = introducer.currentOrMint(alice, sampleGroupId)
+        val aliceG2 = introducer.currentOrMint(alice, otherGroup)
+        // The pump only subscribes the active identity's tags, so this
+        // would hand out a link nobody is listening on.
+        val bobG1 = introducer.currentOrMint(bob, sampleGroupId)
+        val aliceG1Again = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertFalse(aliceG1.introPublicKey.contentEquals(aliceG2.introPublicKey))
+        assertFalse(aliceG1.introPublicKey.contentEquals(bobG1.introPublicKey))
+        assertTrue(aliceG1.introPublicKey.contentEquals(aliceG1Again.introPublicKey))
+    }
+
+    @Test
+    fun mint_alwaysMintsFresh_evenWhenALiveKeyExists() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        // Locks the two-entry-point split; collapsing them would break
+        // the offers' 1:1 mapping.
+        val shared = introducer.currentOrMint(alice, sampleGroupId)
+        val fresh = introducer.mint(alice, sampleGroupId)
+
+        assertFalse(shared.introPublicKey.contentEquals(fresh.introPublicKey))
+        assertEquals(2, store.listForOwner(alice).size)
+    }
+
+    // ─── concurrency ──────────────────────────────────────────────
+
+    @Test
+    fun currentOrMint_concurrentCalls_produceExactlyOneKey() = runTest {
+        // Gate the first read so both callers are provably past it
+        // before either mints; `async` alone won't reproduce it.
+        val gate = CompletableDeferred<Unit>()
+        val store = GatedReadIntroKeyStore(InMemoryIntroKeyStore(), gate)
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Default)
+
+        val first = async { introducer.currentOrMint(alice, sampleGroupId) }
+        val second = async { introducer.currentOrMint(alice, sampleGroupId) }
+        store.awaitFirstRead()
+        gate.complete(Unit)
+        val results = listOf(first, second).awaitAll()
+
+        assertTrue(results[0].introPublicKey.contentEquals(results[1].introPublicKey))
+        assertEquals("a second shared key would be unrevokable", 1, store.listForOwner(alice).size)
+    }
+
+    /** Holds the first [listForOwner] open until released, so a second
+     *  caller is guaranteed to reach its own read meanwhile. */
+    private class GatedReadIntroKeyStore(
+        private val inner: InMemoryIntroKeyStore,
+        private val gate: CompletableDeferred<Unit>,
+    ) : IntroKeyStore by inner {
+        private val firstRead = CompletableDeferred<Unit>()
+        private var gated = false
+
+        suspend fun awaitFirstRead() = firstRead.await()
+
+        override suspend fun listForOwner(ownerIdentityId: IdentityId): List<IntroKeyEntry> {
+            if (!gated) {
+                gated = true
+                firstRead.complete(Unit)
+                gate.await()
+            }
+            return inner.listForOwner(ownerIdentityId)
+        }
+    }
+
+    @Test
+    fun rotate_concurrentWithCurrentOrMint_handsBackALiveLink() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Default)
+        introducer.currentOrMint(alice, sampleGroupId)
+
+        val rotate = async { introducer.rotate(alice, sampleGroupId) }
+        val resolve = async { introducer.currentOrMint(alice, sampleGroupId) }
+        rotate.await()
+        val handedToCaller = resolve.await()
+
+        // The hazard is the value handed to the concurrent caller, not
+        // the end state: unserialized it can be a link rotate revoked.
+        assertNotNull(
+            "the caller was handed a link that was then revoked",
+            store.find(handedToCaller.introPublicKey),
+        )
+        assertEquals(1, store.listForOwner(alice).count { it.label == null })
     }
 }

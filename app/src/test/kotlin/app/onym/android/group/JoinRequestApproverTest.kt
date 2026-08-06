@@ -5,12 +5,8 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
- * Unit-test coverage for [JoinRequestApprover]'s value types. The
- * full behavioral suite (decode pipeline + approve happy path +
- * fanout shape) needs the OnymSDK FFI for Common.publicKey /
- * Common.leafHash, which isn't loaded on the JVM unit-test path —
- * those tests live in [app.onym.android.group.JoinRequestApproverBehaviorTest]
- * under `androidTest/`.
+ * Value-type coverage for [JoinRequestApprover]. The behavioral suite
+ * is [JoinRequestApproverBehaviorTest]; FFI-bound tests stay in androidTest.
  *
  * What this file exercises (no FFI required):
  *   - [JoinRequestApprover.PendingRequest] equality / hashCode

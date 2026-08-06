@@ -97,7 +97,7 @@ class ShareInviteViewModelTest {
     }
 
     @Test
-    fun mintFor_calledTwice_mintsTwoIndependentKeypairs() = runTest(mainDispatcher.scheduler) {
+    fun mintFor_calledTwice_reusesTheSameLink() = runTest(mainDispatcher.scheduler) {
         val owner = IdentityId("alice")
         val group = makeGroup(id = "ab".repeat(32), owner = owner)
         val (vm, store) = harness(initialActive = owner, seed = listOf(group))
@@ -109,11 +109,10 @@ class ShareInviteViewModelTest {
         advanceUntilIdle()
         val second = (vm.state.value as ShareInviteViewModel.State.Ready).link
 
-        // Per-link revocation depends on this — re-shares cannot
-        // collapse to the same intro slot or revoking one would kill
-        // the other.
-        assertTrue("two shares should produce different links", first != second)
-        assertEquals(2, store.listForOwner(owner).size)
+        // The share screen is a view onto the group's link, not a link
+        // factory; re-entry must not leave a trail of slots.
+        assertEquals("re-entry should surface the same link", first, second)
+        assertEquals("reuse must not persist a second intro slot", 1, store.listForOwner(owner).size)
     }
 
     // ─── helpers ──────────────────────────────────────────────────
