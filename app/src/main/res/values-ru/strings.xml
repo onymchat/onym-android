@@ -647,4 +647,13 @@
   <string name="group_rename_placeholder">Название группы</string>
   <string name="group_rename_message">Все участники группы увидят новое название.</string>
   <string name="group_rename_cd">Переименовать группу</string>
+    <string name="share_invite_rotate">Создать новую ссылку</string>
+    <string name="share_invite_rotating">Создаём\u2026</string>
+    <string name="share_invite_rotate_caption">Старая ссылка перестанет работать. Тех, у кого она осталась, об этом не уведомят.</string>
+    <string name="share_invite_direct_title">Персональные приглашения</string>
+    <string name="share_invite_direct_body">Отправлены при создании группы. По каждому из них всё ещё можно запросить вступление.</string>
+    <string name="share_invite_revoke">Отозвать</string>
+    <string name="join_unanswered_title">Пока нет ответа</string>
+    <string name="join_unanswered_body">Возможно, владелец группы не в сети или это приглашение больше не действует. Попросите новую ссылку.</string>
+    <string name="join_unanswered_hint">Можно не закрывать этот экран — если заявку одобрят, чат появится сам.</string>
 </resources>

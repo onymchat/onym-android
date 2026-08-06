@@ -3,6 +3,7 @@ package app.onym.android.group
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +53,14 @@ import kotlinx.coroutines.launch
  */
 class JoinViewModel(
     val capability: IntroCapability,
+    /** How long to sit on [State.AwaitingApproval] before flipping to
+     *  [State.Unanswered], or null to never flip.
+     *
+     *  Injected because `runTest`'s virtual clock skips `delay`
+     *  outright — a hard-coded timeout would fire instantly in every
+     *  test that merely wants to observe [State.AwaitingApproval].
+     *  Production takes the default. */
+    private val unansweredAfterMillis: Long? = UNANSWERED_AFTER_MILLIS,
     /** Suspend function that ships a join request and returns the
      *  outcome. Production wires `JoinRequestSender::send` (which
      *  builds the payload, seals to [IntroCapability.introPublicKey],
@@ -71,6 +80,12 @@ class JoinViewModel(
         data class Ready(val capability: IntroCapability) : State()
         object Sending : State()
         object AwaitingApproval : State()
+        /** The request went out and nothing came back for
+         *  [UNANSWERED_AFTER_MILLIS]. Not a failure — the host may
+         *  simply be offline — but invite links can now be revoked,
+         *  and a revoked link is indistinguishable from a slow host
+         *  from here. Saying so beats an indefinite spinner. */
+        object Unanswered : State()
         data class Approved(val group: ChatGroup) : State()
         data class Failed(val reason: String) : State()
     }
@@ -79,6 +94,7 @@ class JoinViewModel(
     val state: StateFlow<State> = _state.asStateFlow()
 
     private var sendJob: Job? = null
+    private var unansweredJob: Job? = null
 
     init {
         // Watch the repository for the matching group throughout the
@@ -91,7 +107,12 @@ class JoinViewModel(
                 } ?: return@collect
                 when (_state.value) {
                     is State.Approved -> Unit  // already terminal
-                    else -> _state.value = State.Approved(match)
+                    else -> {
+                        // Beats Unanswered too: a late approval is
+                        // still an approval.
+                        unansweredJob?.cancel()
+                        _state.value = State.Approved(match)
+                    }
                 }
             }
         }
@@ -113,12 +134,44 @@ class JoinViewModel(
             // while we were awaiting — defer to it if so.
             if (_state.value is State.Approved) return@launch
             _state.value = when (outcome) {
-                JoinRequestSender.Outcome.Sent -> State.AwaitingApproval
+                JoinRequestSender.Outcome.Sent -> {
+                    startUnansweredTimer()
+                    State.AwaitingApproval
+                }
                 is JoinRequestSender.Outcome.NoIdentityLoaded ->
                     State.Failed("Sign in first.")
                 is JoinRequestSender.Outcome.TransportFailed ->
                     State.Failed("Couldn't send: ${outcome.reason}")
             }
         }
+    }
+
+    /**
+     * Flip to [State.Unanswered] if nothing has landed by the
+     * deadline. The repository watcher stays live, so a late approval
+     * still overwrites this with [State.Approved].
+     */
+    private fun startUnansweredTimer() {
+        val after = unansweredAfterMillis ?: return
+        unansweredJob?.cancel()
+        unansweredJob = viewModelScope.launch {
+            delay(after)
+            if (_state.value is State.AwaitingApproval) {
+                _state.value = State.Unanswered
+            }
+        }
+    }
+
+    companion object {
+        /**
+         * How long to wait on [State.AwaitingApproval] before telling
+         * the user nothing has come back.
+         *
+         * Deliberately generous: approval is a human action plus a
+         * multi-second proof and a chain round-trip on the host's
+         * device, so anything short would cry wolf on a host who is
+         * simply thinking.
+         */
+        const val UNANSWERED_AFTER_MILLIS: Long = 90_000L
     }
 }

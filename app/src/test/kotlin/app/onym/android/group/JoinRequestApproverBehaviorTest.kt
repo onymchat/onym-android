@@ -144,16 +144,17 @@ class JoinRequestApproverBehaviorTest {
         }
 
     @Test
-    fun approve_afterIntroKeyExpires_requestNoLongerDecodes() =
+    fun approve_afterTheLinkIsRevoked_requestNoLongerDecodes() =
         runTest(UnconfinedTestDispatcher()) {
-            var nowMillis = 1_700_000_000_000L
-            val env = seed(clock = { nowMillis })
+            val env = seed()
             val a = env.seedJoiner(bls = 0xC1, inbox = 0xC2, alias = "Bob")
             env.approver.pumpOnce()
             assertEquals(1, env.approver.pending.value.size)
 
-            // The 24h lifetime is still the only bound on a link.
-            nowMillis += IntroKeyEntry.LIFETIME_MILLIS + 1
+            // Links no longer expire; revoking is what kills one. An
+            // in-flight request on a revoked link stops decoding, which
+            // is what makes the joiner's Unanswered state reachable.
+            env.introKeyStore.revoke(env.introPub)
             env.approver.pumpOnce()
 
             assertTrue(env.approver.pending.value.isEmpty())
@@ -400,10 +401,9 @@ class JoinRequestApproverBehaviorTest {
     }
 
     private suspend fun TestScope.seed(
-        clock: () -> Long = { 1_700_000_000_000L },
         extraMembers: List<GovernanceMember> = emptyList(),
     ): Env {
-        val introKeyStore = InMemoryIntroKeyStore(clock = clock)
+        val introKeyStore = InMemoryIntroKeyStore()
         val introPrivate = X25519PrivateKeyParameters(SecureRandom())
         val introPub = introPrivate.generatePublicKey().encoded
         introKeyStore.save(
@@ -412,7 +412,7 @@ class JoinRequestApproverBehaviorTest {
                 introPrivateKey = introPrivate.encoded,
                 ownerIdentityId = owner,
                 groupId = groupId,
-                createdAtMillis = clock(),
+                createdAtMillis = 1_700_000_000_000L,
             ),
         )
 

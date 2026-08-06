@@ -19,19 +19,15 @@ import kotlinx.coroutines.flow.StateFlow
  *  4. On Approve, sender seals the existing
  *     [GroupInvitationPayload] to the joiner's identity inbox key.
  *     The intro key is NOT retired: one link serves many joiners
- *     until [IntroKeyEntry.LIFETIME_MILLIS] expires.
+ *     until the inviter revokes it.
  *
  * Owner-scoping: every entry carries an [IdentityId]. Removing an
  * identity (multi-identity PR-3) cascades a [deleteForOwner] so
  * we don't leak intro privkeys past the identity that minted them.
  *
- * Time-based expiry: entries older than [IntroKeyEntry.LIFETIME_MILLIS]
- * (24h) are treated as revoked at this boundary — [find] returns
- * null for them, [listForOwner] and [entriesFlow] omit them.
- * Implementations lazy-purge expired rows on each read so the
- * underlying blob stays bounded without a background sweeper, and
- * re-emit on [entriesFlow] so [IntroInboxPump] can cancel relayer
- * subscriptions for expired slots.
+ * No time-based expiry: an entry lives until [revoke] retires it or
+ * its owning identity is removed. [revoke] re-emits on [entriesFlow]
+ * so [IntroInboxPump] can cancel that slot's relayer subscription.
  */
 interface IntroKeyStore {
     /** Hot stream of every active (non-expired) entry across every
@@ -53,16 +49,14 @@ interface IntroKeyStore {
     suspend fun save(entry: IntroKeyEntry)
 
     /** Look up an entry by its public key. Returns null when the
-     *  pubkey is unknown — happens when an old entry was
-     *  [revoke]d, has aged past [IntroKeyEntry.LIFETIME_MILLIS], or
+     *  pubkey is unknown — happens when an entry was [revoke]d, or
      *  when a request envelope targets a pubkey this device never
      *  minted (probably a forged link). */
     suspend fun find(introPublicKey: ByteArray): IntroKeyEntry?
 
-    /** Every entry minted by [ownerIdentityId] that has not aged
-     *  past [IntroKeyEntry.LIFETIME_MILLIS]. Sorted newest first
-     *  by [IntroKeyEntry.createdAtMillis]. UI's "Active invites"
-     *  list reads here. */
+    /** Every live entry minted by [ownerIdentityId]. Sorted newest
+     *  first by [IntroKeyEntry.createdAtMillis]. The share screen's
+     *  invite list reads here. */
     suspend fun listForOwner(ownerIdentityId: IdentityId): List<IntroKeyEntry>
 
     /** Single-entry deletion. **No production caller** since invite

@@ -3,6 +3,7 @@ package app.onym.android.group
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.onym.android.identity.ActiveIdentityProvider
+import app.onym.android.identity.IdentityId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,19 +41,43 @@ class ShareInviteViewModel(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /** Other live invites for this group — the create-time offer keys,
+     *  each aimed at one invitee. The group's shared link is [state],
+     *  not a row here. Empty for a group created without invitees.
+     *
+     *  Nothing expires any more, so this list is the only way these
+     *  ever get retired. */
+    private val _otherInvites = MutableStateFlow<List<InviteRow>>(emptyList())
+    val otherInvites: StateFlow<List<InviteRow>> = _otherInvites.asStateFlow()
+
+    /** Set while a rotate is in flight so the UI can disable the
+     *  button — rotating twice in a row would strand a live key. */
+    private val _isRotating = MutableStateFlow(false)
+    val isRotating: StateFlow<Boolean> = _isRotating.asStateFlow()
+
     /**
      * Resolve the share link for the group with hex id [groupId] and
      * surface it. Idempotent: repeated calls (screen re-entry, retry
-     * tap) return the *same* link while the group's intro key is
-     * inside its 24h [IntroKeyEntry.LIFETIME_MILLIS] window, and only
-     * mint a fresh keypair once that key has expired. One link, many
-     * joiners — each still gated by an explicit Approve.
+     * tap) return the *same* link for as long as the group has one.
+     * Links do not expire; "Generate new link" is what replaces one.
+     * One link, many joiners — each still gated by an explicit Approve.
      *
      * If [groupId] does not resolve to a local group (race between
      * persistence + navigation, or a stale deeplink back into share)
      * the state flips to [State.Failed] so the UI can render a
      * message + retry button without crashing.
      */
+    /** One revokable invite on the list. [introPublicKey] is the
+     *  revoke handle; it never reaches the screen. */
+    data class InviteRow(val introPublicKey: ByteArray, val label: String) {
+        override fun equals(other: Any?): Boolean = this === other ||
+            (other is InviteRow &&
+                introPublicKey.contentEquals(other.introPublicKey) &&
+                label == other.label)
+
+        override fun hashCode(): Int = 31 * introPublicKey.contentHashCode() + label.hashCode()
+    }
+
     fun mintFor(groupId: String) {
         val group = groupRepository.snapshots.value.firstOrNull { it.id == groupId }
         if (group == null) {
@@ -76,11 +101,62 @@ class ShareInviteViewModel(
                     link = capability.toAppLink(),
                     groupName = group.name,
                 )
+                refreshOtherInvites(activeIdentityId, group.groupIdBytes)
             } catch (e: Throwable) {
                 _state.value = State.Failed(
                     e.message ?: e.javaClass.simpleName,
                 )
             }
         }
+    }
+
+    /**
+     * Replace the group's shared link. The old one stops working the
+     * moment the intro pump drops its subscription — there is no way
+     * to notify anyone already holding it, so this is the "my link
+     * leaked" escape hatch, not a polite hand-off.
+     */
+    fun rotateLink(groupId: String) {
+        if (_isRotating.value) return
+        val group = groupRepository.snapshots.value.firstOrNull { it.id == groupId } ?: return
+        val activeIdentityId = identity.currentIdentityId.value ?: return
+        _isRotating.value = true
+        viewModelScope.launch {
+            try {
+                val capability = introducer.rotate(
+                    ownerIdentityId = activeIdentityId,
+                    groupId = group.groupIdBytes,
+                    groupName = group.name,
+                )
+                _state.value = State.Ready(
+                    link = capability.toAppLink(),
+                    groupName = group.name,
+                )
+            } catch (e: Throwable) {
+                _state.value = State.Failed(e.message ?: e.javaClass.simpleName)
+            } finally {
+                _isRotating.value = false
+            }
+        }
+    }
+
+    /** Retire one per-invitee offer key. */
+    fun revoke(row: InviteRow, groupId: String) {
+        val group = groupRepository.snapshots.value.firstOrNull { it.id == groupId } ?: return
+        val activeIdentityId = identity.currentIdentityId.value ?: return
+        viewModelScope.launch {
+            introducer.revoke(row.introPublicKey)
+            refreshOtherInvites(activeIdentityId, group.groupIdBytes)
+        }
+    }
+
+    private suspend fun refreshOtherInvites(ownerIdentityId: IdentityId, groupId: ByteArray) {
+        // `label == null` is the group's shared link, which the screen
+        // already renders as the QR + link; only the named per-invitee
+        // offers belong on the list.
+        _otherInvites.value = introducer.liveInvites(ownerIdentityId, groupId)
+            .mapNotNull { entry ->
+                entry.label?.let { InviteRow(entry.introPublicKey, it) }
+            }
     }
 }

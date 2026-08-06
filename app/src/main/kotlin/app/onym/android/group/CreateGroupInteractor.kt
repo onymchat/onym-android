@@ -372,10 +372,9 @@ open class CreateGroupInteractor(
      * ship a durable [GroupInviteOfferPayload] to each invitee's inbox.
      * Reuses the inbox seal+send path, but the payload grants nothing:
      * it carries only the reply channel + display context, and never
-     * anchors anyone. It is not open-ended, though: the intro key it
-     * rides on ages out after [IntroKeyEntry.LIFETIME_MILLIS], after
-     * which an accept lands on an inbox nobody is subscribed to. The
-     * invitee turns it into a
+     * anchors anyone. The intro key it rides on does not expire; it is
+     * retired only when the admin revokes it from the group's invite
+     * list. The invitee turns it into a
      * join request on accept; the admin anchors only on explicit
      * approve.
      *
@@ -396,14 +395,17 @@ open class CreateGroupInteractor(
             // `currentOrMint`: sharing the group's link key here would
             // collapse that mapping.
             //
-            // Note these keys are multi-use like any other now. An
-            // invitee could rebuild a deeplink from the introPublicKey
-            // in their offer and forward it. That grants nothing but
-            // "send a request", which the admin still has to approve.
+            // Note these keys are multi-use like any other now, and
+            // no longer expire. An invitee could rebuild a deeplink
+            // from the introPublicKey in their offer and forward it —
+            // that grants nothing but "send a request", which the
+            // admin still has to approve, and the labelled row on the
+            // invite list is how they kill it.
             val capability = try {
                 introducer.mint(
                     ownerIdentityId = ownerIdentityId,
                     groupId = groupId,
+                    label = IntroKeyEntry.fingerprint(inboxKey),
                     groupName = groupName,
                 )
             } catch (e: Throwable) {

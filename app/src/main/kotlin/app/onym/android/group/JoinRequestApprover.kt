@@ -52,8 +52,8 @@ import kotlinx.serialization.json.Json
  *     inbox key and ships via [inboxTransport.send]. The intro key
  *     is deliberately NOT retired: invite links are multi-use, so
  *     the same [IntroKeyEntry] must keep decrypting requests from
- *     everyone else the inviter shared the link with. The link's
- *     only bound is [IntroKeyEntry.LIFETIME_MILLIS] (24h).
+ *     everyone else the inviter shared the link with. A link is
+ *     retired only when the inviter revokes or rotates it.
  *  4. On Decline → drop that one request. Nothing else: the link
  *     stays live so declining Bob can't silently lock out Carol.
  *     No NACK to the joiner; their JoinScreen times out gracefully.
@@ -413,7 +413,7 @@ open class JoinRequestApprover(
 
         // Drop this request and its collapsed siblings. The intro key
         // is intentionally left alive: one invite link is redeemable
-        // by many joiners inside its 24h lifetime, and revoking here
+        // by many joiners until the inviter retires it, and revoking here
         // would make `decode` return null for every other joiner's
         // pending request — their rows would vanish from the approval
         // surface with no explanation.
@@ -537,11 +537,10 @@ open class JoinRequestApprover(
     /** Decline a pending request: drop that one request and its
      *  collapsed siblings, and nothing else.
      *
-     *  The invite link stays live until [IntroKeyEntry.LIFETIME_MILLIS]
-     *  expires. A decline is a judgement about one requester, not about
-     *  the link — declining Bob must not silently lock out Carol, who
-     *  is holding the same shared link. There is deliberately no "kill
-     *  this link" action; the 24h lifetime is the only bound.
+     *  The invite link stays live. A decline is a judgement about one
+     *  requester, not about the link — declining Bob must not silently
+     *  lock out Carol, who is holding the same shared link. Killing the
+     *  link is a separate, deliberate action on the share screen.
      *
      *  No NACK to the joiner — their JoinScreen times out. */
     override suspend fun decline(requestId: String): Unit = mutex.withLock {
@@ -608,7 +607,7 @@ open class JoinRequestApprover(
      *  fresh row on the very next emission.
      *
      *  The intro key is deliberately NOT revoked: links are multi-use
-     *  for their full [IntroKeyEntry.LIFETIME_MILLIS] window. */
+     *  until the inviter retires them. */
     private suspend fun consumeRequestAndSiblings(requestId: String) {
         val ids = collapsedIds.value[requestId] ?: listOf(requestId)
         for (id in ids) introRequestStore.consume(id)

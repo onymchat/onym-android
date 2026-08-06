@@ -149,10 +149,9 @@ class InviteIntroducerTest {
     @Test
     fun mint_clockProvider_stampsCreatedAt() = runTest {
         val frozenNow = 1_700_000_000_000L
-        // Sync the store's clock with the introducer's so the lazy
-        // expiry sweep doesn't drop a freshly-minted 2023-dated
-        // entry against today's wall clock (issue onymchat/onym-ios#111).
-        val store = InMemoryIntroKeyStore(clock = { frozenNow })
+        // The store no longer sweeps by age, so a 2023-dated entry
+        // survives against today's wall clock without syncing clocks.
+        val store = InMemoryIntroKeyStore()
         val introducer = InviteIntroducer(
             store = store,
             ioDispatcher = Dispatchers.Unconfined,
@@ -194,28 +193,9 @@ class InviteIntroducerTest {
     }
 
     @Test
-    fun currentOrMint_doesNotSlideTheExpiryWindow() = runTest {
+    fun currentOrMint_neverExpires_soAnAncientKeyIsStillReused() = runTest {
         var now = 1_700_000_000_000L
-        val store = InMemoryIntroKeyStore(clock = { now })
-        val introducer = InviteIntroducer(
-            store,
-            ioDispatcher = Dispatchers.Unconfined,
-            clock = { now },
-        )
-
-        introducer.currentOrMint(alice, sampleGroupId)
-        val mintedAt = store.listForOwner(alice).single().createdAtMillis
-        now += IntroKeyEntry.LIFETIME_MILLIS / 2
-        introducer.currentOrMint(alice, sampleGroupId)
-
-        // The 24h cap is absolute per link, not a sliding window.
-        assertEquals(mintedAt, store.listForOwner(alice).single().createdAtMillis)
-    }
-
-    @Test
-    fun currentOrMint_afterLifetimeElapsed_mintsAFreshKeypair() = runTest {
-        var now = 1_700_000_000_000L
-        val store = InMemoryIntroKeyStore(clock = { now })
+        val store = InMemoryIntroKeyStore()
         val introducer = InviteIntroducer(
             store,
             ioDispatcher = Dispatchers.Unconfined,
@@ -223,11 +203,106 @@ class InviteIntroducerTest {
         )
 
         val first = introducer.currentOrMint(alice, sampleGroupId)
-        now += IntroKeyEntry.LIFETIME_MILLIS + 1
+        // A year later. Invite links have no TTL — only rotate or
+        // revoke retires one.
+        now += 365L * 24 * 60 * 60 * 1000
         val second = introducer.currentOrMint(alice, sampleGroupId)
 
-        assertFalse(first.introPublicKey.contentEquals(second.introPublicKey))
+        assertTrue(first.introPublicKey.contentEquals(second.introPublicKey))
         assertEquals(1, store.listForOwner(alice).size)
+    }
+
+    // ─── rotate / revoke ──────────────────────────────────────────
+
+    @Test
+    fun rotate_mintsAFreshKey_andRetiresTheOldOne() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        val old = introducer.currentOrMint(alice, sampleGroupId)
+        val new = introducer.rotate(alice, sampleGroupId)
+
+        assertFalse(old.introPublicKey.contentEquals(new.introPublicKey))
+        assertNull(
+            "the superseded link must stop decrypting requests",
+            store.find(old.introPublicKey),
+        )
+        assertNotNull(store.find(new.introPublicKey))
+        assertEquals("rotate must not leave the old slot behind", 1, store.listForOwner(alice).size)
+    }
+
+    @Test
+    fun rotate_thenCurrentOrMint_returnsTheRotatedKey() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        introducer.currentOrMint(alice, sampleGroupId)
+        val rotated = introducer.rotate(alice, sampleGroupId)
+        val resolved = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertTrue(rotated.introPublicKey.contentEquals(resolved.introPublicKey))
+    }
+
+    @Test
+    fun rotate_leavesOtherGroupsAlone() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+        val other = ByteArray(32) { 0x5A }
+
+        val untouched = introducer.currentOrMint(alice, other)
+        introducer.currentOrMint(alice, sampleGroupId)
+        introducer.rotate(alice, sampleGroupId)
+
+        assertNotNull(store.find(untouched.introPublicKey))
+    }
+
+    @Test
+    fun rotate_doesNotRetireLabelledOfferKeys() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        // Per-invitee offers are revoked one at a time from the invite
+        // list; rotating the shared link must not sweep them away.
+        val offer = introducer.mint(alice, sampleGroupId, label = "aabbccdd")
+        introducer.currentOrMint(alice, sampleGroupId)
+        introducer.rotate(alice, sampleGroupId)
+
+        assertNotNull(store.find(offer.introPublicKey))
+    }
+
+    @Test
+    fun currentOrMint_ignoresLabelledOfferKeys() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+
+        // The create-with-invitees flow lands on the share screen with
+        // the last invitee's offer key as the newest entry. Handing
+        // that out as the group's link would collapse the 1:1
+        // request-to-invitee mapping.
+        val offer = introducer.mint(alice, sampleGroupId, label = "aabbccdd")
+        val shared = introducer.currentOrMint(alice, sampleGroupId)
+
+        assertFalse(offer.introPublicKey.contentEquals(shared.introPublicKey))
+    }
+
+    @Test
+    fun liveInvites_listsEveryKeyForTheGroup() = runTest {
+        val store = InMemoryIntroKeyStore()
+        val introducer = InviteIntroducer(store, ioDispatcher = Dispatchers.Unconfined)
+        val other = ByteArray(32) { 0x5A }
+
+        val shared = introducer.currentOrMint(alice, sampleGroupId)
+        val offer = introducer.mint(alice, sampleGroupId, label = "aabbccdd")
+        introducer.currentOrMint(alice, other)
+
+        val live = introducer.liveInvites(alice, sampleGroupId)
+
+        assertEquals(2, live.size)
+        assertTrue(live.any { it.introPublicKey.contentEquals(shared.introPublicKey) })
+        assertEquals(
+            offer.introPublicKey.toList(),
+            live.single { it.label == "aabbccdd" }.introPublicKey.toList(),
+        )
     }
 
     @Test

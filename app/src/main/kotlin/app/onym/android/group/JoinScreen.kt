@@ -175,6 +175,45 @@ fun JoinScreen(
                     )
                 }
 
+                is JoinViewModel.State.Unanswered -> {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.testTag("join.unanswered"),
+                    ) {
+                        Icon(
+                            Icons.Filled.HourglassTop,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.join_unanswered_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        // Two very different causes, indistinguishable
+                        // from here: the host is offline, or they
+                        // replaced the link and this one is dead.
+                        // Revocation is silent by design — nothing
+                        // tells the holder — so name both.
+                        Text(
+                            text = stringResource(R.string.join_unanswered_body),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(R.string.join_unanswered_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+
                 is JoinViewModel.State.AwaitingApproval -> {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,

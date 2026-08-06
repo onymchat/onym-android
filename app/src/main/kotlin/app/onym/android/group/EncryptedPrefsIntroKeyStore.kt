@@ -30,7 +30,6 @@ import kotlinx.serialization.json.Json
 class EncryptedPrefsIntroKeyStore(
     private val context: Context,
     private val prefsFileName: String = DEFAULT_PREFS_FILE_NAME,
-    private val clock: () -> Long = { System.currentTimeMillis() },
 ) : IntroKeyStore {
 
     private val mutex = Mutex()
@@ -72,11 +71,11 @@ class EncryptedPrefsIntroKeyStore(
         // wrote something. Routes through loadActiveUnlocked so
         // entries that aged past the lifetime while the app was
         // closed are pruned at boot.
-        _entriesFlow.value = loadActiveUnlocked().map { it.toEntry() }
+        _entriesFlow.value = loadAllUnlocked().map { it.toEntry() }
     }
 
     override suspend fun save(entry: IntroKeyEntry) = mutex.withLock {
-        val current = loadActiveUnlocked().toMutableList()
+        val current = loadAllUnlocked().toMutableList()
         val existingIdx = current.indexOfFirst {
             it.introPub.contentEquals(entry.introPublicKey)
         }
@@ -86,6 +85,7 @@ class EncryptedPrefsIntroKeyStore(
             ownerIdentityId = entry.ownerIdentityId.value,
             groupId = entry.groupId,
             createdAtMillis = entry.createdAtMillis,
+            label = entry.label,
         )
         if (existingIdx >= 0) current[existingIdx] = stored
         else current += stored
@@ -93,26 +93,26 @@ class EncryptedPrefsIntroKeyStore(
     }
 
     override suspend fun find(introPublicKey: ByteArray): IntroKeyEntry? = mutex.withLock {
-        loadActiveUnlocked()
+        loadAllUnlocked()
             .firstOrNull { it.introPub.contentEquals(introPublicKey) }
             ?.toEntry()
     }
 
     override suspend fun listForOwner(ownerIdentityId: IdentityId): List<IntroKeyEntry> = mutex.withLock {
-        loadActiveUnlocked()
+        loadAllUnlocked()
             .filter { it.ownerIdentityId == ownerIdentityId.value }
             .sortedByDescending { it.createdAtMillis }
             .map { it.toEntry() }
     }
 
     override suspend fun revoke(introPublicKey: ByteArray) = mutex.withLock {
-        val current = loadActiveUnlocked()
+        val current = loadAllUnlocked()
         val filtered = current.filterNot { it.introPub.contentEquals(introPublicKey) }
         if (filtered.size != current.size) saveAllUnlocked(filtered)
     }
 
     override suspend fun deleteForOwner(ownerIdentityId: IdentityId): Int = mutex.withLock {
-        val current = loadActiveUnlocked()
+        val current = loadAllUnlocked()
         val filtered = current.filterNot { it.ownerIdentityId == ownerIdentityId.value }
         val removed = current.size - filtered.size
         if (removed > 0) saveAllUnlocked(filtered)
@@ -120,21 +120,6 @@ class EncryptedPrefsIntroKeyStore(
     }
 
     // ─── private ──────────────────────────────────────────────────
-
-    /** Load the blob, drop rows older than
-     *  [IntroKeyEntry.LIFETIME_MILLIS], and rewrite if anything was
-     *  pruned. Every read funnels through here so expired keys are
-     *  invisible to callers and the blob stays bounded without a
-     *  background timer. When rows are pruned, [_entriesFlow]
-     *  re-emits so [IntroInboxPump] cancels relayer subscriptions
-     *  for expired slots. */
-    private fun loadActiveUnlocked(): List<StoredIntroKey> {
-        val all = loadAllUnlocked()
-        val cutoffMillis = clock() - IntroKeyEntry.LIFETIME_MILLIS
-        val active = all.filter { it.createdAtMillis > cutoffMillis }
-        if (active.size != all.size) saveAllUnlocked(active)
-        return active
-    }
 
     private fun loadAllUnlocked(): List<StoredIntroKey> {
         val raw = prefs.getString(KEY_BLOB, null) ?: return emptyList()
@@ -171,6 +156,7 @@ class EncryptedPrefsIntroKeyStore(
         ownerIdentityId = IdentityId(ownerIdentityId),
         groupId = groupId,
         createdAtMillis = createdAtMillis,
+        label = label,
     )
 
     companion object {
@@ -191,4 +177,10 @@ internal data class StoredIntroKey(
     val ownerIdentityId: String,
     @Serializable(with = Base64ByteArraySerializer::class) val groupId: ByteArray,
     val createdAtMillis: Long,
+    /** Added after the initial release, so it MUST keep a default:
+     *  kotlinx.serialization would otherwise fail the whole blob
+     *  decode on a pre-existing row, and the catch swallows that into
+     *  an empty list — every outstanding invite would vanish on
+     *  upgrade. */
+    val label: String? = null,
 )
