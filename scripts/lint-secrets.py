@@ -57,9 +57,11 @@ from pathlib import Path
 # requires a justification in code review — these are the only files
 # that legitimately need to touch raw secret material.
 ALLOWED: set[str] = {
-    "app/src/main/kotlin/app/onym/android/identity/IdentityRepository.kt",
-    "app/src/main/kotlin/app/onym/android/identity/StoredSnapshot.kt",
-    "app/src/main/kotlin/app/onym/android/identity/Identity.kt",
+    # Identity core moved from app/src/main/kotlin/app/onym/android/identity/
+    # to the extracted :identity module — same files, same justification.
+    "modules/identity/src/main/kotlin/app/onym/android/identity/IdentityRepository.kt",
+    "modules/identity/src/main/kotlin/app/onym/android/identity/StoredSnapshot.kt",
+    "modules/identity/src/main/kotlin/app/onym/android/identity/Identity.kt",
     "app/src/androidTest/kotlin/app/onym/android/identity/IdentityRepositoryTest.kt",
 }
 

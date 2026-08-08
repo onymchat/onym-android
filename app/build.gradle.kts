@@ -114,22 +114,30 @@ android {
         }
     }
 
-    // Shared test source set — fakes / fixtures / encryptors that
-    // both `test/` (JVM unit) and `androidTest/` (instrumented) can
-    // consume from the same `app.onym.android.support` package.
-    // Mirrors the iOS pattern of a single `Tests/OnymIOSTests/Support/`
-    // directory available to every XCTest target.
-    sourceSets {
-        getByName("test") {
-            java.srcDirs("src/test/kotlin", "src/sharedTest/kotlin")
-        }
-        getByName("androidTest") {
-            java.srcDirs("src/androidTest/kotlin", "src/sharedTest/kotlin")
-        }
-    }
+    // NOTE: the former src/sharedTest source set is gone — every shared
+    // fake in `app.onym.android.support` now lives in the owning
+    // module's testFixtures (:transport, :chain, :identity, :group,
+    // :transport-blossom, :chats-core), wired below.
 }
 
 dependencies {
+    // Extracted library modules (modules/): string resources, brand/
+    // settings UI atoms, crypto/encoding primitives, transport seam
+    // interfaces.
+    implementation(project(":strings"))
+    implementation(project(":design"))
+    implementation(project(":foundation"))
+    implementation(project(":transport"))
+    implementation(project(":chain"))
+    implementation(project(":transport-nostr"))
+    implementation(project(":transport-blossom"))
+    implementation(project(":identity"))
+    implementation(project(":persistence"))
+    implementation(project(":group"))
+    implementation(project(":chats-core"))
+    implementation(project(":inbox"))
+    implementation(project(":search"))
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -209,6 +217,26 @@ dependencies {
     // goes in androidTest.
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Shared inbox-transport fakes (ConfigurableInboxTransport,
+    // LoopbackInboxTransport) moved from src/sharedTest to
+    // :transport's testFixtures.
+    testImplementation(testFixtures(project(":transport")))
+    // Chain-subject fakes (ConfigurableContractTransport,
+    // FakeContractsManifestFetcher, InMemoryChainLedger, FakeOkHttpClient,
+    // …) moved from src/sharedTest to :chain's testFixtures.
+    testImplementation(testFixtures(project(":chain")))
+    // Identity fakes (FakeActiveIdentityProvider,
+    // FakeInvitationEnvelopeDecrypter, TestInvitationEncryptor) moved
+    // from src/sharedTest to :identity's testFixtures.
+    testImplementation(testFixtures(project(":identity")))
+    // Group-subject fakes (InMemoryGroupStore, InMemoryIntroKeyStore)
+    // moved from src/sharedTest to :group's testFixtures — consumed by
+    // the inbox dispatcher / chats VM unit-test suites.
+    testImplementation(testFixtures(project(":group")))
+    // Chats-subject fake (InMemoryMessageStore) moved from
+    // src/sharedTest to :chats-core's testFixtures — consumed by
+    // ChatsViewModelTest / ChatThreadViewModelTest.
+    testImplementation(testFixtures(project(":chats-core")))
     // Android unit tests stub `org.json` (every method throws "not
     // mocked"). The transport layer's NostrEvent / subscriptionFilters
     // use JSONObject + JSONArray for canonical JSON, so tests need a
@@ -228,6 +256,17 @@ dependencies {
 
     // Instrumented tests. Real EncryptedSharedPreferences against the
     // emulator's hardware-backed Keystore.
+    androidTestImplementation(testFixtures(project(":transport")))
+    // Chain + identity fakes for instrumented harnesses/E2E suites, and
+    // LoopbackBlossomClient for uitests/LoopbackRegistryHarness.
+    androidTestImplementation(testFixtures(project(":chain")))
+    androidTestImplementation(testFixtures(project(":identity")))
+    androidTestImplementation(testFixtures(project(":transport-blossom")))
+    // InMemoryGroupStore / InMemoryIntroKeyStore for the instrumented
+    // group + E2E suites.
+    androidTestImplementation(testFixtures(project(":group")))
+    // InMemoryMessageStore for ChatsSwipeDeleteScreenTest.
+    androidTestImplementation(testFixtures(project(":chats-core")))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)

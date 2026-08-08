@@ -59,8 +59,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.onym.android.R
-import app.onym.android.group.LocalOnymTokens
+import app.onym.android.strings.R
+import app.onym.android.design.LocalOnymTokens
+import app.onym.android.design.OnymQrCode
+import app.onym.android.design.heroHex
 import app.onym.android.identity.IdentitiesViewModel
 import app.onym.android.identity.IdentitySummary
 import app.onym.android.identity.inviteUrl

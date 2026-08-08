@@ -62,12 +62,17 @@ jobs:
       - name: Set up Gradle (with build cache)
         uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
 
-      - name: ./gradlew :app:testDebugUnitTest
-        run: ./gradlew :app:testDebugUnitTest --no-daemon
+      - name: ./gradlew testDebugUnitTest
+        # Unqualified on purpose: runs the unit tests of every module
+        # (:app plus the extracted modules/ libraries), so tests that
+        # moved out of :app keep running in CI.
+        run: ./gradlew testDebugUnitTest --no-daemon
 
       - name: Upload test report on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: testDebugUnitTest-report
-          path: app/build/reports/tests/testDebugUnitTest/
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            modules/*/build/reports/tests/testDebugUnitTest/

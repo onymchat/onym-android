@@ -5,7 +5,7 @@ import app.onym.android.chain.ContractsManifestFetcher
 import app.onym.android.chain.KnownRelayersFetcher
 import app.onym.android.chain.RelayerSelectionStore
 import app.onym.android.chain.SepContractTransport
-import app.onym.android.chats.BlossomClient
+import app.onym.android.transport.blossom.BlossomClient
 import app.onym.android.identity.IdentitySecretStore
 import app.onym.android.transport.InboxTransport
 

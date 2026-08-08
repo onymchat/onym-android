@@ -14,8 +14,10 @@ Two rules:
 
 1. **Transport barrier**: identity / per-dialog / group secret names
    may not appear (as identifiers) inside
-   `app/src/main/kotlin/app/onym/android/transport/`. Every match
-   in production code under that path is a violation unless suppressed.
+   `app/src/main/kotlin/app/onym/android/transport/` or any extracted
+   module's `modules/<name>/src/main/kotlin/app/onym/android/transport/`.
+   Every match in production code under those paths is a violation
+   unless suppressed.
 
 2. **Send-arg shape**: `<anything>.send(<arg>, ...)` calls must not
    pass an argument whose name is one of the known secret names. The
@@ -68,7 +70,12 @@ SEND_ARG_FORBIDDEN: set[str] = IDENTITY_SECRET_NAMES | {
 
 # Production-only barrier — tests are free to construct secret
 # fixtures and call into the transport layer with raw bytes.
-TRANSPORT_BARRIER_DIR = "app/src/main/kotlin/app/onym/android/transport/"
+# Covers both the app's transport sources and any extracted library
+# module's (modules/<name>/src/main/kotlin/.../transport/ — e.g. the
+# :transport seam module).
+TRANSPORT_BARRIER_RE = re.compile(
+    r"^(?:app|modules/[^/]+)/src/main/kotlin/app/onym/android/transport/"
+)
 SUPPRESSION = "onym:allow-secret-transport"
 
 COMMENT_LINE = re.compile(r"^\s*//")
@@ -103,7 +110,8 @@ def is_comment_line(line: str) -> bool:
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     sources = sorted(
-        root.glob("app/src/main/kotlin/app/onym/android/**/*.kt"),
+        list(root.glob("app/src/main/kotlin/app/onym/android/**/*.kt"))
+        + list(root.glob("modules/*/src/main/kotlin/app/onym/android/**/*.kt")),
     )
 
     violations: list[tuple[str, int, str, str]] = []
@@ -113,7 +121,7 @@ def main() -> int:
         lines = f.read_text(encoding="utf-8").splitlines()
 
         # Rule 1 — transport-barrier.
-        if rel.startswith(TRANSPORT_BARRIER_DIR):
+        if TRANSPORT_BARRIER_RE.match(rel):
             for i, line in enumerate(lines, start=1):
                 if is_comment_line(line):
                     continue
@@ -124,7 +132,8 @@ def main() -> int:
                         continue
                     violations.append((
                         rel, i,
-                        f"transport-barrier: secret name '{name}' inside {TRANSPORT_BARRIER_DIR}",
+                        f"transport-barrier: secret name '{name}' inside a "
+                        f"src/main/kotlin/app/onym/android/transport/ directory",
                         line.rstrip(),
                     ))
 

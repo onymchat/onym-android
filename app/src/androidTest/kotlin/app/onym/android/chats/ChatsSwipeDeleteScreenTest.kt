@@ -11,7 +11,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import app.onym.android.R
+import app.onym.android.strings.R
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
 import app.onym.android.group.ChatGroup

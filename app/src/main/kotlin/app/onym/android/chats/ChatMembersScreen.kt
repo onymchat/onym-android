@@ -61,7 +61,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.onym.android.R
+import app.onym.android.strings.R
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupAvatarImage

@@ -19,9 +19,9 @@ import androidx.compose.runtime.setValue
 import androidx.core.util.Consumer
 import androidx.fragment.app.FragmentActivity
 import app.onym.android.group.IntroCapability
-import app.onym.android.group.LocalOnymTokens
-import app.onym.android.group.OnymTokens
-import app.onym.android.transport.DeeplinkCapture
+import app.onym.android.design.LocalOnymTokens
+import app.onym.android.design.OnymTokens
+import app.onym.android.group.DeeplinkCapture
 
 /**
  * Sole entry point. Mounts [RootScreen] as the content; the recovery-

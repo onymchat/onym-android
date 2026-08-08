@@ -55,8 +55,14 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.onym.android.R
-import app.onym.android.group.OnymMark
+import app.onym.android.strings.R
+import app.onym.android.design.OnymMark
+import app.onym.android.design.SettingsCard
+import app.onym.android.design.SettingsFootnote
+import app.onym.android.design.SettingsHairline
+import app.onym.android.design.SettingsSectionLabel
+import app.onym.android.design.SettingsTile
+import app.onym.android.design.heroHex
 import app.onym.android.identity.IdentitiesViewModel
 import app.onym.android.identity.IdentityId
 

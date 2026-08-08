@@ -1,5 +1,9 @@
 package app.onym.android
 
+// String resources moved to the :strings module — the same-package
+// `app.onym.android.R` no longer carries R.string entries under
+// android.nonTransitiveRClass.
+import app.onym.android.strings.R
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -339,7 +343,7 @@ fun RootScreen(
                 // CreateGroup* screen reads the right surface family.
                 // Chats / Settings tabs already adapt via Material's
                 // colorScheme and don't need this wrapper.
-                app.onym.android.group.OnymTheme {
+                app.onym.android.design.OnymTheme {
                     CreateGroupScreen(viewModel = vm)
                 }
             }

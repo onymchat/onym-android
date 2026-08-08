@@ -1,6 +1,7 @@
 package app.onym.android.group
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.onym.android.chain.GovernanceMember
 import app.onym.android.chain.SepTier
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals

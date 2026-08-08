@@ -71,13 +71,13 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.runtime.collectAsState
-import app.onym.android.R
+import app.onym.android.strings.R
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.ApproveRequestsToolbarBadge
 import app.onym.android.group.ApproveRequestsViewModel
 import app.onym.android.group.ChatGroup
-import app.onym.android.group.OnymAccent
-import app.onym.android.group.OnymGroupAvatar
+import app.onym.android.design.OnymAccent
+import app.onym.android.design.OnymGroupAvatar
 import app.onym.android.inbox.PendingInvitesToolbarBadge
 import app.onym.android.inbox.PendingInvitesViewModel
 

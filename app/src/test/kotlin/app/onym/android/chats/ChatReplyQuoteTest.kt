@@ -2,7 +2,7 @@ package app.onym.android.chats
 
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.MemberProfile
-import app.onym.android.group.OnymAccent
+import app.onym.android.design.OnymAccent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

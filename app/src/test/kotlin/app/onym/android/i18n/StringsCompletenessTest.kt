@@ -106,9 +106,11 @@ class StringsCompletenessTest {
     private companion object {
         // Paths are relative to the Gradle module root (the `:app`
         // module), which is what the testDebugUnitTest task launches
-        // from. If a future migration changes the layout, update
-        // these constants to match.
-        private const val EN_PATH = "src/main/res/values/strings.xml"
-        private const val RU_PATH = "src/main/res/values-ru/strings.xml"
+        // from. The string catalogs live in the :strings module
+        // (modules/strings) since the modularization split. If a
+        // future migration changes the layout, update these constants
+        // to match.
+        private const val EN_PATH = "../modules/strings/src/main/res/values/strings.xml"
+        private const val RU_PATH = "../modules/strings/src/main/res/values-ru/strings.xml"
     }
 }

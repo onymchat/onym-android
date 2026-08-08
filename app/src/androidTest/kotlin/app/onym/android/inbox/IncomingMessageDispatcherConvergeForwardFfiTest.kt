@@ -5,7 +5,7 @@ import app.onym.android.chain.ChainStateReading
 import app.onym.android.chain.SepCommitmentEntry
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
-import app.onym.android.group.GovernanceMember
+import app.onym.android.chain.GovernanceMember
 import app.onym.android.group.GroupCommitmentBuilder
 import app.onym.android.group.GroupInvitationPayload
 import app.onym.android.group.GroupRepository

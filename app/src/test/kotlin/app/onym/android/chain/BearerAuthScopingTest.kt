@@ -1,10 +1,10 @@
 package app.onym.android.chain
 
-import app.onym.android.chats.OkHttpBlossomClient
+import app.onym.android.transport.blossom.OkHttpBlossomClient
 import app.onym.android.support.FakeOkHttpClient
 import app.onym.android.transport.nostr.GitHubReleasesKnownNostrRelaysFetcher
-import app.onym.android.transport.nostr.NostrEphemeralSignerProvider
-import app.onym.android.transport.nostr.NostrSigner
+import app.onym.android.transport.NostrEphemeralSignerProvider
+import app.onym.android.transport.NostrSigner
 import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient

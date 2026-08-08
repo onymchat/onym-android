@@ -1,5 +1,6 @@
 package app.onym.android.transport
 
+import app.onym.android.group.DeeplinkCapture
 import app.onym.android.group.IntroCapability
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals

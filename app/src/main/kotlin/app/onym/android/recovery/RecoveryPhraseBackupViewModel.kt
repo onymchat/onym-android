@@ -2,7 +2,7 @@ package app.onym.android.recovery
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import app.onym.android.R
+import app.onym.android.strings.R
 import app.onym.android.identity.Identity
 import app.onym.android.identity.IdentityRepository
 import kotlinx.coroutines.Job

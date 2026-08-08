@@ -65,7 +65,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import app.onym.android.R
+import app.onym.android.strings.R
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -76,7 +76,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.onym.android.group.MemberProfile
-import app.onym.android.group.OnymAccent
+import app.onym.android.design.OnymAccent
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 

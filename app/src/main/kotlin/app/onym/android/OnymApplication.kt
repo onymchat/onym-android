@@ -28,7 +28,7 @@ import app.onym.android.group.RoomGroupStore
 import app.onym.android.identity.IdentityRepository
 import app.onym.android.identity.IdentitySecretStore
 import app.onym.android.identity.OnymNostrSignerProvider
-import app.onym.android.persistence.StorageEncryption
+import app.onym.android.foundation.StorageEncryption
 import app.onym.android.recovery.AndroidBiometricAuthenticator
 import app.onym.android.recovery.AndroidClipboardWriter
 import app.onym.android.recovery.AndroidStringProvider
@@ -468,11 +468,11 @@ class OnymApplication : Application() {
         // the Onym default if the list was explicitly cleared).
         val blossomServerUrl = blossomServersRepository.currentEndpoints()
             .firstOrNull()?.url ?: "https://blossom.onym.app"
-        val blossomClient: app.onym.android.chats.BlossomClient =
+        val blossomClient: app.onym.android.transport.blossom.BlossomClient =
             if (UITestRegistry.enabled && UITestRegistry.blossomClient != null) {
                 UITestRegistry.blossomClient!!
             } else {
-                app.onym.android.chats.OkHttpBlossomClient(
+                app.onym.android.transport.blossom.OkHttpBlossomClient(
                     baseUrl = blossomServerUrl,
                     httpClient = httpClient,
                     signerProvider = nostrSignerProvider,

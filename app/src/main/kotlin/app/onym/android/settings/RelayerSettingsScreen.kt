@@ -57,7 +57,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.CircularProgressIndicator
-import app.onym.android.R
+import app.onym.android.strings.R
 import app.onym.android.chain.RelayerEndpoint
 import app.onym.android.chain.RelayerFetchStatus
 import app.onym.android.chain.RelayerStrategy

@@ -8,7 +8,7 @@ import app.onym.android.group.CreateGroupViewModel
 import app.onym.android.recovery.RecoveryPhraseBackupViewModel
 import app.onym.android.settings.AnchorsPickerViewModel
 import app.onym.android.settings.RelayerSettingsViewModel
-import app.onym.android.transport.nostr.NostrEphemeralSignerProvider
+import app.onym.android.transport.NostrEphemeralSignerProvider
 
 /**
  * Composition-root handle. Built once in [OnymApplication.onCreate]

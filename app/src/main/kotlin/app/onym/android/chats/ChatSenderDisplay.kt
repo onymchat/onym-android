@@ -2,7 +2,7 @@ package app.onym.android.chats
 
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.MemberProfile
-import app.onym.android.group.OnymAccent
+import app.onym.android.design.OnymAccent
 import java.util.UUID
 
 /**

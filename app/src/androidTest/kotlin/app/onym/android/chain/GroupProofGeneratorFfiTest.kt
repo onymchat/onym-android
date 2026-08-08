@@ -1,7 +1,7 @@
 package app.onym.android.chain
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import app.onym.android.group.GovernanceMember
+import app.onym.android.chain.GovernanceMember
 import chat.onym.sdk.Common
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals

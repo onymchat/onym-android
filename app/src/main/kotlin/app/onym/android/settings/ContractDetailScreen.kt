@@ -36,10 +36,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import app.onym.android.R
+import app.onym.android.strings.R
 import app.onym.android.chain.ContractNetwork
 import app.onym.android.chain.GovernanceType
-import app.onym.android.group.OnymMark
+import app.onym.android.design.OnymMark
+import app.onym.android.design.SettingsCard
+import app.onym.android.design.SettingsFootnote
+import app.onym.android.design.SettingsRow
+import app.onym.android.design.SettingsSectionLabel
+import app.onym.android.design.SettingsTile
+import app.onym.android.design.SettingsTileBox
+import app.onym.android.design.SettingsTileLabel
 
 /**
  * Anchors → version → Contract Detail. Shows the deployed contract

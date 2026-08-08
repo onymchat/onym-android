@@ -36,10 +36,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.onym.android.R
+import app.onym.android.strings.R
 import app.onym.android.chain.AppNetwork
 import app.onym.android.chain.ContractNetwork
 import app.onym.android.chain.GovernanceType
+import app.onym.android.design.SettingsTile
+import app.onym.android.design.SettingsTileBox
 
 /**
  * Three-level drill-down for the Anchors picker. Composables
