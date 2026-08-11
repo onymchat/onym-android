@@ -166,10 +166,23 @@ class IncomingMessageDispatcherConvergeForwardFfiTest {
             "unverifiable-now invitation must not materialize",
             env.groups.snapshots.value.none { it.groupIdBytes.contentEquals(groupId) },
         )
+        // Still never rejected — but no longer routed to the admin. A
+        // chain read this device couldn't make is not something the
+        // admin can answer; asking them produced a reply, changed
+        // nothing, and told the user "the admin is offline".
+        assertTrue(
+            "a local read failure must not send a refresh request to the admin",
+            refresher.deferred.isEmpty(),
+        )
         assertEquals(
-            "a chain-read failure must defer (retry), not reject+drop",
+            "a chain-read failure must defer locally (retry), not reject+drop",
             listOf(groupId.toList()),
-            refresher.deferred.map { it.toList() },
+            refresher.deferredLocally.map { it.first.toList() },
+        )
+        assertEquals(
+            "no relayer configured is a setup state, not a failed call",
+            listOf(PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED),
+            refresher.deferredLocally.map { it.second },
         )
     }
 
@@ -203,10 +216,18 @@ class IncomingMessageDispatcherConvergeForwardFfiTest {
             "chain-behind snapshot must not materialize unverified",
             env.groups.snapshots.value.none { it.groupIdBytes.contentEquals(groupId) },
         )
+        assertTrue(
+            "a lagging read resolves by re-reading, not by asking the admin",
+            refresher.deferred.isEmpty(),
+        )
         assertEquals(
             "chain-behind must defer (lagging read), not reject+drop",
             listOf(groupId.toList()),
-            refresher.deferred.map { it.toList() },
+            refresher.deferredLocally.map { it.first.toList() },
+        )
+        assertEquals(
+            listOf(PendingGroupVerification.Status.CHAIN_SETTLING),
+            refresher.deferredLocally.map { it.second },
         )
     }
 
@@ -287,6 +308,20 @@ private class ThrowingChainState : ChainStateReading {
 
 private class SpyRefresher : GroupStateRefreshing {
     val deferred = mutableListOf<ByteArray>()
+    /** Snapshots parked without asking the admin, with the reason. The
+     *  distinction is the point of the split: a refresh request that
+     *  goes out for a failure the admin can't fix is the bug. */
+    val deferredLocally = mutableListOf<Pair<ByteArray, PendingGroupVerification.Status>>()
+
+    override suspend fun deferLocally(
+        invitation: GroupInvitationPayload,
+        ownerIdentityId: IdentityId,
+        senderEd25519PublicKey: ByteArray?,
+        status: PendingGroupVerification.Status,
+    ) {
+        deferredLocally.add(invitation.groupId to status)
+    }
+
     override suspend fun deferVerification(
         invitation: GroupInvitationPayload,
         ownerIdentityId: IdentityId,

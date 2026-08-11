@@ -51,10 +51,17 @@ interface MessageDao {
 
     /** Most recent message (any direction) in one group for the chat-list
      *  row subtitle + most-recent-first sort. Body is encrypted, so the
-     *  store decrypts the returned row. */
+     *  store decrypts the returned row.
+     *
+     *  System notices are excluded. Their `chatListPreview` is empty by
+     *  design — the sentence is assembled in the UI, where string
+     *  resources are reachable — so letting a newest-row "Bob joined"
+     *  win here blanked the subtitle and made the group's last real
+     *  message disappear from the list. */
     @Query(
         "SELECT * FROM messages " +
             "WHERE ownerIdentityId = :ownerIdentityId AND groupId = :groupId " +
+            "AND encryptedSystemEventJson IS NULL " +
             "ORDER BY sentAt DESC LIMIT 1",
     )
     suspend fun latestForOwnerAndGroup(

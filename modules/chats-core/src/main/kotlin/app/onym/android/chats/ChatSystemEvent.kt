@@ -16,7 +16,14 @@ import kotlinx.serialization.Serializable
  * and text built here would be hardcoded English with no `values-ru`
  * twin — the exact gap `ChatMessage.chatListPreview` already has.
  *
- * `kind` values are a persistence format: stable forever.
+ * ## Wire/disk format
+ *
+ * kotlinx writes the sealed hierarchy with its **default** class
+ * discriminator, so a stored row looks like
+ * `{"type":"member_joined","alias":"Bob"}`. Both the `type` key and the
+ * [SerialName] values are a persistence format and are stable forever —
+ * renaming either, or setting `classDiscriminator` to something that
+ * merely reads better, orphans every row already on disk.
  *
  * Mirrors `ChatSystemEvent` in onym-ios.
  */

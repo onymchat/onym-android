@@ -237,24 +237,6 @@ class IncomingMessageDispatcher(
     }
 
     /**
-     * Materialize a local [ChatGroup] from an inbound
-     * [GroupInvitationPayload]. Idempotent on `groupId` —
-     * [GroupRepository.insert] delegates to `insertOrUpdate`, so a
-     * re-delivery of the same invitation overwrites in place rather
-     * than minting a duplicate row.
-     *
-     * The `memberProfiles` directory is the union of:
-     *   - whatever the sender shipped on the wire (PR 82),
-     *   - the receiver's own profile (looked up from
-     *     [identitiesFlow]). The "self last" ordering means a
-     *     sender that mistakenly includes us under our own BLS key
-     *     gets overwritten by our locally-trusted alias + inbox pub.
-     *
-     * Skipped when `tier_raw` / `group_type_raw` don't decode (older
-     * or future wire versions) — better to drop the message than
-     * materialize a partial group.
-     */
-    /**
      * Re-run verification for a snapshot parked because *this* device
      * couldn't confirm it — no chain read, or the anchoring hadn't
      * settled. Drives the Retry on those cards, since the remedy is
@@ -277,6 +259,24 @@ class IncomingMessageDispatcher(
         materializeGroup(invitation, ownerIdentityId, senderEd25519PublicKey)
     }
 
+    /**
+     * Materialize a local [ChatGroup] from an inbound
+     * [GroupInvitationPayload]. Idempotent on `groupId` —
+     * [GroupRepository.insert] delegates to `insertOrUpdate`, so a
+     * re-delivery of the same invitation overwrites in place rather
+     * than minting a duplicate row.
+     *
+     * The `memberProfiles` directory is the union of:
+     *   - whatever the sender shipped on the wire (PR 82),
+     *   - the receiver's own profile (looked up from
+     *     [identitiesFlow]). The "self last" ordering means a
+     *     sender that mistakenly includes us under our own BLS key
+     *     gets overwritten by our locally-trusted alias + inbox pub.
+     *
+     * Skipped when `tier_raw` / `group_type_raw` don't decode (older
+     * or future wire versions) — better to drop the message than
+     * materialize a partial group.
+     */
     private suspend fun materializeGroup(
         invitation: GroupInvitationPayload,
         ownerIdentityId: IdentityId,

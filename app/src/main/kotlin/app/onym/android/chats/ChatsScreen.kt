@@ -516,17 +516,22 @@ private fun ChatsRow(
             }
         }
 
+        // Both badges when both apply. They mean different things — one
+        // is work waiting for the founder, the other is reading waiting
+        // for the reader — and dropping the unread count because someone
+        // asked to join loses a signal the row was already carrying.
         if (joinRequestCount > 0) {
             JoinRequestBadge(
                 count = joinRequestCount,
                 modifier = Modifier.testTag("chats.row.join_request_badge.${group.id}"),
             )
-        } else if (item.unreadCount > 0) {
+        }
+        if (item.unreadCount > 0) {
             UnreadBadge(
                 count = item.unreadCount,
                 modifier = Modifier.testTag("chats.row.unread.${group.id}"),
             )
-        } else if (group.isPublishedOnChain) {
+        } else if (joinRequestCount == 0 && group.isPublishedOnChain) {
             Icon(
                 Icons.Filled.Verified,
                 contentDescription = stringResource(R.string.chats_published_on_chain),

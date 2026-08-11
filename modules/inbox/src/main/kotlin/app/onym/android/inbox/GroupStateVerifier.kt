@@ -166,11 +166,6 @@ class GroupStateVerifier(
         // forever, with a Retry that only re-read the chain. Only an
         // outstanding request (VERIFYING) is a reason to skip.
         if (store.status(groupIdHex) == PendingGroupVerification.Status.VERIFYING) return
-        // Escalating: this is no longer ours to retry locally.
-        mutex.withLock {
-            localDeferrals.remove(groupIdHex)
-            recheckAttempts.remove(groupIdHex)
-        }
 
         // We can only ask the admin if the snapshot told us their inbox.
         val adminInbox = invitation.adminPubkeyHex?.lowercase()
@@ -188,6 +183,21 @@ class GroupStateVerifier(
             return
         }
 
+        // `record` is idempotent on groupIdHex, so an entry parked
+        // earlier (locally, for a reason the admin couldn't fix) would
+        // keep its old status and the card would go on naming the wrong
+        // party. Update it explicitly for that case.
+        // Escalating for real now — only past the `adminInbox` bail
+        // above. Dropping the local deferral before that bail threw away
+        // the retained snapshot on a path that then records UNREACHABLE
+        // and returns with no target either, leaving Retry a silent
+        // no-op: the chain re-read was the only thing that could still
+        // have worked.
+        mutex.withLock {
+            localDeferrals.remove(groupIdHex)
+            recheckAttempts.remove(groupIdHex)
+            timeouts.remove(groupIdHex)?.cancel()
+        }
         // `record` is idempotent on groupIdHex, so an entry parked
         // earlier (locally, for a reason the admin couldn't fix) would
         // keep its old status and the card would go on naming the wrong
@@ -240,6 +250,13 @@ class GroupStateVerifier(
         status: PendingGroupVerification.Status,
     ) {
         val groupIdHex = invitation.groupId.toHexLowercase()
+        // An admin refresh already in flight outranks this. A relay
+        // replay lands here routinely, and overwriting VERIFYING would
+        // both mislabel the card and install a `localDeferrals` entry
+        // that makes Retry re-read the chain forever instead of
+        // re-asking the admin — the mirror image of the escalation trap
+        // `deferVerification` guards above.
+        if (store.status(groupIdHex) == PendingGroupVerification.Status.VERIFYING) return
         val known = mutex.withLock {
             localDeferrals[groupIdHex] = LocalDeferral(
                 invitation, ownerIdentityId, senderEd25519PublicKey,

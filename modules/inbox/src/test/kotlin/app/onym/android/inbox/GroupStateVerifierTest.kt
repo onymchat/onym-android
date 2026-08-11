@@ -131,6 +131,84 @@ class GroupStateVerifierTest {
         assertEquals("escalation must actually ask the admin", 1, transport.sends().size)
     }
 
+    /**
+     * The mirror image: a replay landing while an admin refresh is
+     * outstanding must not demote it.
+     *
+     * Overwriting VERIFYING would both mislabel the card and install a
+     * `localDeferrals` entry, after which Retry re-reads the chain
+     * forever instead of re-asking the admin — even though the admin is
+     * the only remaining source and a target is already registered.
+     */
+    @Test
+    fun deferLocally_whileAskingTheAdmin_doesNotDemoteTheEntry() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+        verifier.deferVerification(invitation, owner)
+        assertEquals(
+            PendingGroupVerification.Status.VERIFYING,
+            store.snapshots.value.single().status,
+        )
+
+        // A relay replay re-runs verification and the chain read fails.
+        verifier.deferLocally(
+            invitation,
+            owner,
+            senderEd25519PublicKey = null,
+            status = PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+        )
+
+        assertEquals(
+            "an outstanding admin request outranks a local park",
+            PendingGroupVerification.Status.VERIFYING,
+            store.snapshots.value.single().status,
+        )
+    }
+
+    /**
+     * Escalation that can't actually reach an admin must keep the local
+     * deferral, or Retry becomes a silent no-op.
+     *
+     * The `adminInbox == null` path records UNREACHABLE and returns
+     * without registering a target, so dropping the retained snapshot on
+     * the way in discarded the chain re-read that was the only thing
+     * left that could work.
+     */
+    @Test
+    fun failedEscalation_keepsTheSnapshotRetryableLocally() = runTest {
+        val verifier = makeVerifier()
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = "aa".repeat(48),
+            memberProfiles = null,  // admin not reachable
+        )
+        var reverified = 0
+        verifier.setReverify { _, _, _ -> reverified += 1 }
+
+        verifier.deferLocally(
+            invitation,
+            owner,
+            senderEd25519PublicKey = null,
+            status = PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+        )
+        verifier.deferVerification(invitation, owner)  // can't reach an admin
+
+        verifier.retry(ByteArray(32) { 0x42 }.joinToString("") { "%02x".format(it) })
+
+        assertEquals("Retry must still re-read the chain", 1, reverified)
+    }
+
     /** An outstanding request is the one reason to skip: re-sending
      *  while the admin is mid-reply just burns relay budget. */
     @Test

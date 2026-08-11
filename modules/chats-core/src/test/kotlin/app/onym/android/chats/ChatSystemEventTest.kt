@@ -141,6 +141,25 @@ class ChatSystemEventTest {
         assertEquals("hello", ordinaryMessage().chatListPreview)
     }
 
+    /**
+     * A notice must not become the chat-list subtitle.
+     *
+     * Its `chatListPreview` is empty by design (the sentence is built in
+     * the UI, where string resources are reachable), so letting a
+     * newest-row "Bob joined" win blanked the subtitle and made the
+     * group's last real message vanish from the list.
+     */
+    @Test
+    fun latestMessage_skipsNoticesSoTheSubtitleSurvives() = runTest {
+        store.insert(ordinaryMessage(sentAtMillis = 1_000L))
+        store.insert(
+            systemMessage(ChatSystemEvent.MemberJoined("Bob"), sentAtMillis = 2_000L)
+        )
+
+        val latest = store.latestMessage(owner, groupId)
+        assertEquals("hello", latest?.chatListPreview)
+    }
+
     // ─── Idempotence ──────────────────────────────────────────────
 
     /** Relays replay the full inbox on every reconnect. The recorder's
