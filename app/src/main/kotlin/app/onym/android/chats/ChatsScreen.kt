@@ -97,6 +97,9 @@ fun ChatsScreen(
     viewModel: ChatsViewModel,
     onCreateGroup: () -> Unit,
     approveRequestsViewModel: ApproveRequestsViewModel? = null,
+    /** Active identity's lowercase BLS pubkey hex, for the admin gate
+     *  on the join-request signal. */
+    activeBlsPubkeyHex: kotlinx.coroutines.flow.StateFlow<String?>? = null,
     pendingInvitesViewModel: PendingInvitesViewModel? = null,
     onOpenInvitations: (() -> Unit)? = null,
     onOpenChat: (groupId: String) -> Unit = {},
@@ -121,13 +124,24 @@ fun ChatsScreen(
     // at all. That is the same discoverability failure this change set
     // out to fix, one screen further in.
     //
-    // Built once per render rather than per row. Only the admin's
-    // device ever has entries: a request is sealed to an intro key no
-    // one else holds.
-    val joinRequestCounts: Map<String, Int> = remember(pending) {
-        pending.groupingBy { request ->
-            request.groupId.joinToString("") { "%02x".format(it) }
-        }.eachCount()
+    // Built once per render rather than per row.
+    //
+    // Gated on the same `isAdmin` check the thread uses. Requests are
+    // already founder-only by construction — sealed to an intro key no
+    // one else holds — but the approver's list is device-wide, so on a
+    // two-identity device the non-admin's row would otherwise advertise
+    // "Someone wants to join" and open a thread with nothing in it.
+    val activeBls by (activeBlsPubkeyHex?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(null) })
+    val joinRequestCounts: Map<String, Int> = remember(pending, chatItems, activeBls) {
+        val adminGroupIds = chatItems
+            .filter { it.group.isAdmin(activeBls) }
+            .mapTo(HashSet()) { it.group.id }
+        pending
+            .map { request -> request.groupId.joinToString("") { "%02x".format(it) } }
+            .filter { it in adminGroupIds }
+            .groupingBy { it }
+            .eachCount()
     }
 
     // The chat awaiting a swipe-to-delete confirmation, if any.

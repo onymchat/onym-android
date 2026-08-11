@@ -392,9 +392,15 @@ private fun ChatThreadBody(
             )
         }
     }
-    LaunchedEffect(sortedMessages.size) {
-        if (sortedMessages.isEmpty()) return@LaunchedEffect
-        val lastIndex = sortedMessages.lastIndex
+    // Request rows are appended after the messages, so the bottom of
+    // the list is `messages + requests - 1`. Anchoring on
+    // `sortedMessages.lastIndex` alone opened a thread with history
+    // scrolled just above the pinned requests — the same
+    // discoverability failure this change set out to fix, one screen in.
+    val lastRowIndex = sortedMessages.size + joinRequests.size - 1
+    LaunchedEffect(sortedMessages.size, joinRequests.size) {
+        if (lastRowIndex < 0) return@LaunchedEffect
+        val lastIndex = lastRowIndex
         if (!hasInitialScrolled) {
             // Opened-from-search: land on the target message + flash it,
             // rather than jumping to the bottom.
@@ -450,10 +456,10 @@ private fun ChatThreadBody(
         if (shouldGlueToBottomOnImeRise(
                 rising = rising,
                 anchoredBeforeIme = anchoredBeforeIme,
-                hasMessages = sortedMessages.isNotEmpty(),
+                hasMessages = lastRowIndex >= 0,
             )
         ) {
-            listState.scrollToItem(sortedMessages.lastIndex)
+            listState.scrollToItem(lastRowIndex)
         }
     }
 
@@ -475,7 +481,13 @@ private fun ChatThreadBody(
             .imePadding()  // slides the input panel above the soft keyboard
             .testTag("chat_thread.body"),
     ) {
-        if (sortedMessages.isEmpty()) {
+        // The empty state yields to a pending join request. A founder's
+        // brand-new group has no messages at all — nothing mints a row
+        // at creation — so gating the list on `sortedMessages` alone
+        // meant the very first request in a group rendered nowhere in
+        // the app. That is precisely the flow this change exists to
+        // fix, and the one the E2E walks.
+        if (sortedMessages.isEmpty() && joinRequests.isEmpty()) {
             EmptyThread(
                 invitationMessage = invitationMessage,
                 memberProfiles = memberProfiles,

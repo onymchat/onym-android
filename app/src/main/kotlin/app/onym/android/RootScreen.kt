@@ -186,6 +186,7 @@ fun RootScreen(
                     viewModel = vm,
                     onCreateGroup = { navController.navigate(ROUTE_CREATE_GROUP) },
                     approveRequestsViewModel = dependencies.approveRequestsViewModel,
+                    activeBlsPubkeyHex = dependencies.activeBlsPubkeyHex,
                     pendingInvitesViewModel = dependencies.pendingInvitesViewModel,
                     onOpenInvitations = { navController.navigate(ROUTE_PENDING_INVITES) },
                     onOpenChat = { groupId ->

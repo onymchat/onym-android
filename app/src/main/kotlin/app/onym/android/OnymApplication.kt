@@ -947,6 +947,7 @@ class OnymApplication : Application() {
                 )
             },
             approveRequestsViewModel = approveRequestsViewModel,
+            activeBlsPubkeyHex = activeBlsPubkeyHex,
             pendingInvitesViewModel = pendingInvitesViewModel,
             makeNostrRelaySettingsViewModel = {
                 app.onym.android.settings.NostrRelaySettingsViewModel(

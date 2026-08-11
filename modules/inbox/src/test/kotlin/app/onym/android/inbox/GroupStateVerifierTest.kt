@@ -209,6 +209,48 @@ class GroupStateVerifierTest {
         assertEquals("Retry must still re-read the chain", 1, reverified)
     }
 
+    /**
+     * An entry we already asked about and got no answer for must not
+     * re-ask on every relay replay.
+     *
+     * Narrowing the old blanket `contains` skip to VERIFYING fixed the
+     * escalation trap but opened this: a retained invitation is
+     * re-delivered on each reconnect, so an UNREACHABLE entry would
+     * re-send a refresh on a schedule the user never asked for. It
+     * re-arms through the card's Retry instead.
+     */
+    @Test
+    fun replayOfAnUnansweredRequest_doesNotReAskTheAdmin() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+        verifier.deferVerification(invitation, owner)
+        store.updateStatus(
+            ByteArray(32) { 0x42 }.joinToString("") { "%02x".format(it) },
+            PendingGroupVerification.Status.UNREACHABLE,
+        )
+        val sendsAfterFirstAsk = transport.sends().size
+
+        // Three relay replays of the same retained invitation.
+        repeat(3) { verifier.deferVerification(invitation, owner) }
+
+        assertEquals(
+            "a replay must not re-ask; Retry is the way back",
+            sendsAfterFirstAsk,
+            transport.sends().size,
+        )
+    }
+
     /** An outstanding request is the one reason to skip: re-sending
      *  while the admin is mid-reply just burns relay budget. */
     @Test

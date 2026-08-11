@@ -165,7 +165,17 @@ class GroupStateVerifier(
         // `contains` left the card saying "check your connection"
         // forever, with a Retry that only re-read the chain. Only an
         // outstanding request (VERIFYING) is a reason to skip.
-        if (store.status(groupIdHex) == PendingGroupVerification.Status.VERIFYING) return
+        //
+        // UNREACHABLE is also a skip: we already asked and the admin
+        // didn't answer. Relays replay a retained invitation on every
+        // reconnect, so re-sending here would burn relay budget on a
+        // schedule the user never asked for. That entry re-arms through
+        // the card's Retry, which routes to `retry` below.
+        when (store.status(groupIdHex)) {
+            PendingGroupVerification.Status.VERIFYING,
+            PendingGroupVerification.Status.UNREACHABLE -> return
+            else -> Unit
+        }
 
         // We can only ask the admin if the snapshot told us their inbox.
         val adminInbox = invitation.adminPubkeyHex?.lowercase()
@@ -183,10 +193,6 @@ class GroupStateVerifier(
             return
         }
 
-        // `record` is idempotent on groupIdHex, so an entry parked
-        // earlier (locally, for a reason the admin couldn't fix) would
-        // keep its old status and the card would go on naming the wrong
-        // party. Update it explicitly for that case.
         // Escalating for real now — only past the `adminInbox` bail
         // above. Dropping the local deferral before that bail threw away
         // the retained snapshot on a path that then records UNREACHABLE
@@ -267,6 +273,13 @@ class GroupStateVerifier(
             // Already parked. Refresh the reason so a group that moved
             // from "settling" to "can't read the chain" says so.
             store.updateStatus(groupIdHex, status)
+            // Schedule from here too, or the budget is dead: a recheck
+            // that still fails re-enters through this branch, and
+            // returning early meant MAX_AUTO_RECHECKS only ever
+            // delivered the first attempt.
+            if (status == PendingGroupVerification.Status.CHAIN_SETTLING) {
+                scheduleRecheck(groupIdHex)
+            }
             return
         }
         store.record(
