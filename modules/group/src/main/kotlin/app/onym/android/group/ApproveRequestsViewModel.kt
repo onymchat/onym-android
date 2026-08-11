@@ -140,6 +140,14 @@ class ApproveRequestsViewModel(
          *  mapping local so later prompts only add cases. */
         fun failureReason(outcome: JoinRequestApprover.ApproveOutcome): String? = when (outcome) {
             is JoinRequestApprover.ApproveOutcome.Sent -> null
+            is JoinRequestApprover.ApproveOutcome.GroupNotAnchoredYet ->
+                // Not a failure the founder can do anything about
+                // except wait a moment: the group's own create
+                // transaction is still being included in a ledger. Says
+                // "try again" because that is literally the fix, and
+                // gives a duration so it doesn't read as "retry
+                // forever".
+                "This group isn’t on the chain yet. Give it a few seconds and tap Accept again."
             is JoinRequestApprover.ApproveOutcome.UnknownGroup ->
                 "This invite isn’t for any group on this device."
             is JoinRequestApprover.ApproveOutcome.UnknownRequest ->

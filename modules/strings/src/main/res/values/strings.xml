@@ -564,6 +564,9 @@
   <string name="invite_invited_you_to">invited you to “%1$s”</string>
   <string name="invite_fallback_group">a group</string>
   <string name="invite_verifying_state">Verifying group state…</string>
+  <string name="invite_chain_settling">Waiting for the group to be confirmed on chain… This usually takes a few seconds.</string>
+  <string name="invite_chain_unreachable">Couldn’t reach the chain to verify this group. Check your connection and try again.</string>
+  <string name="invite_chain_not_configured">Still setting up this device’s connection to the chain. Tap Retry in a moment.</string>
   <string name="invite_verify_failed">Couldn’t verify — the admin is offline. The group stays hidden until it can be verified on chain.</string>
   <string name="invite_share_text">Join \"%1$s\" on Onym: %2$s</string>
   <string name="settings_section_transport">TRANSPORT</string>

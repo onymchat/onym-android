@@ -3,6 +3,7 @@ package app.onym.android.chain
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -72,6 +73,24 @@ class SepContractClient(
             payload = GetCommitmentPayload(groupId = groupId),
             payloadSerializer = GetCommitmentPayload.serializer(),
             responseSerializer = SepCommitmentEntry.serializer(),
+        )
+
+    /**
+     * Superseded commitments, newest last, up to [maxEntries].
+     *
+     * The contract keeps the last 64. This is what lets a receiver
+     * verify a snapshot the chain has already advanced past — without
+     * it, the only way to check a stale invitation was to ask the admin
+     * for a fresh one and hope they were awake.
+     */
+    suspend fun getHistory(groupId: ByteArray, maxEntries: UInt): List<SepCommitmentEntry> =
+        invoke(
+            function = "get_history",
+            payload = GetHistoryPayload(groupId = groupId, maxEntries = maxEntries),
+            payloadSerializer = GetHistoryPayload.serializer(),
+            responseSerializer = ListSerializer(
+                SepCommitmentEntry.serializer(),
+            ),
         )
 
     private suspend fun <P, R> invoke(

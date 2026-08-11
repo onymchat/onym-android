@@ -313,6 +313,31 @@ data class TyrannyUpdateCommitmentPayload(
     }
 }
 
+/**
+ * Arguments for `get_history`.
+ *
+ * The contract archives every superseded `CommitmentEntry` and keeps
+ * the most recent `HISTORY_WINDOW` (64) of them, so a snapshot the
+ * chain has already moved past is still checkable against what was
+ * actually committed at its epoch.
+ */
+@Serializable
+data class GetHistoryPayload(
+    @SerialName("group_id")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val groupId: ByteArray,
+    @SerialName("max_entries")
+    val maxEntries: UInt,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is GetHistoryPayload) return false
+        return groupId.contentEquals(other.groupId) && maxEntries == other.maxEntries
+    }
+
+    override fun hashCode(): Int = 31 * groupId.contentHashCode() + maxEntries.hashCode()
+}
+
 /** Payload for `get_commitment`. */
 @Serializable
 data class GetCommitmentPayload(

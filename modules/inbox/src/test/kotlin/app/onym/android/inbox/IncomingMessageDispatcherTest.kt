@@ -256,6 +256,84 @@ class IncomingMessageDispatcherTest {
         assertEquals(1, groupRepository.snapshots.value.single().memberProfiles.size)
     }
 
+
+    // ─── Verification failure routing ───────────────────────────────
+    //
+    // `STALE_NEEDS_REFRESH` used to cover six conditions, four of which
+    // the admin cannot affect — and all of them rendered as "the admin
+    // is offline" with a Retry that messaged the admin. They answered,
+    // verification re-ran, the same local read failed, and the joiner
+    // looped forever.
+    //
+    // These exercise the classifier directly rather than through
+    // `dispatch`: the surrounding `verifyTyrannyInvitation` recomputes a
+    // Poseidon commitment through the OnymSDK JNI .so, which only
+    // `androidTest` loads, so a Tyranny invitation always rejects before
+    // the chain read under plain unit tests. The chain-ahead history
+    // lookup is unreachable here for the same reason and is covered by
+    // the two-device pass.
+
+    @Test
+    fun chainReadFailure_noRelayer_isASetupState() {
+        assertEquals(
+            IncomingMessageDispatcher.TyrannyInvitationVerification.CHAIN_NOT_CONFIGURED,
+            IncomingMessageDispatcher.classifyChainReadFailure(
+                app.onym.android.chain.ChainReadError.NoActiveRelayer,
+            ),
+        )
+    }
+
+    @Test
+    fun chainReadFailure_noContractBinding_isASetupState() {
+        assertEquals(
+            IncomingMessageDispatcher.TyrannyInvitationVerification.CHAIN_NOT_CONFIGURED,
+            IncomingMessageDispatcher.classifyChainReadFailure(
+                app.onym.android.chain.ChainReadError.NoContractBinding,
+            ),
+        )
+    }
+
+    /** The joiner-side twin of the approve-side race: the group's own
+     *  `create_group` hasn't settled. The admin is fine and can do
+     *  nothing about it, so this must not route to them. */
+    @Test
+    fun chainReadFailure_groupNotFound_isSettling() {
+        assertEquals(
+            IncomingMessageDispatcher.TyrannyInvitationVerification.GROUP_NOT_ON_CHAIN_YET,
+            IncomingMessageDispatcher.classifyChainReadFailure(
+                app.onym.android.chain.SepContractError.BadStatus(
+                    code = 502,
+                    body = "HostError: Error(Contract, #5)",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun chainReadFailure_relayerErrored_isUnreachable() {
+        assertEquals(
+            IncomingMessageDispatcher.TyrannyInvitationVerification.CHAIN_UNREACHABLE,
+            IncomingMessageDispatcher.classifyChainReadFailure(
+                java.io.IOException("connection reset"),
+            ),
+        )
+    }
+
+    /** A contract error we have no advice for stays a generic
+     *  unreachable rather than being mislabelled as settling. */
+    @Test
+    fun chainReadFailure_otherContractError_isUnreachable() {
+        assertEquals(
+            IncomingMessageDispatcher.TyrannyInvitationVerification.CHAIN_UNREACHABLE,
+            IncomingMessageDispatcher.classifyChainReadFailure(
+                app.onym.android.chain.SepContractError.BadStatus(
+                    code = 502,
+                    body = "HostError: Error(Contract, #12)",
+                ),
+            ),
+        )
+    }
+
     @Test
     fun decryptFailure_fallsThroughToInvitationsQueue() = runTest {
         val dispatcher = IncomingMessageDispatcher(
@@ -768,6 +846,7 @@ private class FakeChainState(private val entry: SepCommitmentEntry) : ChainState
     override suspend fun tyrannyCommitment(groupId: ByteArray): SepCommitmentEntry = entry
 }
 
+
 /** Records how many times the chain was read — for asserting dedup
  *  short-circuits never reach the relayer. */
 private class CountingChainState(private val entry: SepCommitmentEntry) : ChainStateReading {
@@ -782,6 +861,20 @@ private class CountingChainState(private val entry: SepCommitmentEntry) : ChainS
 private class SpyGroupStateRefresher : GroupStateRefreshing {
     val deferred = mutableListOf<ByteArray>()
     val handled = mutableListOf<ByteArray>()
+    /** Snapshots parked without asking the admin, with the reason. The
+     *  distinction is the point of the split: a refresh request that
+     *  goes out for a failure the admin can't fix is the bug. */
+    val deferredLocally = mutableListOf<Pair<ByteArray, PendingGroupVerification.Status>>()
+
+    override suspend fun deferLocally(
+        invitation: app.onym.android.group.GroupInvitationPayload,
+        ownerIdentityId: IdentityId,
+        senderEd25519PublicKey: ByteArray?,
+        status: PendingGroupVerification.Status,
+    ) {
+        deferredLocally.add(invitation.groupId to status)
+    }
+
     override suspend fun deferVerification(
         invitation: app.onym.android.group.GroupInvitationPayload,
         ownerIdentityId: IdentityId,

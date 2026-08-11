@@ -560,6 +560,9 @@
   <string name="invite_invited_you_to">пригласил(а) вас в «%1$s»</string>
   <string name="invite_fallback_group">группу</string>
   <string name="invite_verifying_state">Проверка состояния группы…</string>
+  <string name="invite_chain_settling">Ожидаем подтверждения группы в сети… Обычно это занимает несколько секунд.</string>
+  <string name="invite_chain_unreachable">Не удалось обратиться к сети для проверки группы. Проверьте подключение и повторите попытку.</string>
+  <string name="invite_chain_not_configured">Подключение этого устройства к сети ещё настраивается. Нажмите «Повторить» через мгновение.</string>
   <string name="invite_verify_failed">Не удалось проверить — администратор не в сети. Группа остаётся скрытой, пока её не удастся проверить в блокчейне.</string>
   <string name="invite_share_text">Присоединяйтесь к «%1$s» в Onym: %2$s</string>
   <string name="settings_section_transport">ТРАНСПОРТ</string>

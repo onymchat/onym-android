@@ -36,6 +36,28 @@ data class PendingGroupVerification(
         /** No reply within the timeout (or no admin inbox to ask) —
          *  surfaced to the user with a Retry. */
         UNREACHABLE,
+
+        /** This device couldn't read the chain: throttled, offline, or
+         *  a relayer that answered with an error.
+         *
+         *  Distinct from [UNREACHABLE] because the remedy is the user's
+         *  own connection, not the admin's availability. These were the
+         *  same state until it turned out that the most common way to
+         *  get "the admin is offline" was a receiver that could not
+         *  reach the chain — a message that named the wrong party and
+         *  offered a Retry that could not possibly work. */
+        CHAIN_UNREACHABLE,
+
+        /** No relayer endpoint or contract binding for the active
+         *  network yet. Usually a cold-start race rather than a wrong
+         *  setting: both lists are fetched in the background at launch,
+         *  so a device offline for those seconds has nothing to call. */
+        CHAIN_NOT_CONFIGURED,
+
+        /** The group's own anchoring transaction hasn't settled yet, or
+         *  our read is lagging one that has. Resolves on its own within
+         *  seconds; the Retry here re-reads the chain. */
+        CHAIN_SETTLING,
     }
 }
 

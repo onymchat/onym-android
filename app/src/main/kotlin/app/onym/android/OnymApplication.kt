@@ -639,6 +639,23 @@ class OnymApplication : Application() {
             readReceiptsEnabled = { readReceiptsPreference.current() },
             systemEvents = chatSystemEvents,
         )
+        // Close the loop for the Retry on a snapshot parked because
+        // *this* device couldn't read the chain. The dispatcher owns
+        // verification and holds the verifier, so the back-reference is
+        // installed here rather than threaded through both constructors.
+        groupStateVerifier.setReverify { invitation, owner, signer ->
+            // Re-fetch the relayer + contract lists first. The most
+            // common reason a joiner can't read the chain is that
+            // neither has arrived yet — both are fetched in the
+            // background at launch, and a device offline for those few
+            // seconds has no endpoint to call and no contract to call it
+            // on. Retrying the read alone would fail the same way every
+            // time. `refresh`, not `start`: the latter returns as soon
+            // as it has spawned the fetch and would race the read.
+            runCatching { relayerRepository.refresh() }
+            runCatching { contractsRepository.refresh() }
+            incomingDispatcher.reverify(invitation, owner, signer)
+        }
         // Filter the invites surface to the active identity, and cascade
         // a wipe on identity removal — mirrors the per-identity wiring
         // GroupRepository / IncomingInvitationsRepository already do.

@@ -284,9 +284,39 @@ private fun VerifyingCard(
                     )
                 }
             }
-            PendingGroupVerification.Status.UNREACHABLE -> {
+            // Not stuck — early. No Retry button: this clears itself,
+            // and offering an action implies the user is holding it up.
+            PendingGroupVerification.Status.CHAIN_SETTLING -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Text(
+                        stringResource(R.string.invite_chain_settling),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            // The three failures name different parties because they
+            // have different remedies: the admin's phone being asleep,
+            // this device's connection, or a chain config that hasn't
+            // arrived yet. Saying "the admin is offline" for all of them
+            // sent people to wait on someone who could not have helped.
+            PendingGroupVerification.Status.UNREACHABLE,
+            PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+            PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED -> {
                 Text(
-                    stringResource(R.string.invite_verify_failed),
+                    stringResource(
+                        when (entry.status) {
+                            PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED ->
+                                R.string.invite_chain_not_configured
+                            PendingGroupVerification.Status.CHAIN_UNREACHABLE ->
+                                R.string.invite_chain_unreachable
+                            else -> R.string.invite_verify_failed
+                        },
+                    ),
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

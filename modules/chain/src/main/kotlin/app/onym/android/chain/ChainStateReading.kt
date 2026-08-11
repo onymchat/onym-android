@@ -21,6 +21,22 @@ interface ChainStateReading {
      *  treat any throw as "couldn't verify, reject" — never as
      *  "verification passed". */
     suspend fun tyrannyCommitment(groupId: ByteArray): SepCommitmentEntry
+
+    /**
+     * Superseded commitments for a Tyranny group, newest last.
+     *
+     * The contract archives every entry `update_commitment` replaces
+     * and keeps the most recent 64. A receiver holding a snapshot the
+     * chain has already moved past can therefore still check it against
+     * what was actually committed at *its* epoch, instead of having to
+     * ask the admin for a fresh one and wait for them to be online.
+     *
+     * Defaulted to an empty list so existing conformers (tests, stubs)
+     * keep compiling; callers treat "no history" as "can't verify this
+     * way" and fall back to the refresh path.
+     */
+    suspend fun tyrannyHistory(groupId: ByteArray, maxEntries: UInt): List<SepCommitmentEntry> =
+        emptyList()
 }
 
 sealed class ChainReadError(message: String) : Throwable(message) {
@@ -47,7 +63,15 @@ class SepContractChainStateReader(
         OkHttpSepContractTransport(httpClient = OkHttpClient(), endpointUrl = url)
     },
 ) : ChainStateReading {
-    override suspend fun tyrannyCommitment(groupId: ByteArray): SepCommitmentEntry {
+    override suspend fun tyrannyCommitment(groupId: ByteArray): SepCommitmentEntry =
+        client(groupId).getCommitment(groupId)
+
+    override suspend fun tyrannyHistory(
+        groupId: ByteArray,
+        maxEntries: UInt,
+    ): List<SepCommitmentEntry> = client(groupId).getHistory(groupId, maxEntries)
+
+    private suspend fun client(groupId: ByteArray): SepContractClient {
         val relayerUrl = relayers.selectUrl() ?: throw ChainReadError.NoActiveRelayer
         val activeNetwork = networkPreference.current()
         val key = AnchorSelectionKey(
@@ -56,13 +80,11 @@ class SepContractChainStateReader(
         )
         val binding = contracts.snapshots.value.binding(key)
             ?: throw ChainReadError.NoContractBinding
-        val transport = makeContractTransport(relayerUrl)
-        val client = SepContractClient(
+        return SepContractClient(
             contractID = binding.contractId,
             contractType = SepGroupType.TYRANNY,
             network = activeNetwork.sepNetwork,
-            transport = transport,
+            transport = makeContractTransport(relayerUrl),
         )
-        return client.getCommitment(groupId)
     }
 }
