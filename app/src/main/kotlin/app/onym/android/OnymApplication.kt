@@ -316,6 +316,7 @@ class OnymApplication : Application() {
                     GroupDatabaseMigrations.MIGRATION_5_6,
                     GroupDatabaseMigrations.MIGRATION_6_7,
                     GroupDatabaseMigrations.MIGRATION_7_8,
+                    GroupDatabaseMigrations.MIGRATION_8_9,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -682,8 +683,29 @@ class OnymApplication : Application() {
         // listens on every minted intro tag regardless of which path
         // produced it.
         val inviteIntroducer = app.onym.android.group.InviteIntroducer(introKeyStore)
+        // Durable sink for inbound "request to join" envelopes. The
+        // request now renders as a row inside the founder's chat
+        // thread, so it has to survive a relaunch the way any other
+        // message does — an in-memory store would silently drop it on
+        // process death while the joiner sat on "Waiting for the host
+        // to approve…". Falls back to the in-memory store if the Room
+        // DAO can't be reached, so a storage failure degrades to the
+        // old behaviour instead of blocking launch.
+        val roomIntroRequestStore = try {
+            app.onym.android.group.RoomIntroRequestStore(
+                dao = groupDatabase.introRequestDao(),
+                encryption = storageEncryption,
+            )
+        } catch (_: Throwable) {
+            null
+        }
         val introRequestStore: app.onym.android.group.IntroRequestStore =
-            app.onym.android.group.InMemoryIntroRequestStore()
+            roomIntroRequestStore ?: app.onym.android.group.InMemoryIntroRequestStore()
+        // Replay what's on disk so a restored request is back in the
+        // thread on a cold launch, without waiting for a relay delivery.
+        if (roomIntroRequestStore != null) {
+            applicationScope.launch { roomIntroRequestStore.start() }
+        }
         val introInboxPump = app.onym.android.group.IntroInboxPump(
             transport = inboxTransport,
             store = introRequestStore,
