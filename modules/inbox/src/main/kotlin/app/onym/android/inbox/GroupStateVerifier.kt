@@ -117,6 +117,9 @@ class GroupStateVerifier(
      *  everything else here: the snapshot is a retained relay event and
      *  comes back on the next launch anyway. */
     private val localDeferrals = mutableMapOf<String, LocalDeferral>()
+    /** Auto-rechecks spent per group, so a chain that never settles
+     *  polls a bounded number of times instead of forever. */
+    private val recheckAttempts = mutableMapOf<String, Int>()
     /** Re-runs receive-side verification for a parked snapshot. Set by
      *  the app after the dispatcher exists — the dispatcher owns
      *  verification and holds this verifier, so a closure keeps the
@@ -154,7 +157,20 @@ class GroupStateVerifier(
         ownerIdentityId: IdentityId,
     ) {
         val groupIdHex = invitation.groupId.toHexLowercase()
-        if (store.contains(groupIdHex)) return
+        // A snapshot already parked locally MUST be allowed through
+        // here. The sequence is real: offline at launch parks it
+        // CHAIN_UNREACHABLE, then the device comes back and the chain
+        // has moved past the 64-entry archive window, so the admin
+        // genuinely is the only source left. Early-returning on
+        // `contains` left the card saying "check your connection"
+        // forever, with a Retry that only re-read the chain. Only an
+        // outstanding request (VERIFYING) is a reason to skip.
+        if (store.status(groupIdHex) == PendingGroupVerification.Status.VERIFYING) return
+        // Escalating: this is no longer ours to retry locally.
+        mutex.withLock {
+            localDeferrals.remove(groupIdHex)
+            recheckAttempts.remove(groupIdHex)
+        }
 
         // We can only ask the admin if the snapshot told us their inbox.
         val adminInbox = invitation.adminPubkeyHex?.lowercase()
@@ -172,6 +188,10 @@ class GroupStateVerifier(
             return
         }
 
+        // `record` is idempotent on groupIdHex, so an entry parked
+        // earlier (locally, for a reason the admin couldn't fix) would
+        // keep its old status and the card would go on naming the wrong
+        // party. Update it explicitly for that case.
         store.record(
             PendingGroupVerification(
                 groupIdHex = groupIdHex,
@@ -181,6 +201,7 @@ class GroupStateVerifier(
                 receivedAt = Instant.now(),
             ),
         )
+        store.updateStatus(groupIdHex, PendingGroupVerification.Status.VERIFYING)
         mutex.withLock {
             targets[groupIdHex] = RefreshTarget(
                 groupId = invitation.groupId.copyOf(),
@@ -240,8 +261,42 @@ class GroupStateVerifier(
                 receivedAt = java.time.Instant.now(),
             ),
         )
-        // Deliberately no `targets` entry and no send: there is nobody
-        // to ask. Retry re-reads the chain instead.
+        // No `targets` entry and no send: there is nobody to ask. The
+        // card offers Retry, and a settling group additionally
+        // re-reads on its own — the flagship case is an admin approving
+        // seconds after `create_group`, where the fix is purely the
+        // passage of time and asking the user to tap would be noise.
+        if (status == PendingGroupVerification.Status.CHAIN_SETTLING) {
+            scheduleRecheck(groupIdHex)
+        }
+    }
+
+    /**
+     * Re-read the chain for a locally-parked snapshot after a short
+     * delay, up to [MAX_AUTO_RECHECKS] times.
+     *
+     * Bounded on purpose: each attempt that still fails re-parks the
+     * snapshot, which would otherwise schedule another and poll the
+     * relayer forever for a group that is never coming. Once the budget
+     * is spent the card still has its Retry.
+     */
+    private suspend fun scheduleRecheck(groupIdHex: String) {
+        val parked = mutex.withLock {
+            val spent = recheckAttempts[groupIdHex] ?: 0
+            if (spent >= MAX_AUTO_RECHECKS) return
+            recheckAttempts[groupIdHex] = spent + 1
+            timeouts[groupIdHex]?.cancel()
+            localDeferrals[groupIdHex]
+        } ?: return
+        val job = scope.launch {
+            delay(RECHECK_DELAY_MILLIS)
+            reverify?.invoke(
+                parked.invitation,
+                parked.ownerIdentityId,
+                parked.senderEd25519PublicKey,
+            )
+        }
+        mutex.withLock { timeouts[groupIdHex] = job }
     }
 
     private suspend fun sendRefresh(groupIdHex: String) {
@@ -299,11 +354,18 @@ class GroupStateVerifier(
 
     private suspend fun resolve(materializedHexes: Set<String>) {
         mutex.withLock {
-            val resolved = targets.keys.filter { materializedHexes.contains(it) }
+            val resolved = (targets.keys + localDeferrals.keys)
+                .filter { materializedHexes.contains(it) }
+                .toSet()
             for (hex in resolved) {
                 timeouts[hex]?.cancel()
                 timeouts.remove(hex)
                 targets.remove(hex)
+                // Verified on a later pass — drop the retained snapshot
+                // so a group secret doesn't outlive the reason it was
+                // kept.
+                localDeferrals.remove(hex)
+                recheckAttempts.remove(hex)
             }
         }
         store.resolveMaterialized(materializedHexes)
@@ -356,6 +418,10 @@ class GroupStateVerifier(
     }
 
     private companion object {
+        /** A settling chain is seconds away, not minutes. */
+        const val RECHECK_DELAY_MILLIS = 5_000L
+        const val MAX_AUTO_RECHECKS = 3
+
         private val jsonFormat = Json { encodeDefaults = true }
 
         private fun ByteArray.toHexLowercase(): String =

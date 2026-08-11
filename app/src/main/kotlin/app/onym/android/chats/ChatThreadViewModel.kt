@@ -95,6 +95,10 @@ class ChatThreadViewModel(
     /** Lowercase BLS pubkey hex of the active identity, for the
      *  admin gate below. Null when no identity is loaded. */
     private val activeBlsPubkeyHex: StateFlow<String?> = MutableStateFlow(null),
+    /** Fallback shown when a joiner's self-asserted alias is blank.
+     *  Injected because this module builds no strings of its own — the
+     *  app passes `R.string.chat_join_request_unnamed`. */
+    private val unnamedJoinerLabel: String = "(unnamed)",
 ) : ViewModel() {
 
     /** Incoming message ids we've already emitted a read receipt for,
@@ -173,7 +177,12 @@ class ChatThreadViewModel(
                     .map { request ->
                         ChatJoinRequestDisplay(
                             requestId = request.id,
-                            alias = request.joinerDisplayLabel.trim(),
+                            // An alias is self-asserted and may arrive
+                            // blank; without a fallback the row reads
+                            // " wants to join". The deleted screen had
+                            // `displayAlias()` for exactly this.
+                            alias = request.joinerDisplayLabel.trim()
+                                .ifEmpty { unnamedJoinerLabel },
                             fingerprint = request.joinerInboxPublicKey
                                 .take(8)
                                 .joinToString("") { "%02x".format(it) } + "\u2026",

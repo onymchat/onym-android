@@ -84,6 +84,110 @@ class GroupStateVerifierTest {
         refreshTimeoutMillis = 10 * 60 * 1000,
     )
 
+    /**
+     * A snapshot parked locally must still be able to escalate.
+     *
+     * The sequence is real: offline at launch parks it
+     * CHAIN_UNREACHABLE; the device comes back, the chain has moved past
+     * the 64-entry archive window, so the admin genuinely becomes the
+     * only source of current state. An early return on "already in the
+     * store" left the card saying "check your connection" forever, with
+     * a Retry that only re-read the chain.
+     */
+    @Test
+    fun locallyParkedSnapshot_canEscalateToTheAdmin() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+
+        verifier.deferLocally(
+            invitation,
+            owner,
+            senderEd25519PublicKey = null,
+            status = PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+        )
+        assertEquals(
+            PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+            store.snapshots.value.single().status,
+        )
+
+        // Now the same group needs the admin.
+        verifier.deferVerification(invitation, owner)
+
+        assertEquals(
+            PendingGroupVerification.Status.VERIFYING,
+            store.snapshots.value.single().status,
+        )
+        assertEquals("escalation must actually ask the admin", 1, transport.sends().size)
+    }
+
+    /** An outstanding request is the one reason to skip: re-sending
+     *  while the admin is mid-reply just burns relay budget. */
+    @Test
+    fun deferVerification_whileAlreadyVerifying_doesNotResend() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+
+        verifier.deferVerification(invitation, owner)
+        verifier.deferVerification(invitation, owner)
+
+        assertEquals(1, transport.sends().size)
+    }
+
+    /** A snapshot parked for a reason the admin can't fix must send
+     *  nothing — a refresh request would be answered promptly and change
+     *  nothing, while telling the user the wrong party is at fault. */
+    @Test
+    fun deferLocally_sendsNothingToTheAdmin() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+
+        verifier.deferLocally(
+            invitation,
+            owner,
+            senderEd25519PublicKey = null,
+            status = PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED,
+        )
+
+        assertEquals(0, transport.sends().size)
+        assertEquals(
+            PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED,
+            store.snapshots.value.single().status,
+        )
+    }
+
     /** A snapshot whose admin we can't reach (no admin entry in the
      *  shipped roster) is recorded as UNREACHABLE and surfaced — not
      *  silently dropped, never materialized. */

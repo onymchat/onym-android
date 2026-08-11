@@ -51,10 +51,15 @@ class RoomIntroRequestStore(
 
     override suspend fun record(request: IntroRequest): Boolean = mutex.withLock {
         if (dao.count(request.id) > 0) {
-            // Backfill a row written before `firstSeenAtMillis` existed.
-            // Its clock starts now rather than at some sender-asserted
-            // past, so a migrated request gets a full window instead of
-            // being swept on the next read.
+            // Backfill a row written before `firstSeenAtMillis` existed
+            // (the column is nullable for migration). Its clock starts
+            // now rather than at some sender-asserted past, so a
+            // migrated request gets a full window instead of being swept
+            // on the next read.
+            //
+            // Only ever stamps a NULL — see the DAO. A relay replay of
+            // an already-stamped request must not reset its clock, or
+            // retention never fires at all.
             dao.stampFirstSeen(request.id, now())
             return@withLock false
         }

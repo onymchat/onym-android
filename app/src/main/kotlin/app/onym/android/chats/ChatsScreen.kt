@@ -71,7 +71,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.filled.MailOutline
-import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.runtime.collectAsState
 import app.onym.android.strings.R
 import app.onym.android.chain.SepGroupType

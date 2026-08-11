@@ -645,7 +645,6 @@
     <item quantity="many">%d участников</item>
     <item quantity="other">%d участника</item>
   </plurals>
-  <string name="approve_default_person">Этот человек</string>
   <string name="group_fallback_name">Группа</string>
   <string name="identity_default_name">Личность</string>
   <string name="share_invite_chooser_title">Поделиться ссылкой-приглашением</string>

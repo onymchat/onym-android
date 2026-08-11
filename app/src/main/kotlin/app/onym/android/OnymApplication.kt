@@ -925,6 +925,9 @@ class OnymApplication : Application() {
                     // "Join requests" screen.
                     approveRequests = approveRequestsViewModel,
                     activeBlsPubkeyHex = activeBlsPubkeyHex,
+                    unnamedJoinerLabel = getString(
+                        app.onym.android.strings.R.string.chat_join_request_unnamed,
+                    ),
                 )
             },
             makeSearchViewModel = {

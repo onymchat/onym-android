@@ -122,6 +122,38 @@ class RoomIntroRequestStoreTest {
         assertTrue(store.requests.value.isEmpty())
     }
 
+    /**
+     * The live path, which the single-insert tests above never reach.
+     *
+     * Relays replay the inbox on every reconnect, so `record` sees the
+     * same id repeatedly. If a replay re-stamped `firstSeenAtMillis` the
+     * retention clock would reset each time and nothing would ever age
+     * out — the sweep would look correct in tests and be dead in
+     * production.
+     */
+    @Test
+    fun replaysDoNotResetTheRetentionClock() = runTest {
+        val store = store()
+        store.record(request("evt-replayed"))
+
+        // Six days pass, with a reconnect replaying the same event each
+        // day — exactly what the relay does.
+        repeat(6) {
+            nowMillis += 24L * 60L * 60L * 1000L
+            assertFalse(store.record(request("evt-replayed")))
+        }
+        assertEquals(listOf("evt-replayed"), store.requests.value.map { it.id })
+
+        // Day eight from FIRST sight, not from the last replay.
+        nowMillis += 2L * 24L * 60L * 60L * 1000L
+        store.start()
+
+        assertTrue(
+            "retention must measure from first sight, not from the last replay",
+            store.requests.value.isEmpty(),
+        )
+    }
+
     @Test
     fun requestJustInsideRetention_isKept() = runTest {
         val store = store()

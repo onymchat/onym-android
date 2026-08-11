@@ -284,8 +284,10 @@ private fun VerifyingCard(
                     )
                 }
             }
-            // Not stuck — early. No Retry button: this clears itself,
-            // and offering an action implies the user is holding it up.
+            // Early rather than stuck: the verifier re-reads the chain
+            // on its own a few seconds from now. The Retry is still
+            // here, because the auto-recheck budget is finite and a
+            // spinner with no way out is worse than a redundant button.
             PendingGroupVerification.Status.CHAIN_SETTLING -> {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -297,6 +299,14 @@ private fun VerifyingCard(
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("pending_invites.verifying_retry.${entry.groupIdHex}"),
+                ) {
+                    Text(stringResource(R.string.retry))
                 }
             }
             // The three failures name different parties because they

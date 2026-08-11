@@ -647,7 +647,6 @@
     <item quantity="one">%d member</item>
     <item quantity="other">%d members</item>
   </plurals>
-  <string name="approve_default_person">This person</string>
   <string name="group_fallback_name">Group</string>
   <string name="identity_default_name">Identity</string>
   <string name="share_invite_chooser_title">Share invite link</string>

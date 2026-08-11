@@ -96,6 +96,13 @@ class PendingVerificationStore {
             publishLocked()
         }
 
+    /** This group's current status, or null when it isn't parked.
+     *  Callers that need to distinguish "already asking the admin" from
+     *  "parked locally" read this rather than [contains]. */
+    suspend fun status(groupIdHex: String): PendingGroupVerification.Status? = mutex.withLock {
+        all.firstOrNull { it.groupIdHex == groupIdHex }?.status
+    }
+
     suspend fun contains(groupIdHex: String): Boolean = mutex.withLock {
         all.any { it.groupIdHex == groupIdHex }
     }

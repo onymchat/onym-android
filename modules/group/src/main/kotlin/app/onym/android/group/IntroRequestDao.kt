@@ -23,8 +23,19 @@ interface IntroRequestDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(row: PersistedIntroRequest)
 
-    /** Backfill for rows written before `firstSeenAtMillis` existed. */
-    @Query("UPDATE intro_requests SET firstSeenAtMillis = :atMillis WHERE id = :id")
+    /**
+     * Backfill for rows written before `firstSeenAtMillis` existed.
+     *
+     * `AND firstSeenAtMillis IS NULL` is load-bearing, not defensive.
+     * Relays replay the inbox on every reconnect, so `record` sees the
+     * same id again and again; without the guard each replay would push
+     * the retention clock forward and no request would ever age out —
+     * defeating the sweep entirely.
+     */
+    @Query(
+        "UPDATE intro_requests SET firstSeenAtMillis = :atMillis " +
+            "WHERE id = :id AND firstSeenAtMillis IS NULL",
+    )
     suspend fun stampFirstSeen(id: String, atMillis: Long)
 
     @Query("DELETE FROM intro_requests WHERE id = :id")
