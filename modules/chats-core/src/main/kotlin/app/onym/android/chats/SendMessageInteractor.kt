@@ -264,6 +264,15 @@ class SendMessageInteractor(
         }
 
         val encoded = encodeVideo(videoUri) ?: throw SendMessageError.VideoEncodeFailed
+        // Reject on the *plaintext* size before sealing. Sealing
+        // allocates a second copy of the whole clip, so checking only
+        // afterwards meant a 95MB video briefly held ~190MB — enough to
+        // OOM a low-memory device while producing a blob we were always
+        // going to throw away. The post-seal check below stays: it is
+        // the authoritative one, since the ciphertext carries a nonce
+        // and tag and can cross the limit when the plaintext sits just
+        // under it.
+        if (encoded.mp4.size > MAX_UPLOAD_BYTES) throw SendMessageError.VideoTooLarge
         val posterSealed = ChatImageCrypto.seal(encoded.poster.jpeg)
         val videoSealed = ChatImageCrypto.seal(encoded.mp4)
         if (videoSealed.blob.size > MAX_UPLOAD_BYTES) throw SendMessageError.VideoTooLarge
@@ -385,6 +394,10 @@ class SendMessageInteractor(
                 }
                 is ChatMediaSource.Video -> {
                     val encoded = encodeVideo(source.uri) ?: continue
+                    // Skip before sealing — an album can carry several
+                    // clips, so encrypting each oversize one just to
+                    // drop it multiplies the transient allocation.
+                    if (encoded.mp4.size > MAX_UPLOAD_BYTES) continue
                     val posterSealed = ChatImageCrypto.seal(encoded.poster.jpeg)
                     val videoSealed = ChatImageCrypto.seal(encoded.mp4)
                     if (videoSealed.blob.size > MAX_UPLOAD_BYTES) continue
@@ -489,6 +502,9 @@ class SendMessageInteractor(
             else -> throw SendMessageError.UnsupportedGroupType(group.groupType)
         }
 
+        // Same pre-check as `sendVideo`: don't encrypt a clip we are
+        // about to reject.
+        if (audioBytes.size > MAX_UPLOAD_BYTES) throw SendMessageError.VideoTooLarge
         val sealed = ChatImageCrypto.seal(audioBytes)
         if (sealed.blob.size > MAX_UPLOAD_BYTES) throw SendMessageError.VideoTooLarge
 
