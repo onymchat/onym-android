@@ -115,8 +115,7 @@ fun ChatMembersScreen(
     val canShareInvite = remember(group, identityRows, activeBlsHex) {
         val g = group ?: return@remember false
         if (g.groupType != SepGroupType.TYRANNY) return@remember false
-        val storedAdminHex = g.adminPubkeyHex?.lowercase() ?: return@remember false
-        activeBlsHex != null && activeBlsHex.lowercase() == storedAdminHex
+        g.isAdmin(activeBlsHex)
     }
     val showShareInvite = onShareInviteClick != null && canShareInvite
 

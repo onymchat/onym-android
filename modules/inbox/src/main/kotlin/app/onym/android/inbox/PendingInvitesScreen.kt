@@ -48,11 +48,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * Invitee-side "you've been invited" list — the push counterpart to the
- * deeplink [app.onym.android.group.JoinScreen]. Mirrors
- * [app.onym.android.group.ApproveRequestsScreen]: a modal of cards, each
+ * deeplink [app.onym.android.group.JoinScreen]. A modal of cards, each
  * offering Accept (ship a join request) or Dismiss. Accept is the
  * explicit step; the group only appears once the admin approves the
  * resulting request on chain.
+ *
+ * (The admin-side approval modal this once mirrored is gone — those
+ * requests now render inside the group's chat thread.)
  *
  * Mirrors `PendingInvitesView` from onym-ios PR #158.
  */

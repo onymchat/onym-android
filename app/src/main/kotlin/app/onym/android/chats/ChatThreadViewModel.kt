@@ -2,8 +2,10 @@ package app.onym.android.chats
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.onym.android.group.ApproveRequestsViewModel
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupRepository
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -82,6 +84,17 @@ class ChatThreadViewModel(
     /** Symmetric read-receipt gate — when `false`, no read receipts are
      *  emitted (and, on the receive side, none are honored). */
     private val readReceiptsEnabled: () -> Boolean = { true },
+    /** Drives the in-thread join-request rows. This replaced the
+     *  separate "Join requests" screen: the founder now accepts or
+     *  declines from inside the conversation the request is about,
+     *  because a badged toolbar button on another screen was not
+     *  something new users ever found.
+     *
+     *  Null in tests that don't exercise the surface. */
+    private val approveRequests: ApproveRequestsViewModel? = null,
+    /** Lowercase BLS pubkey hex of the active identity, for the
+     *  admin gate below. Null when no identity is loaded. */
+    private val activeBlsPubkeyHex: StateFlow<String?> = MutableStateFlow(null),
 ) : ViewModel() {
 
     /** Incoming message ids we've already emitted a read receipt for,
@@ -125,6 +138,65 @@ class ChatThreadViewModel(
             }
         }
         .asStateFlow()
+
+    /**
+     * Pending join requests belonging to *this* group, shaped for the
+     * thread's row. Empty for non-admins and for groups with nothing
+     * outstanding.
+     *
+     * Requests are already cryptographically founder-only — they arrive
+     * sealed to an intro private key that only the inviting device
+     * holds, so a non-founder's pending list is empty by construction.
+     * The admin gate is the belt to that braces: if a device ever ends
+     * up holding an intro key for a group it doesn't administer, the row
+     * still doesn't render, because approving would fail on chain with
+     * `NotAdminOfThisGroup` anyway.
+     */
+    val joinRequests: StateFlow<List<ChatJoinRequestDisplay>> =
+        if (approveRequests == null) {
+            MutableStateFlow(emptyList())
+        } else {
+            combine(
+                group,
+                activeBlsPubkeyHex,
+                approveRequests.pending,
+                approveRequests.inFlight,
+                approveRequests.errors,
+            ) { grp, activeHex, pending, inFlight, errors ->
+                if (grp == null || !grp.isAdmin(activeHex)) return@combine emptyList()
+                pending
+                    .filter { it.groupId.contentEquals(grp.groupIdBytes) }
+                    // The approver hands them back newest-first (matching
+                    // the old modal list); the thread reads oldest-at-top
+                    // like every other row.
+                    .reversed()
+                    .map { request ->
+                        ChatJoinRequestDisplay(
+                            requestId = request.id,
+                            alias = request.joinerDisplayLabel.trim(),
+                            fingerprint = request.joinerInboxPublicKey
+                                .take(8)
+                                .joinToString("") { "%02x".format(it) } + "\u2026",
+                            isInFlight = request.id in inFlight,
+                            // Each row reads its own failure, so two
+                            // outstanding errors both stay explained.
+                            errorText = errors[request.id],
+                        )
+                    }
+            }.stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
+        }
+
+    fun acceptJoinRequest(requestId: String) {
+        approveRequests?.approve(requestId)
+    }
+
+    fun declineJoinRequest(requestId: String) {
+        approveRequests?.decline(requestId)
+    }
 
     private val _sendInFlight = MutableStateFlow(false)
     /** `true` while a send is queued through the interactor. UI uses

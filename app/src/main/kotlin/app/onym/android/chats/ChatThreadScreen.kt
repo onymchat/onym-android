@@ -111,6 +111,7 @@ fun ChatThreadScreen(
 ) {
     val group by viewModel.group.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val joinRequests by viewModel.joinRequests.collectAsStateWithLifecycle()
     val replyingTo by viewModel.replyingTo.collectAsStateWithLifecycle()
     val pendingMedia by viewModel.pendingMedia.collectAsStateWithLifecycle()
 
@@ -207,6 +208,9 @@ fun ChatThreadScreen(
         } else {
             ChatThreadBody(
                 messages = messages,
+                joinRequests = joinRequests,
+                onAcceptJoinRequest = viewModel::acceptJoinRequest,
+                onDeclineJoinRequest = viewModel::declineJoinRequest,
                 // Member profiles flow from the same live `group`
                 // snapshot the title reads, so a joiner landing or an
                 // alias edit repaints the rendered name headers without
@@ -321,6 +325,11 @@ private fun ChatThreadBody(
     replyingTo: java.util.UUID?,
     onArmReply: (java.util.UUID) -> Unit,
     onCancelReply: () -> Unit,
+    /** Founder-only join-request rows for this group, already filtered
+     *  and admin-gated by the ViewModel. */
+    joinRequests: List<ChatJoinRequestDisplay> = emptyList(),
+    onAcceptJoinRequest: (String) -> Unit = {},
+    onDeclineJoinRequest: (String) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     // Defensive sort. The repository's contract is ascending by
@@ -522,6 +531,19 @@ private fun ChatThreadBody(
                         },
                         isHighlighted = message.id == highlightedId,
                         onSwipeReply = { onArmReply(message.id) },
+                    )
+                }
+                // Requests pin below the messages: they are the live
+                // thing awaiting action, and the thread is read
+                // bottom-up.
+                items(
+                    items = joinRequests,
+                    key = { "join_request:" + it.requestId },
+                ) { request ->
+                    ChatJoinRequestRow(
+                        display = request,
+                        onAccept = onAcceptJoinRequest,
+                        onDecline = onDeclineJoinRequest,
                     )
                 }
             }

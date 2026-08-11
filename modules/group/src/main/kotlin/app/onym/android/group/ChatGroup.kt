@@ -161,6 +161,28 @@ data class ChatGroup(
     val groupIdBytes: ByteArray
         get() = bytesFromHex(id)
 
+    /**
+     * Whether [blsPubkeyHex] is this group's admin.
+     *
+     * One derivation, shared by every surface that gates on it — the
+     * invite-sharing button, the group-photo editor, the in-thread
+     * join-request rows and the chat-list request signal. iOS ended up
+     * with three hand-rolled copies of this that had already started to
+     * drift.
+     *
+     * Compares against the stored [adminPubkeyHex] rather than
+     * [ownerIdentityId], which only says "this device's copy of the
+     * thread belongs to that identity" — true for every joiner too.
+     * Groups with no privileged member (Anarchy, OneOnOne) carry no
+     * [adminPubkeyHex] and so answer `false` for everyone; callers that
+     * additionally require a particular governance model check
+     * [groupType] themselves.
+     */
+    fun isAdmin(blsPubkeyHex: String?): Boolean {
+        val storedAdminHex = adminPubkeyHex?.lowercase() ?: return false
+        return blsPubkeyHex != null && blsPubkeyHex.lowercase() == storedAdminHex
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is ChatGroup) return false

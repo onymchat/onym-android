@@ -40,6 +40,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -604,6 +605,23 @@ class OnymApplication : Application() {
         // uses it directly for the member + joiner notices, and the
         // approver reaches the same instance through the
         // GroupSystemEventRecording seam.
+        // Active identity's BLS pubkey hex, for the surfaces that gate
+        // on "am I this group's admin". Derived once rather than
+        // re-hashed per screen.
+        val activeBlsPubkeyHex: kotlinx.coroutines.flow.StateFlow<String?> =
+            kotlinx.coroutines.flow.combine(
+                identityRepository.identities,
+                identityRepository.currentIdentityId,
+            ) { summaries, currentId ->
+                summaries.firstOrNull { it.id == currentId }
+                    ?.blsPublicKey
+                    ?.joinToString("") { b -> "%02x".format(b) }
+            }.stateIn(
+                scope = applicationScope,
+                started = kotlinx.coroutines.flow.SharingStarted.Eagerly,
+                initialValue = null,
+            )
+
         val chatSystemEvents = app.onym.android.chats.ChatSystemEventRecorder(
             messageRepository = messageRepository,
         )
@@ -864,6 +882,10 @@ class OnymApplication : Application() {
                     imageLoader = imageLoader,
                     videoLoader = videoLoader,
                     voiceLoader = voiceLoader,
+                    // In-thread join requests, replacing the deleted
+                    // "Join requests" screen.
+                    approveRequests = approveRequestsViewModel,
+                    activeBlsPubkeyHex = activeBlsPubkeyHex,
                 )
             },
             makeSearchViewModel = {

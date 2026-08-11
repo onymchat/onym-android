@@ -62,6 +62,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -73,7 +75,6 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.runtime.collectAsState
 import app.onym.android.strings.R
 import app.onym.android.chain.SepGroupType
-import app.onym.android.group.ApproveRequestsToolbarBadge
 import app.onym.android.group.ApproveRequestsViewModel
 import app.onym.android.group.ChatGroup
 import app.onym.android.design.OnymAccent
@@ -97,7 +98,6 @@ fun ChatsScreen(
     viewModel: ChatsViewModel,
     onCreateGroup: () -> Unit,
     approveRequestsViewModel: ApproveRequestsViewModel? = null,
-    onOpenApproveRequests: (() -> Unit)? = null,
     pendingInvitesViewModel: PendingInvitesViewModel? = null,
     onOpenInvitations: (() -> Unit)? = null,
     onOpenChat: (groupId: String) -> Unit = {},
@@ -111,6 +111,25 @@ fun ChatsScreen(
     val verifyingInvites by (pendingInvitesViewModel?.verifying?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(emptyList<app.onym.android.inbox.PendingGroupVerification>()) })
     val inviteBadgeCount = pendingInvites.size + verifyingInvites.size
+
+    // Pending join requests per group id, for the chat-list signal.
+    //
+    // Removing the toolbar badge took away the *only* ambient hint that
+    // someone was waiting. A request isn't a ChatMessage, so it moves no
+    // `latestPreview`, and the "X joined" notice it eventually becomes
+    // is deliberately excluded from `unreadCount` — so without this a
+    // founder who never opens that particular thread would see nothing
+    // at all. That is the same discoverability failure this change set
+    // out to fix, one screen further in.
+    //
+    // Built once per render rather than per row. Only the admin's
+    // device ever has entries: a request is sealed to an intro key no
+    // one else holds.
+    val joinRequestCounts: Map<String, Int> = remember(pending) {
+        pending.groupingBy { request ->
+            request.groupId.joinToString("") { "%02x".format(it) }
+        }.eachCount()
+    }
 
     // The chat awaiting a swipe-to-delete confirmation, if any.
     var pendingDelete by remember { mutableStateOf<ChatListItem?>(null) }
@@ -132,31 +151,13 @@ fun ChatsScreen(
                             contentDescription = stringResource(R.string.chats_scan_to_join),
                         )
                     }
-                    if (approveRequestsViewModel != null && onOpenApproveRequests != null) {
-                        Box(modifier = Modifier.padding(end = 4.dp)) {
-                            IconButton(
-                                onClick = onOpenApproveRequests,
-                                modifier = Modifier.testTag("approve_requests.toolbar_button"),
-                            ) {
-                                Icon(
-                                    Icons.Filled.PersonAdd,
-                                    contentDescription = stringResource(R.string.join_requests_cd),
-                                )
-                            }
-                            // Numeric red-badge overlay anchored top-end
-                            // of the icon button. Mirrors the iOS
-                            // ZStack(.topTrailing) layout.
-                            if (pending.isNotEmpty()) {
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .offset(x = (-4).dp, y = 6.dp),
-                                ) {
-                                    ApproveRequestsToolbarBadge(pending.size)
-                                }
-                            }
-                        }
-                    }
+                    // Join requests used to live behind a badged button
+                    // here, opening a modal list. New users never found
+                    // it — nothing in the conversation told them someone
+                    // was waiting. They now render as a row inside the
+                    // group's own thread, surfaced on the list row
+                    // itself (see `joinRequestCounts`), so there is no
+                    // separate surface to discover.
                     // Invitations received by this identity (push offers).
                     // Same always-rendered + badge-on-nonempty treatment as
                     // the join-requests button.
@@ -219,6 +220,7 @@ fun ChatsScreen(
                         item = item,
                         onClick = { onOpenChat(item.group.id) },
                         onRequestDelete = { pendingDelete = item },
+                        joinRequestCount = joinRequestCounts[item.group.id] ?: 0,
                     )
                     HorizontalDivider(thickness = 0.5.dp)
                 }
@@ -272,6 +274,7 @@ private fun SwipeableChatRow(
     item: ChatListItem,
     onClick: () -> Unit,
     onRequestDelete: () -> Unit,
+    joinRequestCount: Int = 0,
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -290,7 +293,7 @@ private fun SwipeableChatRow(
         enableDismissFromEndToStart = true,
         modifier = Modifier.testTag("chats.row.swipe.${item.group.id}"),
     ) {
-        ChatsRow(item = item, onClick = onClick)
+        ChatsRow(item = item, onClick = onClick, joinRequestCount = joinRequestCount)
     }
 }
 
@@ -451,6 +454,10 @@ private fun BenefitRow(
 private fun ChatsRow(
     item: ChatListItem,
     onClick: () -> Unit,
+    /** Join requests waiting in this group's thread. Drives the row's
+     *  "someone wants in" signal — the replacement for the toolbar
+     *  badge this change removed. */
+    joinRequestCount: Int = 0,
 ) {
     val group = item.group
     Row(
@@ -476,22 +483,46 @@ private fun ChatsRow(
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
             )
-            Text(
-                text = item.latestPreview?.takeIf { it.isNotEmpty() } ?: subtitleFor(group),
-                style = MaterialTheme.typography.bodySmall,
-                // Unread rows read a touch stronger than the muted metadata.
-                color = if (item.unreadCount > 0) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.testTag("chats.row.subtitle.${group.id}"),
-            )
+            if (joinRequestCount > 0) {
+                // Takes the subtitle outright rather than sitting beside
+                // the last message: it is the only line in the row that
+                // needs an action, and a small badge alone is what
+                // nobody noticed on the toolbar.
+                Text(
+                    text = if (joinRequestCount == 1) {
+                        stringResource(R.string.chats_join_request_one)
+                    } else {
+                        stringResource(R.string.chats_join_request_many, joinRequestCount)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("chats.row.join_request.${group.id}"),
+                )
+            } else {
+                Text(
+                    text = item.latestPreview?.takeIf { it.isNotEmpty() } ?: subtitleFor(group),
+                    style = MaterialTheme.typography.bodySmall,
+                    // Unread rows read a touch stronger than the muted metadata.
+                    color = if (item.unreadCount > 0) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("chats.row.subtitle.${group.id}"),
+                )
+            }
         }
 
-        if (item.unreadCount > 0) {
+        if (joinRequestCount > 0) {
+            JoinRequestBadge(
+                count = joinRequestCount,
+                modifier = Modifier.testTag("chats.row.join_request_badge.${group.id}"),
+            )
+        } else if (item.unreadCount > 0) {
             UnreadBadge(
                 count = item.unreadCount,
                 modifier = Modifier.testTag("chats.row.unread.${group.id}"),
@@ -504,6 +535,33 @@ private fun ChatsRow(
                 modifier = Modifier.size(18.dp),
             )
         }
+    }
+}
+
+/**
+ * Accent-coloured counterpart to [UnreadBadge] for pending join
+ * requests. Deliberately not the error colour: this is an invitation to
+ * act, not a backlog of unread messages, and a founder should be able to
+ * tell the two apart at a glance down the list.
+ */
+@Composable
+private fun JoinRequestBadge(count: Int, modifier: Modifier = Modifier) {
+    val description = stringResource(R.string.chats_join_request_badge_cd, count)
+    Box(
+        modifier = modifier
+            .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 6.dp)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = if (count > 99) "99+" else count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onPrimary,
+        )
     }
 }
 
