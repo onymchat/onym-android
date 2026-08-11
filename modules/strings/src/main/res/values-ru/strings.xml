@@ -547,6 +547,19 @@
   <string name="approve_empty_body">Люди, нажавшие на одну из ваших ссылок-приглашений, появятся здесь.</string>
   <string name="approve_wants_to_join">хочет вступить в «%1$s»</string>
   <string name="approve_default_inbox_label">входящие</string>
+  <!-- In-thread membership notices (ChatSystemNotice). -->
+  <string name="chat_system_member_joined">Теперь в группе: %1$s</string>
+  <string name="chat_system_you_joined">Вы присоединились к %1$s</string>
+  <!-- In-thread join request (ChatJoinRequestRow). -->
+  <string name="chat_join_request_wants_to_join">%1$s хочет присоединиться</string>
+  <string name="chat_join_request_inbox">входящий ключ %1$s</string>
+  <string name="chat_join_request_accept">Принять</string>
+  <string name="chat_join_request_anchoring">Запись в сеть…</string>
+  <string name="chat_join_request_unnamed">(без имени)</string>
+  <!-- Chat-list signal that requests are waiting in a group. -->
+  <string name="chats_join_request_one">Кто-то хочет присоединиться</string>
+  <string name="chats_join_request_many">Хотят присоединиться: %1$d</string>
+  <string name="chats_join_request_badge_cd">Запросов на вступление: %1$d</string>
   <string name="approve_generating_proof">Генерируется доказательство и обновляется обязательство в блокчейне. Обычно это занимает несколько секунд.</string>
   <string name="approve_group_not_local">Этот запрос относится к группе, которой нет на этом устройстве. Отклоните, чтобы убрать его.</string>
   <string name="approve_member_added_snackbar">%1$s теперь в группе.</string>

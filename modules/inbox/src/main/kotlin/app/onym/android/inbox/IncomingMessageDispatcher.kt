@@ -8,6 +8,7 @@ import app.onym.android.chats.ChatMessagePayload
 import app.onym.android.chats.ChatMessageVariant
 import app.onym.android.chats.ChatReceiptPayload
 import app.onym.android.chats.ChatReceiptSending
+import app.onym.android.chats.ChatSystemEventRecorder
 import app.onym.android.chats.MessageDirection
 import app.onym.android.chats.NoopChatReceiptSender
 import app.onym.android.chats.MessageRepository
@@ -104,6 +105,13 @@ class IncomingMessageDispatcher(
      *  sends read receipts. Defaulted to `true` (the shipping
      *  default). */
     private val readReceiptsEnabled: () -> Boolean = { true },
+    /** Mints the membership notices this device is entitled to render:
+     *  "X joined" off a verified announcement, "You joined X" off a
+     *  verified invitation. Nullable and defaulted like
+     *  [messageRepository] above, so existing dispatcher tests keep
+     *  their construction sites — a null recorder simply writes no
+     *  notices. */
+    private val systemEvents: ChatSystemEventRecorder? = null,
 ) {
 
     suspend fun dispatch(
@@ -316,7 +324,32 @@ class IncomingMessageDispatcher(
             // The group's invitation/intro, as the sender wrote it.
             invitationMessage = invitation.invitationMessage,
         )
+
+        // Was this thread already on the device? Relays replay the inbox
+        // on every reconnect, so a re-delivered invitation is routine —
+        // only the first one is a "you joined" moment.
+        val alreadyPresent = groupRepository.snapshots.value.any {
+            it.id == groupIdHex && it.ownerIdentityId == ownerIdentityId.value
+        }
+
         groupRepository.insert(group)
+
+        // Open the joiner's brand-new thread with a line explaining what
+        // it is, instead of a blank screen, now that the invitation has
+        // cleared verification above.
+        if (!alreadyPresent) {
+            val self = selfMemberProfileEntry(ownerIdentityId)
+            if (self != null) {
+                systemEvents?.recordYouJoined(
+                    groupId = groupIdHex,
+                    ownerIdentityId = ownerIdentityId.value,
+                    groupType = groupType,
+                    groupName = invitation.name,
+                    ownBlsPubkeyHex = self.first,
+                    atMillis = System.currentTimeMillis(),
+                )
+            }
+        }
     }
 
     private fun selfMemberProfileEntry(
@@ -457,6 +490,21 @@ class IncomingMessageDispatcher(
             )),
         )
         groupRepository.insert(updated)
+
+        // "X joined", for every existing member. Reached only past the
+        // dedup guard above (`memberProfiles[key] != null`), the
+        // authorized-signer check and the on-chain commitment check — so
+        // a relay replaying this announcement on each reconnect cannot
+        // append a second notice, and an unverified announcement cannot
+        // append one at all.
+        systemEvents?.recordMemberJoined(
+            groupId = updated.id,
+            ownerIdentityId = updated.ownerIdentityId,
+            groupType = updated.groupType,
+            joinerBlsPubkeyHex = key,
+            alias = payload.newMember.alias,
+            atMillis = System.currentTimeMillis(),
+        )
     }
 
     private fun tryDecodeAnnouncement(bytes: ByteArray): MemberAnnouncementPayload? = try {

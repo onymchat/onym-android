@@ -551,6 +551,19 @@
   <string name="approve_empty_body">People who tap one of your invite links show up here.</string>
   <string name="approve_wants_to_join">wants to join “%1$s”</string>
   <string name="approve_default_inbox_label">inbox</string>
+  <!-- In-thread membership notices (ChatSystemNotice). -->
+  <string name="chat_system_member_joined">%1$s joined</string>
+  <string name="chat_system_you_joined">You joined %1$s</string>
+  <!-- In-thread join request (ChatJoinRequestRow). -->
+  <string name="chat_join_request_wants_to_join">%1$s wants to join</string>
+  <string name="chat_join_request_inbox">inbox %1$s</string>
+  <string name="chat_join_request_accept">Accept</string>
+  <string name="chat_join_request_anchoring">Anchoring on chain…</string>
+  <string name="chat_join_request_unnamed">(unnamed)</string>
+  <!-- Chat-list signal that requests are waiting in a group. -->
+  <string name="chats_join_request_one">Someone wants to join</string>
+  <string name="chats_join_request_many">%1$d people want to join</string>
+  <string name="chats_join_request_badge_cd">%1$d join requests</string>
   <string name="approve_generating_proof">Generating proof and updating the on-chain commitment. This usually takes a few seconds.</string>
   <string name="approve_group_not_local">This request is for a group that isn’t on this device. Decline to clear it.</string>
   <string name="approve_member_added_snackbar">%1$s is now in the group.</string>

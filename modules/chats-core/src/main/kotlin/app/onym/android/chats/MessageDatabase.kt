@@ -38,7 +38,7 @@ import androidx.room.RoomDatabase
     // existing rows decode to a message with no album.
     // v7 (voice): adds nullable `encryptedVoiceAttachmentJson` BLOB.
     // Additive; existing rows decode to a message with no voice.
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class MessageDatabase : RoomDatabase() {
@@ -150,6 +150,21 @@ object MessageDatabaseMigrations {
     val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE messages ADD COLUMN encryptedVoiceAttachmentJson BLOB")
+        }
+    }
+
+    /**
+     * v7 → v8: add the nullable `encryptedSystemEventJson` BLOB that
+     * marks a row as a locally-minted membership notice. Additive;
+     * every existing row is an ordinary message and decodes to no
+     * event.
+     *
+     * The column is also what the unread query filters on, so notices
+     * do not light up a badge — see `MessageDao.unreadCount`.
+     */
+    val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN encryptedSystemEventJson BLOB")
         }
     }
 }

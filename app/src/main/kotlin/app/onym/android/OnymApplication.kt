@@ -354,6 +354,7 @@ class OnymApplication : Application() {
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_4_5,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_5_6,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_6_7,
+                    app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_7_8,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -599,6 +600,13 @@ class OnymApplication : Application() {
             envelopeSealer = identityRepository,
             inboxTransport = inboxTransport,
         )
+        // One recorder for every system row in the app: the dispatcher
+        // uses it directly for the member + joiner notices, and the
+        // approver reaches the same instance through the
+        // GroupSystemEventRecording seam.
+        val chatSystemEvents = app.onym.android.chats.ChatSystemEventRecorder(
+            messageRepository = messageRepository,
+        )
         val incomingDispatcher = app.onym.android.inbox.IncomingMessageDispatcher(
             envelopeDecrypter = identityRepository,
             groupRepository = groupRepository,
@@ -610,6 +618,7 @@ class OnymApplication : Application() {
             groupStateRefresher = groupStateVerifier,
             receiptSender = chatReceiptSender,
             readReceiptsEnabled = { readReceiptsPreference.current() },
+            systemEvents = chatSystemEvents,
         )
         // Filter the invites surface to the active identity, and cascade
         // a wipe on identity removal — mirrors the per-identity wiring
@@ -714,6 +723,10 @@ class OnymApplication : Application() {
             contracts = contractsRepository,
             networkPreference = networkPreference,
             makeContractTransport = contractTransportFactory,
+            // Gives the admin its own "X joined" row on approve. Every
+            // other member's copy comes from the fanned-out
+            // announcement, which the admin never receives.
+            systemEvents = chatSystemEvents,
         )
         val approveRequestsViewModel = app.onym.android.group.ApproveRequestsViewModel(
             approver = joinRequestApprover,

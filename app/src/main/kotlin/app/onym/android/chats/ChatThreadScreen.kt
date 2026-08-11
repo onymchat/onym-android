@@ -493,6 +493,15 @@ private fun ChatThreadBody(
                     items = sortedMessages,
                     key = { it.id },
                 ) { message ->
+                    // A membership notice is the app talking, not a
+                    // person — it renders as a centred pill with no
+                    // author, no status glyph, and none of the bubble's
+                    // gestures (reply, retry, quote).
+                    val systemEvent = message.systemEvent
+                    if (systemEvent != null) {
+                        ChatSystemNotice(event = systemEvent)
+                        return@items
+                    }
                     ChatBubble(
                         message = message,
                         sender = senderDisplays[message.id] ?: ChatSenderDisplay.Unknown,

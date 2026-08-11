@@ -297,6 +297,16 @@ class ChatThreadViewModel(
         val grp = group.value ?: return
         val bySender = LinkedHashMap<String, MutableList<java.util.UUID>>()
         for (message in snapshot) {
+            // System notices are stored INCOMING and carry a *real*
+            // member's BLS hex — the joiner's for "X joined", this
+            // device's own for "You joined" — and both resolve in
+            // `memberProfiles`. Without the `isSystem` skip, merely
+            // opening a thread would ship a READ receipt for a
+            // locally-minted id that no other device has ever seen, and
+            // the "you joined" row would address one to yourself. Worst
+            // case: a brand-new group with no real messages emits relay
+            // traffic the moment it is opened.
+            if (message.isSystem) continue
             if (message.direction == MessageDirection.INCOMING && message.id !in ackedReadIds) {
                 bySender.getOrPut(message.senderBlsPubkeyHex) { mutableListOf() }.add(message.id)
             }

@@ -87,6 +87,12 @@ open class JoinRequestApprover(
     private val makeContractTransport: (String) -> SepContractTransport = { url ->
         OkHttpSepContractTransport(httpClient = OkHttpClient(), endpointUrl = url)
     },
+    /** Appends the "X joined" notice to the admin's own copy of the
+     *  thread once an approval lands. Every other member gets theirs
+     *  from the fanned-out [MemberAnnouncementPayload]; the admin never
+     *  receives that (it is the sender), so this is the admin's only
+     *  source for the row. */
+    private val systemEvents: GroupSystemEventRecording = NoopGroupSystemEventRecorder,
 ) : JoinRequestApproving {
     /** UI-renderable view of one decrypted, awaiting-action request. */
     data class PendingRequest(
@@ -303,6 +309,17 @@ open class JoinRequestApprover(
                 joinerInboxPub = req.joinerInboxPublicKey,
                 joinerSendingPub = req.joinerSendingPublicKey,
                 joinerAlias = req.joinerDisplayLabel,
+            )
+            // The admin's own "X joined" row. Everyone else derives
+            // theirs from the announcement fanned out just above, which
+            // the admin — as its sender — never receives.
+            systemEvents.recordMemberJoined(
+                groupId = anchored.id,
+                ownerIdentityId = anchored.ownerIdentityId,
+                groupType = anchored.groupType,
+                joinerBlsPubkeyHex = blsPub.toHexLowercase(),
+                alias = req.joinerDisplayLabel,
+                atMillis = System.currentTimeMillis(),
             )
         }
 

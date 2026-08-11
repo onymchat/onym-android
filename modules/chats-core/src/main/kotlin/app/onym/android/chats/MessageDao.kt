@@ -64,11 +64,19 @@ interface MessageDao {
 
     /** Count of *incoming* messages in one group received after
      *  [sinceMillis] — the chat-list unread badge. Plain columns only, so
-     *  no decryption. */
+     *  no decryption.
+     *
+     *  System notices are excluded on purpose. They are stored
+     *  `INCOMING` so they read as "not mine", but "Alice joined" lands on
+     *  every member's device at once and counting it would light up an
+     *  unread badge on a chat where nobody actually said anything. The
+     *  `IS NULL` test reads the column's presence, never its contents,
+     *  so this stays a plain-column count. */
     @Query(
         "SELECT COUNT(*) FROM messages " +
             "WHERE ownerIdentityId = :ownerIdentityId AND groupId = :groupId " +
-            "AND directionRaw = 'INCOMING' AND sentAt > :sinceMillis",
+            "AND directionRaw = 'INCOMING' AND sentAt > :sinceMillis " +
+            "AND encryptedSystemEventJson IS NULL",
     )
     suspend fun unreadCount(
         ownerIdentityId: String,

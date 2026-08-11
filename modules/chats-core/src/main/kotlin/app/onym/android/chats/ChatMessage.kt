@@ -69,7 +69,24 @@ data class ChatMessage(
      *  + duration from the descriptor and only downloads the audio blob on
      *  play. Mutually exclusive with the image/video/album fields. */
     val voiceAttachment: ChatVoiceAttachment? = null,
+    /** Non-null when this row is a locally-minted system notice
+     *  ("Alice joined") rather than something a person typed. `null` is
+     *  the overwhelmingly common case and means "ordinary message".
+     *
+     *  Deliberately absent from [ChatMessagePayload]: system rows are
+     *  **never** carried on the wire. Each device mints its own copy
+     *  from an event it independently verified (the admin from its own
+     *  approve, members from a signature- and chain-checked
+     *  [app.onym.android.group.MemberAnnouncementPayload], the joiner
+     *  from its verified invitation). A wire field here would let any
+     *  peer forge "X joined" history. */
+    val systemEvent: ChatSystemEvent? = null,
 ) {
+    /** True for locally-minted system notices. Reads better than
+     *  `systemEvent != null` at the several call sites that only care
+     *  whether the row is a notice, not which kind. */
+    val isSystem: Boolean get() = systemEvent != null
+
     /** Canonical media list for rendering: the album when present, else
      *  the single image/video wrapped in a one-element list, else empty. */
     val media: List<ChatMediaAttachment>
@@ -86,6 +103,13 @@ data class ChatMessage(
      *  Mirrors iOS `ChatMessage.chatListPreview`. */
     val chatListPreview: String
         get() {
+            // A notice has no preview of its own here: the sentence is
+            // assembled from `systemEvent` in the UI, where string
+            // resources are reachable. Returning prose from this module
+            // would mean hardcoded English (this getter already carries
+            // five such strings — a known gap, not one to widen) with no
+            // `values-ru` twin and no lint to catch it.
+            if (isSystem) return ""
             val content = when {
                 voiceAttachment != null -> "Voice message"
                 !albumAttachments.isNullOrEmpty() -> "Album"
