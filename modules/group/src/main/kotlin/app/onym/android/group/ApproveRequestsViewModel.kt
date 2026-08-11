@@ -3,7 +3,7 @@ package app.onym.android.group
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -12,10 +12,12 @@ import kotlinx.coroutines.launch
 
 /**
  * View-model for the approver UI. Mirrors `ApproveRequestsFlow.swift`
- * — one shared instance lives in [app.onym.android.AppDependencies],
- * the toolbar badge on the chats screen watches `pending.size`, and
- * the modal [ApproveRequestsScreen] consumes the full list +
- * dispatches Approve / Decline taps.
+ * — one shared instance lives in [app.onym.android.AppDependencies].
+ * The chats list reads `pending` for the per-group signal, and each
+ * group's chat thread renders its own slice of the list as in-thread
+ * rows that dispatch Accept / Decline. (Both surfaces used to be one
+ * modal + toolbar badge; the requests moved into the thread because
+ * nobody found the badge.)
  *
  * Purely a thin wrapper over [JoinRequestApprover] — no UI logic
  * beyond mapping outcomes to a user-facing reason string.
@@ -30,16 +32,16 @@ class ApproveRequestsViewModel(
     private val _pending = MutableStateFlow<List<JoinRequestApprover.PendingRequest>>(emptyList())
     val pending: StateFlow<List<JoinRequestApprover.PendingRequest>> = _pending.asStateFlow()
 
-    /** Last failed-approve reason, or null. Cleared on the next
-     *  successful Approve / Decline / dismiss. */
-    private val _lastError = MutableStateFlow<String?>(null)
-    val lastError: StateFlow<String?> = _lastError.asStateFlow()
-
-    /** Brief success banner copy after a `Sent` approval. PR 91 adds
-     *  the auto-dismiss timer + content; PR 76 just exposes the
-     *  field so the screen can render whatever lands here. */
-    private val _lastSuccessMessage = MutableStateFlow<String?>(null)
-    val lastSuccessMessage: StateFlow<String?> = _lastSuccessMessage.asStateFlow()
+    /** Why each request's last Approve failed, keyed by request id.
+     *
+     *  A map rather than a single slot because the thread renders one
+     *  row per pending request: with two outstanding failures a single
+     *  slot could only ever explain the newer one, and the older row
+     *  would silently lose its explanation while its request was still
+     *  there to retry. Each row reads its own entry, so an unrelated
+     *  failure can neither overwrite nor leak onto it. */
+    private val _errors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val errors: StateFlow<Map<String, String>> = _errors.asStateFlow()
 
     /** Request IDs whose Approve / Decline call is currently in
      *  flight. PR 90 adds the per-row spinner UI; PR 76 maintains
@@ -57,6 +59,13 @@ class ApproveRequestsViewModel(
         streamJob = viewModelScope.launch {
             approver.pending.collectLatest { snapshot ->
                 _pending.value = snapshot
+                // Drop errors for requests that are no longer pending.
+                // An entry is otherwise only cleared by acting on that
+                // same request again, so one removed by the retention
+                // sweep — or approved from another device — would leave
+                // its failure behind for the process lifetime.
+                val live = snapshot.mapTo(HashSet()) { it.id }
+                _errors.value = _errors.value.filterKeys { it in live }
             }
         }
     }
@@ -72,59 +81,56 @@ class ApproveRequestsViewModel(
      * Approve a pending request. Debounced on [_inFlight] so a
      * rapid double-tap doesn't dispatch twice — entering the proof +
      * chain submission path twice is wasted cycles + can confuse
-     * `lastError` ordering.
+     * error ordering.
      */
     fun approve(requestId: String) {
         if (_inFlight.value.contains(requestId)) return
-        val joinerAlias = _pending.value.firstOrNull { it.id == requestId }?.joinerDisplayLabel
         _inFlight.value = _inFlight.value + requestId
+        // Clear this request's failure as the retry starts, not when it
+        // succeeds. Waiting for `Sent` rendered the spinner and the
+        // previous error together — "Anchoring on chain…" under "that
+        // didn't work" — which reads as a fresh failure rather than a
+        // stale one.
+        clearError(requestId)
         viewModelScope.launch {
             val outcome = approver.approve(requestId)
             _inFlight.value = _inFlight.value - requestId
             when (outcome) {
-                is JoinRequestApprover.ApproveOutcome.Sent -> {
-                    _lastError.value = null
-                    // Store just the joiner's label (empty = unknown); the
-                    // screen formats the localized "… is now in the group."
-                    // banner (this VM has no resources/Context).
-                    _lastSuccessMessage.value = joinerAlias?.trim().orEmpty()
-                    scheduleSuccessDismiss()
-                }
-                else -> {
-                    _lastSuccessMessage.value = null
-                    _lastError.value = failureReason(outcome)
+                // No success banner: the confirmation is now the
+                // "X joined" notice the approve path writes into the
+                // thread, right where the request row was.
+                is JoinRequestApprover.ApproveOutcome.Sent -> Unit
+                else -> failureReason(outcome)?.let { reason ->
+                    _errors.value = _errors.value + (requestId to reason)
                 }
             }
         }
     }
+
+    /** This request's last failure, if it has one. Each row reads its
+     *  own; nothing else can surface on it. */
+    fun error(requestId: String): String? = _errors.value[requestId]
 
     fun decline(requestId: String) {
         if (_inFlight.value.contains(requestId)) return
         _inFlight.value = _inFlight.value + requestId
+        // Same reasoning as `approve`: the error goes when the action
+        // starts, so the row never shows a spinner over a stale failure.
+        clearError(requestId)
         viewModelScope.launch {
             approver.decline(requestId)
             _inFlight.value = _inFlight.value - requestId
-            _lastError.value = null
         }
     }
 
-    fun dismissError() {
-        _lastError.value = null
-    }
-
-    /**
-     * Auto-clear the success banner after ~3s. The "only zero out
-     * if still equal" check protects against a fresh approve
-     * overwriting the snapshot before the delay completes.
-     */
-    private fun scheduleSuccessDismiss() {
-        val snapshot = _lastSuccessMessage.value
-        viewModelScope.launch {
-            delay(3_000)
-            if (_lastSuccessMessage.value == snapshot) {
-                _lastSuccessMessage.value = null
-            }
-        }
+    /** Drop one request's error. Keyed, so acting on one request cannot
+     *  clear the explanation another row is still showing.
+     *
+     *  There is deliberately no dismiss affordance now that the modal is
+     *  gone: the error sits on the row it belongs to, and the row is the
+     *  thing the founder is going to touch next. */
+    private fun clearError(requestId: String) {
+        _errors.value = _errors.value - requestId
     }
 
     private companion object {
@@ -134,6 +140,14 @@ class ApproveRequestsViewModel(
          *  mapping local so later prompts only add cases. */
         fun failureReason(outcome: JoinRequestApprover.ApproveOutcome): String? = when (outcome) {
             is JoinRequestApprover.ApproveOutcome.Sent -> null
+            is JoinRequestApprover.ApproveOutcome.GroupNotAnchoredYet ->
+                // Not a failure the founder can do anything about
+                // except wait a moment: the group's own create
+                // transaction is still being included in a ledger. Says
+                // "try again" because that is literally the fix, and
+                // gives a duration so it doesn't read as "retry
+                // forever".
+                "This group isn’t on the chain yet. Give it a few seconds and tap Accept again."
             is JoinRequestApprover.ApproveOutcome.UnknownGroup ->
                 "This invite isn’t for any group on this device."
             is JoinRequestApprover.ApproveOutcome.UnknownRequest ->

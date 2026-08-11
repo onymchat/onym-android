@@ -132,6 +132,11 @@ class RoomMessageStore(
         encryptedVoiceAttachmentJson = message.voiceAttachment?.let {
             encryption.encrypt(attachmentJson.encodeToString(ChatVoiceAttachment.serializer(), it))
         },
+        // System-notice payload (carries a member alias), encrypted at
+        // rest like the body.
+        encryptedSystemEventJson = message.systemEvent?.let {
+            encryption.encrypt(attachmentJson.encodeToString(ChatSystemEvent.serializer(), it))
+        },
     )
 
     /** Tolerant decode: a row whose encrypted columns fail to
@@ -184,6 +189,16 @@ class RoomMessageStore(
                     attachmentJson.decodeFromString(ChatVoiceAttachment.serializer(), it)
                 }.getOrNull()
             }
+        // Unlike the attachments above, a system event that fails to
+        // decode does NOT degrade to an ordinary message: the row would
+        // then render as an empty-bodied message from a member who never
+        // said it. Drop the row instead.
+        val systemEvent = row.encryptedSystemEventJson?.let { encrypted ->
+            val json = tryDecryptString(encrypted) ?: return null
+            runCatching {
+                attachmentJson.decodeFromString(ChatSystemEvent.serializer(), json)
+            }.getOrNull() ?: return null
+        }
         return ChatMessage(
             id = id,
             groupId = row.groupId,
@@ -199,6 +214,7 @@ class RoomMessageStore(
             videoAttachment = videoAttachment,
             albumAttachments = albumAttachments,
             voiceAttachment = voiceAttachment,
+            systemEvent = systemEvent,
         )
     }
 

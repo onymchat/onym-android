@@ -71,6 +71,9 @@ class AppDependencies(
      *  lands on the relay shows up in the badge before the modal
      *  is opened. */
     val approveRequestsViewModel: app.onym.android.group.ApproveRequestsViewModel,
+    /** Lowercase BLS pubkey hex of the active identity. Surfaces gate
+     *  "am I this group's admin" on it — see `ChatGroup.isAdmin`. */
+    val activeBlsPubkeyHex: kotlinx.coroutines.flow.StateFlow<String?>,
     /** Invitee-side push-invitation surface (PR 158). Single shared
      *  instance — the Chats toolbar "Invitations" badge and the modal
      *  list both consume the same flow, so an offer that lands on the

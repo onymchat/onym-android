@@ -128,16 +128,20 @@ class MultiIdentityChatUITest {
         composeRule.onNodeWithTag("join.send_button").performClick()
         waitForTag("join.awaiting_approval")
 
-        // 5. Alice approves the join request.
+        // 5. Alice approves the join request — from inside the group's
+        //    chat thread, which is the whole point of the surface: there
+        //    is no separate "Join requests" screen to find.
         switchToIdentity("Alice")
-        composeRule.onNodeWithTag("approve_requests.toolbar_button").performClick()
-        waitForTag("approve_requests.approve_button", prefix = true, timeout = 45.seconds)
+        openTheChat()
+        waitForTag("chat_thread.join_request.accept", prefix = true, timeout = 45.seconds)
         composeRule.onAllNodes(
-            hasTestTagStartingWith("approve_requests.approve_button"),
+            hasTestTagStartingWith("chat_thread.join_request.accept"),
             useUnmergedTree = true,
         ).onFirst().performClick()
-        waitForTag("approve_requests.success_banner", timeout = 60.seconds)
-        Espresso.pressBack() // close the approve sheet
+        // The confirmation is the membership notice the approve writes
+        // into the thread, right where the request row was.
+        waitForText("Bob joined", timeout = 60.seconds)
+        Espresso.pressBack() // back to the chats list
         composeRule.waitForIdle()
 
         // 6. Bob -> Alice message + read receipt.

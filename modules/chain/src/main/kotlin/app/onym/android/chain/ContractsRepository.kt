@@ -110,14 +110,28 @@ class ContractsRepository(
         _snapshots.value = ContractsState(manifest = cached, selections = sel)
     }
 
-    /** Fire-and-forget the GitHub-Releases fetch. Idempotent — a
-     *  second [start] returns immediately. Failures swallowed. */
-    suspend fun start() = mutex.withLock {
-        if (startInvoked) return@withLock
-        startInvoked = true
-        runCatching { fetcher.fetch() }.onSuccess { result ->
+    /**
+     * Fire-and-forget the GitHub-Releases fetch. Failures swallowed.
+     *
+     * A *failed* fetch releases the in-flight guard so a later call can
+     * retry; a successful one keeps it, so this stays once-per-process
+     * on the happy path.
+     */
+    suspend fun start() {
+        val shouldFetch = mutex.withLock {
+            if (startInvoked) false else { startInvoked = true; true }
+        }
+        if (!shouldFetch) return
+        val succeeded = runCatching { fetcher.fetch() }.onSuccess { result ->
             store.saveCachedManifest(result.rawJson)
             _snapshots.value = _snapshots.value.copy(manifest = result.manifest)
+        }.isSuccess
+        if (!succeeded) {
+            // Released on failure only — see RelayerRepository.start.
+            // Without a manifest there is no contract binding, and every
+            // chain read throws NoContractBinding for the life of the
+            // process. A successful fetch stays once-only.
+            mutex.withLock { startInvoked = false }
         }
     }
 

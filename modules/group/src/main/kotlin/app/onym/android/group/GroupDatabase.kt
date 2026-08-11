@@ -16,7 +16,7 @@ import androidx.room.RoomDatabase
  * `SwiftDataGroupStore` constructs in onym-ios PR #25.
  */
 @Database(
-    entities = [PersistedGroup::class],
+    entities = [PersistedGroup::class, PersistedIntroRequest::class],
     // v5 (admin Ed25519): adds nullable `encryptedAdminEd25519PubkeyHex`
     // column on top of v4's `encryptedMemberProfilesJson`. Both
     // migrations are non-destructive — existing rows decode to null
@@ -31,11 +31,17 @@ import androidx.room.RoomDatabase
     // v8 (last-read): adds nullable `lastReadAtMillis` INTEGER for the
     // chat-list unread badge. Additive; existing rows decode to null
     // (never opened → everything unread until first open).
-    version = 8,
+    // v9 (pending join requests): adds the `intro_requests` table.
+    // Requests used to live in memory only, which was fine while the
+    // approval UI was a modal to act on immediately; as a row inside
+    // the chat thread, one lost on process death reads as a message the
+    // app dropped while the joiner waits.
+    version = 9,
     exportSchema = false,
 )
 abstract class GroupDatabase : RoomDatabase() {
     abstract fun groupDao(): GroupDao
+    abstract fun introRequestDao(): IntroRequestDao
 }
 
 /**
@@ -139,6 +145,24 @@ object GroupDatabaseMigrations {
     val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE groups ADD COLUMN lastReadAtMillis INTEGER")
+        }
+    }
+
+    /**
+     * v8 → v9: create the `intro_requests` table for pending join
+     * requests. New table, so nothing existing is touched.
+     */
+    val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `intro_requests` (" +
+                    "`id` TEXT NOT NULL, " +
+                    "`receivedAtMillis` INTEGER NOT NULL, " +
+                    "`firstSeenAtMillis` INTEGER, " +
+                    "`encryptedTargetIntroPublicKey` BLOB NOT NULL, " +
+                    "`encryptedPayload` BLOB NOT NULL, " +
+                    "PRIMARY KEY(`id`))",
+            )
         }
     }
 }

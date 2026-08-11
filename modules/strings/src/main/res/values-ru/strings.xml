@@ -539,23 +539,30 @@
   <string name="members_you_suffix">(вы)</string>
   <string name="share_invite_cd">Поделиться приглашением</string>
   <string name="group_photo_cd">Фото группы</string>
-  <string name="join_requests_cd">Запросы на вступление</string>
   <string name="invitations_cd">Приглашения</string>
-  <string name="approve_requests_title">Запросы на вступление</string>
-  <string name="approve_approved_on_chain">Одобрено в блокчейне</string>
-  <string name="approve_empty_title">Нет ожидающих запросов</string>
-  <string name="approve_empty_body">Люди, нажавшие на одну из ваших ссылок-приглашений, появятся здесь.</string>
-  <string name="approve_wants_to_join">хочет вступить в «%1$s»</string>
-  <string name="approve_default_inbox_label">входящие</string>
+  <!-- In-thread membership notices (ChatSystemNotice). -->
+  <string name="chat_system_member_joined">Теперь в группе: %1$s</string>
+  <string name="chat_system_you_joined">Вы присоединились к %1$s</string>
+  <!-- In-thread join request (ChatJoinRequestRow). -->
+  <string name="chat_join_request_wants_to_join">%1$s хочет присоединиться</string>
+  <string name="chat_join_request_inbox">входящий ключ %1$s</string>
+  <string name="chat_join_request_accept">Принять</string>
+  <string name="chat_join_request_anchoring">Запись в сеть…</string>
+  <string name="chat_join_request_unnamed">(без имени)</string>
+  <!-- Chat-list signal that requests are waiting in a group. -->
+  <string name="chats_join_request_one">Кто-то хочет присоединиться</string>
+  <string name="chats_join_request_many">Хотят присоединиться: %1$d</string>
+  <string name="chats_join_request_badge_cd">Запросов на вступление: %1$d</string>
   <string name="approve_generating_proof">Генерируется доказательство и обновляется обязательство в блокчейне. Обычно это занимает несколько секунд.</string>
-  <string name="approve_group_not_local">Этот запрос относится к группе, которой нет на этом устройстве. Отклоните, чтобы убрать его.</string>
-  <string name="approve_member_added_snackbar">%1$s теперь в группе.</string>
   <string name="invitations_title">Приглашения</string>
   <string name="invitations_empty_title">Нет приглашений</string>
   <string name="invitations_empty_body">Приглашения в группы, которые вы получаете, появляются здесь для принятия.</string>
   <string name="invite_invited_you_to">пригласил(а) вас в «%1$s»</string>
   <string name="invite_fallback_group">группу</string>
   <string name="invite_verifying_state">Проверка состояния группы…</string>
+  <string name="invite_chain_settling">Ожидаем подтверждения группы в сети… Обычно это занимает несколько секунд.</string>
+  <string name="invite_chain_unreachable">Не удалось обратиться к сети для проверки группы. Проверьте подключение и повторите попытку.</string>
+  <string name="invite_chain_not_configured">Подключение этого устройства к сети ещё настраивается. Нажмите «Повторить» через мгновение.</string>
   <string name="invite_verify_failed">Не удалось проверить — администратор не в сети. Группа остаётся скрытой, пока её не удастся проверить в блокчейне.</string>
   <string name="invite_share_text">Присоединяйтесь к «%1$s» в Onym: %2$s</string>
   <string name="settings_section_transport">ТРАНСПОРТ</string>
@@ -638,8 +645,6 @@
     <item quantity="many">%d участников</item>
     <item quantity="other">%d участника</item>
   </plurals>
-  <string name="approve_default_person">Этот человек</string>
-  <string name="approve_unknown_group">Неизвестная группа</string>
   <string name="group_fallback_name">Группа</string>
   <string name="identity_default_name">Личность</string>
   <string name="share_invite_chooser_title">Поделиться ссылкой-приглашением</string>

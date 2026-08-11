@@ -67,8 +67,17 @@ class RelayerRepository(
             if (startInvoked) false
             else { startInvoked = true; true }
         }
-        if (shouldFetch) {
-            runCatching { refreshInternal() }
+        if (!shouldFetch) return
+        val succeeded = runCatching { refreshInternal() }.isSuccess
+        if (!succeeded) {
+            // Release the guard on *failure* so a later `start` can try
+            // again. Holding it unconditionally meant one unlucky launch
+            // — no connectivity in the first seconds, or a blocked fetch
+            // — left the device with zero relayer endpoints for the
+            // whole process, and every chain read failing with
+            // [ChainReadError.NoActiveRelayer], with no way back short
+            // of a restart. A *successful* fetch stays once-only.
+            mutex.withLock { startInvoked = false }
         }
     }
 

@@ -111,6 +111,7 @@ fun ChatThreadScreen(
 ) {
     val group by viewModel.group.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val joinRequests by viewModel.joinRequests.collectAsStateWithLifecycle()
     val replyingTo by viewModel.replyingTo.collectAsStateWithLifecycle()
     val pendingMedia by viewModel.pendingMedia.collectAsStateWithLifecycle()
 
@@ -207,6 +208,9 @@ fun ChatThreadScreen(
         } else {
             ChatThreadBody(
                 messages = messages,
+                joinRequests = joinRequests,
+                onAcceptJoinRequest = viewModel::acceptJoinRequest,
+                onDeclineJoinRequest = viewModel::declineJoinRequest,
                 // Member profiles flow from the same live `group`
                 // snapshot the title reads, so a joiner landing or an
                 // alias edit repaints the rendered name headers without
@@ -321,6 +325,11 @@ private fun ChatThreadBody(
     replyingTo: java.util.UUID?,
     onArmReply: (java.util.UUID) -> Unit,
     onCancelReply: () -> Unit,
+    /** Founder-only join-request rows for this group, already filtered
+     *  and admin-gated by the ViewModel. */
+    joinRequests: List<ChatJoinRequestDisplay> = emptyList(),
+    onAcceptJoinRequest: (String) -> Unit = {},
+    onDeclineJoinRequest: (String) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     // Defensive sort. The repository's contract is ascending by
@@ -383,9 +392,15 @@ private fun ChatThreadBody(
             )
         }
     }
-    LaunchedEffect(sortedMessages.size) {
-        if (sortedMessages.isEmpty()) return@LaunchedEffect
-        val lastIndex = sortedMessages.lastIndex
+    // Request rows are appended after the messages, so the bottom of
+    // the list is `messages + requests - 1`. Anchoring on
+    // `sortedMessages.lastIndex` alone opened a thread with history
+    // scrolled just above the pinned requests — the same
+    // discoverability failure this change set out to fix, one screen in.
+    val lastRowIndex = sortedMessages.size + joinRequests.size - 1
+    LaunchedEffect(sortedMessages.size, joinRequests.size) {
+        if (lastRowIndex < 0) return@LaunchedEffect
+        val lastIndex = lastRowIndex
         if (!hasInitialScrolled) {
             // Opened-from-search: land on the target message + flash it,
             // rather than jumping to the bottom.
@@ -441,10 +456,10 @@ private fun ChatThreadBody(
         if (shouldGlueToBottomOnImeRise(
                 rising = rising,
                 anchoredBeforeIme = anchoredBeforeIme,
-                hasMessages = sortedMessages.isNotEmpty(),
+                hasMessages = lastRowIndex >= 0,
             )
         ) {
-            listState.scrollToItem(sortedMessages.lastIndex)
+            listState.scrollToItem(lastRowIndex)
         }
     }
 
@@ -466,7 +481,13 @@ private fun ChatThreadBody(
             .imePadding()  // slides the input panel above the soft keyboard
             .testTag("chat_thread.body"),
     ) {
-        if (sortedMessages.isEmpty()) {
+        // The empty state yields to a pending join request. A founder's
+        // brand-new group has no messages at all — nothing mints a row
+        // at creation — so gating the list on `sortedMessages` alone
+        // meant the very first request in a group rendered nowhere in
+        // the app. That is precisely the flow this change exists to
+        // fix, and the one the E2E walks.
+        if (sortedMessages.isEmpty() && joinRequests.isEmpty()) {
             EmptyThread(
                 invitationMessage = invitationMessage,
                 memberProfiles = memberProfiles,
@@ -493,6 +514,15 @@ private fun ChatThreadBody(
                     items = sortedMessages,
                     key = { it.id },
                 ) { message ->
+                    // A membership notice is the app talking, not a
+                    // person — it renders as a centred pill with no
+                    // author, no status glyph, and none of the bubble's
+                    // gestures (reply, retry, quote).
+                    val systemEvent = message.systemEvent
+                    if (systemEvent != null) {
+                        ChatSystemNotice(event = systemEvent)
+                        return@items
+                    }
                     ChatBubble(
                         message = message,
                         sender = senderDisplays[message.id] ?: ChatSenderDisplay.Unknown,
@@ -513,6 +543,19 @@ private fun ChatThreadBody(
                         },
                         isHighlighted = message.id == highlightedId,
                         onSwipeReply = { onArmReply(message.id) },
+                    )
+                }
+                // Requests pin below the messages: they are the live
+                // thing awaiting action, and the thread is read
+                // bottom-up.
+                items(
+                    items = joinRequests,
+                    key = { "join_request:" + it.requestId },
+                ) { request ->
+                    ChatJoinRequestRow(
+                        display = request,
+                        onAccept = onAcceptJoinRequest,
+                        onDecline = onDeclineJoinRequest,
                     )
                 }
             }

@@ -48,11 +48,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * Invitee-side "you've been invited" list — the push counterpart to the
- * deeplink [app.onym.android.group.JoinScreen]. Mirrors
- * [app.onym.android.group.ApproveRequestsScreen]: a modal of cards, each
+ * deeplink [app.onym.android.group.JoinScreen]. A modal of cards, each
  * offering Accept (ship a join request) or Dismiss. Accept is the
  * explicit step; the group only appears once the admin approves the
  * resulting request on chain.
+ *
+ * (The admin-side approval modal this once mirrored is gone — those
+ * requests now render inside the group's chat thread.)
  *
  * Mirrors `PendingInvitesView` from onym-ios PR #158.
  */
@@ -282,9 +284,49 @@ private fun VerifyingCard(
                     )
                 }
             }
-            PendingGroupVerification.Status.UNREACHABLE -> {
+            // Early rather than stuck: the verifier re-reads the chain
+            // on its own a few seconds from now. The Retry is still
+            // here, because the auto-recheck budget is finite and a
+            // spinner with no way out is worse than a redundant button.
+            PendingGroupVerification.Status.CHAIN_SETTLING -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Text(
+                        stringResource(R.string.invite_chain_settling),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("pending_invites.verifying_retry.${entry.groupIdHex}"),
+                ) {
+                    Text(stringResource(R.string.retry))
+                }
+            }
+            // The three failures name different parties because they
+            // have different remedies: the admin's phone being asleep,
+            // this device's connection, or a chain config that hasn't
+            // arrived yet. Saying "the admin is offline" for all of them
+            // sent people to wait on someone who could not have helped.
+            PendingGroupVerification.Status.UNREACHABLE,
+            PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+            PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED -> {
                 Text(
-                    stringResource(R.string.invite_verify_failed),
+                    stringResource(
+                        when (entry.status) {
+                            PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED ->
+                                R.string.invite_chain_not_configured
+                            PendingGroupVerification.Status.CHAIN_UNREACHABLE ->
+                                R.string.invite_chain_unreachable
+                            else -> R.string.invite_verify_failed
+                        },
+                    ),
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

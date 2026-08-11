@@ -84,6 +84,18 @@ data class PersistedMessage(
      *  ALTER migration shape as the other attachment columns; carries the
      *  per-clip key + the waveform. */
     val encryptedVoiceAttachmentJson: ByteArray? = null,
+    /** AES-GCM-encrypted JSON of the [ChatSystemEvent] for a
+     *  locally-minted system notice; `null` for an ordinary message.
+     *  Encrypted rather than plain because the payload carries a member
+     *  alias — same posture as [encryptedSenderBlsPubkeyHex]. Same
+     *  non-destructive `ALTER TABLE ADD COLUMN` shape as the columns
+     *  above.
+     *
+     *  Nullability is load-bearing beyond migration: the unread query
+     *  filters on `encryptedSystemEventJson IS NULL`, which is why the
+     *  discriminator lives on a column rather than inside the encrypted
+     *  body where SQL cannot see it. */
+    val encryptedSystemEventJson: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -105,7 +117,9 @@ data class PersistedMessage(
             (encryptedAlbumJson?.contentEquals(other.encryptedAlbumJson)
                 ?: (other.encryptedAlbumJson == null)) &&
             (encryptedVoiceAttachmentJson?.contentEquals(other.encryptedVoiceAttachmentJson)
-                ?: (other.encryptedVoiceAttachmentJson == null))
+                ?: (other.encryptedVoiceAttachmentJson == null)) &&
+            (encryptedSystemEventJson?.contentEquals(other.encryptedSystemEventJson)
+                ?: (other.encryptedSystemEventJson == null))
     }
 
     override fun hashCode(): Int {
@@ -123,6 +137,7 @@ data class PersistedMessage(
         h = 31 * h + (encryptedVideoAttachmentJson?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedAlbumJson?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedVoiceAttachmentJson?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedSystemEventJson?.contentHashCode() ?: 0)
         return h
     }
 }

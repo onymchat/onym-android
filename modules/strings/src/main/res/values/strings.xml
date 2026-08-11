@@ -543,23 +543,30 @@
   <string name="members_you_suffix">(you)</string>
   <string name="share_invite_cd">Share invite</string>
   <string name="group_photo_cd">Group photo</string>
-  <string name="join_requests_cd">Join requests</string>
   <string name="invitations_cd">Invitations</string>
-  <string name="approve_requests_title">Join requests</string>
-  <string name="approve_approved_on_chain">Approved on chain</string>
-  <string name="approve_empty_title">No pending requests</string>
-  <string name="approve_empty_body">People who tap one of your invite links show up here.</string>
-  <string name="approve_wants_to_join">wants to join “%1$s”</string>
-  <string name="approve_default_inbox_label">inbox</string>
+  <!-- In-thread membership notices (ChatSystemNotice). -->
+  <string name="chat_system_member_joined">%1$s joined</string>
+  <string name="chat_system_you_joined">You joined %1$s</string>
+  <!-- In-thread join request (ChatJoinRequestRow). -->
+  <string name="chat_join_request_wants_to_join">%1$s wants to join</string>
+  <string name="chat_join_request_inbox">inbox %1$s</string>
+  <string name="chat_join_request_accept">Accept</string>
+  <string name="chat_join_request_anchoring">Anchoring on chain…</string>
+  <string name="chat_join_request_unnamed">(unnamed)</string>
+  <!-- Chat-list signal that requests are waiting in a group. -->
+  <string name="chats_join_request_one">Someone wants to join</string>
+  <string name="chats_join_request_many">%1$d people want to join</string>
+  <string name="chats_join_request_badge_cd">%1$d join requests</string>
   <string name="approve_generating_proof">Generating proof and updating the on-chain commitment. This usually takes a few seconds.</string>
-  <string name="approve_group_not_local">This request is for a group that isn’t on this device. Decline to clear it.</string>
-  <string name="approve_member_added_snackbar">%1$s is now in the group.</string>
   <string name="invitations_title">Invitations</string>
   <string name="invitations_empty_title">No invitations</string>
   <string name="invitations_empty_body">Group invites you receive show up here for you to accept.</string>
   <string name="invite_invited_you_to">invited you to “%1$s”</string>
   <string name="invite_fallback_group">a group</string>
   <string name="invite_verifying_state">Verifying group state…</string>
+  <string name="invite_chain_settling">Waiting for the group to be confirmed on chain… This usually takes a few seconds.</string>
+  <string name="invite_chain_unreachable">Couldn’t reach the chain to verify this group. Check your connection and try again.</string>
+  <string name="invite_chain_not_configured">Still setting up this device’s connection to the chain. Tap Retry in a moment.</string>
   <string name="invite_verify_failed">Couldn’t verify — the admin is offline. The group stays hidden until it can be verified on chain.</string>
   <string name="invite_share_text">Join \"%1$s\" on Onym: %2$s</string>
   <string name="settings_section_transport">TRANSPORT</string>
@@ -640,8 +647,6 @@
     <item quantity="one">%d member</item>
     <item quantity="other">%d members</item>
   </plurals>
-  <string name="approve_default_person">This person</string>
-  <string name="approve_unknown_group">Unknown group</string>
   <string name="group_fallback_name">Group</string>
   <string name="identity_default_name">Identity</string>
   <string name="share_invite_chooser_title">Share invite link</string>

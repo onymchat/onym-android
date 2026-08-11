@@ -40,6 +40,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -315,6 +316,7 @@ class OnymApplication : Application() {
                     GroupDatabaseMigrations.MIGRATION_5_6,
                     GroupDatabaseMigrations.MIGRATION_6_7,
                     GroupDatabaseMigrations.MIGRATION_7_8,
+                    GroupDatabaseMigrations.MIGRATION_8_9,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -354,6 +356,7 @@ class OnymApplication : Application() {
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_4_5,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_5_6,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_6_7,
+                    app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_7_8,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -599,6 +602,30 @@ class OnymApplication : Application() {
             envelopeSealer = identityRepository,
             inboxTransport = inboxTransport,
         )
+        // One recorder for every system row in the app: the dispatcher
+        // uses it directly for the member + joiner notices, and the
+        // approver reaches the same instance through the
+        // GroupSystemEventRecording seam.
+        // Active identity's BLS pubkey hex, for the surfaces that gate
+        // on "am I this group's admin". Derived once rather than
+        // re-hashed per screen.
+        val activeBlsPubkeyHex: kotlinx.coroutines.flow.StateFlow<String?> =
+            kotlinx.coroutines.flow.combine(
+                identityRepository.identities,
+                identityRepository.currentIdentityId,
+            ) { summaries, currentId ->
+                summaries.firstOrNull { it.id == currentId }
+                    ?.blsPublicKey
+                    ?.joinToString("") { b -> "%02x".format(b) }
+            }.stateIn(
+                scope = applicationScope,
+                started = kotlinx.coroutines.flow.SharingStarted.Eagerly,
+                initialValue = null,
+            )
+
+        val chatSystemEvents = app.onym.android.chats.ChatSystemEventRecorder(
+            messageRepository = messageRepository,
+        )
         val incomingDispatcher = app.onym.android.inbox.IncomingMessageDispatcher(
             envelopeDecrypter = identityRepository,
             groupRepository = groupRepository,
@@ -610,7 +637,25 @@ class OnymApplication : Application() {
             groupStateRefresher = groupStateVerifier,
             receiptSender = chatReceiptSender,
             readReceiptsEnabled = { readReceiptsPreference.current() },
+            systemEvents = chatSystemEvents,
         )
+        // Close the loop for the Retry on a snapshot parked because
+        // *this* device couldn't read the chain. The dispatcher owns
+        // verification and holds the verifier, so the back-reference is
+        // installed here rather than threaded through both constructors.
+        groupStateVerifier.setReverify { invitation, owner, signer ->
+            // Re-fetch the relayer + contract lists first. The most
+            // common reason a joiner can't read the chain is that
+            // neither has arrived yet — both are fetched in the
+            // background at launch, and a device offline for those few
+            // seconds has no endpoint to call and no contract to call it
+            // on. Retrying the read alone would fail the same way every
+            // time. `refresh`, not `start`: the latter returns as soon
+            // as it has spawned the fetch and would race the read.
+            runCatching { relayerRepository.refresh() }
+            runCatching { contractsRepository.refresh() }
+            incomingDispatcher.reverify(invitation, owner, signer)
+        }
         // Filter the invites surface to the active identity, and cascade
         // a wipe on identity removal — mirrors the per-identity wiring
         // GroupRepository / IncomingInvitationsRepository already do.
@@ -655,8 +700,29 @@ class OnymApplication : Application() {
         // listens on every minted intro tag regardless of which path
         // produced it.
         val inviteIntroducer = app.onym.android.group.InviteIntroducer(introKeyStore)
+        // Durable sink for inbound "request to join" envelopes. The
+        // request now renders as a row inside the founder's chat
+        // thread, so it has to survive a relaunch the way any other
+        // message does — an in-memory store would silently drop it on
+        // process death while the joiner sat on "Waiting for the host
+        // to approve…". Falls back to the in-memory store if the Room
+        // DAO can't be reached, so a storage failure degrades to the
+        // old behaviour instead of blocking launch.
+        val roomIntroRequestStore = try {
+            app.onym.android.group.RoomIntroRequestStore(
+                dao = groupDatabase.introRequestDao(),
+                encryption = storageEncryption,
+            )
+        } catch (_: Throwable) {
+            null
+        }
         val introRequestStore: app.onym.android.group.IntroRequestStore =
-            app.onym.android.group.InMemoryIntroRequestStore()
+            roomIntroRequestStore ?: app.onym.android.group.InMemoryIntroRequestStore()
+        // Replay what's on disk so a restored request is back in the
+        // thread on a cold launch, without waiting for a relay delivery.
+        if (roomIntroRequestStore != null) {
+            applicationScope.launch { roomIntroRequestStore.start() }
+        }
         val introInboxPump = app.onym.android.group.IntroInboxPump(
             transport = inboxTransport,
             store = introRequestStore,
@@ -714,6 +780,10 @@ class OnymApplication : Application() {
             contracts = contractsRepository,
             networkPreference = networkPreference,
             makeContractTransport = contractTransportFactory,
+            // Gives the admin its own "X joined" row on approve. Every
+            // other member's copy comes from the fanned-out
+            // announcement, which the admin never receives.
+            systemEvents = chatSystemEvents,
         )
         val approveRequestsViewModel = app.onym.android.group.ApproveRequestsViewModel(
             approver = joinRequestApprover,
@@ -851,6 +921,13 @@ class OnymApplication : Application() {
                     imageLoader = imageLoader,
                     videoLoader = videoLoader,
                     voiceLoader = voiceLoader,
+                    // In-thread join requests, replacing the deleted
+                    // "Join requests" screen.
+                    approveRequests = approveRequestsViewModel,
+                    activeBlsPubkeyHex = activeBlsPubkeyHex,
+                    unnamedJoinerLabel = getString(
+                        app.onym.android.strings.R.string.chat_join_request_unnamed,
+                    ),
                 )
             },
             makeSearchViewModel = {
@@ -870,6 +947,7 @@ class OnymApplication : Application() {
                 )
             },
             approveRequestsViewModel = approveRequestsViewModel,
+            activeBlsPubkeyHex = activeBlsPubkeyHex,
             pendingInvitesViewModel = pendingInvitesViewModel,
             makeNostrRelaySettingsViewModel = {
                 app.onym.android.settings.NostrRelaySettingsViewModel(

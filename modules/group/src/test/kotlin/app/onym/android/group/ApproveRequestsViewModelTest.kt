@@ -15,6 +15,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -77,38 +78,89 @@ class ApproveRequestsViewModelTest {
     }
 
     @Test
-    fun sentClearsLastError() = runTest(dispatcher) {
+    fun retryingClearsThatRequestsError() = runTest(dispatcher) {
         val approver = FakeApprover()
         val vm = ApproveRequestsViewModel(approver = approver)
         vm.start()
         approver.emit(listOf(samplePending("r1")))
         advanceUntilIdle()
 
-        // First approve fails — produces an error.
+        // First approve fails — produces an error against r1.
         approver.gate = CompletableDeferred()
         vm.approve("r1")
         advanceUntilIdle()
         approver.gate.complete(JoinRequestApprover.ApproveOutcome.TransportFailed("boom"))
         advanceUntilIdle()
-        assertEquals("Couldn’t send: boom", vm.lastError.value)
+        assertEquals("Couldn’t send: boom", vm.error("r1"))
 
-        // Second approve succeeds — clears the error.
+        // Retrying clears it as the attempt STARTS, not when it lands —
+        // otherwise the row renders the spinner over the previous
+        // failure, which reads as a fresh one.
+        approver.gate = CompletableDeferred()
+        vm.approve("r1")
+        runCurrent()
+        assertNull(vm.error("r1"))
+
+        approver.gate.complete(JoinRequestApprover.ApproveOutcome.Sent)
+        advanceUntilIdle()
+        // No success banner: the confirmation is the "Bob joined"
+        // notice the approve path writes into the thread.
+        assertNull(vm.error("r1"))
+    }
+
+    /** Two rows, two failures, two explanations. A single error slot
+     *  could only ever hold the newer one, so the first row would go
+     *  blank while its request was still there to retry. */
+    @Test
+    fun twoFailingRequestsEachKeepTheirOwnExplanation() = runTest(dispatcher) {
+        val approver = FakeApprover()
+        val vm = ApproveRequestsViewModel(approver = approver)
+        vm.start()
+        approver.emit(listOf(samplePending("r1"), samplePending("r2")))
+        advanceUntilIdle()
+
         approver.gate = CompletableDeferred()
         vm.approve("r1")
         advanceUntilIdle()
-        approver.gate.complete(JoinRequestApprover.ApproveOutcome.Sent)
-        // PR 91: the success banner auto-dismisses after 3s. Run
-        // current work without advancing the virtual clock past
-        // the dismiss timer so the banner is still set when we
-        // assert.
-        runCurrent()
-        assertNull(vm.lastError.value)
-        assertNotNull(vm.lastSuccessMessage.value)
+        approver.gate.complete(JoinRequestApprover.ApproveOutcome.TransportFailed("boom"))
+        advanceUntilIdle()
 
-        // After the timer fires, the banner clears.
-        advanceTimeBy(3_001)
-        runCurrent()
-        assertNull(vm.lastSuccessMessage.value)
+        approver.gate = CompletableDeferred()
+        vm.approve("r2")
+        advanceUntilIdle()
+        approver.gate.complete(JoinRequestApprover.ApproveOutcome.NoActiveRelayer)
+        advanceUntilIdle()
+
+        assertNotNull(vm.error("r1"))
+        assertNotNull(vm.error("r2"))
+        assertEquals("Couldn’t send: boom", vm.error("r1"))
+        assertNotEquals(vm.error("r1"), vm.error("r2"))
+    }
+
+    /** An error is otherwise only cleared by acting on that same
+     *  request again — so a request that disappears while showing a
+     *  failure left its entry behind for the process lifetime. */
+    @Test
+    fun errorsAreDroppedWhenTheirRequestStopsBeingPending() = runTest(dispatcher) {
+        val approver = FakeApprover()
+        val vm = ApproveRequestsViewModel(approver = approver)
+        vm.start()
+        approver.emit(listOf(samplePending("r1")))
+        advanceUntilIdle()
+
+        approver.gate = CompletableDeferred()
+        vm.approve("r1")
+        advanceUntilIdle()
+        approver.gate.complete(JoinRequestApprover.ApproveOutcome.TransportFailed("boom"))
+        advanceUntilIdle()
+        assertNotNull(vm.error("r1"))
+
+        // The request goes away without anyone acting on it.
+        approver.emit(emptyList())
+        advanceUntilIdle()
+
+        assertNull(vm.error("r1"))
+        assertTrue(vm.errors.value.isEmpty())
     }
 
     @Test
@@ -124,7 +176,7 @@ class ApproveRequestsViewModelTest {
         advanceUntilIdle()
         approver.gate.complete(JoinRequestApprover.ApproveOutcome.TransportFailed("relays down"))
         advanceUntilIdle()
-        assertEquals("Couldn’t send: relays down", vm.lastError.value)
+        assertEquals("Couldn’t send: relays down", vm.error("r1"))
     }
 
     private fun samplePending(id: String) = JoinRequestApprover.PendingRequest(

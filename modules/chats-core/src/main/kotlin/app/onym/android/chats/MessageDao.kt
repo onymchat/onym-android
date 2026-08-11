@@ -51,10 +51,17 @@ interface MessageDao {
 
     /** Most recent message (any direction) in one group for the chat-list
      *  row subtitle + most-recent-first sort. Body is encrypted, so the
-     *  store decrypts the returned row. */
+     *  store decrypts the returned row.
+     *
+     *  System notices are excluded. Their `chatListPreview` is empty by
+     *  design — the sentence is assembled in the UI, where string
+     *  resources are reachable — so letting a newest-row "Bob joined"
+     *  win here blanked the subtitle and made the group's last real
+     *  message disappear from the list. */
     @Query(
         "SELECT * FROM messages " +
             "WHERE ownerIdentityId = :ownerIdentityId AND groupId = :groupId " +
+            "AND encryptedSystemEventJson IS NULL " +
             "ORDER BY sentAt DESC LIMIT 1",
     )
     suspend fun latestForOwnerAndGroup(
@@ -64,11 +71,19 @@ interface MessageDao {
 
     /** Count of *incoming* messages in one group received after
      *  [sinceMillis] — the chat-list unread badge. Plain columns only, so
-     *  no decryption. */
+     *  no decryption.
+     *
+     *  System notices are excluded on purpose. They are stored
+     *  `INCOMING` so they read as "not mine", but "Alice joined" lands on
+     *  every member's device at once and counting it would light up an
+     *  unread badge on a chat where nobody actually said anything. The
+     *  `IS NULL` test reads the column's presence, never its contents,
+     *  so this stays a plain-column count. */
     @Query(
         "SELECT COUNT(*) FROM messages " +
             "WHERE ownerIdentityId = :ownerIdentityId AND groupId = :groupId " +
-            "AND directionRaw = 'INCOMING' AND sentAt > :sinceMillis",
+            "AND directionRaw = 'INCOMING' AND sentAt > :sinceMillis " +
+            "AND encryptedSystemEventJson IS NULL",
     )
     suspend fun unreadCount(
         ownerIdentityId: String,

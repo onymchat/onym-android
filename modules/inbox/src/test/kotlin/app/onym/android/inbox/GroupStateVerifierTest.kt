@@ -84,6 +84,230 @@ class GroupStateVerifierTest {
         refreshTimeoutMillis = 10 * 60 * 1000,
     )
 
+    /**
+     * A snapshot parked locally must still be able to escalate.
+     *
+     * The sequence is real: offline at launch parks it
+     * CHAIN_UNREACHABLE; the device comes back, the chain has moved past
+     * the 64-entry archive window, so the admin genuinely becomes the
+     * only source of current state. An early return on "already in the
+     * store" left the card saying "check your connection" forever, with
+     * a Retry that only re-read the chain.
+     */
+    @Test
+    fun locallyParkedSnapshot_canEscalateToTheAdmin() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+
+        verifier.deferLocally(
+            invitation,
+            owner,
+            senderEd25519PublicKey = null,
+            status = PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+        )
+        assertEquals(
+            PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+            store.snapshots.value.single().status,
+        )
+
+        // Now the same group needs the admin.
+        verifier.deferVerification(invitation, owner)
+
+        assertEquals(
+            PendingGroupVerification.Status.VERIFYING,
+            store.snapshots.value.single().status,
+        )
+        assertEquals("escalation must actually ask the admin", 1, transport.sends().size)
+    }
+
+    /**
+     * The mirror image: a replay landing while an admin refresh is
+     * outstanding must not demote it.
+     *
+     * Overwriting VERIFYING would both mislabel the card and install a
+     * `localDeferrals` entry, after which Retry re-reads the chain
+     * forever instead of re-asking the admin — even though the admin is
+     * the only remaining source and a target is already registered.
+     */
+    @Test
+    fun deferLocally_whileAskingTheAdmin_doesNotDemoteTheEntry() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+        verifier.deferVerification(invitation, owner)
+        assertEquals(
+            PendingGroupVerification.Status.VERIFYING,
+            store.snapshots.value.single().status,
+        )
+
+        // A relay replay re-runs verification and the chain read fails.
+        verifier.deferLocally(
+            invitation,
+            owner,
+            senderEd25519PublicKey = null,
+            status = PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+        )
+
+        assertEquals(
+            "an outstanding admin request outranks a local park",
+            PendingGroupVerification.Status.VERIFYING,
+            store.snapshots.value.single().status,
+        )
+    }
+
+    /**
+     * Escalation that can't actually reach an admin must keep the local
+     * deferral, or Retry becomes a silent no-op.
+     *
+     * The `adminInbox == null` path records UNREACHABLE and returns
+     * without registering a target, so dropping the retained snapshot on
+     * the way in discarded the chain re-read that was the only thing
+     * left that could work.
+     */
+    @Test
+    fun failedEscalation_keepsTheSnapshotRetryableLocally() = runTest {
+        val verifier = makeVerifier()
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = "aa".repeat(48),
+            memberProfiles = null,  // admin not reachable
+        )
+        var reverified = 0
+        verifier.setReverify { _, _, _ -> reverified += 1 }
+
+        verifier.deferLocally(
+            invitation,
+            owner,
+            senderEd25519PublicKey = null,
+            status = PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+        )
+        verifier.deferVerification(invitation, owner)  // can't reach an admin
+
+        verifier.retry(ByteArray(32) { 0x42 }.joinToString("") { "%02x".format(it) })
+
+        assertEquals("Retry must still re-read the chain", 1, reverified)
+    }
+
+    /**
+     * An entry we already asked about and got no answer for must not
+     * re-ask on every relay replay.
+     *
+     * Narrowing the old blanket `contains` skip to VERIFYING fixed the
+     * escalation trap but opened this: a retained invitation is
+     * re-delivered on each reconnect, so an UNREACHABLE entry would
+     * re-send a refresh on a schedule the user never asked for. It
+     * re-arms through the card's Retry instead.
+     */
+    @Test
+    fun replayOfAnUnansweredRequest_doesNotReAskTheAdmin() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+        verifier.deferVerification(invitation, owner)
+        store.updateStatus(
+            ByteArray(32) { 0x42 }.joinToString("") { "%02x".format(it) },
+            PendingGroupVerification.Status.UNREACHABLE,
+        )
+        val sendsAfterFirstAsk = transport.sends().size
+
+        // Three relay replays of the same retained invitation.
+        repeat(3) { verifier.deferVerification(invitation, owner) }
+
+        assertEquals(
+            "a replay must not re-ask; Retry is the way back",
+            sendsAfterFirstAsk,
+            transport.sends().size,
+        )
+    }
+
+    /** An outstanding request is the one reason to skip: re-sending
+     *  while the admin is mid-reply just burns relay budget. */
+    @Test
+    fun deferVerification_whileAlreadyVerifying_doesNotResend() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+
+        verifier.deferVerification(invitation, owner)
+        verifier.deferVerification(invitation, owner)
+
+        assertEquals(1, transport.sends().size)
+    }
+
+    /** A snapshot parked for a reason the admin can't fix must send
+     *  nothing — a refresh request would be answered promptly and change
+     *  nothing, while telling the user the wrong party is at fault. */
+    @Test
+    fun deferLocally_sendsNothingToTheAdmin() = runTest {
+        val verifier = makeVerifier()
+        val adminBls = "aa".repeat(48)
+        val invitation = invitation(
+            groupId = ByteArray(32) { 0x42 },
+            adminPubkeyHex = adminBls,
+            memberProfiles = mapOf(
+                adminBls to MemberProfile(
+                    alias = "Admin",
+                    inboxPublicKey = ByteArray(32) { 0x51 },
+                    sendingPubkey = ByteArray(32) { 0x52 },
+                ),
+            ),
+        )
+
+        verifier.deferLocally(
+            invitation,
+            owner,
+            senderEd25519PublicKey = null,
+            status = PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED,
+        )
+
+        assertEquals(0, transport.sends().size)
+        assertEquals(
+            PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED,
+            store.snapshots.value.single().status,
+        )
+    }
+
     /** A snapshot whose admin we can't reach (no admin entry in the
      *  shipped roster) is recorded as UNREACHABLE and surfaced — not
      *  silently dropped, never materialized. */

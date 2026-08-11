@@ -13,6 +13,7 @@ import app.onym.android.chain.OnymGroupProofGenerator
 import app.onym.android.chain.RelayerRepository
 import app.onym.android.chain.SepContractClient
 import app.onym.android.chain.SepContractError
+import app.onym.android.chain.SepContractErrorCode
 import app.onym.android.chain.SepContractTransport
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.TyrannyUpdateCommitmentPayload
@@ -87,6 +88,12 @@ open class JoinRequestApprover(
     private val makeContractTransport: (String) -> SepContractTransport = { url ->
         OkHttpSepContractTransport(httpClient = OkHttpClient(), endpointUrl = url)
     },
+    /** Appends the "X joined" notice to the admin's own copy of the
+     *  thread once an approval lands. Every other member gets theirs
+     *  from the fanned-out [MemberAnnouncementPayload]; the admin never
+     *  receives that (it is the sender), so this is the admin's only
+     *  source for the row. */
+    private val systemEvents: GroupSystemEventRecording = NoopGroupSystemEventRecorder,
 ) : JoinRequestApproving {
     /** UI-renderable view of one decrypted, awaiting-action request. */
     data class PendingRequest(
@@ -165,6 +172,16 @@ open class JoinRequestApprover(
         class ProofFailed(val reason: String) : ApproveOutcome()
         /** Relayer accepted the POST but the contract rejected. */
         class AnchorRejected(val reason: String) : ApproveOutcome()
+
+        /** The contract has no record of this group yet
+         *  (`GROUP_NOT_FOUND`). Almost always a race rather than a
+         *  fault: the group's own `create_group` transaction is still
+         *  waiting to be included in a ledger, and the admin approved a
+         *  joiner within those few seconds. Retrying shortly succeeds,
+         *  so this is separated from [AnchorRejected] — which means "the
+         *  chain looked at this and said no" and is not worth
+         *  retrying. */
+        object GroupNotAnchoredYet : ApproveOutcome()
     }
 
     private val mutex = Mutex()
@@ -303,6 +320,17 @@ open class JoinRequestApprover(
                 joinerInboxPub = req.joinerInboxPublicKey,
                 joinerSendingPub = req.joinerSendingPublicKey,
                 joinerAlias = req.joinerDisplayLabel,
+            )
+            // The admin's own "X joined" row. Everyone else derives
+            // theirs from the announcement fanned out just above, which
+            // the admin — as its sender — never receives.
+            systemEvents.recordMemberJoined(
+                groupId = anchored.id,
+                ownerIdentityId = anchored.ownerIdentityId,
+                groupType = anchored.groupType,
+                joinerBlsPubkeyHex = blsPub.toHexLowercase(),
+                alias = req.joinerDisplayLabel,
+                atMillis = System.currentTimeMillis(),
             )
         }
 
@@ -635,6 +663,12 @@ open class JoinRequestApprover(
         val response = try {
             client.updateCommitmentTyranny(payload)
         } catch (e: SepContractError) {
+            // A refused call arrives as a non-2xx whose body carries the
+            // simulation output, so the contract's own error number is
+            // in there rather than in a structured field.
+            if (e.contractErrorCode == SepContractErrorCode.GROUP_NOT_FOUND.code) {
+                return AnchorOutcome.Failed(ApproveOutcome.GroupNotAnchoredYet)
+            }
             return AnchorOutcome.Failed(
                 ApproveOutcome.TransportFailed("anchor: ${e.message ?: e}"),
             )
@@ -644,9 +678,14 @@ open class JoinRequestApprover(
             )
         }
         if (!response.accepted) {
-            return AnchorOutcome.Failed(
-                ApproveOutcome.AnchorRejected(response.message ?: "(no message)"),
-            )
+            // The same condition can also come back as a 200 with
+            // `accepted: false`, depending on where the relayer catches
+            // it — so both paths check.
+            val message = response.message ?: "(no message)"
+            if (SepContractErrorCode.parse(message) == SepContractErrorCode.GROUP_NOT_FOUND.code) {
+                return AnchorOutcome.Failed(ApproveOutcome.GroupNotAnchoredYet)
+            }
+            return AnchorOutcome.Failed(ApproveOutcome.AnchorRejected(message))
         }
 
         return AnchorOutcome.Ok(

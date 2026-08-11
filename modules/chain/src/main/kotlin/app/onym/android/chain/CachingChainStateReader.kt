@@ -69,6 +69,30 @@ class CachingChainStateReader(
         throw lastError ?: ChainReadError.NoActiveRelayer
     }
 
+    /**
+     * Archived entries are immutable once written — an epoch's
+     * commitment never changes — so unlike [tyrannyCommitment] there is
+     * nothing to go stale and no TTL to manage. Retries still apply:
+     * this runs against the same throttled relayer.
+     */
+    override suspend fun tyrannyHistory(
+        groupId: ByteArray,
+        maxEntries: UInt,
+    ): List<SepCommitmentEntry> {
+        var lastError: Throwable? = null
+        for (attempt in 0 until maxAttempts) {
+            try {
+                return inner.tyrannyHistory(groupId, maxEntries)
+            } catch (e: Throwable) {
+                lastError = e
+                if (attempt < maxAttempts - 1 && baseRetryDelayMillis > 0) {
+                    delay(baseRetryDelayMillis * (attempt + 1))
+                }
+            }
+        }
+        throw lastError ?: ChainReadError.NoActiveRelayer
+    }
+
     private companion object {
         private fun ByteArray.toHexLowercase(): String =
             buildString(size * 2) { for (b in this@toHexLowercase) append("%02x".format(b.toInt() and 0xFF)) }

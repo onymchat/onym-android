@@ -1,6 +1,9 @@
 package app.onym.android.inbox
 
+import app.onym.android.chain.ChainReadError
 import app.onym.android.chain.ChainStateReading
+import app.onym.android.chain.SepContractError
+import app.onym.android.chain.SepContractErrorCode
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
 import app.onym.android.chats.ChatMessage
@@ -8,6 +11,7 @@ import app.onym.android.chats.ChatMessagePayload
 import app.onym.android.chats.ChatMessageVariant
 import app.onym.android.chats.ChatReceiptPayload
 import app.onym.android.chats.ChatReceiptSending
+import app.onym.android.chats.ChatSystemEventRecorder
 import app.onym.android.chats.MessageDirection
 import app.onym.android.chats.NoopChatReceiptSender
 import app.onym.android.chats.MessageRepository
@@ -104,6 +108,13 @@ class IncomingMessageDispatcher(
      *  sends read receipts. Defaulted to `true` (the shipping
      *  default). */
     private val readReceiptsEnabled: () -> Boolean = { true },
+    /** Mints the membership notices this device is entitled to render:
+     *  "X joined" off a verified announcement, "You joined X" off a
+     *  verified invitation. Nullable and defaulted like
+     *  [messageRepository] above, so existing dispatcher tests keep
+     *  their construction sites — a null recorder simply writes no
+     *  notices. */
+    private val systemEvents: ChatSystemEventRecorder? = null,
 ) {
 
     suspend fun dispatch(
@@ -226,6 +237,29 @@ class IncomingMessageDispatcher(
     }
 
     /**
+     * Re-run verification for a snapshot parked because *this* device
+     * couldn't confirm it — no chain read, or the anchoring hadn't
+     * settled. Drives the Retry on those cards, since the remedy is
+     * another chain read rather than another message to the admin.
+     *
+     * Idempotent: a snapshot that still fails is re-parked with a fresh
+     * reason, and one that now verifies materializes and clears itself.
+     */
+    suspend fun reverify(
+        invitation: app.onym.android.group.GroupInvitationPayload,
+        ownerIdentityId: IdentityId,
+        senderEd25519PublicKey: ByteArray?,
+    ) {
+        // The signer is carried through from the original delivery.
+        // Dropping it would leave the materialized group without
+        // `adminEd25519PubkeyHex`, and every later
+        // MemberAnnouncementPayload is checked against exactly that — so
+        // a group admitted via Retry would silently stop accepting new
+        // members.
+        materializeGroup(invitation, ownerIdentityId, senderEd25519PublicKey)
+    }
+
+    /**
      * Materialize a local [ChatGroup] from an inbound
      * [GroupInvitationPayload]. Idempotent on `groupId` —
      * [GroupRepository.insert] delegates to `insertOrUpdate`, so a
@@ -267,7 +301,43 @@ class IncomingMessageDispatcher(
                 TyrannyInvitationVerification.VERIFIED -> {} // materialize below
                 TyrannyInvitationVerification.REJECT -> return
                 TyrannyInvitationVerification.STALE_NEEDS_REFRESH -> {
+                    // Genuinely past the archive window: the admin is
+                    // the only remaining source of current state.
                     groupStateRefresher.deferVerification(invitation, ownerIdentityId)
+                    return
+                }
+                // The rest are this device's problem, not the admin's.
+                // Park them with a reason the user can act on and send
+                // nothing — a refresh request would be answered promptly
+                // and still leave the snapshot unverifiable.
+                TyrannyInvitationVerification.CHAIN_NOT_CONFIGURED -> {
+                    groupStateRefresher.deferLocally(
+                        invitation,
+                        ownerIdentityId,
+                        senderEd25519PublicKey,
+                        PendingGroupVerification.Status.CHAIN_NOT_CONFIGURED,
+                    )
+                    return
+                }
+                TyrannyInvitationVerification.CHAIN_UNREACHABLE -> {
+                    groupStateRefresher.deferLocally(
+                        invitation,
+                        ownerIdentityId,
+                        senderEd25519PublicKey,
+                        PendingGroupVerification.Status.CHAIN_UNREACHABLE,
+                    )
+                    return
+                }
+                // Both resolve by re-reading in a moment: the group's
+                // anchoring is still settling, or our read lags it.
+                TyrannyInvitationVerification.GROUP_NOT_ON_CHAIN_YET,
+                TyrannyInvitationVerification.CHAIN_BEHIND_SNAPSHOT -> {
+                    groupStateRefresher.deferLocally(
+                        invitation,
+                        ownerIdentityId,
+                        senderEd25519PublicKey,
+                        PendingGroupVerification.Status.CHAIN_SETTLING,
+                    )
                     return
                 }
             }
@@ -316,7 +386,32 @@ class IncomingMessageDispatcher(
             // The group's invitation/intro, as the sender wrote it.
             invitationMessage = invitation.invitationMessage,
         )
+
+        // Was this thread already on the device? Relays replay the inbox
+        // on every reconnect, so a re-delivered invitation is routine —
+        // only the first one is a "you joined" moment.
+        val alreadyPresent = groupRepository.snapshots.value.any {
+            it.id == groupIdHex && it.ownerIdentityId == ownerIdentityId.value
+        }
+
         groupRepository.insert(group)
+
+        // Open the joiner's brand-new thread with a line explaining what
+        // it is, instead of a blank screen, now that the invitation has
+        // cleared verification above.
+        if (!alreadyPresent) {
+            val self = selfMemberProfileEntry(ownerIdentityId)
+            if (self != null) {
+                systemEvents?.recordYouJoined(
+                    groupId = groupIdHex,
+                    ownerIdentityId = ownerIdentityId.value,
+                    groupType = groupType,
+                    groupName = invitation.name,
+                    ownBlsPubkeyHex = self.first,
+                    atMillis = System.currentTimeMillis(),
+                )
+            }
+        }
     }
 
     private fun selfMemberProfileEntry(
@@ -457,6 +552,21 @@ class IncomingMessageDispatcher(
             )),
         )
         groupRepository.insert(updated)
+
+        // "X joined", for every existing member. Reached only past the
+        // dedup guard above (`memberProfiles[key] != null`), the
+        // authorized-signer check and the on-chain commitment check — so
+        // a relay replaying this announcement on each reconnect cannot
+        // append a second notice, and an unverified announcement cannot
+        // append one at all.
+        systemEvents?.recordMemberJoined(
+            groupId = updated.id,
+            ownerIdentityId = updated.ownerIdentityId,
+            groupType = updated.groupType,
+            joinerBlsPubkeyHex = key,
+            alias = payload.newMember.alias,
+            atMillis = System.currentTimeMillis(),
+        )
     }
 
     private fun tryDecodeAnnouncement(bytes: ByteArray): MemberAnnouncementPayload? = try {
@@ -812,15 +922,12 @@ class IncomingMessageDispatcher(
         //     thereby letting a self-consistent fake materialize).
         val onchain = try {
             reader.tyrannyCommitment(invitation.groupId)
-        } catch (_: Throwable) {
-            // Couldn't reach / read the relayer (throttled, offline, or
-            // unconfigured). NOT evidence of forgery — never reject. Defer
-            // so the verifier retries via the admin-refresh path and the
-            // group materializes once the read succeeds, instead of being
-            // silently dropped until the next relay replay (a restart).
-            return TyrannyInvitationVerification.STALE_NEEDS_REFRESH
+        } catch (e: Throwable) {
+            return classifyChainReadFailure(e)
         }
-        if (onchain.epoch < invitation.epoch) return TyrannyInvitationVerification.STALE_NEEDS_REFRESH
+        if (onchain.epoch < invitation.epoch) {
+            return TyrannyInvitationVerification.CHAIN_BEHIND_SNAPSHOT
+        }
         if (onchain.epoch == invitation.epoch) {
             return if (onchain.commitment.contentEquals(claimed)) {
                 TyrannyInvitationVerification.VERIFIED
@@ -828,14 +935,80 @@ class IncomingMessageDispatcher(
                 TyrannyInvitationVerification.REJECT
             }
         }
+
+        // Chain AHEAD. The contract archives every entry it supersedes
+        // and keeps the last [HISTORY_WINDOW], so a snapshot the chain
+        // has moved past is still checkable against what was actually
+        // committed at its own epoch — reproducing
+        // `Poseidon(Poseidon(root, epoch), salt)` for an archived epoch
+        // needs the same never-on-chain `salt`, so this is exactly as
+        // strong as the exact-epoch check above.
+        //
+        // This is why the admin no longer has to be awake for the common
+        // case: an admin who admits a second joiner before the first has
+        // opened the app used to strand that first invitation on a
+        // round-trip to a sleeping phone.
+        try {
+            val archived = reader
+                .tyrannyHistory(invitation.groupId, HISTORY_WINDOW)
+                .firstOrNull { it.epoch == invitation.epoch }
+            if (archived != null) {
+                return if (archived.commitment.contentEquals(claimed)) {
+                    TyrannyInvitationVerification.VERIFIED
+                } else {
+                    TyrannyInvitationVerification.REJECT
+                }
+            }
+        } catch (_: Throwable) {
+            // History unreadable (older relayer, throttle). Fall through
+            // to the admin refresh rather than failing: this path is an
+            // optimization over asking, not a replacement for it.
+        }
+
+        // Older than the window, or no history available — the admin is
+        // now genuinely the only source for current state.
         return TyrannyInvitationVerification.STALE_NEEDS_REFRESH
     }
 
+    /** Matches `HISTORY_WINDOW` in `sep-tyranny`. Asking for more than
+     *  the contract keeps is harmless (it clamps), but asking for the
+     *  exact figure documents the bound this relies on. */
+    private val HISTORY_WINDOW: UInt get() = 64u
+
     /** Outcome of receiver-side Tyranny invitation verification (PR 159). */
-    private enum class TyrannyInvitationVerification {
+    internal enum class TyrannyInvitationVerification {
         /** Internally consistent AND matches the on-chain commitment at
          *  an exact epoch — safe to materialize. */
         VERIFIED,
+
+        /** The chain couldn't be read at all — throttled, offline, or a
+         *  relayer that answered with an error.
+         *
+         *  Split out from [STALE_NEEDS_REFRESH] because the two need
+         *  opposite responses. This one is entirely local to the
+         *  receiver: asking the admin cannot fix it, and the previous
+         *  behaviour — defer, tell the user "the admin is offline",
+         *  offer a Retry that re-sends to the admin — left a joiner
+         *  looping forever against a wall they alone could take down. */
+        CHAIN_UNREACHABLE,
+
+        /** No relayer endpoint or no contract binding for the active
+         *  network — nothing was attempted over the network at all.
+         *  Usually not a misconfiguration but a race: both lists are
+         *  fetched in the background at launch. */
+        CHAIN_NOT_CONFIGURED,
+
+        /** The contract has no record of this group yet
+         *  (`GROUP_NOT_FOUND`). The admin's `create_group` is still
+         *  settling; seconds later this becomes verifiable on its own. */
+        GROUP_NOT_ON_CHAIN_YET,
+
+        /** The chain is *behind* the snapshot: our read hasn't caught up
+         *  with an `update_commitment` that has already landed. Also
+         *  what a self-consistent forgery claiming a future epoch looks
+         *  like — indistinguishable here, which is why this waits rather
+         *  than trusting. Resolves by re-reading, not by asking anyone. */
+        CHAIN_BEHIND_SNAPSHOT,
 
         /** Internally consistent, but we couldn't byte-verify against the
          *  chain *right now* — the chain advanced past the snapshot, OR
@@ -892,7 +1065,30 @@ class IncomingMessageDispatcher(
         return true
     }
 
-    private companion object {
+    internal companion object {
+
+        /**
+         * Which "couldn't read the chain" this is.
+         *
+         * NOT evidence of forgery — never reject. But which failure it
+         * is decides what the user should do about it, and these used
+         * to be indistinguishable: everything became "ask the admin",
+         * including the failures no admin could resolve.
+         *
+         * Extracted so it is reachable from a JVM unit test. The
+         * `verifyTyrannyInvitation` path around it is not: its Poseidon
+         * recompute needs the OnymSDK JNI .so, which only `androidTest`
+         * loads, so a Tyranny invitation always rejects before the chain
+         * read under plain unit tests.
+         */
+        internal fun classifyChainReadFailure(e: Throwable): TyrannyInvitationVerification = when {
+            (e as? SepContractError)?.contractErrorCode ==
+                SepContractErrorCode.GROUP_NOT_FOUND.code ->
+                TyrannyInvitationVerification.GROUP_NOT_ON_CHAIN_YET
+            e is ChainReadError -> TyrannyInvitationVerification.CHAIN_NOT_CONFIGURED
+            else -> TyrannyInvitationVerification.CHAIN_UNREACHABLE
+        }
+
         private val permissiveJson = Json { ignoreUnknownKeys = true }
 
         private fun ByteArray.toHexLowercase(): String = buildString(size * 2) {
