@@ -2,7 +2,9 @@
 // Bip39 (BIP39 + project HKDF stretches), StellarStrKey (SEP-0023),
 // StorageEncryption (AES-256-GCM field encryption), TrustedAssetVerifier
 // + DetachedSignatureFetch (Ed25519 gate for fetched config assets),
-// Base64Serializers (iOS-compatible ByteArray JSON encoding).
+// Base64Serializers (iOS-compatible ByteArray JSON encoding), and the
+// seat-generic consent/offers primitives (SignedServiceManifest /
+// ServiceManifestReviewer / PinnedConsentStore / entitlements).
 plugins {
     // No `android-library` alias exists in libs.versions.toml (the
     // integrator may want to add one). The root build.gradle.kts loads
@@ -11,9 +13,11 @@ plugins {
     // the same artifact, so it resolves here without a version.
     id("com.android.library")
     alias(libs.plugins.kotlin.android)
+    // @Serializable PinnedConsentRecord — the compiler plugin
+    // generates its `.serializer()`. (Base64Serializers still
+    // hand-implements KSerializer; that needs no plugin.)
+    alias(libs.plugins.kotlin.serialization)
     // NOT applied — nothing here needs them:
-    //  - kotlin-serialization: Base64Serializers hand-implements
-    //    KSerializer; no @Serializable classes to generate code for.
     //  - compose-compiler: no UI.
     //  - ksp: no Room / annotation processing.
 }
@@ -49,6 +53,15 @@ dependencies {
     // catalog.
     api(libs.kotlinx.serialization.json)
 
+    // api: DataStore<Preferences> is a public constructor parameter
+    // of DataStorePreferencesPinnedConsentStore (same posture as
+    // :chain's selection stores).
+    api(libs.androidx.datastore.preferences)
+
+    // api: PinnedConsentStore's methods are `suspend`, so coroutine
+    // types are part of the public API surface.
+    api(libs.kotlinx.coroutines.core)
+
     // implementation: BouncyCastle types (HKDFBytesGenerator, Ed25519
     // Signer/PublicKeyParameters) appear only in bodies / internal
     // members, never in public signatures.
@@ -63,4 +76,9 @@ dependencies {
     // generation / provider registration) through the implementation
     // dep above — testImplementation extends implementation.
     testImplementation(libs.junit)
+    // runTest for the suspend consent-store API, and the pure-JVM
+    // DataStore artifact for temp-file-backed store tests (same
+    // pattern as :chain's RelayerSelectionStoreTest).
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.androidx.datastore.preferences.core)
 }
