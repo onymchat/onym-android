@@ -90,6 +90,20 @@ object UITestRegistry {
      *  null-means-no-network contract as [nostrRelaysFetcher]. */
     var blossomServersFetcher: app.onym.android.transport.blossom.KnownBlossomServersFetcher? = null
 
+    /** Optional fake for the Discovery network seam
+     *  ([app.onym.android.discovery.OkHttpDiscoveryFetcher] in
+     *  production). Same null-means-no-network contract as
+     *  [nostrRelaysFetcher]: when either this or [discoveryStore] is
+     *  null under [enabled], no [app.onym.android.discovery.DiscoveryRepository]
+     *  is constructed at all — the legacy fetchers run unwrapped and
+     *  UI tests stay offline. */
+    var discoveryFetcher: app.onym.android.discovery.DiscoveryFetching? = null
+
+    /** In-memory replacement for
+     *  [app.onym.android.discovery.DataStorePreferencesDiscoveryStore].
+     *  See [discoveryFetcher] for the null contract. */
+    var discoveryStore: app.onym.android.discovery.DiscoveryStore? = null
+
     /** Reset between tests. Called from `@Before`. */
     fun reset() {
         enabled = false
@@ -103,5 +117,7 @@ object UITestRegistry {
         blossomClient = null
         nostrRelaysFetcher = null
         blossomServersFetcher = null
+        discoveryFetcher = null
+        discoveryStore = null
     }
 }
