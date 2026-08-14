@@ -57,7 +57,7 @@ class DiscoveryTrustMutationTest {
         extraTopLevelField: Boolean = false,
     ): JsonObject = buildJsonObject {
         put("version", 1)
-        put("implementationProfile", DiscoveryProfile.IMPLEMENTATION_PROFILE)
+        put("implementationProfileId", DiscoveryProfile.IMPLEMENTATION_PROFILE)
         put("providerId", "onym:component:test-discovery")
         put("operator", operator)
         put("seat", "discovery")
@@ -112,7 +112,7 @@ class DiscoveryTrustMutationTest {
         extraTopLevelField: Boolean = false,
     ): JsonObject = buildJsonObject {
         put("version", 1)
-        put("implementationProfile", DiscoveryProfile.IMPLEMENTATION_PROFILE)
+        put("implementationProfileId", DiscoveryProfile.IMPLEMENTATION_PROFILE)
         put("catalogId", "main")
         put("providerId", "onym:component:test-discovery")
         put("sequence", sequence)

@@ -55,7 +55,7 @@ object DiscoveryProfile {
 @Serializable
 data class DiscoveryProviderManifest(
     val version: Int,
-    val implementationProfile: String,
+    val implementationProfileId: String,
     val providerId: String,
     val operator: String,
     val seat: String,
@@ -91,7 +91,7 @@ data class CatalogDescriptor(
 @Serializable
 data class CatalogSnapshot(
     val version: Int,
-    val implementationProfile: String,
+    val implementationProfileId: String,
     val catalogId: String,
     val providerId: String,
     val sequence: Long,

@@ -139,9 +139,9 @@ object DiscoveryTrust {
         if (manifest.version != 1) {
             throw manifestInvalid("unsupported version ${manifest.version}")
         }
-        if (manifest.implementationProfile != DiscoveryProfile.IMPLEMENTATION_PROFILE) {
+        if (manifest.implementationProfileId != DiscoveryProfile.IMPLEMENTATION_PROFILE) {
             throw manifestInvalid(
-                "unsupported implementation profile ${manifest.implementationProfile}"
+                "unsupported implementation profile ${manifest.implementationProfileId}"
             )
         }
         if (manifest.seat != "discovery") {
@@ -246,7 +246,7 @@ object DiscoveryTrust {
         if (snapshot.version != 1) {
             throw snapshotInvalid("unsupported version ${snapshot.version}")
         }
-        if (snapshot.implementationProfile != DiscoveryProfile.IMPLEMENTATION_PROFILE) {
+        if (snapshot.implementationProfileId != DiscoveryProfile.IMPLEMENTATION_PROFILE) {
             throw snapshotInvalid("unsupported implementation profile")
         }
         if (snapshot.providerId != manifest.providerId) {
