@@ -139,13 +139,32 @@ data class ManifestRef(
     val digest: String,
 )
 
-/** One evidence pointer inside a catalog entry (`Discovery.md` §5.3). */
+/** One evidence pointer inside a catalog entry (`Discovery.md` §5.3).
+ *  §4.2 defers the member shape to v2: `evidence` must be absent or
+ *  empty in v1, and a non-empty array skips the entry — so this type
+ *  only ever appears in skipped entries' raw JSON. */
 @Serializable
 data class EvidenceRef(
     val type: String,
     val uri: String,
     val digest: String,
 )
+
+/**
+ * §4.2 entry `status`: `{"state": "warning" | "review", "uri"?}` —
+ * defined in v1 so entry-lossy decoding cannot silently drop the very
+ * entries carrying warnings. A VALID status never skips the entry; an
+ * undecodable one skips it like any other malformed field.
+ */
+@Serializable
+data class EntryStatus(
+    val state: String,
+    val uri: String? = null,
+) {
+    companion object {
+        val allowedStates: Set<String> = setOf("warning", "review")
+    }
+}
 
 /**
  * Wire-shaped catalog entry DTO — string-typed `relationship` so an
@@ -168,6 +187,7 @@ internal data class RawCatalogEntry(
     val reviewedAt: String? = null,
     val relationship: String,
     val placement: String,
+    val status: EntryStatus? = null,
 )
 
 /**
@@ -192,4 +212,6 @@ data class CatalogEntry(
     val reviewedAt: String? = null,
     val relationship: EntryRelationship,
     val placement: String,
+    /** §4.2 disclosed warning/review status — surfaced, never dropped. */
+    val status: EntryStatus? = null,
 )

@@ -123,13 +123,138 @@ class DiscoveryTrustFixtureTest {
     }
 
     @Test
-    fun snapshotGap_s3AfterS1_isSnapshotInvalid() {
+    fun snapshotForwardJump_s3AfterS1_isAcceptedWithNote() {
+        // §6/§10 item 8: the client missed a publication — accepted,
+        // with the jump surfaced as an outcome (never a permanent
+        // rejection of an honest catalog). The intermediate-fetch
+        // continuity walk is not performed (gap-listed in §11).
+        val manifest = verifiedManifest()
+        val result = DiscoveryTrust.verifySnapshot(
+            snapshot3, manifest, previousRaw = snapshot1, now = now,
+        )
+        assertEquals(SnapshotChainOutcome.ForwardJumpWithNote(missed = 1), result.outcome)
+    }
+
+    @Test
+    fun snapshotNoOpRefresh_identicalBytes_isNotAWarning() {
+        // §6/§10 item 11: identical latest snapshot re-fetched — the
+        // provider simply hasn't published since.
+        val manifest = verifiedManifest()
+        val result = DiscoveryTrust.verifySnapshot(
+            snapshot2, manifest, previousRaw = snapshot2, now = now,
+        )
+        assertEquals(SnapshotChainOutcome.NoOpRefresh, result.outcome)
+    }
+
+    @Test
+    fun snapshotFirstAcceptance_takesAnySequence() {
+        // §6: on first acceptance there is no retained state — an
+        // established catalog past its first snapshot must be addable
+        // (TOFU covers trust).
+        val manifest = verifiedManifest()
+        val result = DiscoveryTrust.verifySnapshot(
+            snapshot3, manifest, previousRaw = null, now = now,
+        )
+        assertEquals(3L, result.snapshot.sequence)
+        assertEquals(SnapshotChainOutcome.FirstAcceptance, result.outcome)
+    }
+
+    @Test
+    fun snapshotFutureDatedGeneratedAt_isSnapshotInvalid() {
+        // §4.2: generatedAt (2026-08-13) beyond the 10-minute skew in
+        // the verifier's future is snapshot_invalid — the 90-day
+        // ceiling must not be mintable forward.
         val manifest = verifiedManifest()
         try {
-            DiscoveryTrust.verifySnapshot(snapshot3, manifest, previousRaw = snapshot1, now = now)
+            DiscoveryTrust.verifySnapshot(
+                snapshot1, manifest, previousRaw = null,
+                now = Instant.parse("2026-08-01T00:00:00Z"),
+            )
             fail("expected snapshot_invalid")
         } catch (e: DiscoveryTrustError.SnapshotInvalid) {
-            assertTrue(e.message!!.contains("sequence"))
+            assertTrue(e.message!!.contains("future"))
+        }
+    }
+
+    @Test
+    fun sponsoredDisclosureAndStatus_surviveDecoding() {
+        // §10 item 6 + §4.2 status: the sponsored-placement disclosure
+        // and a valid warning status must SURVIVE decoding — an entry
+        // carrying a valid status is never skipped (that would be the
+        // exact warning-dropping failure the field exists to prevent).
+        val manifest = verifiedManifest()
+        val result = DiscoveryTrust.verifySnapshot(
+            DiscoveryFixtures.load("snapshot-sponsored.json"),
+            manifest, previousRaw = null, now = now,
+        )
+        assertEquals(2, result.entries.size)
+        assertTrue(result.skippedEntryIndexes.isEmpty())
+        assertEquals(EntryRelationship.SponsoredPlacement, result.entries[0].relationship)
+        assertEquals("sponsored", result.entries[0].placement)
+        val status = result.entries[1].status
+        assertEquals("warning", status?.state)
+        assertTrue(status?.uri != null)
+    }
+
+    @Test
+    fun audienceSkipManifest_isValidAndEmptyByPolicy() {
+        // §1/§10 item 13: a manifest of decodable but non-public
+        // catalogs is a valid, empty-by-policy source; the skip count
+        // is surfaced, never provider_manifest_invalid.
+        val verified = DiscoveryTrust.verifyProviderManifest(
+            DiscoveryFixtures.load("audience-skip-manifest.json"), null, now,
+        )
+        assertTrue(verified.catalogs.isEmpty())
+        assertEquals(listOf(0), verified.audienceSkippedCatalogIndexes)
+        assertTrue(verified.skippedCatalogIndexes.isEmpty())
+    }
+
+    @Test
+    fun policyTransitionGrace_previousDeclarationAcceptedWithNote() {
+        // §4.2/§10 item 10: manifest updated to a new policy digest,
+        // snapshot still citing the previous one — accepted with the
+        // transition note when the previous declaration was retained;
+        // rejected without it; any third digest fails.
+        val transitionManifest = DiscoveryTrust.verifyProviderManifest(
+            DiscoveryFixtures.load("policy-transition-manifest.json"), null, now,
+        )
+        val previousPolicy = "sha256:" + "11".repeat(32)
+        val v1 = DiscoveryTrust.verifySnapshot(snapshot1, verifiedManifest(), previousRaw = null, now = now)
+
+        try {
+            DiscoveryTrust.verifySnapshot(
+                snapshot1, transitionManifest,
+                previous = null, now = now,
+            )
+            fail("expected snapshot_invalid")
+        } catch (e: DiscoveryTrustError.SnapshotInvalid) {
+            assertTrue(e.message!!.contains("policy"))
+        }
+
+        val accepted = DiscoveryTrust.verifySnapshot(
+            snapshot1, transitionManifest,
+            previous = AcceptedSnapshotRef(
+                digest = v1.digest,
+                sequence = v1.snapshot.sequence,
+                previousPolicyDigest = previousPolicy,
+            ),
+            now = now,
+        )
+        assertTrue(accepted.policyTransition)
+
+        try {
+            DiscoveryTrust.verifySnapshot(
+                snapshot1, transitionManifest,
+                previous = AcceptedSnapshotRef(
+                    digest = v1.digest,
+                    sequence = v1.snapshot.sequence,
+                    previousPolicyDigest = "sha256:" + "99".repeat(32),
+                ),
+                now = now,
+            )
+            fail("expected snapshot_invalid")
+        } catch (e: DiscoveryTrustError.SnapshotInvalid) {
+            assertTrue(e.message!!.contains("policy"))
         }
     }
 

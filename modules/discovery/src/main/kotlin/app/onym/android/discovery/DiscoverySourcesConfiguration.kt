@@ -14,6 +14,12 @@ data class AcceptedCatalogSnapshot(
     val sequence: Long,
     /** RFC 3339 acceptance timestamp (client clock). */
     val acceptedAt: String,
+    /** The `policy` digest the manifest declared for this catalog at
+     *  acceptance time — retained as the "immediately previous
+     *  declaration" the §4.2 policy-transition grace accepts with a
+     *  note on the next refresh. `null` on records persisted by
+     *  older builds. */
+    val policyDigest: String? = null,
 )
 
 /**

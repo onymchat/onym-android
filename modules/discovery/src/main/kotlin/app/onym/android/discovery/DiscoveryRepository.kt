@@ -42,11 +42,17 @@ sealed class DiscoveryFetchStatus {
     data class Failed(val message: String) : DiscoveryFetchStatus()
 }
 
-/** Everything the Discovery UI observes, published as one value. */
+/** Everything the Discovery UI observes, published as one value.
+ *  [sourceNotes] carries the last refresh's integrity/completeness
+ *  notes per providerId — skipped catalogs and entries
+ *  (`result_incomplete`), audience skips, forward-jump and
+ *  policy-transition notes (§1/§6/§9). Informational: the source's
+ *  data was still accepted. */
 data class DiscoveryState(
     val configuration: DiscoverySourcesConfiguration,
     val entries: List<AttributedCatalogEntry>,
     val fetchStatus: DiscoveryFetchStatus,
+    val sourceNotes: Map<String, List<String>> = emptyMap(),
 ) {
     val sources: List<DiscoverySource> get() = configuration.sources
 
@@ -244,14 +250,16 @@ class DiscoveryRepository(
 
         val refreshedSources = mutableListOf<DiscoverySource>()
         val collected = mutableListOf<AttributedCatalogEntry>()
+        val notesByProvider = mutableMapOf<String, List<String>>()
         var firstError: Throwable? = null
         var failures = 0
 
         for (source in pinned) {
             try {
-                val (updated, entries) = refreshSource(source)
-                refreshedSources.add(updated)
-                collected.addAll(entries)
+                val result = refreshSource(source)
+                refreshedSources.add(result.source)
+                collected.addAll(result.entries)
+                if (result.notes.isNotEmpty()) notesByProvider[source.providerId] = result.notes
             } catch (e: Throwable) {
                 failures += 1
                 if (firstError == null) firstError = e
@@ -285,16 +293,25 @@ class DiscoveryRepository(
                 configuration = merged,
                 entries = entries,
                 fetchStatus = DiscoveryFetchStatus.Success,
+                sourceNotes = notesByProvider.filterKeys { it in liveProviderIds },
             )
         }
     }
+
+    /** One source's refresh result: updated chain anchors, attributed
+     *  entries, and the §1/§6/§9 integrity/completeness notes. */
+    private data class SourceRefreshResult(
+        val source: DiscoverySource,
+        val entries: List<AttributedCatalogEntry>,
+        val notes: List<String>,
+    )
 
     /** Fetch + verify one pinned source's manifest and every declared
      *  catalog snapshot. Returns the source with updated chain
      *  anchors plus its attributed entries. */
     private suspend fun refreshSource(
         source: DiscoverySource,
-    ): Pair<DiscoverySource, List<AttributedCatalogEntry>> {
+    ): SourceRefreshResult {
         val manifestRaw = fetcher.fetch(source.url, DiscoveryProfile.MAX_MANIFEST_BYTES)
         val verified = DiscoveryTrust.verifyProviderManifest(
             raw = manifestRaw,
@@ -312,29 +329,63 @@ class DiscoveryRepository(
                     "${source.providerId} — the URL now serves a different provider"
             )
         }
+        // §1/§9 surfacing: skipped descriptors and audience skips are
+        // notes on the source, so a partly or wholly skipped manifest
+        // never reads as a silently smaller (or empty) one.
+        val notes = mutableListOf<String>()
+        if (verified.skippedCatalogIndexes.isNotEmpty()) {
+            notes.add("${verified.skippedCatalogIndexes.size} malformed catalog(s) were skipped")
+        }
+        if (verified.audienceSkippedCatalogIndexes.isNotEmpty()) {
+            notes.add("${verified.audienceSkippedCatalogIndexes.size} non-public catalog(s) were skipped")
+        }
+
         val entries = mutableListOf<AttributedCatalogEntry>()
         val accepted = source.acceptedCatalogs.toMutableMap()
         for (catalog in verified.catalogs) {
             val snapshotRaw = fetcher.fetch(catalog.snapshot, DiscoveryProfile.MAX_SNAPSHOT_BYTES)
+            // §8 retained state: last accepted digest + sequence, and
+            // the previous manifest's policy declaration for the §4.2
+            // transition grace. The §6 four-case comparison (no-op
+            // refresh / successor / rollback / forward jump) lives in
+            // DiscoveryTrust now.
             val previous = accepted[catalog.catalogId]?.let {
-                AcceptedSnapshotRef(digest = it.digest, sequence = it.sequence)
+                AcceptedSnapshotRef(
+                    digest = it.digest,
+                    sequence = it.sequence,
+                    previousPolicyDigest = it.policyDigest,
+                )
             }
-            // Unchanged bytes → same accepted snapshot; re-verify with
-            // no chain anchor (a snapshot is always its own valid
-            // re-fetch) but keep the retained anchor untouched.
-            val rePublished = previous != null &&
-                DiscoveryTrust.sha256Digest(snapshotRaw) == previous.digest
             val result = DiscoveryTrust.verifySnapshot(
                 raw = snapshotRaw,
                 manifest = verified,
-                previous = if (rePublished) null else previous,
+                previous = previous,
                 now = now(),
             )
             accepted[catalog.catalogId] = AcceptedCatalogSnapshot(
                 digest = result.digest,
                 sequence = result.snapshot.sequence,
                 acceptedAt = now().toString(),
+                policyDigest = catalog.policy,
             )
+            when (val outcome = result.outcome) {
+                is SnapshotChainOutcome.ForwardJumpWithNote -> notes.add(
+                    "catalog ${catalog.catalogId}: ${outcome.missed} intermediate " +
+                        "publication(s) could not be verified"
+                )
+                else -> Unit
+            }
+            if (result.policyTransition) {
+                notes.add("catalog ${catalog.catalogId}: the provider is transitioning to a new policy")
+            }
+            if (result.skippedEntryIndexes.isNotEmpty()) {
+                // §9 result_incomplete: the shrunken set must never be
+                // presented as the whole catalog.
+                notes.add(
+                    "catalog ${catalog.catalogId}: ${result.skippedEntryIndexes.size} " +
+                        "listing(s) could not be read and were skipped"
+                )
+            }
             result.entries.mapTo(entries) { entry ->
                 AttributedCatalogEntry(
                     entry = entry,
@@ -349,7 +400,11 @@ class DiscoveryRepository(
                 )
             }
         }
-        return source.copy(acceptedCatalogs = accepted) to entries
+        return SourceRefreshResult(
+            source = source.copy(acceptedCatalogs = accepted),
+            entries = entries,
+            notes = notes,
+        )
     }
 
     // ─── internals ────────────────────────────────────────────────

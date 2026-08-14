@@ -21,6 +21,35 @@ class DiscoveryCanonicalTest {
     }
 
     @Test
+    fun caseDivergenceVector_sortsByUtf8ByteOrder() {
+        // §3/§10 item 1: the sort is UTF-8 byte order — uppercase
+        // before lowercase. A case-insensitive sort fails exactly on
+        // this vector.
+        val input = DiscoveryFixtures.load("canonical-case-input.json")
+        val expected = DiscoveryFixtures.load("canonical-case-bytes.bin")
+        val canonical = DiscoveryCanonical.signingBytes(input)
+        assertArrayEquals(expected, canonical)
+        assertEquals("""{"AB":4,"Ab":3,"aB":2,"ab":1}""", String(canonical, Charsets.UTF_8))
+    }
+
+    @Test
+    fun escapingVector_matchesPinnedEscaping() {
+        // §3/§10 item 1: escaping is pinned — two-char forms,
+        // lowercase \u00xx for remaining controls, and NOTHING else
+        // escaped: no `/`, no non-ASCII, no U+007F.
+        val input = DiscoveryFixtures.load("canonical-escaping-input.json")
+        val expected = DiscoveryFixtures.load("canonical-escaping-bytes.bin")
+        val canonical = DiscoveryCanonical.signingBytes(input)
+        assertArrayEquals(expected, canonical)
+        val text = String(canonical, Charsets.UTF_8)
+        assertTrue(text, "\"controls\":\"\\u0001\\u001f\"" in text)
+        assertTrue(text, "\"delete\":\"\"" in text)
+        assertTrue(text, """"slash":"a/b"""" in text)
+        assertTrue(text, """"twochar":"\b\f\n\r\t"""" in text)
+        assertTrue(text, "\"unicode\":\"héllo → 日本\"" in text)
+    }
+
+    @Test
     fun signingBytes_dropsTopLevelSignatureOnly_slashUnescaped() {
         val bytes = DiscoveryCanonical.signingBytes(DiscoveryFixtures.load("canonical-input.json"))
         val text = String(bytes, Charsets.UTF_8)

@@ -234,7 +234,7 @@ class DiscoveryTrustMutationTest {
             DiscoveryTrust.verifyProviderManifest(raw, publicKeyHex, now)
             fail("expected provider_manifest_invalid")
         } catch (e: DiscoveryTrustError.ProviderManifestInvalid) {
-            assertTrue(e.message!!.contains("no surviving catalog descriptors"))
+            assertTrue(e.message!!.contains("no decodable catalog descriptors"))
         }
     }
 
@@ -411,6 +411,176 @@ class DiscoveryTrustMutationTest {
             fail("expected snapshot_invalid")
         } catch (e: DiscoveryTrustError.SnapshotInvalid) {
             assertTrue(e.message!!.contains("sequence 1"))
+        }
+    }
+
+    @Test
+    fun snapshot_bornExpired_equalTimestamps_isSnapshotInvalid() {
+        // §4.2: expiresAt must be STRICTLY after generatedAt —
+        // equality is snapshot_invalid (born expired), not merely
+        // snapshot_expired.
+        val manifest = verifiedManifest()
+        val raw = signAndPublish(
+            snapshotDocument(
+                generatedAt = "2026-08-13T00:00:00Z",
+                expiresAt = "2026-08-13T00:00:00Z",
+            )
+        )
+        try {
+            DiscoveryTrust.verifySnapshot(raw, manifest, previousRaw = null, now = now)
+            fail("expected snapshot_invalid")
+        } catch (e: DiscoveryTrustError.SnapshotInvalid) {
+            assertTrue(e.message!!.contains("after generatedAt"))
+        }
+    }
+
+    @Test
+    fun snapshot_sameSequenceDifferentBytes_isFork() {
+        val manifest = verifiedManifest()
+        val published = signAndPublish(snapshotDocument())
+        val republished = signAndPublish(
+            snapshotDocument(entries = listOf(entryDocument(componentId = "onym:component:other")))
+        )
+        val anchor = AcceptedSnapshotRef(
+            digest = DiscoveryTrust.sha256Digest(published),
+            sequence = 1,
+        )
+        try {
+            DiscoveryTrust.verifySnapshot(republished, manifest, previous = anchor, now = now)
+            fail("expected snapshot_invalid")
+        } catch (e: DiscoveryTrustError.SnapshotInvalid) {
+            assertTrue(e.message!!.contains("fork"))
+        }
+    }
+
+    @Test
+    fun snapshot_entryWithNonEmptyEvidence_isSkipped() {
+        // §4.2: evidence must be absent or empty in v1 — an entry with
+        // a non-empty array is skipped, never passed through as an
+        // unrenderable attestation.
+        val manifest = verifiedManifest()
+        val withEvidence = entryDocument(componentId = "onym:component:audited") {
+            it["evidence"] = buildJsonArray {
+                addJsonObject {
+                    put("type", "audit")
+                    put("uri", "https://auditor.example/report.pdf")
+                    put("digest", "sha256:" + "33".repeat(32))
+                }
+            }
+        }
+        val raw = signAndPublish(snapshotDocument(entries = listOf(entryDocument(), withEvidence)))
+        val result = DiscoveryTrust.verifySnapshot(raw, manifest, previousRaw = null, now = now)
+        assertEquals(1, result.entries.size)
+        assertEquals(listOf(1), result.skippedEntryIndexes)
+    }
+
+    @Test
+    fun snapshot_entryStatus_validSurvives_invalidSkips() {
+        // §4.2: a VALID status never skips the entry (skipping it is
+        // the exact warning-dropping failure the field exists to
+        // prevent); an undecodable status skips the entry.
+        val manifest = verifiedManifest()
+        val warned = entryDocument(componentId = "onym:component:warned") {
+            it["status"] = buildJsonObject {
+                put("state", "warning")
+                put("uri", "https://discovery.example/status/warned.md")
+            }
+        }
+        val reviewed = entryDocument(componentId = "onym:component:reviewed") {
+            it["status"] = buildJsonObject { put("state", "review") }
+        }
+        val unknownState = entryDocument(componentId = "onym:component:suspended") {
+            it["status"] = buildJsonObject { put("state", "suspended") }
+        }
+        val httpUri = entryDocument(componentId = "onym:component:http-status") {
+            it["status"] = buildJsonObject {
+                put("state", "warning")
+                put("uri", "http://discovery.example/status.md")
+            }
+        }
+        val raw = signAndPublish(
+            snapshotDocument(entries = listOf(warned, reviewed, unknownState, httpUri))
+        )
+        val result = DiscoveryTrust.verifySnapshot(raw, manifest, previousRaw = null, now = now)
+        assertEquals(2, result.entries.size)
+        assertEquals(listOf(2, 3), result.skippedEntryIndexes)
+        assertEquals("warning", result.entries[0].status?.state)
+        assertEquals("review", result.entries[1].status?.state)
+        assertEquals(null, result.entries[1].status?.uri)
+    }
+
+    @Test
+    fun snapshot_minimalEntryWithoutProfilesOrEvidence_survives() {
+        // §4.1 lists profiles and evidence as optional: a minimal
+        // conforming entry must not be skipped.
+        val manifest = verifiedManifest()
+        val minimal = entryDocument(componentId = "onym:component:minimal") {
+            it.remove("profiles")
+            it.remove("evidence")
+        }
+        val raw = signAndPublish(snapshotDocument(entries = listOf(minimal)))
+        val result = DiscoveryTrust.verifySnapshot(raw, manifest, previousRaw = null, now = now)
+        assertEquals(1, result.entries.size)
+        assertTrue(result.skippedEntryIndexes.isEmpty())
+    }
+
+    @Test
+    fun manifest_invalidSeatTypesMember_skipsDescriptor() {
+        // §4.1: members are tokens in [a-z0-9.-]{1,64} or the lone
+        // "*" wildcard; anything else skips the descriptor.
+        val base = manifestDocument(secondCatalog = true)
+        val catalogs = base["catalogs"] as kotlinx.serialization.json.JsonArray
+        val good = catalogs[0] as JsonObject
+        val badMember = JsonObject(
+            (catalogs[1] as JsonObject) + ("seatTypes" to buildJsonArray { add("Notary!") })
+        )
+        val wildcardNotAlone = JsonObject(
+            (catalogs[1] as JsonObject) +
+                ("catalogId" to JsonPrimitive("third")) +
+                ("seatTypes" to buildJsonArray { add("*"); add("notary") })
+        )
+        val mutated = JsonObject(
+            base + ("catalogs" to buildJsonArray { add(good); add(badMember); add(wildcardNotAlone) })
+        )
+        val verified = DiscoveryTrust.verifyProviderManifest(
+            signAndPublish(mutated), publicKeyHex, now,
+        )
+        assertEquals(listOf("main"), verified.catalogs.map { it.catalogId })
+        assertEquals(listOf(1, 2), verified.skippedCatalogIndexes)
+    }
+
+    @Test
+    fun manifest_loneWildcardSeatTypes_isAccepted() {
+        val base = manifestDocument()
+        val catalogs = base["catalogs"] as kotlinx.serialization.json.JsonArray
+        val wildcard = JsonObject(
+            (catalogs[0] as JsonObject) + ("seatTypes" to buildJsonArray { add("*") })
+        )
+        val mutated = JsonObject(base + ("catalogs" to buildJsonArray { add(wildcard) }))
+        val verified = DiscoveryTrust.verifyProviderManifest(
+            signAndPublish(mutated), publicKeyHex, now,
+        )
+        assertEquals(listOf("main"), verified.catalogs.map { it.catalogId })
+    }
+
+    @Test
+    fun manifest_rawStringPortAndIntegerIpv4Uris_areRejected() {
+        // §7: the RAW string must not carry a port component (URL
+        // libraries normalize a redundant :443 away before any
+        // parsed-port check), and integer/hex IPv4 literal hosts are
+        // IP literals, not DNS names.
+        for (uri in listOf(
+            "https://discovery.example:443/catalogs/main.json",
+            "https://3232235777/catalogs/main.json",
+            "https://0xc0a80101/catalogs/main.json",
+        )) {
+            val raw = signAndPublish(manifestDocument(snapshotUri = uri))
+            try {
+                DiscoveryTrust.verifyProviderManifest(raw, publicKeyHex, now)
+                fail("expected provider_manifest_invalid for $uri")
+            } catch (_: DiscoveryTrustError.ProviderManifestInvalid) {
+                // expected: the descriptor was skipped, zero survive
+            }
         }
     }
 

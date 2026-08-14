@@ -64,13 +64,41 @@ data class VerifiedProviderManifest(
     /** 64-char lowercase hex of the 32-byte Ed25519 operator key. */
     val operatorKeyHex: String,
     /** Descriptors that survived lossy per-descriptor decoding
-     *  (§4.1), in manifest order. */
+     *  (§4.1) AND whose `audience` is exactly `"public"`, in manifest
+     *  order. */
     val catalogs: List<CatalogDescriptor>,
     /** Indexes into `manifest.catalogs` that were skipped as
      *  malformed (unknown keys or bad fields) — surfaced, never
      *  silently dropped. */
     val skippedCatalogIndexes: List<Int>,
+    /** Indexes of descriptors that decoded but whose `audience` is
+     *  not exactly `"public"` — skipped per §1, surfaced in the
+     *  source's skipped-catalog count, and NOT counted toward
+     *  manifest invalidity (a manifest of decodable but all-non-public
+     *  catalogs is a valid, empty-by-policy source). */
+    val audienceSkippedCatalogIndexes: List<Int> = emptyList(),
 )
+
+/** §6's four-case chain comparison outcome for an ACCEPTED snapshot
+ *  (rollback and fork are rejections, not outcomes). */
+sealed class SnapshotChainOutcome {
+    /** No retained acceptance: first acceptance of this catalog. Any
+     *  sequence is accepted — TOFU pinning covers trust, and an
+     *  established catalog past its first snapshot must be addable. */
+    data object FirstAcceptance : SnapshotChainOutcome()
+
+    /** `sequence` = retained + 1 with a matching `previousDigest`. */
+    data object Successor : SnapshotChainOutcome()
+
+    /** Same sequence, same bytes — the provider simply hasn't
+     *  published since. No warning. */
+    data object NoOpRefresh : SnapshotChainOutcome()
+
+    /** `sequence` more than retained + 1: accepted with a
+     *  source-integrity note (§6). The intermediate-fetch continuity
+     *  walk is not performed (gap-listed in the profile's §11). */
+    data class ForwardJumpWithNote(val missed: Long) : SnapshotChainOutcome()
+}
 
 /** [DiscoveryTrust.verifySnapshot] result. */
 data class VerifiedSnapshot(
@@ -83,6 +111,12 @@ data class VerifiedSnapshot(
     /** `sha256:` digest of the exact fetched bytes — retained by the
      *  caller for the next refresh's chain comparison (§8). */
     val digest: String,
+    /** How this acceptance relates to the retained chain state (§6). */
+    val outcome: SnapshotChainOutcome = SnapshotChainOutcome.FirstAcceptance,
+    /** True when `policyDigest` matched the retained PREVIOUS policy
+     *  declaration rather than the manifest's current one — accepted
+     *  with a surfaced policy-transition note (§4.2). */
+    val policyTransition: Boolean = false,
 )
 
 /** Chain anchor for [DiscoveryTrust.verifySnapshot] when only the
@@ -92,6 +126,10 @@ data class AcceptedSnapshotRef(
     /** `sha256:` digest of the previously accepted snapshot's exact bytes. */
     val digest: String,
     val sequence: Long,
+    /** The `policy` digest the manifest declared for this catalog at
+     *  the last acceptance — the "immediately previous declaration"
+     *  §4.2's policy-transition grace accepts with a note. */
+    val previousPolicyDigest: String? = null,
 )
 
 /**
@@ -168,21 +206,34 @@ object DiscoveryTrust {
 
         // Lossy per-descriptor decode (§4.1): a descriptor with
         // unknown keys or otherwise malformed is skipped and counted,
-        // never document-fatal; zero surviving descriptors is fatal.
+        // never document-fatal. Zero DECODABLE descriptors is fatal —
+        // audience-based skips (§1) do NOT count toward invalidity: a
+        // manifest of decodable but all-non-public catalogs is a
+        // valid, empty-by-policy source.
         val catalogs = mutableListOf<CatalogDescriptor>()
         val skippedCatalogs = mutableListOf<Int>()
+        val audienceSkipped = mutableListOf<Int>()
+        val seenCatalogIds = mutableSetOf<String>()
         manifest.catalogs.forEachIndexed { index, element ->
             val descriptor = decodeDescriptor(element)
-            if (descriptor != null) catalogs.add(descriptor) else skippedCatalogs.add(index)
-        }
-        if (catalogs.isEmpty()) {
-            throw manifestInvalid("no surviving catalog descriptors")
-        }
-        val seenCatalogIds = mutableSetOf<String>()
-        for (catalog in catalogs) {
-            if (!seenCatalogIds.add(catalog.catalogId)) {
-                throw manifestInvalid("duplicate catalogId ${catalog.catalogId}")
+            when {
+                descriptor == null -> skippedCatalogs.add(index)
+                else -> {
+                    // Duplicate detection runs over every DECODED
+                    // descriptor, audience-skipped or not (§4.1).
+                    if (!seenCatalogIds.add(descriptor.catalogId)) {
+                        throw manifestInvalid("duplicate catalogId ${descriptor.catalogId}")
+                    }
+                    if (descriptor.audience != "public") {
+                        audienceSkipped.add(index)
+                    } else {
+                        catalogs.add(descriptor)
+                    }
+                }
             }
+        }
+        if (seenCatalogIds.isEmpty()) {
+            throw manifestInvalid("no decodable catalog descriptors")
         }
         validateUri(manifest.privacyProfileUri) { manifestInvalid(it) }
         validateDigest(manifest.privacyProfile) { manifestInvalid(it) }
@@ -201,6 +252,7 @@ object DiscoveryTrust {
             operatorKeyHex = operatorKeyHex,
             catalogs = catalogs,
             skippedCatalogIndexes = skippedCatalogs,
+            audienceSkippedCatalogIndexes = audienceSkipped,
         )
     }
 
@@ -222,10 +274,27 @@ object DiscoveryTrust {
             validateUri(descriptor.snapshot) { entrySkip(it) }
             validateDigest(descriptor.policy) { entrySkip(it) }
             validateUri(descriptor.policyUri) { entrySkip(it) }
+            // §4.1: seatTypes members are seat-type tokens
+            // (`[a-z0-9.-]{1,64}`) or the literal `"*"` wildcard,
+            // which must appear alone. A member matching neither form
+            // skips the descriptor (one lossiness model per level).
+            for (member in descriptor.seatTypes) {
+                if (!isSeatTypeMember(member)) throw entrySkip("invalid seatTypes member $member")
+            }
+            if ("*" in descriptor.seatTypes && descriptor.seatTypes.size > 1) {
+                throw entrySkip("\"*\" must appear alone in seatTypes")
+            }
             descriptor
         } catch (_: EntrySkipException) {
             null
         }
+    }
+
+    /** §4.1 `seatTypes` member: `[a-z0-9.-]{1,64}` token or `"*"`. */
+    private fun isSeatTypeMember(value: String): Boolean {
+        if (value == "*") return true
+        if (value.isEmpty() || value.length > 64) return false
+        return value.all { it in 'a'..'z' || it in '0'..'9' || it == '.' || it == '-' }
     }
 
     // ─── catalog snapshot ─────────────────────────────────────────
@@ -302,11 +371,23 @@ object DiscoveryTrust {
         val descriptor = manifest.catalogs.firstOrNull { it.catalogId == snapshot.catalogId }
             ?: throw snapshotInvalid("catalogId ${snapshot.catalogId} not declared by manifest")
         validateDigest(snapshot.policyDigest) { snapshotInvalid(it) }
+        // §4.2 policy-transition grace: the snapshot must cite the
+        // manifest's current declaration OR the immediately previous
+        // one the client retained — accepted with a surfaced
+        // transition note. Any other digest is snapshot_invalid.
+        var policyTransition = false
         if (snapshot.policyDigest != descriptor.policy) {
-            throw snapshotInvalid("policyDigest does not match manifest's pinned policy")
+            if (previous?.previousPolicyDigest == snapshot.policyDigest) {
+                policyTransition = true
+            } else {
+                throw snapshotInvalid(
+                    "policyDigest matches neither the manifest's pinned policy " +
+                        "nor the retained previous declaration"
+                )
+            }
         }
 
-        // Chain rules (§4.2).
+        // Chain rules (§4.2, structural).
         if (snapshot.sequence < 1) {
             throw snapshotInvalid("sequence starts at 1")
         }
@@ -319,14 +400,42 @@ object DiscoveryTrust {
                 ?: throw snapshotInvalid("sequence > 1 requires previousDigest")
             validateDigest(previousDigest) { snapshotInvalid(it) }
         }
-        if (previous != null) {
-            if (snapshot.sequence != previous.sequence + 1) {
-                throw snapshotInvalid(
-                    "sequence must increase by 1: previous ${previous.sequence} → ${snapshot.sequence}"
-                )
-            }
-            if (snapshot.previousDigest != previous.digest) {
-                throw snapshotInvalid("previousDigest does not match previous snapshot bytes")
+        // §6 four-case comparison against the retained acceptance.
+        val digest = sha256Digest(raw)
+        val outcome: SnapshotChainOutcome = if (previous == null) {
+            // First acceptance of this catalog: any sequence — an
+            // established catalog past its first snapshot must be
+            // addable; TOFU covers trust.
+            SnapshotChainOutcome.FirstAcceptance
+        } else {
+            when {
+                snapshot.sequence < previous.sequence ->
+                    throw snapshotInvalid(
+                        "rollback: sequence ${snapshot.sequence} after accepted ${previous.sequence}"
+                    )
+                snapshot.sequence == previous.sequence ->
+                    if (digest == previous.digest) {
+                        SnapshotChainOutcome.NoOpRefresh
+                    } else {
+                        throw snapshotInvalid(
+                            "fork: sequence ${snapshot.sequence} republished with different bytes"
+                        )
+                    }
+                snapshot.sequence == previous.sequence + 1 ->
+                    if (snapshot.previousDigest == previous.digest) {
+                        SnapshotChainOutcome.Successor
+                    } else {
+                        throw snapshotInvalid(
+                            "fork: previousDigest does not match the retained snapshot digest"
+                        )
+                    }
+                else ->
+                    // Forward jump: accepted with a source-integrity
+                    // note. The §6 intermediate continuity walk is not
+                    // performed (gap-listed in the profile's §11).
+                    SnapshotChainOutcome.ForwardJumpWithNote(
+                        missed = snapshot.sequence - previous.sequence - 1
+                    )
             }
         }
 
@@ -340,6 +449,12 @@ object DiscoveryTrust {
             Duration.ofDays(DiscoveryProfile.MAX_EXPIRY_WINDOW_DAYS)
         ) {
             throw snapshotInvalid("expiry window exceeds ${DiscoveryProfile.MAX_EXPIRY_WINDOW_DAYS} days")
+        }
+        // §4.2: generatedAt must not lie in the verifier's future
+        // beyond the skew allowance — otherwise the 90-day ceiling
+        // could be minted forward.
+        if (generatedAt.isAfter(now.plus(CLOCK_SKEW))) {
+            throw snapshotInvalid("generatedAt ${snapshot.generatedAt} is in the future")
         }
         // Expired only when expiresAt is more than the skew allowance
         // in the past (§4.2/§9 — symmetric 10-minute clock skew; a
@@ -379,7 +494,9 @@ object DiscoveryTrust {
             snapshot = snapshot,
             entries = entries,
             skippedEntryIndexes = skipped,
-            digest = sha256Digest(raw),
+            digest = digest,
+            outcome = outcome,
+            policyTransition = policyTransition,
         )
     }
 
@@ -439,9 +556,20 @@ object DiscoveryTrust {
             val relationship = EntryRelationship.fromRaw(raw.relationship)
                 ?: throw entrySkip("unknown relationship ${raw.relationship}")
             if (raw.placement.isEmpty()) throw entrySkip("empty placement")
-            for (evidence in raw.evidence) {
-                validateUri(evidence.uri) { entrySkip(it) }
-                validateDigest(evidence.digest) { entrySkip(it) }
+            // §4.2: evidence must be absent or empty in v1 — a
+            // non-empty array is an unrenderable attestation (the
+            // audit-laundering the abstract §13 forbids presenting);
+            // the entry is skipped, never passed through.
+            if (raw.evidence.isNotEmpty()) throw entrySkip("non-empty evidence in v1")
+            // §4.2 status: {state: warning|review, uri?}. A VALID
+            // status never skips the entry — it is exactly the
+            // warning the field exists to surface; anything else is
+            // undecodable and skips the entry.
+            raw.status?.let { status ->
+                if (status.state !in EntryStatus.allowedStates) {
+                    throw entrySkip("unknown status state ${status.state}")
+                }
+                status.uri?.let { validateUri(it) { m -> entrySkip(m) } }
             }
             CatalogEntry(
                 componentId = raw.componentId,
@@ -454,6 +582,7 @@ object DiscoveryTrust {
                 reviewedAt = raw.reviewedAt,
                 relationship = relationship,
                 placement = raw.placement,
+                status = raw.status,
             )
         } catch (_: EntrySkipException) {
             null
@@ -546,6 +675,30 @@ object DiscoveryTrust {
         if (uri.rawQuery != null) throw error("$value: query is not allowed")
         if (uri.rawFragment != null) throw error("$value: fragment is not allowed")
         if (uri.port != -1) throw error("$value: explicit port is not allowed")
+        // Integer-form and hex-form IPv4 literals: a host whose LAST
+        // dot label is all digits or 0x-prefixed is an IPv4 candidate
+        // per the URL host parser, never a DNS name.
+        val lastLabel = host.substringAfterLast('.')
+        if (lastLabel.isNotEmpty() && lastLabel.all { it in '0'..'9' }) {
+            throw error("$value: host must be a DNS name, not an IP literal")
+        }
+        if (lastLabel.lowercase().startsWith("0x")) {
+            throw error("$value: host must be a DNS name, not an IP literal")
+        }
+        // §7: the port check also runs over the RAW string, not only
+        // the parsed port — URL libraries commonly normalize a
+        // redundant `:443` away before a parsed-port check is
+        // reachable, and a verifier relying only on the parsed port
+        // does not conform.
+        val authorityStart = value.indexOf("://").let { if (it < 0) return else it + 3 }
+        val authorityEnd = value.drop(authorityStart)
+            .indexOfFirst { it == '/' || it == '?' || it == '#' }
+            .let { if (it < 0) value.length else authorityStart + it }
+        val authority = value.substring(authorityStart, authorityEnd)
+        val hostPort = authority.substringAfterLast('@')
+        if (':' in hostPort) {
+            throw error("$value: port component in raw URI string is not allowed")
+        }
     }
 
     private val IPV4_LITERAL = Regex("""\d{1,3}(\.\d{1,3}){3}""")
