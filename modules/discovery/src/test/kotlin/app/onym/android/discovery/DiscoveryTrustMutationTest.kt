@@ -55,6 +55,9 @@ class DiscoveryTrustMutationTest {
     private fun manifestDocument(
         snapshotUri: String = "https://discovery.example/catalogs/main.json",
         extraTopLevelField: Boolean = false,
+        extraDescriptorField: Boolean = false,
+        secondCatalog: Boolean = false,
+        omitPrivacyProfile: Boolean = false,
     ): JsonObject = buildJsonObject {
         put("version", 1)
         put("implementationProfileId", DiscoveryProfile.IMPLEMENTATION_PROFILE)
@@ -68,12 +71,24 @@ class DiscoveryTrustMutationTest {
                 put("audience", "public")
                 putJsonArray("seatTypes") { add("notary") }
                 put("policy", "sha256:" + "11".repeat(32))
+                put("policyUri", "https://discovery.example/policies/main.md")
+                if (extraDescriptorField) put("surprise", true)
+            }
+            if (secondCatalog) addJsonObject {
+                put("catalogId", "second")
+                put("snapshot", "https://discovery.example/catalogs/second.json")
+                put("audience", "public")
+                putJsonArray("seatTypes") { add("notary") }
+                put("policy", "sha256:" + "44".repeat(32))
+                put("policyUri", "https://discovery.example/policies/second.md")
             }
         }
         putJsonArray("capabilities") {
             add("signed-snapshot-v1")
             add("local-filtering-v1")
         }
+        if (!omitPrivacyProfile) put("privacyProfile", "sha256:" + "55".repeat(32))
+        put("privacyProfileUri", "https://discovery.example/privacy.md")
         putJsonArray("offers") {}
         put("validUntil", "2026-12-31T23:59:59Z")
         if (extraTopLevelField) put("extra", 1)
@@ -124,10 +139,10 @@ class DiscoveryTrustMutationTest {
         if (extraTopLevelField) put("extra", 1)
     }
 
-    private fun verifiedManifest(): DiscoveryProviderManifest =
+    private fun verifiedManifest(): VerifiedProviderManifest =
         DiscoveryTrust.verifyProviderManifest(
             signAndPublish(manifestDocument()), publicKeyHex, now,
-        ).manifest
+        )
 
     // ─── sanity: the builders produce verifying documents ─────────
 
@@ -208,7 +223,10 @@ class DiscoveryTrustMutationTest {
     // ─── URI rules (§7) ───────────────────────────────────────────
 
     @Test
-    fun manifest_withHttpSnapshotUri_isProviderManifestInvalid() {
+    fun manifest_withHttpSnapshotUri_hasZeroSurvivingDescriptors() {
+        // §4.1: the malformed descriptor is skipped (not document-
+        // fatal), but a manifest whose only descriptor was skipped
+        // has zero survivors — provider_manifest_invalid.
         val raw = signAndPublish(
             manifestDocument(snapshotUri = "http://discovery.example/catalogs/main.json")
         )
@@ -216,7 +234,50 @@ class DiscoveryTrustMutationTest {
             DiscoveryTrust.verifyProviderManifest(raw, publicKeyHex, now)
             fail("expected provider_manifest_invalid")
         } catch (e: DiscoveryTrustError.ProviderManifestInvalid) {
-            assertTrue(e.message!!.contains("https"))
+            assertTrue(e.message!!.contains("no surviving catalog descriptors"))
+        }
+    }
+
+    // ─── lossy descriptor decoding (§4.1) ─────────────────────────
+
+    @Test
+    fun manifest_descriptorWithUnknownKey_isSkippedAndCounted() {
+        val raw = signAndPublish(
+            manifestDocument(extraDescriptorField = true, secondCatalog = true)
+        )
+        val verified = DiscoveryTrust.verifyProviderManifest(raw, publicKeyHex, now)
+        assertEquals(listOf("second"), verified.catalogs.map { it.catalogId })
+        assertEquals(listOf(0), verified.skippedCatalogIndexes)
+    }
+
+    @Test
+    fun manifest_withoutPolicyUri_descriptorIsSkipped() {
+        val document = manifestDocument(secondCatalog = true)
+        val catalogs = (document["catalogs"] as kotlinx.serialization.json.JsonArray)
+        val stripped = JsonObject(
+            (catalogs[0] as JsonObject).filterKeys { it != "policyUri" }
+        )
+        val mutated = JsonObject(
+            document + ("catalogs" to buildJsonArray {
+                add(stripped)
+                add(catalogs[1])
+            })
+        )
+        val verified = DiscoveryTrust.verifyProviderManifest(
+            signAndPublish(mutated), publicKeyHex, now,
+        )
+        assertEquals(listOf("second"), verified.catalogs.map { it.catalogId })
+        assertEquals(listOf(0), verified.skippedCatalogIndexes)
+    }
+
+    @Test
+    fun manifest_withoutPrivacyProfile_isProviderManifestInvalid() {
+        val raw = signAndPublish(manifestDocument(omitPrivacyProfile = true))
+        try {
+            DiscoveryTrust.verifyProviderManifest(raw, publicKeyHex, now)
+            fail("expected provider_manifest_invalid")
+        } catch (e: DiscoveryTrustError.ProviderManifestInvalid) {
+            assertTrue(e.message!!.contains("schema"))
         }
     }
 

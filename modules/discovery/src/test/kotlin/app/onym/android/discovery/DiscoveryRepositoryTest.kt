@@ -139,6 +139,25 @@ class DiscoveryRepositoryTest {
     }
 
     @Test
+    fun refresh_rejectsManifestForDifferentProviderId() = runTest {
+        // §6 refresh identity match: the pinned source's URL serves a
+        // valid, correctly signed manifest — but for a different
+        // providerId. provider_manifest_invalid, nothing accepted.
+        val repo = repository(defaults = listOf(
+            pinnedDefault().copy(providerId = "onym:component:some-other-provider")
+        ))
+        repo.bootstrap()
+        try {
+            repo.refresh()
+            throw AssertionError("expected refresh to fail on identity mismatch")
+        } catch (e: DiscoveryTrustError.ProviderManifestInvalid) {
+            assertTrue(e.message!!.contains("pinned source"))
+        }
+        assertTrue(repo.snapshots.value.entries.isEmpty())
+        assertTrue(repo.snapshots.value.fetchStatus is DiscoveryFetchStatus.Failed)
+    }
+
+    @Test
     fun refresh_skipsUnpinnedSources() = runTest {
         val unpinned = pinnedDefault().copy(pinnedOperatorKeyHex = null)
         store.saveConfiguration(

@@ -301,9 +301,20 @@ class DiscoveryRepository(
             pinnedOperatorKeyHex = source.pinnedOperatorKeyHex,
             now = now(),
         )
+        // Refresh-time identity match (§6): the URL must still serve
+        // the pinned provider. `seat` and `implementationProfileId`
+        // are already pinned to this profile's constants by
+        // `verifyProviderManifest`; `providerId` is the per-source
+        // identity that can drift.
+        if (verified.manifest.providerId != source.providerId) {
+            throw DiscoveryTrustError.ProviderManifestInvalid(
+                "providerId ${verified.manifest.providerId} does not match the pinned source " +
+                    "${source.providerId} — the URL now serves a different provider"
+            )
+        }
         val entries = mutableListOf<AttributedCatalogEntry>()
         val accepted = source.acceptedCatalogs.toMutableMap()
-        for (catalog in verified.manifest.catalogs) {
+        for (catalog in verified.catalogs) {
             val snapshotRaw = fetcher.fetch(catalog.snapshot, DiscoveryProfile.MAX_SNAPSHOT_BYTES)
             val previous = accepted[catalog.catalogId]?.let {
                 AcceptedSnapshotRef(digest = it.digest, sequence = it.sequence)
@@ -315,7 +326,7 @@ class DiscoveryRepository(
                 DiscoveryTrust.sha256Digest(snapshotRaw) == previous.digest
             val result = DiscoveryTrust.verifySnapshot(
                 raw = snapshotRaw,
-                manifest = verified.manifest,
+                manifest = verified,
                 previous = if (rePublished) null else previous,
                 now = now(),
             )

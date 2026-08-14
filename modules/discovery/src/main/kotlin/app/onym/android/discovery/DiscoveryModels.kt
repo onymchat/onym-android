@@ -16,10 +16,13 @@ import kotlinx.serialization.json.JsonElement
  *    `provider_manifest_invalid` / `snapshot_invalid`, so every decode
  *    goes through [DiscoveryJson.strict] (`ignoreUnknownKeys = false`,
  *    explicit — never a tolerant default).
- *  - **Catalog entries decode lossily** — `entries` stays a
- *    `List<JsonElement>` on the snapshot and each element is decoded
- *    individually by [DiscoveryTrust]; one malformed entry is skipped
- *    (and counted), the snapshot survives.
+ *  - **Catalog entries and `catalogs[]` descriptors decode lossily** —
+ *    `entries` stays a `List<JsonElement>` on the snapshot and
+ *    `catalogs` a `List<JsonElement>` on the manifest; each element is
+ *    decoded individually by [DiscoveryTrust]. One malformed entry or
+ *    descriptor is skipped (and counted), the document survives — but
+ *    a manifest with zero surviving descriptors is
+ *    `provider_manifest_invalid` (§4.1).
  *
  * Wire keys are camelCase, matching the Rust reference implementation
  * (`onym-discovery` `src/types.rs`) byte-for-byte on the fixtures.
@@ -59,10 +62,13 @@ data class DiscoveryProviderManifest(
     val providerId: String,
     val operator: String,
     val seat: String,
-    val catalogs: List<CatalogDescriptor>,
+    /** Lossy: descriptors are decoded individually by [DiscoveryTrust]
+     *  so one malformed descriptor cannot take the manifest down with
+     *  it (§4.1); zero surviving descriptors is invalid. */
+    val catalogs: List<JsonElement>,
     val capabilities: List<String>,
-    val privacyProfile: String? = null,
-    val privacyProfileUri: String? = null,
+    val privacyProfile: String,
+    val privacyProfileUri: String,
     /** Offers are opaque at this layer (consumed by the consent flow
      *  in a later PR) — kept as raw elements, not dropped, so the
      *  strict top-level decode still sees the field. */
@@ -79,7 +85,7 @@ data class CatalogDescriptor(
     val audience: String,
     val seatTypes: List<String>,
     val policy: String,
-    val policyUri: String? = null,
+    val policyUri: String,
 )
 
 /**

@@ -24,8 +24,8 @@ class DiscoveryTrustFixtureTest {
     private val snapshot2 = DiscoveryFixtures.load("snapshot-2.json")
     private val snapshot3 = DiscoveryFixtures.load("snapshot-3.json")
 
-    private fun verifiedManifest(): DiscoveryProviderManifest =
-        DiscoveryTrust.verifyProviderManifest(manifestRaw, null, now).manifest
+    private fun verifiedManifest(): VerifiedProviderManifest =
+        DiscoveryTrust.verifyProviderManifest(manifestRaw, null, now)
 
     // ─── provider manifest ────────────────────────────────────────
 
@@ -34,8 +34,9 @@ class DiscoveryTrustFixtureTest {
         val verified = DiscoveryTrust.verifyProviderManifest(manifestRaw, null, now)
         assertEquals(DiscoveryFixtures.OPERATOR_KEY_HEX, verified.operatorKeyHex)
         assertEquals("onym:component:onym-discovery", verified.manifest.providerId)
-        assertEquals(1, verified.manifest.catalogs.size)
-        assertEquals("public-all-seats", verified.manifest.catalogs.single().catalogId)
+        assertEquals(1, verified.catalogs.size)
+        assertEquals("public-all-seats", verified.catalogs.single().catalogId)
+        assertTrue(verified.skippedCatalogIndexes.isEmpty())
     }
 
     @Test
@@ -136,11 +137,32 @@ class DiscoveryTrustFixtureTest {
     fun snapshot_pastExpiresAt_isSnapshotExpired() {
         val manifest = DiscoveryTrust.verifyProviderManifest(
             manifestRaw, null, Instant.parse("2026-12-01T00:00:00Z"),
-        ).manifest
+        )
         try {
             DiscoveryTrust.verifySnapshot(
                 snapshot1, manifest, previousRaw = null,
                 now = Instant.parse("2026-12-01T00:00:00Z"),
+            )
+            fail("expected snapshot_expired")
+        } catch (e: DiscoveryTrustError.SnapshotExpired) {
+            assertEquals("snapshot_expired", e.code)
+        }
+    }
+
+    @Test
+    fun snapshot_expirySkewBoundary_tenMinutesGraceThenExpired() {
+        // §4.2/§9: expired only when expiresAt (2026-09-12T00:00:00Z)
+        // is MORE than 10 minutes in the past.
+        val manifest = verifiedManifest()
+        // Exactly 10 minutes past expiry: within the skew allowance.
+        DiscoveryTrust.verifySnapshot(
+            snapshot1, manifest, previousRaw = null,
+            now = Instant.parse("2026-09-12T00:10:00Z"),
+        )
+        try {
+            DiscoveryTrust.verifySnapshot(
+                snapshot1, manifest, previousRaw = null,
+                now = Instant.parse("2026-09-12T00:10:01Z"),
             )
             fail("expected snapshot_expired")
         } catch (e: DiscoveryTrustError.SnapshotExpired) {

@@ -18,8 +18,9 @@ import java.util.Base64
  */
 sealed class DiscoveryTrustError(val code: String, message: String) : Exception(message) {
     /** Signature/key-pin failure, unknown top-level field, bad
-     *  version/profile/seat, expired `validUntil`, oversize, or URI
-     *  violation on the provider manifest. */
+     *  version/profile/seat, zero surviving catalog descriptors,
+     *  expired `validUntil`, oversize, or URI violation on the
+     *  provider manifest. */
     class ProviderManifestInvalid(reason: String) :
         DiscoveryTrustError("provider_manifest_invalid", reason)
 
@@ -29,8 +30,8 @@ sealed class DiscoveryTrustError(val code: String, message: String) : Exception(
     class SnapshotInvalid(reason: String) :
         DiscoveryTrustError("snapshot_invalid", reason)
 
-    /** `expiresAt` in the past — entries are stale history, never
-     *  current recommendations. */
+    /** `expiresAt` more than the 10-minute skew allowance in the past
+     *  — entries are stale history, never current recommendations. */
     class SnapshotExpired(reason: String) :
         DiscoveryTrustError("snapshot_expired", reason)
 
@@ -62,6 +63,13 @@ data class VerifiedProviderManifest(
     val manifest: DiscoveryProviderManifest,
     /** 64-char lowercase hex of the 32-byte Ed25519 operator key. */
     val operatorKeyHex: String,
+    /** Descriptors that survived lossy per-descriptor decoding
+     *  (§4.1), in manifest order. */
+    val catalogs: List<CatalogDescriptor>,
+    /** Indexes into `manifest.catalogs` that were skipped as
+     *  malformed (unknown keys or bad fields) — surfaced, never
+     *  silently dropped. */
+    val skippedCatalogIndexes: List<Int>,
 )
 
 /** [DiscoveryTrust.verifySnapshot] result. */
@@ -102,6 +110,9 @@ data class AcceptedSnapshotRef(
  * both pin the same conformance fixtures.
  */
 object DiscoveryTrust {
+
+    /** §4.2/§9 clock-skew allowance on snapshot expiry. */
+    private val CLOCK_SKEW: Duration = Duration.ofMinutes(10)
 
     // ─── provider manifest ────────────────────────────────────────
 
@@ -155,21 +166,26 @@ object DiscoveryTrust {
             )
         }
 
-        if (manifest.catalogs.isEmpty()) {
-            throw manifestInvalid("manifest declares no catalogs")
+        // Lossy per-descriptor decode (§4.1): a descriptor with
+        // unknown keys or otherwise malformed is skipped and counted,
+        // never document-fatal; zero surviving descriptors is fatal.
+        val catalogs = mutableListOf<CatalogDescriptor>()
+        val skippedCatalogs = mutableListOf<Int>()
+        manifest.catalogs.forEachIndexed { index, element ->
+            val descriptor = decodeDescriptor(element)
+            if (descriptor != null) catalogs.add(descriptor) else skippedCatalogs.add(index)
+        }
+        if (catalogs.isEmpty()) {
+            throw manifestInvalid("no surviving catalog descriptors")
         }
         val seenCatalogIds = mutableSetOf<String>()
-        for (catalog in manifest.catalogs) {
-            validateCatalogId(catalog.catalogId) { manifestInvalid(it) }
+        for (catalog in catalogs) {
             if (!seenCatalogIds.add(catalog.catalogId)) {
                 throw manifestInvalid("duplicate catalogId ${catalog.catalogId}")
             }
-            validateUri(catalog.snapshot) { manifestInvalid(it) }
-            validateDigest(catalog.policy) { manifestInvalid(it) }
-            catalog.policyUri?.let { validateUri(it) { m -> manifestInvalid(m) } }
         }
-        manifest.privacyProfileUri?.let { validateUri(it) { m -> manifestInvalid(m) } }
-        manifest.privacyProfile?.let { validateDigest(it) { m -> manifestInvalid(m) } }
+        validateUri(manifest.privacyProfileUri) { manifestInvalid(it) }
+        validateDigest(manifest.privacyProfile) { manifestInvalid(it) }
 
         val validUntil = parseTimestamp(manifest.validUntil) { manifestInvalid(it) }
         if (!validUntil.isAfter(now)) {
@@ -180,7 +196,36 @@ object DiscoveryTrust {
             ?: throw manifestInvalid("manifest is unsigned")
         verifyEd25519(operatorKeyHex, raw, signature) { manifestInvalid(it) }
 
-        return VerifiedProviderManifest(manifest, operatorKeyHex)
+        return VerifiedProviderManifest(
+            manifest = manifest,
+            operatorKeyHex = operatorKeyHex,
+            catalogs = catalogs,
+            skippedCatalogIndexes = skippedCatalogs,
+        )
+    }
+
+    /**
+     * Lossy descriptor decode (§4.1): strict within the descriptor —
+     * an unknown key, a bad catalog id, a §7 URI violation, or a
+     * malformed policy digest → `null`, the caller skips + counts.
+     * Never throws — one bad descriptor must not take the manifest
+     * down; zero survivors is the caller's fatal case.
+     */
+    private fun decodeDescriptor(element: JsonElement): CatalogDescriptor? {
+        val descriptor = try {
+            DiscoveryJson.strict.decodeFromJsonElement(CatalogDescriptor.serializer(), element)
+        } catch (_: Exception) {
+            return null
+        }
+        return try {
+            validateCatalogId(descriptor.catalogId) { entrySkip(it) }
+            validateUri(descriptor.snapshot) { entrySkip(it) }
+            validateDigest(descriptor.policy) { entrySkip(it) }
+            validateUri(descriptor.policyUri) { entrySkip(it) }
+            descriptor
+        } catch (_: EntrySkipException) {
+            null
+        }
     }
 
     // ─── catalog snapshot ─────────────────────────────────────────
@@ -194,7 +239,7 @@ object DiscoveryTrust {
      */
     fun verifySnapshot(
         raw: ByteArray,
-        manifest: DiscoveryProviderManifest,
+        manifest: VerifiedProviderManifest,
         previousRaw: ByteArray? = null,
         now: Instant,
     ): VerifiedSnapshot {
@@ -227,7 +272,7 @@ object DiscoveryTrust {
      */
     fun verifySnapshot(
         raw: ByteArray,
-        manifest: DiscoveryProviderManifest,
+        manifest: VerifiedProviderManifest,
         previous: AcceptedSnapshotRef?,
         now: Instant,
     ): VerifiedSnapshot {
@@ -249,9 +294,9 @@ object DiscoveryTrust {
         if (snapshot.implementationProfileId != DiscoveryProfile.IMPLEMENTATION_PROFILE) {
             throw snapshotInvalid("unsupported implementation profile")
         }
-        if (snapshot.providerId != manifest.providerId) {
+        if (snapshot.providerId != manifest.manifest.providerId) {
             throw snapshotInvalid(
-                "providerId ${snapshot.providerId} does not match manifest ${manifest.providerId}"
+                "providerId ${snapshot.providerId} does not match manifest ${manifest.manifest.providerId}"
             )
         }
         val descriptor = manifest.catalogs.firstOrNull { it.catalogId == snapshot.catalogId }
@@ -296,13 +341,16 @@ object DiscoveryTrust {
         ) {
             throw snapshotInvalid("expiry window exceeds ${DiscoveryProfile.MAX_EXPIRY_WINDOW_DAYS} days")
         }
-        if (!expiresAt.isAfter(now)) {
+        // Expired only when expiresAt is more than the skew allowance
+        // in the past (§4.2/§9 — symmetric 10-minute clock skew; a
+        // fast clock must not reject a fresh snapshot).
+        if (expiresAt.plus(CLOCK_SKEW).isBefore(now)) {
             throw DiscoveryTrustError.SnapshotExpired("expired at ${snapshot.expiresAt}")
         }
 
         // Signature over the exact fetched bytes' canonical form, by
         // the manifest's operator key.
-        val operatorKeyHex = parseOperatorKeyHex(manifest.operator) { snapshotInvalid(it) }
+        val operatorKeyHex = parseOperatorKeyHex(manifest.manifest.operator) { snapshotInvalid(it) }
         val signature = snapshot.signature
             ?: throw snapshotInvalid("snapshot is unsigned")
         verifyEd25519(operatorKeyHex, raw, signature) { snapshotInvalid(it) }
