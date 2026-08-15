@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -134,6 +135,19 @@ internal fun OnboardingHost(
         },
     )
     val flow = hostViewModel.flow
+
+    // MODERATION TRIPWIRE: the reserved slot has NO Android surface
+    // yet. If the flag ever flips without one, the walk would render
+    // the module's inert placeholder on an outcome-gated,
+    // unskippable, back-blocked step — a bricked wizard. Fail fast
+    // and name the missing piece instead of shipping the dead end.
+    require(OnboardingStep.Moderation !in flow.steps) {
+        "OnboardingFlow was constructed with moderationEnabled = true, but " +
+            "OnboardingHost provides no OnboardingStep.Moderation surface — the " +
+            "step is outcome-gated and unskippable, so the walk would dead-end. " +
+            "Wire the moderation step content before enabling the reserved slot."
+    }
+
     val state by flow.state.collectAsState()
 
     // Full-screen and back-blocked: the only exits are Done's primary
@@ -165,8 +179,28 @@ internal fun OnboardingHost(
     // linger.
     val hubShown = hubVisible && state.step == OnboardingStep.Services
     val backupShown = backupVisible && state.step == OnboardingStep.RecoveryPhrase
+
+    // Hoisted ABOVE the hubShown conditional: were the controller
+    // created inside the overlay, closing the hub would drop the
+    // NavHost without popping, and the NavBackStackEntry-scoped seat
+    // ViewModels (each holding a SharingStarted.Eagerly collector)
+    // would sit uncleared in the Activity's NavControllerViewModel —
+    // one leaked set per open/close cycle. With the controller
+    // hoisted, [closeHub] pops to the hub root on EVERY close, so
+    // popped entries get onCleared() and a re-opened hub builds
+    // fresh seat ViewModels (they are entry-scoped: new entry, new
+    // ViewModel).
+    val hubNavController = androidx.navigation.compose.rememberNavController()
+    val closeHub: () -> Unit = {
+        // currentBackStackEntry is null until the NavHost first sets
+        // a graph — popping by route would throw then.
+        if (hubNavController.currentBackStackEntry != null) {
+            hubNavController.popBackStack(ROUTE_HUB, inclusive = false)
+        }
+        hubVisible = false
+    }
     LaunchedEffect(state.step) {
-        if (state.step != OnboardingStep.Services) hubVisible = false
+        if (state.step != OnboardingStep.Services) closeHub()
         if (state.step != OnboardingStep.RecoveryPhrase) backupVisible = false
     }
 
@@ -217,6 +251,7 @@ internal fun OnboardingHost(
                 OnboardingServicesHubOverlay(
                     dependencies = dependencies,
                     flow = flow,
+                    navController = hubNavController,
                     onOpenConsent = { entry -> consentEntry = entry },
                     onUseRecommended = {
                         // Only the choice reverts — consent pins and
@@ -230,7 +265,7 @@ internal fun OnboardingHost(
                         if (flow.state.value.step == OnboardingStep.Services) {
                             flow.recordOutcome(StepOutcome.Consented(null))
                         }
-                        hubVisible = false
+                        closeHub()
                     },
                     onDone = {
                         flow.recordServicesChoice(ServicesChoice.Custom)
@@ -249,7 +284,7 @@ internal fun OnboardingHost(
                         ) {
                             flow.recordOutcome(StepOutcome.Consented(null))
                         }
-                        hubVisible = false
+                        closeHub()
                     },
                 )
             }
@@ -447,16 +482,22 @@ private fun IdentityStepContent(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        text = stringResource(OnboardingR.string.onboarding_identity_retry),
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .clickable { attempt += 1 }
-                            .testTag("onboarding.identity.retry"),
-                    )
+                    // A real button: Role.Button semantics + the M3
+                    // 48dp minimum touch target (a bare clickable
+                    // Text had neither).
+                    TextButton(
+                        onClick = { attempt += 1 },
+                        modifier = Modifier.testTag("onboarding.identity.retry"),
+                    ) {
+                        Text(
+                            text = stringResource(
+                                OnboardingR.string.onboarding_identity_retry,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                        )
+                    }
                 }
             }
         }

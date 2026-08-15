@@ -79,10 +79,12 @@ class MainActivity : FragmentActivity() {
         // thumbnail across the whole app. Suppressed only under the
         // in-process UI-test harness so fastlane screengrab can capture
         // the screen — FLAG_SECURE otherwise yields all-black images.
-        // Gated the same way as every other harness seam (see
-        // UITestRegistry); the registry is switched on by the test's
-        // TestWatcher rule before this Activity launches.
-        if (!UITestRegistry.enabled) {
+        // Gated on debugActive (not the raw enabled flag): dropping
+        // FLAG_SECURE is a security-weakening seam, so a release
+        // binary must never honour it (see UITestRegistry). The
+        // registry is switched on by the test's TestWatcher rule
+        // before this Activity launches.
+        if (!UITestRegistry.debugActive) {
             window.setFlags(
                 WindowManager.LayoutParams.FLAG_SECURE,
                 WindowManager.LayoutParams.FLAG_SECURE,

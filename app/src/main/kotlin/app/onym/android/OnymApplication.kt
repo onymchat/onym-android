@@ -228,7 +228,9 @@ class OnymApplication : Application() {
         // (UI tests get a fresh EncryptedSharedPreferences file per
         // test); fall back to the production default-name store
         // otherwise.
-        val identityStore = if (UITestRegistry.enabled) {
+        // debugActive, not enabled: swapping the encrypted secret
+        // store is a security-weakening seam (see UITestRegistry).
+        val identityStore = if (UITestRegistry.debugActive) {
             UITestRegistry.identitySecretStore ?: IdentitySecretStore(applicationContext)
         } else {
             IdentitySecretStore(applicationContext)
@@ -296,8 +298,11 @@ class OnymApplication : Application() {
         // slots are mutable vars, so a re-read after the check would
         // race a concurrent test-runner write (same capture style as
         // the other slots).
+        // debugActive, not enabled: a pinned clock weakens the
+        // discovery trust layer's signature-expiry checks (see
+        // UITestRegistry).
         val registryDiscoveryClock =
-            if (UITestRegistry.enabled) UITestRegistry.discoveryClock else null
+            if (UITestRegistry.debugActive) UITestRegistry.discoveryClock else null
         val discoveryClock: () -> java.time.Instant =
             registryDiscoveryClock ?: java.time.Instant::now
         val discoveryRepository: app.onym.android.discovery.DiscoveryRepository? =
@@ -1219,7 +1224,10 @@ class OnymApplication : Application() {
                     // a fake — a real BiometricPrompt can't be
                     // answered from a test. Production always takes
                     // the AndroidBiometricAuthenticator branch.
-                    authenticator = if (UITestRegistry.enabled &&
+                    // debugActive, not enabled: bypassing the
+                    // biometric gate on the mnemonic must be
+                    // impossible in a release binary.
+                    authenticator = if (UITestRegistry.debugActive &&
                         UITestRegistry.biometricAuthenticator != null
                     ) {
                         UITestRegistry.biometricAuthenticator!!

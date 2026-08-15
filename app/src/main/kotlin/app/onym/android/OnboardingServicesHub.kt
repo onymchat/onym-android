@@ -54,7 +54,6 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import app.onym.android.chain.RelayerConfiguration
 import app.onym.android.chain.RelayerFetchStatus
 import app.onym.android.chain.RelayerStrategy
@@ -92,7 +91,7 @@ import app.onym.android.onboarding.R as OnboardingR
 // the recommended setup instead", mirroring the iOS sheet's
 // `interactiveDismissDisabled`.
 
-private const val ROUTE_HUB = "hub"
+internal const val ROUTE_HUB = "hub"
 private const val ROUTE_MESSAGE = "hub/messageDelivery"
 private const val ROUTE_MEDIA = "hub/mediaDelivery"
 private const val ROUTE_DIRECTORY = "hub/directory"
@@ -103,11 +102,16 @@ private const val ROUTE_GROUP = "hub/groupIntegrity"
 internal fun OnboardingServicesHubOverlay(
     dependencies: AppDependencies,
     flow: OnboardingFlow,
+    /** HOISTED by the host (it outlives this overlay's composition):
+     *  the host pops it to [ROUTE_HUB] on every close, so the
+     *  NavBackStackEntry-scoped seat ViewModels are provably
+     *  onCleared() instead of leaking one Eagerly-collecting set per
+     *  open/close cycle in the Activity's NavControllerViewModel. */
+    navController: androidx.navigation.NavHostController,
     onOpenConsent: (AttributedCatalogEntry) -> Unit,
     onUseRecommended: () -> Unit,
     onDone: () -> Unit,
 ) {
-    val navController = rememberNavController()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -549,12 +553,10 @@ private fun MessageDeliveryContent(
             error = state.customDraftError,
             tagPrefix = "onboarding.services.messageDelivery",
             onDraftChanged = viewModel::customDraftChanged,
-            onAdd = {
-                val valid =
-                    NostrRelaySettingsViewModel.validate(state.customDraft) != null
-                viewModel.tappedAddCustom()
-                if (valid) recordCustomAdd(flow)
-            },
+            // The consent is recorded from the VM's ACTUAL add
+            // result — a duplicate URL sets "already configured"
+            // and adds nothing, so it must not record.
+            onAdd = { viewModel.tappedAddCustom { recordCustomAdd(flow) } },
         )
     }
 }
@@ -632,12 +634,9 @@ private fun MediaDeliveryContent(
             error = state.customDraftError,
             tagPrefix = "onboarding.services.mediaDelivery",
             onDraftChanged = viewModel::customDraftChanged,
-            onAdd = {
-                val valid =
-                    BlossomServerSettingsViewModel.validate(state.customDraft) != null
-                viewModel.tappedAddCustom()
-                if (valid) recordCustomAdd(flow)
-            },
+            // Recorded from the VM's actual add result — see the
+            // message-delivery seat.
+            onAdd = { viewModel.tappedAddCustom { recordCustomAdd(flow) } },
         )
     }
 }
@@ -748,12 +747,10 @@ private fun GroupIntegrityContent(
             error = state.customDraftError,
             tagPrefix = "onboarding.services.groupIntegrity",
             onDraftChanged = viewModel::customDraftChanged,
-            onAdd = {
-                val valid = RelayerSettingsViewModel.validate(state.customDraft) is
-                    RelayerSettingsViewModel.ValidationResult.Valid
-                viewModel.tappedAddCustom()
-                if (valid) recordCustomAdd(flow)
-            },
+            // Recorded once the endpoint actually landed (the
+            // relayer repository upserts) — see the message-delivery
+            // seat.
+            onAdd = { viewModel.tappedAddCustom { recordCustomAdd(flow) } },
         )
 
         SettingsFootnote(stringResource(OnboardingR.string.onboarding_notary_leave_empty))
