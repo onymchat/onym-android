@@ -108,6 +108,13 @@ internal fun OnboardingServicesHubOverlay(
      *  onCleared() instead of leaking one Eagerly-collecting set per
      *  open/close cycle in the Activity's NavControllerViewModel. */
     navController: androidx.navigation.NavHostController,
+    /** Host-retained scope for seat repository WRITES: the seat
+     *  ViewModels are NavBackStackEntry-scoped (cleared on pop, per
+     *  the round-3 leak fix), so their own viewModelScope would
+     *  cancel an in-flight add the moment the user backs out —
+     *  writes route through this scope instead (the hardening the
+     *  old SeatStepContent carried as `writeScope`). */
+    writeScope: kotlinx.coroutines.CoroutineScope,
     onOpenConsent: (AttributedCatalogEntry) -> Unit,
     onUseRecommended: () -> Unit,
     onDone: () -> Unit,
@@ -134,6 +141,7 @@ internal fun OnboardingServicesHubOverlay(
                     MessageDeliveryContent(
                         dependencies = dependencies,
                         flow = flow,
+                        writeScope = writeScope,
                         onOpenConsent = onOpenConsent,
                     )
                 }
@@ -147,6 +155,7 @@ internal fun OnboardingServicesHubOverlay(
                     MediaDeliveryContent(
                         dependencies = dependencies,
                         flow = flow,
+                        writeScope = writeScope,
                         onOpenConsent = onOpenConsent,
                     )
                 }
@@ -160,6 +169,7 @@ internal fun OnboardingServicesHubOverlay(
                     DirectoryContent(
                         dependencies = dependencies,
                         flow = flow,
+                        writeScope = writeScope,
                     )
                 }
             }
@@ -172,6 +182,7 @@ internal fun OnboardingServicesHubOverlay(
                     GroupIntegrityContent(
                         dependencies = dependencies,
                         flow = flow,
+                        writeScope = writeScope,
                         onOpenConsent = onOpenConsent,
                     )
                 }
@@ -361,7 +372,6 @@ private fun SeatEndpointRow(
     name: String,
     url: String,
     chip: String?,
-    chipColor: androidx.compose.ui.graphics.Color,
     isLast: Boolean,
     tag: String,
 ) {
@@ -377,7 +387,7 @@ private fun SeatEndpointRow(
         title = name,
         subtitle = url,
         subtitleMono = true,
-        trailing = { if (chip != null) DiscoveryChip(chip, chipColor) },
+        trailing = { if (chip != null) DiscoveryChip(chip, SettingsTile.Green) },
         isLast = isLast,
         insetHairline = 16.dp,
         modifier = Modifier.testTag(tag),
@@ -496,12 +506,13 @@ private fun recordCustomAdd(flow: OnboardingFlow) {
 private fun MessageDeliveryContent(
     dependencies: AppDependencies,
     flow: OnboardingFlow,
+    writeScope: kotlinx.coroutines.CoroutineScope,
     onOpenConsent: (AttributedCatalogEntry) -> Unit,
 ) {
     val viewModel: NostrRelaySettingsViewModel = viewModel(
         key = "onboarding.nostrSettings",
         factory = viewModelFactory {
-            initializer { dependencies.makeNostrRelaySettingsViewModel() }
+            initializer { dependencies.makeNostrRelaySettingsViewModel(writeScope) }
         },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -526,7 +537,6 @@ private fun MessageDeliveryContent(
                         url = endpoint.url,
                         // No role chip — see the content KDoc.
                         chip = null,
-                        chipColor = SettingsTile.Green,
                         isLast = idx == endpoints.lastIndex,
                         tag = "onboarding.services.messageDelivery.configured.${endpoint.url}",
                     )
@@ -576,12 +586,13 @@ private fun MessageDeliveryContent(
 private fun MediaDeliveryContent(
     dependencies: AppDependencies,
     flow: OnboardingFlow,
+    writeScope: kotlinx.coroutines.CoroutineScope,
     onOpenConsent: (AttributedCatalogEntry) -> Unit,
 ) {
     val viewModel: BlossomServerSettingsViewModel = viewModel(
         key = "onboarding.blossomSettings",
         factory = viewModelFactory {
-            initializer { dependencies.makeBlossomServerSettingsViewModel() }
+            initializer { dependencies.makeBlossomServerSettingsViewModel(writeScope) }
         },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -609,7 +620,6 @@ private fun MediaDeliveryContent(
                         } else {
                             null
                         },
-                        chipColor = SettingsTile.Green,
                         isLast = idx == endpoints.lastIndex,
                         tag = "onboarding.services.mediaDelivery.configured.${endpoint.url}",
                     )
@@ -663,12 +673,13 @@ private fun MediaDeliveryContent(
 private fun GroupIntegrityContent(
     dependencies: AppDependencies,
     flow: OnboardingFlow,
+    writeScope: kotlinx.coroutines.CoroutineScope,
     onOpenConsent: (AttributedCatalogEntry) -> Unit,
 ) {
     val viewModel: RelayerSettingsViewModel = viewModel(
         key = "onboarding.relayerSettings",
         factory = viewModelFactory {
-            initializer { dependencies.makeRelayerSettingsViewModel() }
+            initializer { dependencies.makeRelayerSettingsViewModel(writeScope) }
         },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -699,7 +710,6 @@ private fun GroupIntegrityContent(
                         } else {
                             null
                         },
-                        chipColor = SettingsTile.Green,
                         isLast = idx == endpoints.lastIndex,
                         tag = "onboarding.services.groupIntegrity.configured.${endpoint.url}",
                     )
@@ -879,6 +889,7 @@ private fun PublishedNotaryList(
 private fun DirectoryContent(
     dependencies: AppDependencies,
     flow: OnboardingFlow,
+    writeScope: kotlinx.coroutines.CoroutineScope,
 ) {
     val discovery = dependencies.discovery
     if (discovery == null) {
@@ -897,7 +908,7 @@ private fun DirectoryContent(
     val viewModel: DiscoverySettingsViewModel = viewModel(
         key = "onboarding.discoverySettings",
         factory = viewModelFactory {
-            initializer { discovery.makeDiscoverySettingsViewModel() }
+            initializer { discovery.makeDiscoverySettingsViewModel(writeScope) }
         },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()

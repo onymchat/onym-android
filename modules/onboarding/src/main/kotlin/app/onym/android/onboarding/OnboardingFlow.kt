@@ -302,9 +302,12 @@ class OnboardingFlow(
      * `moderationEnabled = false` the step isn't in the sequence and
      * this is never consulted for a live step.
      */
-    fun isMandatory(step: OnboardingStep): Boolean {
+    fun isMandatory(step: OnboardingStep): Boolean =
+        isMandatory(step, _state.value)
+
+    private fun isMandatory(step: OnboardingStep, state: State): Boolean {
         if (step != OnboardingStep.Moderation) return false
-        return _state.value.moderationDirectoryHasEntries != false
+        return state.moderationDirectoryHasEntries != false
     }
 
     /**
@@ -325,12 +328,21 @@ class OnboardingFlow(
      *   outcome on reveal; "Remind me later" (skip) is the honest
      *   escape.
      */
-    fun requiresOutcomeToAdvance(step: OnboardingStep): Boolean = when (step) {
-        OnboardingStep.Identity -> true
-        OnboardingStep.Moderation -> isMandatory(step)
-        OnboardingStep.RecoveryPhrase -> true
-        else -> false
-    }
+    fun requiresOutcomeToAdvance(step: OnboardingStep): Boolean =
+        requiresOutcomeToAdvance(step, _state.value)
+
+    /** Snapshot-taking overload: [advance] runs inside a
+     *  `_state.update {}` CAS loop, and evaluating the guard against
+     *  a fresh `_state.value` read there would mix two snapshots on
+     *  a contended retry — the guard must be answered from the SAME
+     *  `current` the update is transforming. */
+    private fun requiresOutcomeToAdvance(step: OnboardingStep, state: State): Boolean =
+        when (step) {
+            OnboardingStep.Identity -> true
+            OnboardingStep.Moderation -> isMandatory(step, state)
+            OnboardingStep.RecoveryPhrase -> true
+            else -> false
+        }
 
     /**
      * Whether the recorded outcome at [step] satisfies an
@@ -415,7 +427,7 @@ class OnboardingFlow(
     fun advance() {
         _state.update { current ->
             val next = neighbor(current.step, offset = 1) ?: return@update current
-            if (requiresOutcomeToAdvance(current.step) &&
+            if (requiresOutcomeToAdvance(current.step, current) &&
                 !satisfiesGate(current.outcomes[current.step])
             ) {
                 return@update current

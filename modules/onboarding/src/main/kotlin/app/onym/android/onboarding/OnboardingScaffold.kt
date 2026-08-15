@@ -9,12 +9,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,8 +32,7 @@ import androidx.compose.ui.unit.dp
  *
  * Test tags follow `onboarding.<step>.<element>`:
  * `onboarding.<step>.primary`, `onboarding.<step>.skip`,
- * `onboarding.<step>.back`, `onboarding.<step>.title` (plus
- * `onboarding.<step>.skip_pending` for the probe-progress state).
+ * `onboarding.<step>.back`, `onboarding.<step>.title`.
  */
 @Composable
 fun OnboardingScaffold(
@@ -56,12 +53,6 @@ fun OnboardingScaffold(
      *  "Remind me later" (a deferral, not a skip). Ignored when
      *  [onSkip] is null. */
     skipTitle: String? = null,
-    /**
-     * Renders a small progress indicator in the Skip slot — used
-     * while the flow's moderation-directory probe is unresolved and
-     * the step's gating is not yet known.
-     */
-    showSkipProgress: Boolean = false,
     /** null hides the Back affordance (the first step). */
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -150,14 +141,6 @@ fun OnboardingScaffold(
                         onClick = onSkip,
                         modifier = Modifier.testTag("onboarding.${step.tag}.skip"),
                     ) { Text(skipTitle ?: stringResource(R.string.onboarding_skip)) }
-                } else if (showSkipProgress) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier
-                            .padding(12.dp)
-                            .size(18.dp)
-                            .testTag("onboarding.${step.tag}.skip_pending"),
-                    )
                 }
             }
         }

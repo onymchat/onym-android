@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import app.onym.android.transport.blossom.BlossomServerEndpoint
 import app.onym.android.transport.blossom.BlossomServersConfiguration
 import app.onym.android.transport.blossom.BlossomServersRepository
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -28,7 +29,14 @@ data class BlossomServerSettingsState(
 
 class BlossomServerSettingsViewModel(
     private val repository: BlossomServersRepository,
+    /** See [writes]. */
+    private val writeScope: CoroutineScope? = null,
 ) : ViewModel() {
+
+    /** Scope for repository WRITES — see
+     *  [NostrRelaySettingsViewModel.writes] for the rationale
+     *  (onboarding hub back-pops must not cancel in-flight writes). */
+    private val writes get() = writeScope ?: viewModelScope
 
     private val _draft = MutableStateFlow("")
     private val _draftError = MutableStateFlow<String?>(null)
@@ -62,7 +70,7 @@ class BlossomServerSettingsViewModel(
                 "Use https:// or http:// with a hostname, e.g. https://blossom.example.com"
             return
         }
-        viewModelScope.launch {
+        writes.launch {
             val added = repository.addEndpoint(BlossomServerEndpoint.custom(normalized))
             if (added) {
                 _draft.value = ""
@@ -75,7 +83,7 @@ class BlossomServerSettingsViewModel(
     }
 
     fun tappedRemove(url: String) {
-        viewModelScope.launch { repository.removeEndpoint(url) }
+        writes.launch { repository.removeEndpoint(url) }
     }
 
     /** Promote [url] to the head of the list — the FIRST endpoint is

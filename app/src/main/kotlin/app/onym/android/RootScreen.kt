@@ -482,7 +482,7 @@ fun RootScreen(
             composable(ROUTE_NOSTR_RELAYS) {
                 val vm = viewModel(
                     factory = viewModelFactory {
-                        initializer { dependencies.makeNostrRelaySettingsViewModel() }
+                        initializer { dependencies.makeNostrRelaySettingsViewModel(null) }
                     },
                 ) as app.onym.android.settings.NostrRelaySettingsViewModel
                 val (entries, consents) = rememberSeatCatalog(
@@ -508,7 +508,7 @@ fun RootScreen(
             composable(ROUTE_BLOSSOM_RELAYS) {
                 val vm = viewModel(
                     factory = viewModelFactory {
-                        initializer { dependencies.makeBlossomServerSettingsViewModel() }
+                        initializer { dependencies.makeBlossomServerSettingsViewModel(null) }
                     },
                 ) as app.onym.android.settings.BlossomServerSettingsViewModel
                 app.onym.android.settings.BlossomServerSettingsScreen(
@@ -525,7 +525,7 @@ fun RootScreen(
             composable(ROUTE_RELAYER_SETTINGS) {
                 val vm: RelayerSettingsViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { dependencies.makeRelayerSettingsViewModel() }
+                        initializer { dependencies.makeRelayerSettingsViewModel(null) }
                     },
                 )
                 val (entries, consents) = rememberSeatCatalog(
@@ -553,7 +553,7 @@ fun RootScreen(
                 val discovery = dependencies.discovery ?: return@composable
                 val vm: app.onym.android.settings.DiscoverySettingsViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { discovery.makeDiscoverySettingsViewModel() }
+                        initializer { discovery.makeDiscoverySettingsViewModel(null) }
                     },
                 )
                 app.onym.android.settings.DiscoverySettingsScreen(
@@ -569,7 +569,7 @@ fun RootScreen(
                 // pinned outcome propagates through the repository.
                 val vm: app.onym.android.settings.DiscoverySettingsViewModel = viewModel(
                     factory = viewModelFactory {
-                        initializer { discovery.makeDiscoverySettingsViewModel() }
+                        initializer { discovery.makeDiscoverySettingsViewModel(null) }
                     },
                 )
                 app.onym.android.settings.AddDiscoveryProviderScreen(

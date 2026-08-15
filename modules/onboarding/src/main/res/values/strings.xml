@@ -127,6 +127,7 @@
     <!-- Done step -->
     <string name="onboarding_done_section_setup">YOUR SETUP</string>
     <string name="onboarding_done_none_configured">None configured</string>
+    <string name="onboarding_done_directory_not_confirmed">Not confirmed</string>
     <string name="onboarding_done_footnote">Everything here can be changed later in Settings. Nothing is permanent except your recovery phrase.</string>
     <string name="onboarding_done_nudge_full_title">Back up your recovery phrase</string>
     <string name="onboarding_done_nudge_full_body">Your identity key was created on this device and exists nowhere else. Back it up from Settings → Back Up Keys so you can recover your account.</string>

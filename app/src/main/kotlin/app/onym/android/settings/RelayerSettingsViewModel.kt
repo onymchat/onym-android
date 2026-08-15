@@ -7,6 +7,7 @@ import app.onym.android.chain.RelayerEndpoint
 import app.onym.android.chain.RelayerFetchStatus
 import app.onym.android.chain.RelayerRepository
 import app.onym.android.chain.RelayerStrategy
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,7 +31,14 @@ import java.net.URISyntaxException
  */
 class RelayerSettingsViewModel(
     private val repository: RelayerRepository,
+    /** See [writes]. */
+    private val writeScope: CoroutineScope? = null,
 ) : ViewModel() {
+
+    /** Scope for repository WRITES — see
+     *  [NostrRelaySettingsViewModel.writes] for the rationale
+     *  (onboarding hub back-pops must not cancel in-flight writes). */
+    private val writes get() = writeScope ?: viewModelScope
 
     /** Snapshot the screen renders. */
     data class State(
@@ -80,7 +88,7 @@ class RelayerSettingsViewModel(
     // ─── intents ──────────────────────────────────────────────────
 
     fun addKnown(endpoint: RelayerEndpoint) {
-        viewModelScope.launch { repository.addEndpoint(endpoint) }
+        writes.launch { repository.addEndpoint(endpoint) }
     }
 
     fun customDraftChanged(text: String) {
@@ -99,7 +107,7 @@ class RelayerSettingsViewModel(
         val draft = _state.value.customDraft
         when (val r = validate(draft)) {
             is ValidationResult.Valid -> {
-                viewModelScope.launch {
+                writes.launch {
                     repository.addEndpoint(RelayerEndpoint.custom(r.normalisedUrl))
                     onAdded()
                 }
@@ -112,15 +120,15 @@ class RelayerSettingsViewModel(
     }
 
     fun removeEndpoint(url: String) {
-        viewModelScope.launch { repository.removeEndpoint(url) }
+        writes.launch { repository.removeEndpoint(url) }
     }
 
     fun setPrimary(url: String) {
-        viewModelScope.launch { repository.setPrimary(url) }
+        writes.launch { repository.setPrimary(url) }
     }
 
     fun setStrategy(strategy: RelayerStrategy) {
-        viewModelScope.launch { repository.setStrategy(strategy) }
+        writes.launch { repository.setStrategy(strategy) }
     }
 
     /** "Try Again" tap on the [RelayerFetchStatus.Failed] gate. The

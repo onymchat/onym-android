@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -27,7 +28,20 @@ data class NostrRelaySettingsState(
 
 class NostrRelaySettingsViewModel(
     private val repository: NostrRelaysRepository,
+    /** See [writes]. */
+    private val writeScope: CoroutineScope? = null,
 ) : ViewModel() {
+
+    /**
+     * Scope for repository WRITES. Defaults to [viewModelScope]; the
+     * onboarding hub passes its host-retained scope instead, because
+     * its seat screens live on NavBackStackEntry-scoped ViewModels —
+     * a back-pop clears the entry and would cancel an in-flight
+     * add/remove mid-write (the hardening the old onboarding
+     * SeatStepContent carried as `writeScope`). Reads/collectors stay
+     * on [viewModelScope] so they die with the screen.
+     */
+    private val writes get() = writeScope ?: viewModelScope
 
     private val _draft = MutableStateFlow("")
     private val _draftError = MutableStateFlow<String?>(null)
@@ -63,7 +77,7 @@ class NostrRelaySettingsViewModel(
                 "Use wss:// or ws:// with a hostname, e.g. wss://relay.example.com"
             return
         }
-        viewModelScope.launch {
+        writes.launch {
             val added = repository.addEndpoint(NostrRelayEndpoint.custom(normalized))
             if (added) {
                 _draft.value = ""
@@ -76,11 +90,11 @@ class NostrRelaySettingsViewModel(
     }
 
     fun tappedRemove(url: String) {
-        viewModelScope.launch { repository.removeEndpoint(url) }
+        writes.launch { repository.removeEndpoint(url) }
     }
 
     fun tappedResetToDefault() {
-        viewModelScope.launch { repository.resetToDefault() }
+        writes.launch { repository.resetToDefault() }
     }
 
     companion object {

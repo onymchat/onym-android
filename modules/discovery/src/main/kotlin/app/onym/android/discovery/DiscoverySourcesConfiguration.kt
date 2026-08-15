@@ -64,11 +64,15 @@ data class DiscoverySource(
          * the user's own trust-on-first-use act, so even the bundled
          * default goes through the same TOFU confirmation as any
          * other source — refresh skips unpinned sources, and nothing
-         * this provider publishes is trusted until the user confirms
-         * its operator-key fingerprint (the onboarding
-         * discovery-confirm step, or Settings → Discovery). Never
-         * pre-pin a key here. Mirrors onym-ios
-         * `DiscoverySource.onymDefault`.
+         * this provider publishes is trusted until a confirmation
+         * pins its operator key. The pin sites today: the onboarding
+         * services hub's Directory seat ("Verify & Confirm" — the
+         * interactive fingerprint path), accepting the RECOMMENDED
+         * setup on the services step (a programmatic fetch → verify
+         * → pin of exactly this seeded source; see the app layer's
+         * RecommendedDirectoryPinner for the trust rationale), or
+         * Settings → Discovery. Never pre-pin a key here. Mirrors
+         * onym-ios `DiscoverySource.onymDefault`.
          */
         val onymDefault = DiscoverySource(
             url = "https://discovery.onym.app/manifest.json",

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import app.onym.android.discovery.DiscoveryRepository
 import app.onym.android.discovery.DiscoveryState
 import app.onym.android.discovery.PendingDiscoverySource
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +26,14 @@ import java.net.URI
  */
 class DiscoverySettingsViewModel(
     private val repository: DiscoveryRepository,
+    /** See [writes]. */
+    private val writeScope: CoroutineScope? = null,
 ) : ViewModel() {
+
+    /** Scope for repository WRITES — see
+     *  [NostrRelaySettingsViewModel.writes] for the rationale
+     *  (onboarding hub back-pops must not cancel in-flight writes). */
+    private val writes get() = writeScope ?: viewModelScope
 
     /**
      * Where the add-provider flow currently stands. The pending
@@ -76,7 +84,7 @@ class DiscoverySettingsViewModel(
      * seeding restores it — only an explicit re-add does.
      */
     fun tappedRemove(providerId: String) {
-        viewModelScope.launch { repository.removeSource(providerId) }
+        writes.launch { repository.removeSource(providerId) }
     }
 
     /** User-initiated refresh; the failure surfaces on the snapshot. */
@@ -116,7 +124,7 @@ class DiscoverySettingsViewModel(
      *  source, and refresh so its catalogs land in the aggregate. */
     fun tappedConfirmAdd() {
         val phase = _addPhase.value as? AddPhase.Confirming ?: return
-        viewModelScope.launch {
+        writes.launch {
             repository.confirmAddSource(phase.pending)
             _addPhase.value = AddPhase.Added
         }

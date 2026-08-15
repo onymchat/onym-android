@@ -242,7 +242,7 @@ class DiscoverySettingsUITest {
             // viewModelScope is Main.immediate and every seam in the
             // zero-pinned-source refresh path resolves without
             // suspension, so the refresh completes inside this block.
-            discoveryUi.makeDiscoverySettingsViewModel().tappedRefresh()
+            discoveryUi.makeDiscoverySettingsViewModel(null).tappedRefresh()
         }
         composeRule.waitUntil(timeoutMillis = 5.seconds.inWholeMilliseconds) {
             discoveryUi.stateFlow.value.fetchStatus is DiscoveryFetchStatus.Success

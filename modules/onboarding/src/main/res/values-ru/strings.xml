@@ -127,6 +127,7 @@
     <!-- Done step -->
     <string name="onboarding_done_section_setup">ВАША НАСТРОЙКА</string>
     <string name="onboarding_done_none_configured">Не настроено</string>
+    <string name="onboarding_done_directory_not_confirmed">Не подтверждён</string>
     <string name="onboarding_done_footnote">Всё это можно изменить позже в Настройках. Здесь нет ничего окончательного, кроме фразы восстановления.</string>
     <string name="onboarding_done_nudge_full_title">Сделайте резервную копию фразы восстановления</string>
     <string name="onboarding_done_nudge_full_body">Ключ вашей личности создан на этом устройстве и больше нигде не существует. Сделайте резервную копию (Настройки → Резервная копия ключей), чтобы можно было восстановить аккаунт.</string>

@@ -59,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -79,6 +80,7 @@ import app.onym.android.recovery.RecoveryPhraseBackupScreen
 import app.onym.android.recovery.RecoveryPhraseBackupViewModel
 import app.onym.android.settings.ModuleConsentScreen
 import app.onym.android.settings.ModuleConsentViewModel
+import kotlinx.coroutines.launch
 import app.onym.android.onboarding.R as OnboardingR
 
 /**
@@ -204,6 +206,33 @@ internal fun OnboardingHost(
         if (state.step != OnboardingStep.RecoveryPhrase) backupVisible = false
     }
 
+    // PIN-ON-ACCEPT: advancing PAST the services step with the
+    // recommendation selected is the explicit confirm of the seeded
+    // default directory — run the programmatic TOFU (same
+    // fetch→verify→pin path as the hub's Verify & Confirm; see
+    // RecommendedDirectoryPinner for the trust rationale). Trigger
+    // semantics: previous step was Services AND the new step is
+    // LATER in the walk (Back to Identity never triggers) AND the
+    // choice is Recommended at that moment. Idempotent (no-op when
+    // already pinned or removed) and non-blocking (failure leaves
+    // the source unpinned; the Done summary says "Not confirmed").
+    // Runs in the host-retained scope so further navigation can't
+    // cancel the pin mid-flight.
+    var stepBeforeChange by remember { mutableStateOf<OnboardingStep?>(null) }
+    LaunchedEffect(state.step) {
+        val previous = stepBeforeChange
+        stepBeforeChange = state.step
+        val services = flow.steps.indexOf(OnboardingStep.Services)
+        if (previous == OnboardingStep.Services &&
+            flow.steps.indexOf(state.step) > services &&
+            state.servicesChoice == ServicesChoice.Recommended
+        ) {
+            hostViewModel.viewModelScope.launch {
+                onboarding.pinRecommendedDirectory()
+            }
+        }
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -252,6 +281,7 @@ internal fun OnboardingHost(
                     dependencies = dependencies,
                     flow = flow,
                     navController = hubNavController,
+                    writeScope = hostViewModel.viewModelScope,
                     onOpenConsent = { entry -> consentEntry = entry },
                     onUseRecommended = {
                         // Only the choice reverts — consent pins and
@@ -576,6 +606,18 @@ private fun ServicesStepContent(
     // telling the truth about what the user configured.
     val usingCustom = state.servicesChoice == ServicesChoice.Custom
 
+    // Parity with the hub's use-recommended caveat: tapping the
+    // Recommended card after a custom setup flips the chip and
+    // overwrites the outcome while persisted endpoints/pins STAY —
+    // so the same stays-configured footnote must be visible at the
+    // card whenever that tap matters: while Custom is selected, and
+    // lingering after a flip back within this visit (the flow-held
+    // choice alone can't say "was custom a moment ago").
+    var sawCustomHere by remember { mutableStateOf(false) }
+    LaunchedEffect(usingCustom) {
+        if (usingCustom) sawCustomHere = true
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -666,6 +708,19 @@ private fun ServicesStepContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )
+
+        if (usingCustom || sawCustomHere) {
+            Text(
+                text = stringResource(
+                    OnboardingR.string.onboarding_hub_use_recommended_footnote,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .testTag("onboarding.services.stays_configured"),
+            )
+        }
     }
 }
 
@@ -1021,21 +1076,36 @@ private fun DoneStepContent(
                     )
                 },
             )
-            val source = discoveryState?.sources?.firstOrNull()
-            if (discoveryState != null && source != null) {
+            // The directory row must distinguish the same states the
+            // hub does. Pinned: the fingerprint IS the checkable
+            // detail (+ the source count). NOT pinned: an explicit
+            // "Not confirmed" trailing and NO detail line — a URL
+            // there would render indistinguishably from a confirmed
+            // source's fingerprint. A pinned source wins the row
+            // when several exist (it is the one refresh trusts).
+            val sources = discoveryState?.sources.orEmpty()
+            val pinnedSource = sources.firstOrNull { it.pinnedOperatorKeyHex != null }
+            val displaySource = pinnedSource ?: sources.firstOrNull()
+            if (discoveryState != null && displaySource != null) {
                 SettingsHairline(insetStart = 52.dp)
                 SummaryRow(
                     icon = Icons.Filled.Search,
                     title = stringResource(
                         OnboardingR.string.onboarding_hub_row_directory_title,
                     ),
-                    value = source.label,
-                    detail = source.operatorKeyFingerprint ?: source.url,
-                    trailing = pluralStringResource(
-                        OnboardingR.plurals.onboarding_done_sources_count,
-                        discoveryState.sources.size,
-                        discoveryState.sources.size,
-                    ),
+                    value = displaySource.label,
+                    detail = pinnedSource?.operatorKeyFingerprint,
+                    trailing = if (pinnedSource != null) {
+                        pluralStringResource(
+                            OnboardingR.plurals.onboarding_done_sources_count,
+                            sources.size,
+                            sources.size,
+                        )
+                    } else {
+                        stringResource(
+                            OnboardingR.string.onboarding_done_directory_not_confirmed,
+                        )
+                    },
                 )
             }
         }

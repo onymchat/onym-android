@@ -84,10 +84,6 @@ fun OnboardingScreen(
         },
         onSkip = if (flow.isSkippable(step)) ({ flow.skip() }) else null,
         skipTitle = stringResource(skipTitleRes(step)),
-        // While the directory probe is unresolved, moderation's
-        // gating is unknown (failed closed) — show progress in the
-        // skip slot instead of nothing.
-        showSkipProgress = step == OnboardingStep.Moderation && !state.moderationProbeResolved,
         onBack = if (step != OnboardingStep.Welcome) ({ flow.back() }) else null,
         modifier = modifier,
         // Unnumbered steps pass null so the scaffold never reserves a
