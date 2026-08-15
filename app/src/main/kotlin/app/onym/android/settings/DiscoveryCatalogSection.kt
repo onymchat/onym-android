@@ -115,6 +115,11 @@ internal fun DiscoveryCatalogCard(
     entries: List<AttributedCatalogEntry>,
     consentByComponentId: Map<String, PinnedConsentRecord>,
     onEntryClick: (AttributedCatalogEntry) -> Unit,
+    /** Overrides the per-row test-tag prefix (rows read
+     *  `<prefix>.<componentId>`) — the onboarding hub's seat screens
+     *  use their own `onboarding.services.<seat>.catalog` vocabulary;
+     *  null keeps the Settings default. */
+    testTagPrefix: String? = null,
 ) {
     SettingsCard {
         entries.forEachIndexed { idx, entry ->
@@ -155,7 +160,8 @@ internal fun DiscoveryCatalogCard(
                 onClick = { onEntryClick(entry) },
                 isLast = idx == entries.lastIndex,
                 modifier = Modifier.testTag(
-                    "discovery.catalog.${entry.entry.seatType}.${entry.entry.componentId}",
+                    testTagPrefix?.let { "$it.${entry.entry.componentId}" }
+                        ?: "discovery.catalog.${entry.entry.seatType}.${entry.entry.componentId}",
                 ),
             )
         }

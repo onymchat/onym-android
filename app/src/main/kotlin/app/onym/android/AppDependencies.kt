@@ -144,6 +144,14 @@ class OnboardingUiDependencies(
      *  picker uses. */
     val addRelayerEndpoint: suspend (app.onym.android.chain.RelayerEndpoint) -> Unit,
     /**
+     * Awaits the identity bootstrap and answers whether a snapshot
+     * exists — the identity step's checklist binds to this instead of
+     * asserting success it can't know about. Idempotent (it awaits
+     * the same bootstrap the app kicks at start); a false answer
+     * renders the step's failure card with Try again.
+     */
+    val identityReady: suspend () -> Boolean = { true },
+    /**
      * Presentation generation, bumped on every explicit restart. The
      * host keys its retained OnboardingFlow on this so a re-run gets
      * a FRESH state machine — the prior walk's ViewModel (whose flow

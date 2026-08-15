@@ -130,6 +130,16 @@ object UITestRegistry {
      */
     var discoveryClock: (() -> java.time.Instant)? = null
 
+    /**
+     * Fake biometric gate for the recovery-phrase reveal. The real
+     * [app.onym.android.recovery.AndroidBiometricAuthenticator]
+     * drives a system BiometricPrompt no instrumented test can
+     * answer; tests that walk the onboarding recovery step (or the
+     * Settings backup flow) register an auto-succeeding fake here.
+     * Null (the default) keeps the real prompt.
+     */
+    var biometricAuthenticator: app.onym.android.recovery.BiometricAuthenticator? = null
+
     /** Reset between tests. Called from `@Before`. */
     fun reset() {
         enabled = false
@@ -147,5 +157,6 @@ object UITestRegistry {
         discoveryStore = null
         onboardingStore = null
         discoveryClock = null
+        biometricAuthenticator = null
     }
 }

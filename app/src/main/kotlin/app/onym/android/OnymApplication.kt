@@ -1184,6 +1184,12 @@ class OnymApplication : Application() {
             },
             relayerState = relayerRepository.snapshots,
             addRelayerEndpoint = relayerRepository::addEndpoint,
+            // Awaits the same idempotent bootstrap the app kicks at
+            // start, so the identity step's checklist reflects the
+            // real outcome instead of asserting one.
+            identityReady = {
+                runCatching { identityRepository.bootstrap() }.isSuccess
+            },
             generation = onboardingGeneration,
             // Explicit restart (Settings → Restart Onboarding): the
             // persisted restart bit survives a mid-walk kill (the
@@ -1206,9 +1212,20 @@ class OnymApplication : Application() {
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
                 RecoveryPhraseBackupViewModel(
                     repository = identityRepository,
-                    authenticator = AndroidBiometricAuthenticator(
-                        activityProvider = activityProvider,
-                    ),
+                    // UI-test seam: instrumented tests that walk the
+                    // reveal (the onboarding recovery step) register
+                    // a fake — a real BiometricPrompt can't be
+                    // answered from a test. Production always takes
+                    // the AndroidBiometricAuthenticator branch.
+                    authenticator = if (UITestRegistry.enabled &&
+                        UITestRegistry.biometricAuthenticator != null
+                    ) {
+                        UITestRegistry.biometricAuthenticator!!
+                    } else {
+                        AndroidBiometricAuthenticator(
+                            activityProvider = activityProvider,
+                        )
+                    },
                     clipboard = clipboard,
                     strings = strings,
                 )
