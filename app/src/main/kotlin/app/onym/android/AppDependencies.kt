@@ -175,6 +175,26 @@ class OnboardingUiDependencies(
 )
 
 /**
+ * The [OnboardingUiDependencies.identityReady] probe body: awaits the
+ * (idempotent) identity bootstrap and answers whether it produced a
+ * snapshot. A plain failure answers `false` (the identity step's
+ * failure card + Try again), but a [kotlinx.coroutines.CancellationException]
+ * is RETHROWN — a `runCatching`-style swallow would flip a merely
+ * cancelled check (the user tapped Back, the composable left the
+ * composition) into a scary failure card. Extracted from the
+ * composition root so the distinction is unit-testable.
+ */
+internal suspend fun probeIdentityReady(bootstrap: suspend () -> Unit): Boolean =
+    try {
+        bootstrap()
+        true
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        false
+    }
+
+/**
  * Everything the discovery settings UI needs, bundled so
  * [AppDependencies] carries one nullable value. Mirrors iOS's
  * `DiscoveryModulePicker` bundling on `discovery-settings-ui`.

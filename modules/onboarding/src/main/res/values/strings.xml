@@ -69,7 +69,7 @@
     <string name="onboarding_hub_row_group_subtitle">Keeps group membership provably honest</string>
     <string name="onboarding_hub_footnote">More than one service works differently per category: relays all carry every message together, extra media hosts are trusted download sources, and each new group picks its notary from your list.</string>
     <string name="onboarding_hub_use_recommended">Use the recommended setup instead</string>
-    <string name="onboarding_hub_use_recommended_footnote">Anything you already added here stays configured — remove it from the lists above if you\'ve changed your mind.</string>
+    <string name="onboarding_hub_use_recommended_footnote">Anything you already added here stays configured — you can remove it later in Settings.</string>
     <string name="onboarding_hub_done">Done</string>
 
     <!-- Seat surfaces (shared) -->

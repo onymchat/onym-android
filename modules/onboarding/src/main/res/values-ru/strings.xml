@@ -69,7 +69,7 @@
     <string name="onboarding_hub_row_group_subtitle">Гарантирует доказуемую честность состава групп</string>
     <string name="onboarding_hub_footnote">Несколько сервисов работают по-разному в каждой категории: релеи используются все вместе, дополнительные медиасервисы — доверенные источники для скачивания, а нотариус для каждой новой группы выбирается из вашего списка.</string>
     <string name="onboarding_hub_use_recommended">Вернуться к рекомендуемой настройке</string>
-    <string name="onboarding_hub_use_recommended_footnote">Всё, что вы уже добавили, остаётся настроенным — удалите из списков выше, если передумали.</string>
+    <string name="onboarding_hub_use_recommended_footnote">Всё, что вы уже добавили, остаётся настроенным — удалить это можно позже в Настройках.</string>
     <string name="onboarding_hub_done">Готово</string>
 
     <!-- Seat surfaces (shared) -->

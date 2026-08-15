@@ -1186,9 +1186,11 @@ class OnymApplication : Application() {
             addRelayerEndpoint = relayerRepository::addEndpoint,
             // Awaits the same idempotent bootstrap the app kicks at
             // start, so the identity step's checklist reflects the
-            // real outcome instead of asserting one.
+            // real outcome instead of asserting one. probeIdentityReady
+            // rethrows CancellationException — a cancelled check must
+            // not masquerade as a bootstrap failure.
             identityReady = {
-                runCatching { identityRepository.bootstrap() }.isSuccess
+                probeIdentityReady { identityRepository.bootstrap() }
             },
             generation = onboardingGeneration,
             // Explicit restart (Settings → Restart Onboarding): the
