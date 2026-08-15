@@ -102,6 +102,19 @@ needed, verified rather than assumed:
   registry seam upstream kept for future hub-loading tests is not
   yet used here.
 
+## Lint-annotation commit (not authored by the tests branch)
+
+While this branch was being reconciled, a local commit ("Lint:
+allow-annotate recoveryPhrase test-tag literals in the page object")
+was added to it from the shared repo (worktrees share branches —
+presumably the implementation side keeping `scripts/lint-secrets.py`
+green across branches). Verified legitimate: `onym:allow-secret-read`
+is the sanctioned suppression marker consumed by the default-deny
+secret-read lint, the four annotated sites are UI test-tag string
+literals (comment-only change, zero behavior), the annotations mirror
+the implementation's own in OnboardingHost.kt, and the lint passes.
+The commit is kept as its own commit with its original message.
+
 ## Notes for the record
 
 - Honest-copy assertions verified against the implementation: Nostr
