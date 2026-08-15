@@ -215,16 +215,31 @@ class OnboardingWalkUITest {
         onboarding.tapPrimary(OnboardingStep.Identity)
 
         // Services: SEEDED — recommended card preselected, primary
-        // enabled immediately. Keep the defaults.
+        // enabled immediately. Keep the defaults. Nothing is pinned
+        // yet (pin-on-accept runs on leaving the step forward).
         onboarding.awaitStep(OnboardingStep.Services)
         onboarding.awaitRecommendedCard()
         onboarding.primaryButton(OnboardingStep.Services).assertIsEnabled()
+        assertTrue(
+            discoveryStore.loadConfigurationBlocking().sources
+                .all { it.pinnedOperatorKeyHex == null },
+        )
         onboarding.tapPrimary(OnboardingStep.Services)
 
         // Moderation is RESERVED (flag off): the step must never
         // present — the walk goes straight to recoveryPhrase.
         onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
         onboarding.assertStepAbsent(OnboardingStep.Moderation)
+
+        // PIN-ON-ACCEPT: advancing past services with Recommended
+        // selected is the explicit confirm of the seeded directory —
+        // under the harness (fixture fetcher + pinned clock) the
+        // programmatic TOFU must SUCCEED and pin the operator key.
+        // Async in the host scope, so poll.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            discoveryStore.loadConfigurationBlocking().sources
+                .any { it.pinnedOperatorKeyHex == OPERATOR_KEY_HEX }
+        }
 
         // Recovery: the primary ("I've written it down") stays
         // disabled before any reveal; the deferral reads "Remind me
@@ -246,8 +261,12 @@ class OnboardingWalkUITest {
         onboarding.assertPrimaryDisabled(OnboardingStep.RecoveryPhrase)
         onboarding.tapSkip(OnboardingStep.RecoveryPhrase)
 
-        // Done: "Start messaging" completes; the tab shell mounts.
+        // Done: the summary's directory row reflects the pin honestly
+        // — fingerprint detail, no "Not confirmed" trailing — and
+        // "Start messaging" completes; the tab shell mounts.
         onboarding.awaitStep(OnboardingStep.Done)
+        onboarding.awaitDoneSummary()
+        onboarding.assertDoneDirectoryPinned("ea4a 6c63 e29c 520a")
         onboarding.assertPrimaryLabel(OnboardingStep.Done, "Start messaging")
         onboarding.tapPrimary(OnboardingStep.Done)
         onboarding.awaitTabShell()
@@ -400,9 +419,12 @@ class OnboardingWalkUITest {
         onboarding.awaitPrimaryEnabled(OnboardingStep.RecoveryPhrase)
         onboarding.tapPrimary(OnboardingStep.RecoveryPhrase)
 
-        // Done: summary card renders alongside the frame.
+        // Done: summary card renders alongside the frame; the
+        // hub-pinned directory shows its fingerprint (never "Not
+        // confirmed").
         onboarding.awaitStep(OnboardingStep.Done)
         onboarding.awaitDoneSummary()
+        onboarding.assertDoneDirectoryPinned("ea4a 6c63 e29c 520a")
         onboarding.tapPrimary(OnboardingStep.Done)
         onboarding.awaitTabShell()
         assertTrue(onboardingStore.completed)

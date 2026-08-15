@@ -123,6 +123,28 @@ No test changes needed; verified on device rather than assumed:
 - The new `:onboarding` lint gate runs as part of `:onboarding:test`
   builds — green over the contract suite.
 
+## Review-fix round 4 (8d50e4f)
+
+- PIN-ON-ACCEPT, asserted end-to-end in the smoke test. The harness
+  registers the fixture discovery fetcher + the pinned clock, so the
+  recommended path's programmatic TOFU deterministically SUCCEEDS:
+  the smoke asserts nothing is pinned while ON the services step,
+  polls the store for the seeded source's operator key after
+  advancing past it (the pin runs async in the host scope), and then
+  asserts the Done summary's honest PINNED state — fingerprint
+  detail present, "Not confirmed" absent
+  (`assertDoneDirectoryPinned`). The unpinned/"Not confirmed" branch
+  is intentionally not exercised here (it would need a fetcher-less
+  or failing-fetch variant); `assertDoneDirectoryNotConfirmed` is in
+  the page object for that future test. The custom walk asserts the
+  same pinned summary after its manual hub pin.
+- No drift: the tests never referenced `chipColor`, the
+  `showSkipProgress` scaffold slot, `addRelayerEndpoint`, or the
+  seat-VM factory signatures (all wiring goes through
+  `rebuildDependenciesForTest()`); the new
+  `onboarding.services.stays_configured` footnote is Custom-path
+  copy the walks don't assert.
+
 ## Lint-annotation commit (not authored by the tests branch)
 
 While this branch was being reconciled, a local commit ("Lint:

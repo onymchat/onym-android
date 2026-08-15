@@ -430,6 +430,25 @@ class OnboardingScreenObject(private val rule: ComposeContentTestRule) {
         return this
     }
 
+    /** The summary's directory row in its PINNED state: the operator
+     *  fingerprint is the checkable detail, and the explicit
+     *  "Not confirmed" trailing must be absent. */
+    fun assertDoneDirectoryPinned(fingerprint: String): OnboardingScreenObject {
+        doneSummary()
+            .assert(hasAnyDescendant(hasText(fingerprint)))
+            .assert(hasNoDescendantWithText("Not confirmed"))
+        return this
+    }
+
+    /** The summary's directory row in its UNPINNED state: explicit
+     *  "Not confirmed" trailing, no fingerprint detail line. */
+    fun assertDoneDirectoryNotConfirmed(fingerprint: String): OnboardingScreenObject {
+        doneSummary()
+            .assert(hasAnyDescendant(hasText("Not confirmed")))
+            .assert(hasNoDescendantWithText(fingerprint))
+        return this
+    }
+
     // ─── after the walk ───────────────────────────────────────────
 
     /** The tab shell replaced the walk. */
