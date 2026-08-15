@@ -129,6 +129,7 @@ dependencies {
     implementation(project(":foundation"))
     implementation(project(":transport"))
     implementation(project(":chain"))
+    implementation(project(":discovery"))
     implementation(project(":transport-nostr"))
     implementation(project(":transport-blossom"))
     implementation(project(":identity"))
@@ -225,6 +226,9 @@ dependencies {
     // FakeContractsManifestFetcher, InMemoryChainLedger, FakeOkHttpClient,
     // …) moved from src/sharedTest to :chain's testFixtures.
     testImplementation(testFixtures(project(":chain")))
+    // Discovery-subject fakes (FakeDiscoveryFetcher,
+    // InMemoryDiscoveryStore) for the seat-adapter unit tests.
+    testImplementation(testFixtures(project(":discovery")))
     // Identity fakes (FakeActiveIdentityProvider,
     // FakeInvitationEnvelopeDecrypter, TestInvitationEncryptor) moved
     // from src/sharedTest to :identity's testFixtures.

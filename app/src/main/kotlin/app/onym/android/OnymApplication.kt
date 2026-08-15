@@ -110,6 +110,27 @@ private val Context.chatPreferencesDataStore: DataStore<Preferences> by preferen
 )
 
 /**
+ * DataStore Preferences for the Discovery source configuration
+ * (pinned provider keys, accepted snapshot chain anchors) + the last
+ * verified catalog-entry list. Keys and digests aren't secret
+ * material — same reasoning as [relayerDataStore]. Separate file per
+ * the one-domain-one-blob convention.
+ */
+private val Context.discoveryDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.discovery_prefs",
+)
+
+/**
+ * DataStore Preferences for pinned consent records (exact reviewed
+ * manifest bytes + acceptance metadata). A new file — not shared with
+ * the relayer / discovery stores — so the consent history can be
+ * reasoned about (and selectively wiped in tests) on its own.
+ */
+private val Context.consentDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.consent_prefs",
+)
+
+/**
  * Composition root. Two responsibilities:
  *
  *  - Register the BouncyCastle JCE provider once at process start
@@ -234,6 +255,66 @@ class OnymApplication : Application() {
         // `Authorization: Bearer ""` (also 401, but more confusing).
         val relayerAuthToken = BuildConfig.RELAYER_AUTH_TOKEN.takeIf { it.isNotBlank() }
 
+        // Discovery seat (PR A3). The repository owns the user's
+        // provider sources + the verified catalog aggregate; the seat
+        // adapters below wrap the three legacy known-list fetchers
+        // with discovery-backed ones that fall back to legacy on any
+        // failure — discovery can only ever add to what the app can
+        // do today, never take away. Under the UI harness the seams
+        // come from UITestRegistry; when a slot is null, no
+        // repository is constructed at all (same null-means-no-network
+        // contract as nostrRelaysFetcher), so existing UI tests stay
+        // offline and the legacy fetchers run unwrapped.
+        val discoveryFetcher: app.onym.android.discovery.DiscoveryFetching? =
+            if (UITestRegistry.enabled) UITestRegistry.discoveryFetcher
+            else app.onym.android.discovery.OkHttpDiscoveryFetcher(httpClient = httpClient)
+        val discoveryStore: app.onym.android.discovery.DiscoveryStore? =
+            if (UITestRegistry.enabled) UITestRegistry.discoveryStore
+            else app.onym.android.discovery.DataStorePreferencesDiscoveryStore(
+                dataStore = applicationContext.discoveryDataStore,
+            )
+        val discoveryRepository: app.onym.android.discovery.DiscoveryRepository? =
+            if (discoveryFetcher != null && discoveryStore != null) {
+                app.onym.android.discovery.DiscoveryRepository(
+                    store = discoveryStore,
+                    fetcher = discoveryFetcher,
+                )
+            } else {
+                null
+            }
+        if (discoveryRepository != null) {
+            // Same triad launch as the relayer / contracts blocks:
+            // hydrate the persisted source set + cached entries from
+            // disk, then fire the first refresh in the background.
+            applicationScope.launch {
+                discoveryRepository.bootstrap()
+                discoveryRepository.start()
+            }
+        }
+        // Shared seam the seat adapters fetch catalog entries +
+        // destination manifests through. Null exactly when the
+        // repository is null — `wrapping(...)` then returns the
+        // legacy fetcher unwrapped.
+        val discoveryCatalog: DiscoverySeatCatalog? =
+            if (discoveryRepository != null && discoveryFetcher != null) {
+                DiscoverySeatCatalog(
+                    repository = discoveryRepository,
+                    fetcher = discoveryFetcher,
+                )
+            } else {
+                null
+            }
+        // Pinned consent records (module-consent primitives). The
+        // composition root owns the consent DataStore file; the
+        // consent UI PR consumes this store when the DISCOVERY
+        // settings surface lands. Constructed here so the file's
+        // ownership + name are fixed from day one.
+        @Suppress("UNUSED_VARIABLE")
+        val pinnedConsentStore: app.onym.android.foundation.PinnedConsentStore =
+            app.onym.android.foundation.DataStorePreferencesPinnedConsentStore(
+                dataStore = applicationContext.consentDataStore,
+            )
+
         // Relayer wiring (PR #17). Bootstrap loads cached + selection
         // from disk; start() fires the network fetch. Both run on the
         // application scope so launch never blocks on the network.
@@ -248,12 +329,18 @@ class OnymApplication : Application() {
                 dataStore = applicationContext.relayerDataStore,
             )
         }
-        val relayerFetcher = if (UITestRegistry.enabled) {
+        val legacyRelayerFetcher = if (UITestRegistry.enabled) {
             UITestRegistry.relayerFetcher
                 ?: error("UITestRegistry.enabled but relayerFetcher not set")
         } else {
             GitHubReleasesKnownRelayersFetcher(httpClient = httpClient)
         }
+        // Discovery-backed adapter over the legacy fetcher (identity
+        // when there's no discovery catalog — UI-test harness).
+        val relayerFetcher = DiscoveryBackedKnownRelayersFetcher.wrapping(
+            fallback = legacyRelayerFetcher,
+            catalog = discoveryCatalog,
+        )
         val relayerRepository = RelayerRepository(
             store = relayerStore,
             fetcher = relayerFetcher,
@@ -394,9 +481,15 @@ class OnymApplication : Application() {
         // Fetcher pulls the Onym-published default list from GitHub. Under
         // the UI harness it's whatever the test set (null → no network, so
         // the hardcoded seed stays the default).
-        val nostrRelaysFetcher: app.onym.android.transport.nostr.KnownNostrRelaysFetcher? =
+        val legacyNostrRelaysFetcher: app.onym.android.transport.nostr.KnownNostrRelaysFetcher? =
             if (UITestRegistry.enabled) UITestRegistry.nostrRelaysFetcher
             else app.onym.android.transport.nostr.GitHubReleasesKnownNostrRelaysFetcher(httpClient = httpClient)
+        // Discovery-backed adapter over the legacy fetcher (identity
+        // when there's no discovery catalog — UI-test harness).
+        val nostrRelaysFetcher = DiscoveryBackedKnownNostrRelaysFetcher.wrapping(
+            fallback = legacyNostrRelaysFetcher,
+            catalog = discoveryCatalog,
+        )
         val nostrRelaysRepository = app.onym.android.transport.nostr.NostrRelaysRepository(
             store = app.onym.android.transport.nostr.DataStoreNostrRelaysSelectionStore(
                 dataStore = applicationContext.nostrRelaysDataStore,
@@ -414,9 +507,15 @@ class OnymApplication : Application() {
         // Blossom Relays). Bootstrapped synchronously here (a single local
         // DataStore read) so the blob client below can be built with the
         // first configured server's URL. Changes apply on the next launch.
-        val blossomServersFetcher: app.onym.android.transport.blossom.KnownBlossomServersFetcher? =
+        val legacyBlossomServersFetcher: app.onym.android.transport.blossom.KnownBlossomServersFetcher? =
             if (UITestRegistry.enabled) UITestRegistry.blossomServersFetcher
             else app.onym.android.transport.blossom.GitHubReleasesKnownBlossomServersFetcher(httpClient = httpClient)
+        // Discovery-backed adapter over the legacy fetcher (identity
+        // when there's no discovery catalog — UI-test harness).
+        val blossomServersFetcher = DiscoveryBackedKnownBlossomServersFetcher.wrapping(
+            fallback = legacyBlossomServersFetcher,
+            catalog = discoveryCatalog,
+        )
         val blossomServersRepository = app.onym.android.transport.blossom.BlossomServersRepository(
             store = app.onym.android.transport.blossom.DataStoreBlossomServersSelectionStore(
                 dataStore = applicationContext.blossomServersDataStore,
