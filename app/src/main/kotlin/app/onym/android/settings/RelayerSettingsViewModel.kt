@@ -91,13 +91,17 @@ class RelayerSettingsViewModel(
     }
 
     /** Validate the draft + add as a custom endpoint. On success
-     *  the draft clears so the field is ready for the next entry. */
-    fun tappedAddCustom() {
+     *  the draft clears so the field is ready for the next entry.
+     *  [onAdded] fires after the endpoint actually LANDED in the
+     *  configuration (the repository upserts, so a repeated URL
+     *  still ends configured) — never on a validation failure. */
+    fun tappedAddCustom(onAdded: () -> Unit = {}) {
         val draft = _state.value.customDraft
         when (val r = validate(draft)) {
             is ValidationResult.Valid -> {
                 viewModelScope.launch {
                     repository.addEndpoint(RelayerEndpoint.custom(r.normalisedUrl))
+                    onAdded()
                 }
                 _state.value = _state.value.copy(customDraft = "", customDraftError = null)
             }

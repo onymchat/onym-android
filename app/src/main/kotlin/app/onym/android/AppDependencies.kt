@@ -148,9 +148,12 @@ class OnboardingUiDependencies(
      * exists — the identity step's checklist binds to this instead of
      * asserting success it can't know about. Idempotent (it awaits
      * the same bootstrap the app kicks at start); a false answer
-     * renders the step's failure card with Try again.
+     * renders the step's failure card with Try again. REQUIRED, no
+     * default: the identity step is the walk's one fail-closed gate,
+     * and a `{ true }` default would quietly fail it open at any
+     * construction site that forgot the wiring.
      */
-    val identityReady: suspend () -> Boolean = { true },
+    val identityReady: suspend () -> Boolean,
     /**
      * Presentation generation, bumped on every explicit restart. The
      * host keys its retained OnboardingFlow on this so a re-run gets

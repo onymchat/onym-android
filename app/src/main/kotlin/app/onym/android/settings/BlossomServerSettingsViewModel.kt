@@ -50,7 +50,11 @@ class BlossomServerSettingsViewModel(
         _draftError.value = null
     }
 
-    fun tappedAddCustom() {
+    /** Validate the draft + add as a custom endpoint. [onAdded]
+     *  fires only when the endpoint actually LANDED in the
+     *  configuration — not on a validation failure and not on a
+     *  duplicate (see NostrRelaySettingsViewModel.tappedAddCustom). */
+    fun tappedAddCustom(onAdded: () -> Unit = {}) {
         val raw = _draft.value
         val normalized = validate(raw)
         if (normalized == null) {
@@ -63,6 +67,7 @@ class BlossomServerSettingsViewModel(
             if (added) {
                 _draft.value = ""
                 _draftError.value = null
+                onAdded()
             } else {
                 _draftError.value = "That URL is already configured."
             }

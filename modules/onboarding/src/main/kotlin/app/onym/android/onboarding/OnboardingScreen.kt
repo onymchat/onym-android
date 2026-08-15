@@ -20,8 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import app.onym.android.design.SettingsCard
 import androidx.compose.ui.unit.dp
+import app.onym.android.design.SettingsCard
 import kotlinx.coroutines.launch
 
 /**
