@@ -25,6 +25,11 @@ class OnboardingGateResolutionTest {
         }
         override suspend fun markCompleted() = throw IOException("corrupt prefs")
         override suspend fun reset() = throw IOException("corrupt prefs")
+        override suspend fun isRestartRequested(): Boolean {
+            reads++
+            throw IOException("corrupt prefs")
+        }
+        override suspend fun requestRestart() = throw IOException("corrupt prefs")
     }
 
     @Test
@@ -76,6 +81,57 @@ class OnboardingGateResolutionTest {
                 isExistingUser = { throw IOException("storage unavailable") },
             ),
         )
+    }
+
+    // ── Explicit restart (Settings → Restart Onboarding) ──────────
+
+    @Test
+    fun restartRequested_resolvesTrue_evenForCompletedGrandfatheredUsers() = runTest {
+        // The restart action's whole contract: a configured user is
+        // by definition grandfathered, so the request must override
+        // both the (cleared) flag and the probe.
+        val store = InMemoryOnboardingStore(initiallyCompleted = true)
+        store.requestRestart()
+        assertTrue(
+            OnboardingGateProbe.resolvePending(
+                uiTestMode = false,
+                store = store,
+                isExistingUser = { true },
+            ),
+        )
+    }
+
+    @Test
+    fun completingTheRestartWalk_resolvesFalseAgain() = runTest {
+        val store = InMemoryOnboardingStore(initiallyCompleted = true)
+        store.requestRestart()
+        store.markCompleted()
+        assertFalse(store.restartRequested)
+        assertFalse(
+            OnboardingGateProbe.resolvePending(
+                uiTestMode = false,
+                store = store,
+                isExistingUser = { true },
+            ),
+        )
+    }
+
+    @Test
+    fun restartRequest_survivesReResolution_midWalkKillResumes() = runTest {
+        // Process death mid-restart-walk: every fresh resolution
+        // still presents the walk until complete() clears the bit —
+        // no half state where neither the walk nor the tabs mount.
+        val store = InMemoryOnboardingStore(initiallyCompleted = true)
+        store.requestRestart()
+        repeat(3) {
+            assertTrue(
+                OnboardingGateProbe.resolvePending(
+                    uiTestMode = false,
+                    store = store,
+                    isExistingUser = { true },
+                ),
+            )
+        }
     }
 
     @Test

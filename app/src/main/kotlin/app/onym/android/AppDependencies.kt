@@ -143,6 +143,27 @@ class OnboardingUiDependencies(
      *  list — the same `RelayerRepository.addEndpoint` the Settings
      *  picker uses. */
     val addRelayerEndpoint: suspend (app.onym.android.chain.RelayerEndpoint) -> Unit,
+    /**
+     * Presentation generation, bumped on every explicit restart. The
+     * host keys its retained OnboardingFlow on this so a re-run gets
+     * a FRESH state machine — the prior walk's ViewModel (whose flow
+     * already published `completed`) would otherwise dismiss the new
+     * walk on first composition.
+     */
+    val generation: kotlinx.coroutines.flow.StateFlow<Int> =
+        kotlinx.coroutines.flow.MutableStateFlow(0),
+    /**
+     * Settings → Restart Onboarding, confirmed: persists the
+     * restart-requested bit (clearing the completion flag),
+     * re-suppresses the relayer auto-populate policy for the new
+     * walk, bumps [generation], and flips [shouldOnboard] to true so
+     * RootScreen presents the walk immediately — WITHOUT re-running
+     * the cold-boot grandfathering probe, which would veto the
+     * restart (a configured user always reads grandfathered).
+     * Identity and chats/messages are untouched: only the seat
+     * selections re-run, and the steps render current state.
+     */
+    val requestRestart: suspend () -> Unit = {},
 )
 
 /**
