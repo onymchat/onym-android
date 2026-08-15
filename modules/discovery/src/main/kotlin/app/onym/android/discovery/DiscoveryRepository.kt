@@ -34,6 +34,18 @@ data class AttributedCatalogEntry(
     val attribution: SourceAttribution,
 )
 
+/**
+ * Last refresh outcome for one configured source, kept in-memory
+ * (like [DiscoveryFetchStatus], never persisted) so the Discovery
+ * settings UI can chip each source independently. [isIntegrity]
+ * separates trust findings (signature, chain, expiry — about the
+ * provider) from plain fetch failures (about the network).
+ */
+data class DiscoverySourceError(
+    val message: String,
+    val isIntegrity: Boolean,
+)
+
 /** Refresh lifecycle, mirrored from :chain's `RelayerFetchStatus`. */
 sealed class DiscoveryFetchStatus {
     data object Idle : DiscoveryFetchStatus()
@@ -52,6 +64,10 @@ data class DiscoveryState(
     val configuration: DiscoverySourcesConfiguration,
     val entries: List<AttributedCatalogEntry>,
     val fetchStatus: DiscoveryFetchStatus,
+    /** Per-source outcome of the last refresh, keyed by providerId.
+     *  Absent key = the source refreshed cleanly (or hasn't been
+     *  refreshed yet). In-memory only. */
+    val sourceErrors: Map<String, DiscoverySourceError> = emptyMap(),
     val sourceNotes: Map<String, List<String>> = emptyMap(),
 ) {
     val sources: List<DiscoverySource> get() = configuration.sources
@@ -76,6 +92,9 @@ data class PendingDiscoverySource(
     val url: String,
     val manifest: DiscoveryProviderManifest,
     val operatorKeyHex: String,
+    /** Descriptors that survived lossy per-descriptor decoding (§4.1)
+     *  — what the confirmation UI lists as the source's catalogs. */
+    val catalogs: List<CatalogDescriptor> = emptyList(),
 )
 
 /**
@@ -168,6 +187,7 @@ class DiscoveryRepository(
             url = url,
             manifest = verified.manifest,
             operatorKeyHex = verified.operatorKeyHex,
+            catalogs = verified.catalogs,
         )
     }
 
@@ -227,7 +247,10 @@ class DiscoveryRepository(
         val remaining = _snapshots.value.entries
             .filterNot { it.attribution.providerId == providerId }
         store.saveCachedEntries(remaining)
-        _snapshots.value = _snapshots.value.copy(entries = remaining)
+        _snapshots.value = _snapshots.value.copy(
+            entries = remaining,
+            sourceErrors = _snapshots.value.sourceErrors - providerId,
+        )
     }
 
     // ─── refresh ──────────────────────────────────────────────────
@@ -250,6 +273,7 @@ class DiscoveryRepository(
 
         val refreshedSources = mutableListOf<DiscoverySource>()
         val collected = mutableListOf<AttributedCatalogEntry>()
+        val sourceErrors = mutableMapOf<String, DiscoverySourceError>()
         val notesByProvider = mutableMapOf<String, List<String>>()
         var firstError: Throwable? = null
         var failures = 0
@@ -264,6 +288,13 @@ class DiscoveryRepository(
                 failures += 1
                 if (firstError == null) firstError = e
                 refreshedSources.add(source) // keep pins + anchors intact
+                // Trust findings (signature / chain / expiry) chip as
+                // integrity problems in the settings UI; anything else
+                // reads as a plain fetch failure.
+                sourceErrors[source.providerId] = DiscoverySourceError(
+                    message = e.message ?: e.javaClass.simpleName,
+                    isIntegrity = e is DiscoveryTrustError,
+                )
             }
         }
 
@@ -272,6 +303,7 @@ class DiscoveryRepository(
             mutex.withLock {
                 _snapshots.value = _snapshots.value.copy(
                     fetchStatus = DiscoveryFetchStatus.Failed(error.message ?: ""),
+                    sourceErrors = sourceErrors.toMap(),
                 )
             }
             throw error
@@ -293,6 +325,7 @@ class DiscoveryRepository(
                 configuration = merged,
                 entries = entries,
                 fetchStatus = DiscoveryFetchStatus.Success,
+                sourceErrors = sourceErrors.filterKeys { it in liveProviderIds },
                 sourceNotes = notesByProvider.filterKeys { it in liveProviderIds },
             )
         }

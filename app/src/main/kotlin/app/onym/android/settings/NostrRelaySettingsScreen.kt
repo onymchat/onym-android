@@ -63,6 +63,15 @@ fun NostrRelaySettingsScreen(
     viewModel: NostrRelaySettingsViewModel,
     onBack: () -> Unit,
     onRunYourOwn: () -> Unit = {},
+    /** Discovery-sourced message-transport entries for the "From
+     *  catalog" section. Empty (the default) renders the screen
+     *  exactly as it was before discovery existed. */
+    catalogEntries: List<app.onym.android.discovery.AttributedCatalogEntry> = emptyList(),
+    /** Active pinned consent per componentId — drives the
+     *  consent-state chips on catalog rows. */
+    consentByComponentId: Map<String, app.onym.android.foundation.PinnedConsentRecord> = emptyMap(),
+    /** Routes the tapped entry into the module-consent flow. */
+    onCatalogEntryClick: (app.onym.android.discovery.AttributedCatalogEntry) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -90,6 +99,14 @@ fun NostrRelaySettingsScreen(
                     onRemove = viewModel::tappedRemove,
                 )
             }
+            // "From catalog" (discovery). Renders nothing when no
+            // discovery entries exist, so the screen is unchanged
+            // for discovery-less builds.
+            discoveryCatalogSection(
+                entries = catalogEntries,
+                consentByComponentId = consentByComponentId,
+                onEntryClick = onCatalogEntryClick,
+            )
             item {
                 AddCustomCard(
                     draft = state.customDraft,

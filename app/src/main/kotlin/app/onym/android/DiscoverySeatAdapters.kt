@@ -131,14 +131,7 @@ class ReviewedSeatEntry(
 
     /** First endpoint URI whose URL scheme is in [schemes]. */
     fun firstEndpointUri(schemes: Set<String>): String? =
-        fields.endpointUris.firstOrNull { uri ->
-            val scheme = try {
-                URI(uri).scheme
-            } catch (_: Exception) {
-                null
-            }
-            scheme?.lowercase() in schemes
-        }
+        fields.firstEndpointUri(schemes)
 }
 
 /**
@@ -175,6 +168,17 @@ class SeatManifestFields(rawBytes: ByteArray) {
         networks = (obj?.get("networks") as? JsonArray)
             ?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
     }
+
+    /** First endpoint URI whose URL scheme is in [schemes]. */
+    fun firstEndpointUri(schemes: Set<String>): String? =
+        endpointUris.firstOrNull { uri ->
+            val scheme = try {
+                URI(uri).scheme
+            } catch (_: Exception) {
+                null
+            }
+            scheme?.lowercase() in schemes
+        }
 
     private companion object {
         fun JsonObject.stringField(key: String): String? =

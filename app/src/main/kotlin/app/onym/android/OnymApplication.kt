@@ -306,13 +306,17 @@ class OnymApplication : Application() {
             }
         // Pinned consent records (module-consent primitives). The
         // composition root owns the consent DataStore file; the
-        // consent UI PR consumes this store when the DISCOVERY
-        // settings surface lands. Constructed here so the file's
-        // ownership + name are fixed from day one.
-        @Suppress("UNUSED_VARIABLE")
+        // DISCOVERY settings surface below consumes it.
         val pinnedConsentStore: app.onym.android.foundation.PinnedConsentStore =
             app.onym.android.foundation.DataStorePreferencesPinnedConsentStore(
                 dataStore = applicationContext.consentDataStore,
+            )
+        // Append-only module-selection history (active = last per
+        // seat). Lives in the discovery DataStore file under its own
+        // `discovery.`-prefixed key.
+        val seatSelectionStore: app.onym.android.discovery.SeatSelectionStore =
+            app.onym.android.discovery.DataStorePreferencesSeatSelectionStore(
+                dataStore = applicationContext.discoveryDataStore,
             )
 
         // Relayer wiring (PR #17). Bootstrap loads cached + selection
@@ -525,6 +529,94 @@ class OnymApplication : Application() {
         kotlinx.coroutines.runBlocking { blossomServersRepository.bootstrap() }
         // Background-refresh the published default for the next launch.
         applicationScope.launch { blossomServersRepository.start() }
+
+        // Discovery settings UI (PR A4). One nullable bundle: when
+        // the repository is absent (UI-test harness without discovery
+        // fakes) `discoveryUi` stays null and every surface renders
+        // exactly as before discovery existed.
+        val discoveryUi: DiscoveryUiDependencies? =
+            if (discoveryRepository != null && discoveryFetcher != null) {
+                // Accepting a consented manifest writes its endpoint
+                // into the seat's *legacy* configuration — that stays
+                // the operational source of truth; the selection
+                // record is provenance, not routing.
+                val applySeatEndpoint: suspend (app.onym.android.foundation.SignedServiceManifest) -> Unit =
+                    { manifest ->
+                        val fields = SeatManifestFields(manifest.rawBytes)
+                        val name = fields.name?.takeIf { it.isNotEmpty() }
+                            ?: manifest.componentId.removePrefix("onym:component:")
+                        when (manifest.seat) {
+                            DiscoveryBackedKnownRelayersFetcher.SEAT_TYPE ->
+                                fields.firstEndpointUri(setOf("https"))?.let { url ->
+                                    relayerRepository.addEndpoint(
+                                        app.onym.android.chain.RelayerEndpoint(
+                                            name = name,
+                                            url = url,
+                                            networks = fields.networks
+                                                ?: DiscoveryBackedKnownRelayersFetcher.DEFAULT_NETWORKS,
+                                        ),
+                                    )
+                                }
+                            DiscoveryBackedKnownNostrRelaysFetcher.SEAT_TYPE ->
+                                fields.firstEndpointUri(setOf("wss"))?.let { url ->
+                                    nostrRelaysRepository.addEndpoint(
+                                        app.onym.android.transport.nostr.NostrRelayEndpoint(
+                                            url = url,
+                                            name = name,
+                                            isDefault = false,
+                                        ),
+                                    )
+                                }
+                            DiscoveryBackedKnownBlossomServersFetcher.SEAT_TYPE ->
+                                fields.firstEndpointUri(setOf("https"))?.let { url ->
+                                    blossomServersRepository.addEndpoint(
+                                        app.onym.android.transport.blossom.BlossomServerEndpoint(
+                                            url = url,
+                                            name = name,
+                                            isDefault = false,
+                                        ),
+                                    )
+                                }
+                            // No moderation branch: the moderation
+                            // seat has no running code on Android and
+                            // its entries are hidden from every
+                            // picker.
+                        }
+                    }
+                DiscoveryUiDependencies(
+                    stateFlow = discoveryRepository.snapshots,
+                    makeDiscoverySettingsViewModel = {
+                        app.onym.android.settings.DiscoverySettingsViewModel(
+                            repository = discoveryRepository,
+                        )
+                    },
+                    makeModuleConsentViewModel = { seatType, componentShortId ->
+                        val entry = discoveryRepository.snapshots.value.entries.firstOrNull {
+                            it.entry.seatType == seatType &&
+                                it.entry.componentId.removePrefix("onym:component:") ==
+                                componentShortId
+                        }
+                        app.onym.android.settings.ModuleConsentViewModel(
+                            entry = entry,
+                            fetchManifestBytes = { uri ->
+                                discoveryFetcher.fetch(
+                                    uri,
+                                    app.onym.android.discovery.DiscoveryProfile
+                                        .MAX_DESTINATION_MANIFEST_BYTES,
+                                )
+                            },
+                            consentStore = pinnedConsentStore,
+                            selectionStore = seatSelectionStore,
+                            applyToConfiguration = applySeatEndpoint,
+                        )
+                    },
+                    activeConsent = { componentId ->
+                        pinnedConsentStore.activeRecord(componentId)
+                    },
+                )
+            } else {
+                null
+            }
 
         // Inbox transport for invitation send. Constructed once;
         // CreateGroupInteractor.create blocks on `send` (which
@@ -1061,6 +1153,7 @@ class OnymApplication : Application() {
             },
             blossomServersFlow = blossomServersRepository.snapshots,
             clearAllMessages = { messageRepository.clearAll() },
+            discovery = discoveryUi,
             makeJoinViewModel = { capability ->
                 // PR 92: prefill the display-name field from the
                 // active identity's alias. Empty when the identity

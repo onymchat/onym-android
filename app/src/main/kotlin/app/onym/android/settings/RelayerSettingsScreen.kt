@@ -78,6 +78,15 @@ fun RelayerSettingsScreen(
     viewModel: RelayerSettingsViewModel,
     onBackClick: () -> Unit,
     onRunYourOwnClick: () -> Unit = {},
+    /** Discovery-sourced notary entries for the "From catalog"
+     *  section. Empty (the default) renders the screen exactly as it
+     *  was before discovery existed. */
+    catalogEntries: List<app.onym.android.discovery.AttributedCatalogEntry> = emptyList(),
+    /** Active pinned consent per componentId — drives the
+     *  consent-state chips on catalog rows. */
+    consentByComponentId: Map<String, app.onym.android.foundation.PinnedConsentRecord> = emptyMap(),
+    /** Routes the tapped entry into the module-consent flow. */
+    onCatalogEntryClick: (app.onym.android.discovery.AttributedCatalogEntry) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     Scaffold(
@@ -193,6 +202,15 @@ fun RelayerSettingsScreen(
                     }
                 }
             }
+
+            // ─── From Catalog (discovery) ────────────────────────
+            // Renders nothing when no discovery entries exist, so
+            // the screen is unchanged for discovery-less builds.
+            discoveryCatalogSection(
+                entries = catalogEntries,
+                consentByComponentId = consentByComponentId,
+                onEntryClick = onCatalogEntryClick,
+            )
 
             // ─── Add Custom URL ──────────────────────────────────
             item { SectionHeader(stringResource(R.string.relayer_section_add_custom)) }

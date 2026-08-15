@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
@@ -111,6 +112,12 @@ fun SettingsScreen(
     /** Wipe every local message (keeps chats). Invoked only after the
      *  Data → "Clear local message cache" two-step confirmation. */
     onClearMessages: () -> Unit = {},
+    /** Settings → Discovery entry. Null when discovery isn't wired
+     *  (UI-test harness) — the section is omitted entirely. */
+    onDiscoveryClick: (() -> Unit)? = null,
+    /** Live count of configured discovery providers — drives the
+     *  Discovery row's subtitle. */
+    discoveryProvidersCount: Int = 0,
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -183,6 +190,33 @@ fun SettingsScreen(
                 item {
                     SettingsFootnote(
                         stringResource(R.string.settings_transport_footnote),
+                    )
+                }
+            }
+
+            // ─── DISCOVERY ─────────────────────────────────────────
+            if (onDiscoveryClick != null) {
+                item { SettingsSectionLabel(stringResource(R.string.settings_section_discovery)) }
+                item {
+                    SettingsCard {
+                        SettingsRow(
+                            leading = {
+                                SettingsTileBox(Icons.Filled.TravelExplore, SettingsTile.Purple)
+                            },
+                            title = stringResource(R.string.discovery_providers_row_title),
+                            subtitle = stringResource(
+                                R.string.endpoints_configured_count,
+                                discoveryProvidersCount,
+                            ),
+                            onClick = onDiscoveryClick,
+                            isLast = true,
+                            modifier = Modifier.testTag("settings.discovery_row"),
+                        )
+                    }
+                }
+                item {
+                    SettingsFootnote(
+                        stringResource(R.string.settings_discovery_footnote),
                     )
                 }
             }

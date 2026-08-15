@@ -42,7 +42,22 @@ data class DiscoverySource(
     val pinnedOperatorKeyHex: String? = null,
     /** Last accepted snapshot per catalogId — the §8 retention set. */
     val acceptedCatalogs: Map<String, AcceptedCatalogSnapshot> = emptyMap(),
-)
+) {
+    /** Short human-checkable fingerprint of the pinned key for the
+     *  settings list; `null` while TOFU confirmation is outstanding. */
+    val operatorKeyFingerprint: String?
+        get() = pinnedOperatorKeyHex?.let(::fingerprint)
+
+    companion object {
+        /**
+         * First 16 hex characters of an operator key, grouped in 4s —
+         * the human-checkable TOFU fingerprint. Mirrors
+         * `DiscoverySource.fingerprint(ofKeyHex:)` in onym-ios.
+         */
+        fun fingerprint(keyHex: String): String =
+            keyHex.take(16).chunked(4).joinToString(" ")
+    }
+}
 
 /**
  * The persisted Discovery source set. Same wire-default convention as

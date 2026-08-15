@@ -93,4 +93,39 @@ class AppDependencies(
      *  `MessageRepository.clearAll`; run behind a two-step confirm from
      *  Settings → Data → Clear local message cache. */
     val clearAllMessages: suspend () -> Unit,
+    /** Discovery settings surfaces (provider list, TOFU add flow,
+     *  module consent) + the live discovery state the per-seat
+     *  pickers' "From catalog" sections read. `null` exactly when no
+     *  [app.onym.android.discovery.DiscoveryRepository] was
+     *  constructed (UI-test harness without discovery fakes) — every
+     *  consumer renders as before discovery existed. */
+    val discovery: DiscoveryUiDependencies? = null,
+)
+
+/**
+ * Everything the discovery settings UI needs, bundled so
+ * [AppDependencies] carries one nullable value. Mirrors iOS's
+ * `DiscoveryModulePicker` bundling on `discovery-settings-ui`.
+ */
+class DiscoveryUiDependencies(
+    /** Live discovery state: sources, verified entries, fetch status,
+     *  per-source errors. */
+    val stateFlow: kotlinx.coroutines.flow.StateFlow<app.onym.android.discovery.DiscoveryState>,
+    /** Settings → Discovery (provider list + add flow). */
+    val makeDiscoverySettingsViewModel: () -> app.onym.android.settings.DiscoverySettingsViewModel,
+    /**
+     * Consent flow for one catalog entry, looked up by seat type +
+     * short component id (the `onym:component:` prefix stripped for
+     * route friendliness). The seat-specific apply closure that
+     * writes the accepted endpoint into the legacy configuration is
+     * pre-bound. The returned ViewModel reports a stable error when
+     * the entry has vanished from the aggregate.
+     */
+    val makeModuleConsentViewModel: (
+        seatType: String,
+        componentShortId: String,
+    ) -> app.onym.android.settings.ModuleConsentViewModel,
+    /** Active pinned consent for a componentId — drives the
+     *  consent-state chips on catalog rows. */
+    val activeConsent: suspend (componentId: String) -> app.onym.android.foundation.PinnedConsentRecord?,
 )
