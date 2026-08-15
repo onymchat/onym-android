@@ -34,6 +34,24 @@ class SettingsScreenObject(private val rule: ComposeContentTestRule) {
     fun tapAnchorsRow() = scrollAndClick("settings.anchors_row")
     fun tapIdentitiesRow() = scrollAndClick("settings.identities_row")
     fun tapClearMessagesRow() = scrollAndClick("settings.clear_messages_row")
+    fun tapDiscoveryRow() = scrollAndClick("settings.discovery_row")
+
+    /**
+     * Assert the DISCOVERY section is absent (the app booted without
+     * a discovery repository — [app.onym.android.UITestRegistry]
+     * discovery slots left null). `settings.list` is a LazyColumn, so
+     * a plain `assertDoesNotExist` could false-pass on a row that's
+     * merely below the fold; scrolling to the ANCHORS row — the
+     * unconditional section rendered immediately *after* where
+     * DISCOVERY would sit — forces the discovery slot through
+     * composition first.
+     */
+    fun assertNoDiscoveryRow() {
+        openSettingsTab()
+        rule.onNodeWithTag("settings.list")
+            .performScrollToNode(hasTestTag("settings.anchors_row"))
+        rule.onNodeWithTag("settings.discovery_row").assertDoesNotExist()
+    }
 
     private fun scrollAndClick(tag: String) {
         openSettingsTab()
