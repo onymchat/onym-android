@@ -8,9 +8,13 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * Owns the in-memory view of [BlossomServersConfiguration] + writes to
- * the persistence seam. The Blossom client reads the server list once
- * at boot via [currentEndpoints] (uploads/downloads target the first
- * configured server); live re-config is out of scope for V1.
+ * the persistence seam. Uploads/downloads target the FIRST configured
+ * server — the app's `DynamicBaseUrlBlossomClient` re-reads
+ * [currentEndpoints] per operation, so a change here applies to the
+ * very next upload/download. [addEndpoint]'s `makeActive` /
+ * [makeActive] move an endpoint to the head so a pick actually takes
+ * effect (a plain append behind the seeded default would be silently
+ * inert).
  *
  * First-launch seed: if storage starts empty AND
  * [BlossomServersConfiguration.hasUserInteracted] is false, the
@@ -77,18 +81,75 @@ class BlossomServersRepository(
     }
 
     /** Append [endpoint] when its URL isn't already configured.
-     *  Returns `true` on append, `false` on duplicate-no-op. Flips
-     *  [BlossomServersConfiguration.hasUserInteracted] to `true`. */
-    suspend fun addEndpoint(endpoint: BlossomServerEndpoint): Boolean = mutex.withLock {
+     *  Returns `true` on insert, `false` when the URL was already
+     *  configured — a plain add is then a no-op; with [makeActive] the
+     *  STORED row is moved to the head instead (still `false`).
+     *  Mutations flip [BlossomServersConfiguration.hasUserInteracted]
+     *  to `true`; no-ops (duplicate plain add, already-first
+     *  make-active) leave it alone.
+     *
+     *  [makeActive] places the endpoint at the HEAD of the list. The
+     *  first endpoint is the one uploads/downloads target, so this is
+     *  how a pick — e.g. a consented catalog module — actually takes
+     *  effect; a plain append behind the seeded default would be
+     *  silently inert. When the URL already exists, the EXISTING row
+     *  moves (preserving its name / isDefault identity — a consented
+     *  seat whose URL equals the seeded default must not strip the
+     *  DEFAULT badge); the passed [endpoint] is only installed for
+     *  genuinely new URLs. Other entries keep their relative order.
+     *  Mirrors onym-ios `addEndpoint(_:makeActive:)`. */
+    suspend fun addEndpoint(
+        endpoint: BlossomServerEndpoint,
+        makeActive: Boolean = false,
+    ): Boolean = mutex.withLock {
         val current = _snapshots.value
-        if (current.endpoints.any { it.url == endpoint.url }) return@withLock false
+        val existingIdx = current.endpoints.indexOfFirst { it.url == endpoint.url }
+        if (existingIdx >= 0) {
+            if (!makeActive) return@withLock false
+            // Already at the head: complete no-op — same posture as
+            // makeActive(), which doesn't count "nothing moved" as
+            // user interaction.
+            if (existingIdx == 0) return@withLock false
+            val existing = current.endpoints[existingIdx]
+            val updated = current.copy(
+                endpoints = listOf(existing) + current.endpoints.filter { it.url != endpoint.url },
+                hasUserInteracted = true,
+            )
+            store.save(updated)
+            _snapshots.value = updated
+            return@withLock false
+        }
         val updated = current.copy(
-            endpoints = current.endpoints + endpoint,
+            endpoints = if (makeActive) {
+                listOf(endpoint) + current.endpoints
+            } else {
+                current.endpoints + endpoint
+            },
             hasUserInteracted = true,
         )
         store.save(updated)
         _snapshots.value = updated
         true
+    }
+
+    /** Move the configured endpoint with [url] to the head of the list
+     *  so it becomes the upload/download target. No-op when the URL
+     *  isn't configured (callers add first) or is already first — in
+     *  both cases nothing is persisted and
+     *  [BlossomServersConfiguration.hasUserInteracted] is left alone.
+     *  An actual move counts as a user mutation. Mirrors onym-ios
+     *  `makeActive(url:)`. */
+    suspend fun makeActive(url: String) = mutex.withLock {
+        val current = _snapshots.value
+        val index = current.endpoints.indexOfFirst { it.url == url }
+        if (index <= 0) return@withLock
+        val endpoint = current.endpoints[index]
+        val updated = current.copy(
+            endpoints = listOf(endpoint) + current.endpoints.filter { it.url != url },
+            hasUserInteracted = true,
+        )
+        store.save(updated)
+        _snapshots.value = updated
     }
 
     /** Remove the endpoint matching [url]. Flips

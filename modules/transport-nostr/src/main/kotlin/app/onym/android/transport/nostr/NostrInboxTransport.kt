@@ -42,6 +42,24 @@ import java.util.Base64
  * Mirrors `NostrInboxTransport.swift` from onym-ios PR #12.
  * `PendingInvitation` / `SEPRekeyEnvelope` decoding is stripped —
  * the adapter does exactly: ship opaque bytes in/out.
+ *
+ * ## Known limitation: endpoints are read once at boot
+ *
+ * The composition root calls [connect] once with the relay list
+ * hydrated at launch; a Settings change to the Nostr relay set only
+ * applies on the next launch (the Settings screen says so). A clean
+ * reconnect-on-change seam does not exist today: [subscribe]
+ * snapshots the connection set at call time and only the resulting
+ * [Job] is retained — the `onEvent` callbacks aren't — so reacting to
+ * an endpoint change would mean tearing down and replaying every
+ * active subscription through its original caller. That is a
+ * transport-lifecycle refactor, deliberately out of scope for the
+ * onboarding unblockers.
+ *
+ * TODO(onboarding follow-up): add a reconnect-on-change seam
+ * (re-subscribe active inboxes after the connection set changes) so
+ * relay edits — including an onboarding pick — apply without a
+ * relaunch.
  */
 class NostrInboxTransport(
     /** Per-event signer factory. Constructor-injected so this file

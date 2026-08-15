@@ -54,7 +54,17 @@ class SendMessageInteractor(
     private val messageRepository: MessageRepository,
     private val inboxTransport: InboxTransport,
     private val blossomClient: BlossomClient,
-    private val blossomServerUrl: String,
+    /** Resolves the base URL stamped into each attachment's `server`
+     *  field so receivers fetch from the same server the sender
+     *  uploaded to. A provider (not a frozen string) so it re-reads
+     *  the current Blossom configuration — a server change in
+     *  Settings applies to the next send, not the next launch.
+     *  Resolved ONCE per send; the stamp and every upload of that
+     *  send go through a client bound to the resolved URL
+     *  ([BlossomClient.bound]), so one message's attachments and
+     *  blobs always land together even if the configuration changes
+     *  mid-send. Mirrors onym-ios `resolveBlossomServerURL`. */
+    private val resolveBlossomServerUrl: suspend () -> String,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val idFactory: () -> UUID = { UUID.randomUUID() },
@@ -181,6 +191,12 @@ class SendMessageInteractor(
 
         val encoded = encodeImage(imageData) ?: throw SendMessageError.ImageEncodeFailed
         val sealed = ChatImageCrypto.seal(encoded.jpeg)
+        // Resolve once per send: the stamp below and every upload of
+        // this send go through the same bound client, so metadata and
+        // blob location can't diverge if the configuration changes
+        // mid-send.
+        val blossomServerUrl = resolveBlossomServerUrl()
+        val sendClient = blossomClient.bound(blossomServerUrl)
         val attachment = ChatImageAttachment(
             sha256 = sealed.sha256Hex,
             mimeType = "image/jpeg",
@@ -226,6 +242,7 @@ class SendMessageInteractor(
         messageRepository.append(pending)
 
         val finalStatus = uploadAndFanOut(
+            client = sendClient,
             blobs = listOf(sealed.blob to "image/jpeg"),
             payload = payload,
             recipients = recipientInboxKeysFor(group, myBlsHex),
@@ -277,6 +294,9 @@ class SendMessageInteractor(
         val videoSealed = ChatImageCrypto.seal(encoded.mp4)
         if (videoSealed.blob.size > MAX_UPLOAD_BYTES) throw SendMessageError.VideoTooLarge
 
+        // Resolve once per send — see sendImage.
+        val blossomServerUrl = resolveBlossomServerUrl()
+        val sendClient = blossomClient.bound(blossomServerUrl)
         val poster = ChatImageAttachment(
             sha256 = posterSealed.sha256Hex,
             mimeType = "image/jpeg",
@@ -333,6 +353,7 @@ class SendMessageInteractor(
         messageRepository.append(pending)
 
         val finalStatus = uploadAndFanOut(
+            client = sendClient,
             blobs = listOf(
                 posterSealed.blob to "image/jpeg",
                 videoSealed.blob to "video/mp4",
@@ -373,6 +394,10 @@ class SendMessageInteractor(
             else -> throw SendMessageError.UnsupportedGroupType(group.groupType)
         }
 
+        // Resolve once per send — see sendImage. Every item of the
+        // album carries the same stamp.
+        val blossomServerUrl = resolveBlossomServerUrl()
+        val sendClient = blossomClient.bound(blossomServerUrl)
         val items = mutableListOf<ChatMediaAttachment>()
         val uploads = mutableListOf<Pair<ByteArray, String>>()
         val shas = mutableListOf<String>()
@@ -462,6 +487,7 @@ class SendMessageInteractor(
         messageRepository.append(pending)
 
         val finalStatus = uploadAndFanOut(
+            client = sendClient,
             blobs = uploads,
             payload = payload,
             recipients = recipientInboxKeysFor(group, myBlsHex),
@@ -508,6 +534,9 @@ class SendMessageInteractor(
         val sealed = ChatImageCrypto.seal(audioBytes)
         if (sealed.blob.size > MAX_UPLOAD_BYTES) throw SendMessageError.VideoTooLarge
 
+        // Resolve once per send — see sendImage.
+        val blossomServerUrl = resolveBlossomServerUrl()
+        val sendClient = blossomClient.bound(blossomServerUrl)
         val voiceAttachment = ChatVoiceAttachment(
             sha256 = sealed.sha256Hex,
             mimeType = "audio/mp4",
@@ -550,6 +579,7 @@ class SendMessageInteractor(
         messageRepository.append(pending)
 
         val finalStatus = uploadAndFanOut(
+            client = sendClient,
             blobs = listOf(sealed.blob to "audio/mp4"),
             payload = payload,
             recipients = recipientInboxKeysFor(group, myBlsHex),
@@ -627,8 +657,29 @@ class SendMessageInteractor(
             attachments = message.albumAttachments,
             voiceAttachment = message.voiceAttachment,
         )
+        // Re-uploads go to the server already STAMPED into the message's
+        // attachments (the descriptor recipients will read), not the
+        // currently-configured one — a config change between the failed
+        // send and the retry must not strand the descriptor. Falls back
+        // to the live client for legacy rows without a stamp.
+        //
+        // Taking the FIRST stamp is deliberate: every send since the
+        // per-send binding landed resolves the URL exactly once, so all
+        // of one message's attachments carry the same stamp and any of
+        // them is representative. A mixed-stamp message could only be a
+        // legacy row from before that guarantee; per-blob binding for
+        // that vanishing case isn't worth the complexity — the retry
+        // then re-uploads all blobs to the first stamp's server, which
+        // at worst re-homes a legacy blob alongside its siblings.
+        val stampedServer = message.media.asSequence()
+            .mapNotNull { it.image?.server ?: it.video?.server }
+            .firstOrNull()
+            ?: message.voiceAttachment?.server
+        val retryClient = stampedServer?.let { blossomClient.bound(it) } ?: blossomClient
+
         val blobs = attachmentBlobs(message)
         uploadAndFanOut(
+            client = retryClient,
             blobs = blobs.map { it.blob to it.mimeType },
             payload = payload,
             recipients = recipientInboxKeysFor(group, myBlsHex),
@@ -657,9 +708,13 @@ class SendMessageInteractor(
      * An upload failure marks the message FAILED and keeps the outbox
      * blob(s) for a later resend (no fan-out — recipients never get a
      * descriptor pointing at a missing blob). On confirmed SENT the
-     * [sentBlobShas] are evicted from the outbox.
+     * [sentBlobShas] are evicted from the outbox. [client] is the
+     * client every blob of this operation uploads through — bound to
+     * the URL stamped into the message's attachments, so blobs and
+     * stamp can't diverge mid-operation.
      */
     private suspend fun uploadAndFanOut(
+        client: BlossomClient,
         blobs: List<Pair<ByteArray, String>>,
         payload: ChatMessagePayload,
         recipients: List<ByteArray>,
@@ -669,7 +724,7 @@ class SendMessageInteractor(
     ): MessageStatus {
         for ((blob, mime) in blobs) {
             try {
-                blossomClient.upload(blob, mime)
+                client.upload(blob, mime)
             } catch (_: Exception) {
                 messageRepository.updateStatus(messageId, ownerId, MessageStatus.FAILED)
                 return MessageStatus.FAILED

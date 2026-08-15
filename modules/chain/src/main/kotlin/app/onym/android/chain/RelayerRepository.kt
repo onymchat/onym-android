@@ -36,6 +36,17 @@ class RelayerRepository(
      *  tests typically pass `{ it.message ?: "" }` or a controlled
      *  fixture. */
     private val errorMessageResolver: (Throwable) -> String = { it.message ?: "" },
+    /** Seam over the first-launch auto-populate: consulted right
+     *  before a fetch would install the whole published list into an
+     *  untouched configuration. Returning `false` defers it — the
+     *  fetched list still lands in [RelayerState.knownRelayers] (and
+     *  the on-disk cache), but the configuration and
+     *  [RelayerConfiguration.hasUserInteracted] stay untouched, so a
+     *  later fetch (or an explicit user pick, e.g. during onboarding)
+     *  can still populate. Defaults to always-on, preserving the
+     *  historical behavior. Mirrors onym-ios
+     *  `RelayerRepository.autoPopulatePolicy`. */
+    private val autoPopulatePolicy: () -> Boolean = { true },
 ) {
     private val mutex = Mutex()
     private val _snapshots = MutableStateFlow(RelayerState.empty)
@@ -119,10 +130,14 @@ class RelayerRepository(
      *  [RelayerConfiguration.hasUserInteracted] flips, future
      *  fetches only update the cached known list — never the
      *  configuration. Preserves the current [RelayerFetchStatus]
-     *  via `.copy()`; the caller sets it explicitly afterwards. */
+     *  via `.copy()`; the caller sets it explicitly afterwards.
+     *  [autoPopulatePolicy] gates the install: when it returns
+     *  `false` the fetched list only lands in the known list
+     *  (configuration and flag untouched), leaving the choice to a
+     *  later fetch or an explicit user pick. */
     private suspend fun applyKnownListAndAutoPopulateLocked(fresh: List<RelayerEndpoint>) {
         val current = _snapshots.value.configuration
-        val updatedConfig = if (!current.hasUserInteracted && fresh.isNotEmpty()) {
+        val updatedConfig = if (!current.hasUserInteracted && fresh.isNotEmpty() && autoPopulatePolicy()) {
             RelayerConfiguration(
                 endpoints = fresh,
                 primaryUrl = null,

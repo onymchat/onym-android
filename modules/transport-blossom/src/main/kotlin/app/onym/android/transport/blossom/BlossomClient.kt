@@ -28,6 +28,19 @@ interface BlossomClient {
     suspend fun upload(blob: ByteArray, mimeType: String): BlobDescriptor
     /** `GET /<sha256>` the blob. Callers verify the hash before use. */
     suspend fun download(sha256: String): ByteArray
+
+    /**
+     * A client pinned to [serverUrl] for the duration of a multi-blob
+     * operation. Callers that stamp a server URL into metadata (e.g. a
+     * chat message's attachments) resolve the URL once, stamp it, and
+     * run every upload of that operation through the bound client so
+     * the stamp and the blobs' actual location can never diverge —
+     * even if the configured server changes mid-operation. Clients
+     * with a fixed base URL return `this` (the default).
+     *
+     * Mirrors onym-ios `BlossomClient.bound(toServer:)`.
+     */
+    fun bound(serverUrl: String): BlossomClient = this
 }
 
 internal class BlossomException(message: String) : Exception(message)

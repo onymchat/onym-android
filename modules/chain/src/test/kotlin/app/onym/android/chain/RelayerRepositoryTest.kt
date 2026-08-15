@@ -73,6 +73,62 @@ class RelayerRepositoryTest {
         assertEquals(listOf(a), repo.snapshots.value.knownRelayers)
     }
 
+    // ─── auto-populate suppression seam (onboarding unblockers) ───
+
+    @Test
+    fun start_policyFalse_updatesKnownListButNotConfiguration() = runTest {
+        val store = InMemoryRelayerSelectionStore()
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a, b)))
+        val repo = RelayerRepository(store, fetcher, autoPopulatePolicy = { false })
+        repo.bootstrap()
+
+        repo.start()
+
+        val state = repo.snapshots.value
+        // The fetched list still lands in the known list + disk cache…
+        assertEquals(listOf(a, b), state.knownRelayers)
+        assertEquals(listOf(a, b), store.loadCachedKnownRelayers())
+        // …but the configuration is untouched: no endpoints installed,
+        // hasUserInteracted NOT flipped — deferred, not cancelled.
+        assertEquals(emptyList<RelayerEndpoint>(), state.configuration.endpoints)
+        assertFalse(state.configuration.hasUserInteracted)
+        assertFalse(store.loadConfiguration().hasUserInteracted)
+    }
+
+    @Test
+    fun refresh_populatesLater_oncePolicyFlipsTrue() = runTest {
+        var allow = false
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a)))
+        val repo = RelayerRepository(
+            InMemoryRelayerSelectionStore(), fetcher, autoPopulatePolicy = { allow },
+        )
+        repo.bootstrap()
+        repo.refresh()
+        assertEquals(emptyList<RelayerEndpoint>(), repo.snapshots.value.configuration.endpoints)
+
+        allow = true
+        repo.refresh()
+
+        val config = repo.snapshots.value.configuration
+        assertEquals(listOf(a), config.endpoints)
+        assertTrue(config.hasUserInteracted)
+    }
+
+    @Test
+    fun start_defaultPolicy_behaviorUnchanged() = runTest {
+        // No policy passed — identical to the historical default: the
+        // first successful fetch installs the list.
+        val fetcher = FakeKnownRelayersFetcher(FakeKnownRelayersFetcher.Mode.Succeeds(listOf(a, b)))
+        val (repo, _) = makeRepo(fetcher = fetcher)
+        repo.bootstrap()
+
+        repo.start()
+
+        val config = repo.snapshots.value.configuration
+        assertEquals(listOf(a, b), config.endpoints)
+        assertTrue(config.hasUserInteracted)
+    }
+
     // ─── PR #22: auto-populate on first launch ────────────────────
 
     @Test
