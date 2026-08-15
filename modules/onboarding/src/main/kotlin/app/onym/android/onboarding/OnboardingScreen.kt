@@ -67,10 +67,14 @@ fun OnboardingScreen(
         subtitle = subtitleRes(step)?.let { stringResource(it) },
         primaryTitle = stringResource(primaryTitleRes(step)),
         // Outcome-gated steps render their primary disabled until the
-        // step content records one (the identity bootstrap check, the
-        // recovery reveal); `flow.advance()` carries the same guard
-        // as the second layer.
-        primaryEnabled = !(flow.requiresOutcomeToAdvance(step) && state.outcomes[step] == null),
+        // step content records a SATISFYING outcome (the identity
+        // bootstrap check, the recovery reveal) — a surviving Skipped
+        // from an earlier "Remind me later" does not count, so
+        // skip-then-Back re-disables the primary. `flow.advance()`
+        // carries the same guard as the second layer. (The collected
+        // `state` already recomposes this on every outcomes change;
+        // the predicate reads the same StateFlow value.)
+        primaryEnabled = !(flow.requiresOutcomeToAdvance(step) && !flow.outcomeSatisfiesGate(step)),
         onPrimary = {
             if (step == OnboardingStep.Done) {
                 scope.launch { flow.complete() }

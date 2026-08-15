@@ -382,15 +382,52 @@ class OnboardingFlowTest {
         assertEquals(OnboardingStep.RecoveryPhrase, flow.step)
         assertEquals(StepOutcome.Skipped, flow.outcome(OnboardingStep.RecoveryPhrase))
 
+        // The surviving Skipped does NOT satisfy the gate — the
+        // primary must read disabled and advance() must refuse:
+        // "I've written it down" can't ride on a deferral.
+        assertFalse(flow.outcomeSatisfiesGate(OnboardingStep.RecoveryPhrase))
+        flow.advance()
+        assertEquals(OnboardingStep.RecoveryPhrase, flow.step)
+
         // Redoing the step (the reveal) overwrites the preserved
-        // outcome.
+        // outcome and satisfies the gate.
         flow.recordOutcome(StepOutcome.Consented(null))
+        assertTrue(flow.outcomeSatisfiesGate(OnboardingStep.RecoveryPhrase))
         flow.advance()
         assertEquals(OnboardingStep.Done, flow.step)
         assertEquals(
             StepOutcome.Consented(null),
             flow.outcome(OnboardingStep.RecoveryPhrase),
         )
+    }
+
+    @Test
+    fun skipThenBack_reGatesThePrimary() {
+        // Regression: RecoveryPhrase → "Remind me later" → Done →
+        // Back left the primary enabled off the surviving Skipped
+        // outcome, letting "I've written it down" advance with the
+        // phrase never revealed. A Skipped outcome must not satisfy
+        // an outcome-gated step; the honest exits after skip+back
+        // are the reveal (records Consented) or skipping again.
+        val flow = flow()
+        flow.walkTo(OnboardingStep.RecoveryPhrase)
+        flow.skip()
+        assertEquals(OnboardingStep.Done, flow.step)
+        flow.back()
+        assertEquals(OnboardingStep.RecoveryPhrase, flow.step)
+
+        assertFalse(flow.outcomeSatisfiesGate(OnboardingStep.RecoveryPhrase))
+        flow.advance()
+        assertEquals(
+            "advance must refuse on a skipped-then-revisited gated step",
+            OnboardingStep.RecoveryPhrase,
+            flow.step,
+        )
+
+        // Skipping again is still available.
+        flow.skip()
+        assertEquals(OnboardingStep.Done, flow.step)
+        assertEquals(StepOutcome.Skipped, flow.outcome(OnboardingStep.RecoveryPhrase))
     }
 
     @Test

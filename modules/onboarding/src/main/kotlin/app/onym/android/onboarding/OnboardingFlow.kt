@@ -332,6 +332,26 @@ class OnboardingFlow(
         else -> false
     }
 
+    /**
+     * Whether the recorded outcome at [step] satisfies an
+     * outcome-gated step ([requiresOutcomeToAdvance]). A missing
+     * outcome never does — and neither does [StepOutcome.Skipped]:
+     * skipping records a decision to DEFER, not the thing the gate
+     * exists to prove (the identity snapshot, the recovery reveal,
+     * the moderation consent). Without this, RecoveryPhrase →
+     * "Remind me later" → Back would leave "I've written it down"
+     * enabled off the surviving Skipped outcome, with the phrase
+     * never revealed. Used by both [advance]'s guard and the
+     * screen's primary-disabled logic; the honest exits after
+     * skip+back remain the reveal (records Consented) or skipping
+     * again.
+     */
+    fun outcomeSatisfiesGate(step: OnboardingStep): Boolean =
+        satisfiesGate(_state.value.outcomes[step])
+
+    private fun satisfiesGate(outcome: StepOutcome?): Boolean =
+        outcome != null && outcome !is StepOutcome.Skipped
+
     // ── Lifecycle ─────────────────────────────────────────────────
 
     /**
@@ -396,7 +416,7 @@ class OnboardingFlow(
         _state.update { current ->
             val next = neighbor(current.step, offset = 1) ?: return@update current
             if (requiresOutcomeToAdvance(current.step) &&
-                current.outcomes[current.step] == null
+                !satisfiesGate(current.outcomes[current.step])
             ) {
                 return@update current
             }

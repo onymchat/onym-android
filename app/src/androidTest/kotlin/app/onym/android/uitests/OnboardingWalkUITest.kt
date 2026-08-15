@@ -260,22 +260,10 @@ class OnboardingWalkUITest {
         assertFalse("the walk must not have completed", onboardingStore.completed)
     }
 
-    // ─── (4) pre-bootstrap loading state ──────────────────────────
-
-    @Test
-    @Ignore(
-        "Redesigned flow — the directory surface moved into the services " +
-            "hub (its empty state renders inline); the hub walk lands in " +
-            "the tests PR.",
-    )
-    @EmptyDiscoverySources
-    fun discoveryConfirm_showsLoadingState_whenNoDefaultSourceHydrated() {
-        val onboarding = OnboardingScreenObject(composeRule)
-
-        onboarding.awaitStep(OnboardingStep.Welcome)
-        onboarding.tapPrimary(OnboardingStep.Welcome)
-        onboarding.awaitStep(OnboardingStep.Identity)
-    }
+    // (4) The old pre-bootstrap directory-loading test is gone: the
+    // directory surface moved into the services hub, and the
+    // redesigned hub walks live in the follow-up tests PR. The
+    // @EmptyDiscoverySources seam stays for those walks.
 
     // ─── (5) completed flag at boot ───────────────────────────────
 

@@ -157,6 +157,19 @@ internal fun OnboardingHost(
     var backupVisible by rememberSaveable { mutableStateOf(false) }
     var consentEntry by remember { mutableStateOf<AttributedCatalogEntry?>(null) }
 
+    // The saved flags can outlive the flow: OnboardingFlow dies with
+    // the process, so after process death the restored `true` would
+    // mount an overlay over a walk restarted at Welcome. An overlay
+    // is only ever meaningful on its own step — derive the effective
+    // visibility from the step, and clear the stale flag so it can't
+    // linger.
+    val hubShown = hubVisible && state.step == OnboardingStep.Services
+    val backupShown = backupVisible && state.step == OnboardingStep.RecoveryPhrase
+    LaunchedEffect(state.step) {
+        if (state.step != OnboardingStep.Services) hubVisible = false
+        if (state.step != OnboardingStep.RecoveryPhrase) backupVisible = false
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -200,7 +213,7 @@ internal fun OnboardingHost(
                 },
             )
 
-            if (hubVisible) {
+            if (hubShown) {
                 OnboardingServicesHubOverlay(
                     dependencies = dependencies,
                     flow = flow,
@@ -210,9 +223,13 @@ internal fun OnboardingHost(
                         // endpoints the sub-surfaces persisted stay
                         // (the hub's footnote says so); explicitly
                         // accepting the recommended path is still a
-                        // consent.
+                        // consent. recordOutcome writes to the
+                        // CURRENT step — same guard every other call
+                        // site carries.
                         flow.recordServicesChoice(ServicesChoice.Recommended)
-                        flow.recordOutcome(StepOutcome.Consented(null))
+                        if (flow.state.value.step == OnboardingStep.Services) {
+                            flow.recordOutcome(StepOutcome.Consented(null))
+                        }
                         hubVisible = false
                     },
                     onDone = {
@@ -227,7 +244,9 @@ internal fun OnboardingHost(
                         // summary reads live repository state.
                         val existing =
                             flow.state.value.outcomes[OnboardingStep.Services]
-                        if ((existing as? StepOutcome.Consented)?.componentId == null) {
+                        if ((existing as? StepOutcome.Consented)?.componentId == null &&
+                            flow.state.value.step == OnboardingStep.Services
+                        ) {
                             flow.recordOutcome(StepOutcome.Consented(null))
                         }
                         hubVisible = false
@@ -235,7 +254,7 @@ internal fun OnboardingHost(
                 )
             }
 
-            if (backupVisible) {
+            if (backupShown) {
                 RecoveryBackupOverlay(
                     dependencies = dependencies,
                     flow = flow,
