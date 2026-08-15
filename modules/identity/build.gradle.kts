@@ -25,6 +25,14 @@ android {
         // ciphers + the keystore-backed master key path (same rationale
         // as :app).
         minSdk = 26
+
+        // Instrumented tests that reach this module's internals
+        // (IdentityRepositoryTest, IdentityRepositorySealInvitationTest,
+        // OnymNostrSignerTest) live in THIS module's androidTest —
+        // internal visibility doesn't cross module boundaries, so they
+        // can't sit in :app's androidTest (they did, and broke the
+        // whole app androidTest compilation when identity modularized).
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -100,6 +108,13 @@ dependencies {
     // main-source deps above (testImplementation extends implementation).
     // No coroutines-test / robolectric / org.json needed here.
     testImplementation(libs.junit)
+
+    // Instrumented tests (moved from app/src/androidTest — see the
+    // testInstrumentationRunner note above). ApplicationProvider rides
+    // in transitively via androidx.test.ext:junit → androidx.test:core.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 
     // testFixtures: TestInvitationEncryptor's public signature exposes
     // Ed25519PrivateKeyParameters (callers mint sender keys), so

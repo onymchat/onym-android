@@ -104,6 +104,32 @@ object UITestRegistry {
      *  See [discoveryFetcher] for the null contract. */
     var discoveryStore: app.onym.android.discovery.DiscoveryStore? = null
 
+    /**
+     * Onboarding gate driver (PR 4). The null default is the explicit
+     * BYPASS contract every pre-onboarding instrumented test relies
+     * on: with the slot unset, [OnymApplication] resolves the gate in
+     * UI-test mode (never onboard) exactly as it did before the slot
+     * existed. Setting it makes the walk drivable: the gate reads
+     * THIS store's completion flag, and the grandfathering probe is
+     * pinned to "fresh user" — deterministic regardless of whatever
+     * DataStore state earlier runs left on the device (the in-process
+     * application of the iOS #252 emulator-isolation lesson; the
+     * grandfathering truth table itself is unit-tested).
+     */
+    var onboardingStore: app.onym.android.onboarding.OnboardingStore? = null
+
+    /**
+     * Fixture-era clock for the discovery trust layer
+     * ([app.onym.android.discovery.DiscoveryRepository] +
+     *  [app.onym.android.settings.ModuleConsentViewModel]). The
+     * conformance fixtures are signed with expiries
+     * (`snapshot-1.json` → 2026-09-12); with the real clock the
+     * tests would start failing the day the fixtures lapse. Port of
+     * the iOS #252 injected-clock lesson. Null (the default) keeps
+     * the real clock.
+     */
+    var discoveryClock: (() -> java.time.Instant)? = null
+
     /** Reset between tests. Called from `@Before`. */
     fun reset() {
         enabled = false
@@ -119,5 +145,7 @@ object UITestRegistry {
         blossomServersFetcher = null
         discoveryFetcher = null
         discoveryStore = null
+        onboardingStore = null
+        discoveryClock = null
     }
 }

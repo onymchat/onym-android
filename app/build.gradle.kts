@@ -279,6 +279,9 @@ dependencies {
     // src/androidTest/resources/fixtures — copies of the shared
     // conformance fixtures in modules/discovery/src/test/resources).
     androidTestImplementation(testFixtures(project(":discovery")))
+    // InMemoryOnboardingStore — drives the onboarding gate in the
+    // walk-through UI test (PR 4).
+    androidTestImplementation(testFixtures(project(":onboarding")))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)

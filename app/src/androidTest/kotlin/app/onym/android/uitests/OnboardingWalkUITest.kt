@@ -1,0 +1,354 @@
+package app.onym.android.uitests
+
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import app.onym.android.MainActivity
+import app.onym.android.OnymApplication
+import app.onym.android.UITestRegistry
+import app.onym.android.discovery.DiscoverySource
+import app.onym.android.discovery.DiscoverySourcesConfiguration
+import app.onym.android.onboarding.OnboardingStep
+import app.onym.android.support.FakeDiscoveryFetcher
+import app.onym.android.support.InMemoryDiscoveryStore
+import app.onym.android.support.InMemoryOnboardingStore
+import app.onym.android.uitests.screens.OnboardingScreenObject
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
+import org.junit.runner.RunWith
+import java.time.Instant
+import kotlin.time.Duration.Companion.seconds
+
+/**
+ * End-to-end coverage of the first-launch onboarding walk (PR 4 of
+ * the onboarding sequence):
+ *
+ *  1. Fresh state with the gate forced ON walks all 6 steps —
+ *     welcome → discoveryConfirm (TOFU with the fixture fingerprint)
+ *     → messageTransport → blobTransport → notary (legacy published
+ *     add) → done — and lands in the tab shell; a dependency rebuild
+ *     + Activity recreation then asserts the walk does NOT reappear
+ *     (completion flag persisted, gate re-resolves false).
+ *  2. The skip path: every skippable step skipped straight through.
+ *  3. Back navigation revisits the prior step without restarting.
+ *  4. The pre-bootstrap loading state on discoveryConfirm when no
+ *     default source has hydrated.
+ *  5. A completed-at-boot flag bypasses the walk entirely.
+ *  6. The explicit harness contract: with NO onboarding slot
+ *     registered, the gate resolves in UI-test mode and every
+ *     pre-onboarding instrumented test boots straight to the tabs —
+ *     the bypass the rest of the suite relies on.
+ *
+ * Determinism (the iOS #252 lessons, applied in-process):
+ *  - the gate reads an [InMemoryOnboardingStore] and pins the
+ *    grandfathering probe to "fresh user", so DataStore state left
+ *    on the emulator by earlier runs can never flip the decision;
+ *  - [UITestRegistry.discoveryClock] injects a fixture-era instant
+ *    (the signed fixtures expire — `snapshot-1.json` on 2026-09-12 —
+ *    and these tests must not rot with them).
+ *
+ * Coverage caveat: grandfathering ("existing user → no walk") has NO
+ * instrumented coverage through the real probe wiring — with the
+ * slot set the probe is pinned to "fresh user" by design — so that
+ * truth table lives exclusively in the unit tests
+ * (`OnboardingGateProbeTest` / `OnboardingGateTest`).
+ *
+ * Network is replayed from the shared Discovery conformance fixtures
+ * (see [DiscoverySettingsUITest] for the byte-exactness contract).
+ * Registry discipline follows [DiscoverySettingsUITest]: an
+ * `order = 0` rule populates [UITestRegistry] (branching on the
+ * per-test annotations below) BEFORE the compose rule launches
+ * [MainActivity].
+ */
+@RunWith(AndroidJUnit4::class)
+class OnboardingWalkUITest {
+
+    /** Boot WITHOUT the onboarding slot: the pre-PR-4 harness state,
+     *  now the explicit bypass contract. */
+    @Retention(AnnotationRetention.RUNTIME)
+    @Target(AnnotationTarget.FUNCTION)
+    annotation class NoOnboardingSlot
+
+    /** Boot with the completion flag already set. */
+    @Retention(AnnotationRetention.RUNTIME)
+    @Target(AnnotationTarget.FUNCTION)
+    annotation class AlreadyCompleted
+
+    /** Don't seed the unpinned default source — the discoveryConfirm
+     *  step must render its loading state, not a dead-end hero. */
+    @Retention(AnnotationRetention.RUNTIME)
+    @Target(AnnotationTarget.FUNCTION)
+    annotation class EmptyDiscoverySources
+
+    private val onboardingStore = InMemoryOnboardingStore()
+
+    private val discoveryStore = InMemoryDiscoveryStore()
+    private val discoveryFetcher = FakeDiscoveryFetcher().apply {
+        respond(MANIFEST_URL, fixture("provider-manifest.json"))
+        respond(SNAPSHOT_URL, fixture("snapshot-1.json"))
+        respond(ENTRY_MANIFEST_URL, fixture("destination-manifest.json"))
+    }
+
+    // Non-discovery seams, seeded exactly like DiscoverySettingsUITest
+    // so the rest of boot stays offline.
+    private val relayerStore = app.onym.android.support.InMemoryRelayerSelectionStore()
+    private val relayerFetcher = app.onym.android.support.FakeKnownRelayersFetcher(
+        app.onym.android.support.FakeKnownRelayersFetcher.Mode.Succeeds(
+            listOf(
+                app.onym.android.chain.RelayerEndpoint(
+                    "Onym Testnet",
+                    RELAYER_URL,
+                    listOf("testnet"),
+                ),
+            ),
+        ),
+    )
+    private val contractsStore = app.onym.android.support.InMemoryAnchorSelectionStore()
+    private val contractsFetcher = app.onym.android.support.FakeContractsManifestFetcher(
+        app.onym.android.support.FakeContractsManifestFetcher.Mode.Succeeds(
+            app.onym.android.chain.ContractsManifest(version = 1, releases = emptyList()),
+        ),
+    )
+
+    @get:Rule(order = 0)
+    val registrySetup = object : TestWatcher() {
+        override fun starting(description: Description) {
+            UITestRegistry.relayerStore = relayerStore
+            UITestRegistry.relayerFetcher = relayerFetcher
+            UITestRegistry.contractsStore = contractsStore
+            UITestRegistry.contractsFetcher = contractsFetcher
+            UITestRegistry.discoveryFetcher = discoveryFetcher
+            UITestRegistry.discoveryStore = discoveryStore
+            UITestRegistry.discoveryClock = { FIXTURE_ERA }
+            if (description.getAnnotation(EmptyDiscoverySources::class.java) == null) {
+                // The unpinned default source the discoveryConfirm
+                // hero reviews — the production seed is skipped under
+                // the harness, so the walk test provides its own.
+                runBlocking {
+                    discoveryStore.saveConfiguration(
+                        DiscoverySourcesConfiguration(
+                            sources = listOf(
+                                DiscoverySource(
+                                    url = MANIFEST_URL,
+                                    label = "Onym Discovery",
+                                    providerId = PROVIDER_ID,
+                                    pinnedOperatorKeyHex = null,
+                                ),
+                            ),
+                        ),
+                    )
+                }
+            }
+            if (description.getAnnotation(NoOnboardingSlot::class.java) == null) {
+                if (description.getAnnotation(AlreadyCompleted::class.java) != null) {
+                    runBlocking { onboardingStore.markCompleted() }
+                }
+                UITestRegistry.onboardingStore = onboardingStore
+            }
+            UITestRegistry.enabled = true
+            val app = ApplicationProvider.getApplicationContext<OnymApplication>()
+            app.rebuildDependenciesForTest()
+        }
+
+        override fun finished(description: Description) {
+            UITestRegistry.reset()
+        }
+    }
+
+    @get:Rule(order = 1)
+    val composeRule = createAndroidComposeRule<MainActivity>()
+
+    // ─── (1) the full walk ────────────────────────────────────────
+
+    @Test
+    fun walkAllSteps_completesToTabShell_andDoesNotReappear() {
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        // welcome → the only path forward is Continue (no Skip).
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        onboarding.tapPrimary(OnboardingStep.Welcome)
+
+        // discoveryConfirm: TOFU the seeded default. Review →
+        // fixture fingerprint → pin → confirmed state.
+        onboarding.awaitStep(OnboardingStep.DiscoveryConfirm)
+        onboarding.awaitReviewHero()
+        onboarding.tapReviewFingerprint()
+        onboarding.awaitFingerprint()
+        // First 16 hex chars of the fixture operator key, grouped in
+        // 4s — DiscoverySource.fingerprint(OPERATOR_KEY_HEX).
+        onboarding.assertFingerprint("ea4a 6c63 e29c 520a")
+        // Nothing pinned before the confirm (the TOFU contract).
+        assertTrue(
+            discoveryStore.loadConfigurationBlocking().sources
+                .all { it.pinnedOperatorKeyHex == null },
+        )
+        onboarding.tapConfirmPin()
+        onboarding.awaitPinned()
+        assertEquals(
+            OPERATOR_KEY_HEX,
+            discoveryStore.loadConfigurationBlocking().sources
+                .single().pinnedOperatorKeyHex,
+        )
+        onboarding.tapPrimary(OnboardingStep.DiscoveryConfirm)
+
+        // messageTransport / blobTransport: the defaults apply;
+        // Continue through.
+        onboarding.awaitStep(OnboardingStep.MessageTransport)
+        onboarding.tapPrimary(OnboardingStep.MessageTransport)
+        onboarding.awaitStep(OnboardingStep.BlobTransport)
+        onboarding.tapPrimary(OnboardingStep.BlobTransport)
+
+        // notary: the published list is fetched even while
+        // auto-populate is suppressed — add the fixture relayer
+        // (legacy add, no consent flow), then Continue.
+        onboarding.awaitStep(OnboardingStep.Notary)
+        onboarding.awaitNotaryPublishedRow(RELAYER_URL)
+        onboarding.tapNotaryAdd(RELAYER_URL)
+        // The Add affordance flips to the ADDED chip once the write
+        // lands in the configuration, with the row itself still
+        // listed.
+        onboarding.awaitNotaryAdded(RELAYER_URL)
+        onboarding.tapPrimary(OnboardingStep.Notary)
+
+        // done → Start completes the walk; the tab shell mounts.
+        onboarding.awaitStep(OnboardingStep.Done)
+        onboarding.tapPrimary(OnboardingStep.Done)
+        onboarding.awaitTabShell()
+        assertTrue("completion flag must be persisted", onboardingStore.completed)
+        assertEquals("flag written exactly once", 1, onboardingStore.markCount)
+
+        // Re-resolution: rebuild the dependency graph (fresh gate
+        // decision off the same store) and recreate the Activity —
+        // onboarding must NOT reappear.
+        val app = ApplicationProvider.getApplicationContext<OnymApplication>()
+        app.rebuildDependenciesForTest()
+        composeRule.activityRule.scenario.recreate()
+        onboarding.awaitTabShell()
+        onboarding.assertNotShown()
+        assertEquals("re-resolution must not re-write the flag", 1, onboardingStore.markCount)
+    }
+
+    // ─── (2) the skip path ────────────────────────────────────────
+
+    @Test
+    fun skipPath_everySkippableStep_stillCompletes() {
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        onboarding.tapPrimary(OnboardingStep.Welcome)
+
+        for (step in listOf(
+            OnboardingStep.DiscoveryConfirm,
+            OnboardingStep.MessageTransport,
+            OnboardingStep.BlobTransport,
+            OnboardingStep.Notary,
+        )) {
+            onboarding.awaitStep(step)
+            onboarding.tapSkip(step)
+        }
+
+        onboarding.awaitStep(OnboardingStep.Done)
+        onboarding.tapPrimary(OnboardingStep.Done)
+        onboarding.awaitTabShell()
+        assertTrue(onboardingStore.completed)
+        // Skipping trusted nothing: the seeded source stays unpinned.
+        assertTrue(
+            discoveryStore.loadConfigurationBlocking().sources
+                .all { it.pinnedOperatorKeyHex == null },
+        )
+    }
+
+    // ─── (3) back navigation ──────────────────────────────────────
+
+    @Test
+    fun backNavigation_revisitsPriorStep_withoutRestartingTheWalk() {
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.awaitStep(OnboardingStep.DiscoveryConfirm)
+
+        onboarding.tapBack(OnboardingStep.DiscoveryConfirm)
+        onboarding.awaitStep(OnboardingStep.Welcome)
+
+        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.awaitStep(OnboardingStep.DiscoveryConfirm)
+        assertFalse("the walk must not have completed", onboardingStore.completed)
+    }
+
+    // ─── (4) pre-bootstrap loading state ──────────────────────────
+
+    @Test
+    @EmptyDiscoverySources
+    fun discoveryConfirm_showsLoadingState_whenNoDefaultSourceHydrated() {
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.awaitStep(OnboardingStep.DiscoveryConfirm)
+
+        // No source ever hydrates (the store is empty and the
+        // harness seeds no default) — the step shows progress, not a
+        // dead-end hero, and stays skippable.
+        onboarding.awaitDiscoveryLoading()
+        onboarding.tapSkip(OnboardingStep.DiscoveryConfirm)
+        onboarding.awaitStep(OnboardingStep.MessageTransport)
+    }
+
+    // ─── (5) completed flag at boot ───────────────────────────────
+
+    @Test
+    @AlreadyCompleted
+    fun completedFlag_atBoot_bypassesTheWalk() {
+        val onboarding = OnboardingScreenObject(composeRule)
+        onboarding.awaitTabShell()
+        onboarding.assertNotShown()
+    }
+
+    // ─── (6) explicit harness bypass contract ─────────────────────
+
+    @Test
+    @NoOnboardingSlot
+    fun noOnboardingSlot_harnessBootsStraightToTabs() {
+        // The contract every pre-onboarding instrumented test relies
+        // on, asserted rather than incidental: registry enabled, no
+        // onboarding slot → UI-test-mode gate → tabs.
+        val onboarding = OnboardingScreenObject(composeRule)
+        onboarding.awaitTabShell()
+        onboarding.assertNotShown()
+    }
+
+    // ─── fixtures ─────────────────────────────────────────────────
+
+    private companion object {
+        const val MANIFEST_URL = "https://discovery.onym.app/manifest.json"
+        const val SNAPSHOT_URL = "https://discovery.onym.app/catalogs/public-all-seats.json"
+        const val ENTRY_MANIFEST_URL = "https://discovery.onym.app/manifests/onym-courier.json"
+        const val PROVIDER_ID = "onym:component:onym-discovery"
+        const val OPERATOR_KEY_HEX =
+            "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
+        const val RELAYER_URL = "https://relayer-testnet.onym.chat"
+
+        /** Inside the fixtures' validity window (snapshot expires
+         *  2026-09-12) — frozen so the suite can't rot. */
+        val FIXTURE_ERA: Instant = Instant.parse("2026-08-14T00:00:00Z")
+
+        fun fixture(name: String): ByteArray =
+            checkNotNull(
+                OnboardingWalkUITest::class.java.classLoader
+                    ?.getResourceAsStream("fixtures/$name"),
+            ) { "missing androidTest fixture: fixtures/$name" }
+                .use { it.readBytes() }
+    }
+}
+
+/** Main-thread-safe suspend shorthand for assertions — same pattern
+ *  as [DiscoverySettingsUITest]'s store helpers. */
+private fun InMemoryDiscoveryStore.loadConfigurationBlocking(): DiscoverySourcesConfiguration =
+    runBlocking { loadConfiguration() }

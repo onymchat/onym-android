@@ -68,6 +68,17 @@ jobs:
         # moved out of :app keep running in CI.
         run: ./gradlew testDebugUnitTest --no-daemon
 
+      - name: ./gradlew assembleDebugAndroidTest
+        # Compile + package every module's instrumented tests — no
+        # emulator, so this is a cheap compilation gate (most inputs
+        # are already warm from the unit-test build above). Closes the
+        # gap PR #213 exposed: androidTest sources broke at the
+        # :identity modularization and sat unnoticed on main because
+        # nothing in CI compiled them. Unqualified for the same reason
+        # as testDebugUnitTest above — modules that grow their own
+        # androidTest (like :identity) are covered automatically.
+        run: ./gradlew assembleDebugAndroidTest --no-daemon
+
       - name: Upload test report on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4

@@ -53,7 +53,18 @@ import xml.etree.ElementTree as ET
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-ANDROID_TEST_ROOT = REPO_ROOT / "app" / "src" / "androidTest"
+
+
+def android_test_roots() -> list[pathlib.Path]:
+    """Every androidTest source root: :app plus any library module that
+    grew its own instrumented suites (e.g. :identity, whose tests moved
+    out of :app when the modularization made their internal access
+    illegal there). Resolved lazily so a module added later is picked
+    up without touching this script."""
+    return [
+        REPO_ROOT / "app" / "src" / "androidTest",
+        *sorted((REPO_ROOT / "modules").glob("*/src/androidTest")),
+    ]
 
 UI_TESTS_START = "<!-- UI_TESTS_START -->"
 UI_TESTS_END = "<!-- UI_TESTS_END -->"
@@ -70,13 +81,16 @@ CLASS_DECL = re.compile(r"^\s*(?:open\s+|abstract\s+|sealed\s+|data\s+)?class\s+
 def discover() -> list[str]:
     """Return FQNs of every instrumented test class.
 
-    A "test class" here is any Kotlin file under app/src/androidTest that
-    contains `@RunWith(AndroidJUnit4::class)` somewhere in the file. The
-    package comes from the file's `package` declaration; the class name
-    is the next `class X` token after the annotation.
+    A "test class" here is any Kotlin file under an androidTest source
+    root (see `android_test_roots`) that contains
+    `@RunWith(AndroidJUnit4::class)` somewhere in the file. The package
+    comes from the file's `package` declaration — never from the path —
+    so module-hosted suites derive the same FQNs they had under :app.
+    The class name is the next `class X` token after the annotation.
     """
     out: list[str] = []
-    for kt in sorted(ANDROID_TEST_ROOT.rglob("*.kt")):
+    files = [kt for root in android_test_roots() for kt in root.rglob("*.kt")]
+    for kt in sorted(files):
         text = kt.read_text(encoding="utf-8")
         if "@RunWith(AndroidJUnit4::class)" not in text:
             continue
