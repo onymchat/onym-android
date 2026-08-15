@@ -271,6 +271,11 @@ dependencies {
     androidTestImplementation(testFixtures(project(":group")))
     // InMemoryMessageStore for ChatsSwipeDeleteScreenTest.
     androidTestImplementation(testFixtures(project(":chats-core")))
+    // FakeDiscoveryFetcher / InMemoryDiscoveryStore for the Discovery
+    // settings UI tests (the byte fixtures they replay live in
+    // src/androidTest/resources/fixtures — copies of the shared
+    // conformance fixtures in modules/discovery/src/test/resources).
+    androidTestImplementation(testFixtures(project(":discovery")))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)
