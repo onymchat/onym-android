@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -27,7 +28,20 @@ data class NostrRelaySettingsState(
 
 class NostrRelaySettingsViewModel(
     private val repository: NostrRelaysRepository,
+    /** See [writes]. */
+    private val writeScope: CoroutineScope? = null,
 ) : ViewModel() {
+
+    /**
+     * Scope for repository WRITES. Defaults to [viewModelScope]; the
+     * onboarding hub passes its host-retained scope instead, because
+     * its seat screens live on NavBackStackEntry-scoped ViewModels —
+     * a back-pop clears the entry and would cancel an in-flight
+     * add/remove mid-write (the hardening the old onboarding
+     * SeatStepContent carried as `writeScope`). Reads/collectors stay
+     * on [viewModelScope] so they die with the screen.
+     */
+    private val writes get() = writeScope ?: viewModelScope
 
     private val _draft = MutableStateFlow("")
     private val _draftError = MutableStateFlow<String?>(null)
@@ -49,7 +63,13 @@ class NostrRelaySettingsViewModel(
         _draftError.value = null
     }
 
-    fun tappedAddCustom() {
+    /** Validate the draft + add as a custom endpoint. [onAdded]
+     *  fires only when the endpoint actually LANDED in the
+     *  configuration — not on a validation failure and not on a
+     *  duplicate — so callers (the onboarding seat screens record a
+     *  consent) can react to the real result instead of guessing
+     *  from pre-validation. */
+    fun tappedAddCustom(onAdded: () -> Unit = {}) {
         val raw = _draft.value
         val normalized = validate(raw)
         if (normalized == null) {
@@ -57,11 +77,12 @@ class NostrRelaySettingsViewModel(
                 "Use wss:// or ws:// with a hostname, e.g. wss://relay.example.com"
             return
         }
-        viewModelScope.launch {
+        writes.launch {
             val added = repository.addEndpoint(NostrRelayEndpoint.custom(normalized))
             if (added) {
                 _draft.value = ""
                 _draftError.value = null
+                onAdded()
             } else {
                 _draftError.value = "That URL is already configured."
             }
@@ -69,11 +90,11 @@ class NostrRelaySettingsViewModel(
     }
 
     fun tappedRemove(url: String) {
-        viewModelScope.launch { repository.removeEndpoint(url) }
+        writes.launch { repository.removeEndpoint(url) }
     }
 
     fun tappedResetToDefault() {
-        viewModelScope.launch { repository.resetToDefault() }
+        writes.launch { repository.resetToDefault() }
     }
 
     companion object {

@@ -7,6 +7,7 @@ import app.onym.android.chain.RelayerEndpoint
 import app.onym.android.chain.RelayerFetchStatus
 import app.onym.android.chain.RelayerRepository
 import app.onym.android.chain.RelayerStrategy
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,7 +31,14 @@ import java.net.URISyntaxException
  */
 class RelayerSettingsViewModel(
     private val repository: RelayerRepository,
+    /** See [writes]. */
+    private val writeScope: CoroutineScope? = null,
 ) : ViewModel() {
+
+    /** Scope for repository WRITES — see
+     *  [NostrRelaySettingsViewModel.writes] for the rationale
+     *  (onboarding hub back-pops must not cancel in-flight writes). */
+    private val writes get() = writeScope ?: viewModelScope
 
     /** Snapshot the screen renders. */
     data class State(
@@ -79,8 +87,16 @@ class RelayerSettingsViewModel(
 
     // ─── intents ──────────────────────────────────────────────────
 
-    fun addKnown(endpoint: RelayerEndpoint) {
-        viewModelScope.launch { repository.addEndpoint(endpoint) }
+    /** Add from the published list. [onAdded] fires after the
+     *  endpoint actually LANDED in the configuration (the repository
+     *  upserts) — same landed-callback contract as
+     *  [tappedAddCustom], so callers never record a consent for a
+     *  write that didn't happen. */
+    fun addKnown(endpoint: RelayerEndpoint, onAdded: () -> Unit = {}) {
+        writes.launch {
+            repository.addEndpoint(endpoint)
+            onAdded()
+        }
     }
 
     fun customDraftChanged(text: String) {
@@ -91,13 +107,17 @@ class RelayerSettingsViewModel(
     }
 
     /** Validate the draft + add as a custom endpoint. On success
-     *  the draft clears so the field is ready for the next entry. */
-    fun tappedAddCustom() {
+     *  the draft clears so the field is ready for the next entry.
+     *  [onAdded] fires after the endpoint actually LANDED in the
+     *  configuration (the repository upserts, so a repeated URL
+     *  still ends configured) — never on a validation failure. */
+    fun tappedAddCustom(onAdded: () -> Unit = {}) {
         val draft = _state.value.customDraft
         when (val r = validate(draft)) {
             is ValidationResult.Valid -> {
-                viewModelScope.launch {
+                writes.launch {
                     repository.addEndpoint(RelayerEndpoint.custom(r.normalisedUrl))
+                    onAdded()
                 }
                 _state.value = _state.value.copy(customDraft = "", customDraftError = null)
             }
@@ -108,15 +128,15 @@ class RelayerSettingsViewModel(
     }
 
     fun removeEndpoint(url: String) {
-        viewModelScope.launch { repository.removeEndpoint(url) }
+        writes.launch { repository.removeEndpoint(url) }
     }
 
     fun setPrimary(url: String) {
-        viewModelScope.launch { repository.setPrimary(url) }
+        writes.launch { repository.setPrimary(url) }
     }
 
     fun setStrategy(strategy: RelayerStrategy) {
-        viewModelScope.launch { repository.setStrategy(strategy) }
+        writes.launch { repository.setStrategy(strategy) }
     }
 
     /** "Try Again" tap on the [RelayerFetchStatus.Failed] gate. The

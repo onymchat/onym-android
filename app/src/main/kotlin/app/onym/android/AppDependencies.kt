@@ -37,7 +37,11 @@ class AppDependencies(
      *  into the app shell yet. */
     val nostrSignerProvider: NostrEphemeralSignerProvider,
     val makeRecoveryPhraseBackupViewModel: (activityProvider: () -> FragmentActivity) -> RecoveryPhraseBackupViewModel,
-    val makeRelayerSettingsViewModel: () -> RelayerSettingsViewModel,
+    /** `writeScope` (nullable): an outliving scope for repository
+     *  writes — the onboarding hub passes its host-retained scope so
+     *  a back-pop can't cancel an in-flight add; Settings passes
+     *  null (the VM's own scope). */
+    val makeRelayerSettingsViewModel: (writeScope: kotlinx.coroutines.CoroutineScope?) -> RelayerSettingsViewModel,
     val makeAnchorsPickerViewModel: () -> AnchorsPickerViewModel,
     /** App-wide testnet/mainnet preference. Settings exposes a Switch
      *  bound to this; CreateGroupInteractor reads it per call. */
@@ -80,12 +84,14 @@ class AppDependencies(
      *  relay shows up in the badge before the modal is opened. */
     val pendingInvitesViewModel: app.onym.android.inbox.PendingInvitesViewModel,
     /** Settings → Transport → Nostr Relays. */
-    val makeNostrRelaySettingsViewModel: () -> app.onym.android.settings.NostrRelaySettingsViewModel,
+    /** `writeScope`: see [makeRelayerSettingsViewModel]. */
+    val makeNostrRelaySettingsViewModel: (writeScope: kotlinx.coroutines.CoroutineScope?) -> app.onym.android.settings.NostrRelaySettingsViewModel,
     /** Live snapshot of configured Nostr relays — drives the
      *  Settings entry's "{n} configured" subtitle. */
     val nostrRelaysFlow: kotlinx.coroutines.flow.StateFlow<app.onym.android.transport.nostr.NostrRelaysConfiguration>,
     /** Settings → Transport → Blossom Relays. */
-    val makeBlossomServerSettingsViewModel: () -> app.onym.android.settings.BlossomServerSettingsViewModel,
+    /** `writeScope`: see [makeRelayerSettingsViewModel]. */
+    val makeBlossomServerSettingsViewModel: (writeScope: kotlinx.coroutines.CoroutineScope?) -> app.onym.android.settings.BlossomServerSettingsViewModel,
     /** Live snapshot of configured Blossom servers — drives the
      *  Settings entry's "{n} configured" subtitle. */
     val blossomServersFlow: kotlinx.coroutines.flow.StateFlow<app.onym.android.transport.blossom.BlossomServersConfiguration>,
@@ -139,10 +145,30 @@ class OnboardingUiDependencies(
      *  fetched even while auto-populate is suppressed) and shows
      *  which are already configured. */
     val relayerState: kotlinx.coroutines.flow.StateFlow<app.onym.android.chain.RelayerState>,
-    /** Legacy add-without-consent for the notary step's published
-     *  list — the same `RelayerRepository.addEndpoint` the Settings
-     *  picker uses. */
-    val addRelayerEndpoint: suspend (app.onym.android.chain.RelayerEndpoint) -> Unit,
+    /**
+     * Awaits the identity bootstrap and answers whether a snapshot
+     * exists — the identity step's checklist binds to this instead of
+     * asserting success it can't know about. Idempotent (it awaits
+     * the same bootstrap the app kicks at start); a false answer
+     * renders the step's failure card with Try again. REQUIRED, no
+     * default: the identity step is the walk's one fail-closed gate,
+     * and a `{ true }` default would quietly fail it open at any
+     * construction site that forgot the wiring.
+     */
+    val identityReady: suspend () -> Boolean,
+    /**
+     * Accepting the RECOMMENDED setup on the services step is the
+     * explicit confirm of the seeded default directory: this runs
+     * the same fetch→verify→pin path the hub's "Verify & Confirm"
+     * uses, programmatically, for the SEEDED source only (see
+     * RecommendedDirectoryPinner for the trust rationale), then
+     * kicks a repository refresh so catalogs populate. Idempotent
+     * (no-op when already pinned or removed) and non-blocking:
+     * failure (offline first-run) leaves the source unpinned and
+     * the Done summary says so. Inert default for builds without
+     * discovery.
+     */
+    val pinRecommendedDirectory: suspend () -> Unit = {},
     /**
      * Presentation generation, bumped on every explicit restart. The
      * host keys its retained OnboardingFlow on this so a re-run gets
@@ -167,6 +193,26 @@ class OnboardingUiDependencies(
 )
 
 /**
+ * The [OnboardingUiDependencies.identityReady] probe body: awaits the
+ * (idempotent) identity bootstrap and answers whether it produced a
+ * snapshot. A plain failure answers `false` (the identity step's
+ * failure card + Try again), but a [kotlinx.coroutines.CancellationException]
+ * is RETHROWN — a `runCatching`-style swallow would flip a merely
+ * cancelled check (the user tapped Back, the composable left the
+ * composition) into a scary failure card. Extracted from the
+ * composition root so the distinction is unit-testable.
+ */
+internal suspend fun probeIdentityReady(bootstrap: suspend () -> Unit): Boolean =
+    try {
+        bootstrap()
+        true
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        false
+    }
+
+/**
  * Everything the discovery settings UI needs, bundled so
  * [AppDependencies] carries one nullable value. Mirrors iOS's
  * `DiscoveryModulePicker` bundling on `discovery-settings-ui`.
@@ -175,8 +221,9 @@ class DiscoveryUiDependencies(
     /** Live discovery state: sources, verified entries, fetch status,
      *  per-source errors. */
     val stateFlow: kotlinx.coroutines.flow.StateFlow<app.onym.android.discovery.DiscoveryState>,
-    /** Settings → Discovery (provider list + add flow). */
-    val makeDiscoverySettingsViewModel: () -> app.onym.android.settings.DiscoverySettingsViewModel,
+    /** Settings → Discovery (provider list + add flow).
+     *  `writeScope`: see [AppDependencies.makeRelayerSettingsViewModel]. */
+    val makeDiscoverySettingsViewModel: (writeScope: kotlinx.coroutines.CoroutineScope?) -> app.onym.android.settings.DiscoverySettingsViewModel,
     /**
      * Consent flow for one catalog entry, looked up by seat type +
      * short component id (the `onym:component:` prefix stripped for

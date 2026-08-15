@@ -134,6 +134,23 @@ class RecoveryPhraseBackupViewModel(
         stop()
     }
 
+    /**
+     * Scrub the flow back to the intro: cancel the in-flight jobs,
+     * drop the cached identity, and — critically — drop any revealed
+     * phrase still held inside [step]. Hosts call this whenever the
+     * surface leaves the screen (the onboarding overlay's dispose),
+     * so the mnemonic never outlives its surface and every re-entry
+     * crosses the biometric gate again ([Step.Intro] →
+     * [tappedContinueFromIntro] → [authenticate]). [start] re-arms
+     * afterwards — [stop] cleared the snapshot-job guard.
+     */
+    fun reset() {
+        stop()
+        currentIdentity = null
+        _isReady.value = false
+        _step.value = Step.Intro
+    }
+
     // ─── Intents (called from the view) ─────────────────────────────
 
     fun tappedContinueFromIntro() {

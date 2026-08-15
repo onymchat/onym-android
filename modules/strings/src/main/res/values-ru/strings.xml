@@ -699,19 +699,6 @@
   <string name="discovery_catalog_section">ИЗ КАТАЛОГА</string>
   <string name="discovery_catalog_footnote">Опубликовано провайдерами Discovery, которым вы доверяете. Нажатие на запись показывает манифест и условия оператора — ничего не добавляется без вашего явного согласия.</string>
   <!-- Onboarding wiring (PR 3): контент шагов на уровне приложения. -->
-  <string name="onboarding_discovery_section_provider">ПРОВАЙДЕР ПО УМОЛЧАНИЮ</string>
-  <string name="onboarding_discovery_review_fingerprint">Проверить отпечаток</string>
-  <string name="onboarding_discovery_add_own">Добавить своего провайдера</string>
-  <string name="onboarding_discovery_use_default">Использовать провайдера по умолчанию</string>
-  <string name="onboarding_discovery_pinned_title">Провайдер закреплён</string>
-  <string name="onboarding_discovery_pinned_subtitle">Его каталог загружается в фоне — на следующих шагах можно выбрать из него.</string>
-  <string name="onboarding_discovery_chip_pinned">ЗАКРЕПЛЁН</string>
-  <string name="onboarding_seat_section_defaults">ПРИМЕНЯЕТСЯ ПО УМОЛЧАНИЮ</string>
-  <string name="onboarding_seat_defaults_footnote">Эти значения по умолчанию применяются автоматически. Пропуск шага оставит их.</string>
-  <string name="onboarding_seat_section_published">ОПУБЛИКОВАННЫЙ СПИСОК</string>
-  <string name="onboarding_seat_add">Добавить</string>
-  <string name="onboarding_seat_added_chip">ДОБАВЛЕНО</string>
-  <string name="onboarding_seat_no_catalog">Проверенных модулей каталога пока нет. Подтвердите провайдера обнаружения, чтобы выбрать модуль здесь — значения по умолчанию всё равно применяются.</string>
   <!-- Настройки → Перезапуск онбординга. -->
   <string name="settings_restart_onboarding_title">Перезапустить онбординг</string>
   <string name="settings_restart_onboarding_subtitle">Пройти первоначальную настройку заново</string>

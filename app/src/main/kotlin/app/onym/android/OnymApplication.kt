@@ -228,7 +228,9 @@ class OnymApplication : Application() {
         // (UI tests get a fresh EncryptedSharedPreferences file per
         // test); fall back to the production default-name store
         // otherwise.
-        val identityStore = if (UITestRegistry.enabled) {
+        // debugActive, not enabled: swapping the encrypted secret
+        // store is a security-weakening seam (see UITestRegistry).
+        val identityStore = if (UITestRegistry.debugActive) {
             UITestRegistry.identitySecretStore ?: IdentitySecretStore(applicationContext)
         } else {
             IdentitySecretStore(applicationContext)
@@ -296,8 +298,11 @@ class OnymApplication : Application() {
         // slots are mutable vars, so a re-read after the check would
         // race a concurrent test-runner write (same capture style as
         // the other slots).
+        // debugActive, not enabled: a pinned clock weakens the
+        // discovery trust layer's signature-expiry checks (see
+        // UITestRegistry).
         val registryDiscoveryClock =
-            if (UITestRegistry.enabled) UITestRegistry.discoveryClock else null
+            if (UITestRegistry.debugActive) UITestRegistry.discoveryClock else null
         val discoveryClock: () -> java.time.Instant =
             registryDiscoveryClock ?: java.time.Instant::now
         val discoveryRepository: app.onym.android.discovery.DiscoveryRepository? =
@@ -727,9 +732,10 @@ class OnymApplication : Application() {
                     }
                 DiscoveryUiDependencies(
                     stateFlow = discoveryRepository.snapshots,
-                    makeDiscoverySettingsViewModel = {
+                    makeDiscoverySettingsViewModel = { writeScope ->
                         app.onym.android.settings.DiscoverySettingsViewModel(
                             repository = discoveryRepository,
+                            writeScope = writeScope,
                         )
                     },
                     makeModuleConsentViewModel = { seatType, componentShortId ->
@@ -1174,6 +1180,61 @@ class OnymApplication : Application() {
         // (harmless after an explicit pick — hasUserInteracted is
         // set, so the refresh only updates the known list).
         val onboardingGeneration = kotlinx.coroutines.flow.MutableStateFlow(0)
+        // Pin-on-accept for the seeded default directory (see
+        // RecommendedDirectoryPinner for the trust rationale): the
+        // status probe and the programmatic TOFU are bound to the
+        // SEEDED providerId only — a user-added source never goes
+        // through here.
+        val recommendedDirectoryPinner = discoveryRepository?.let { repo ->
+            RecommendedDirectoryPinner(
+                seededSourcePinned = {
+                    // HYDRATE FIRST: before bootstrap the snapshot
+                    // has no sources, and a raw read would misreport
+                    // "user removed the seed" (SourceAbsent — never
+                    // retried) for a store that simply hadn't loaded.
+                    // bootstrap() is idempotent (mutex-guarded
+                    // re-read + default re-seed), so awaiting it here
+                    // resolves the tri-state from REAL data:
+                    //  - seed present        → its pin status;
+                    //  - seed absent because the providerId is in
+                    //    removedDefaultProviderIds → null, the
+                    //    deliberate-removal signal, respected;
+                    //  - seed absent otherwise is unreachable after
+                    //    bootstrap (mergeDefaults re-seeds unless
+                    //    removed) — answered null defensively.
+                    repo.bootstrap()
+                    val configuration = repo.snapshots.value.configuration
+                    val seededId = app.onym.android.discovery.DiscoverySource
+                        .onymDefault.providerId
+                    val seed = configuration.sources
+                        .firstOrNull { it.providerId == seededId }
+                    when {
+                        seed != null -> seed.pinnedOperatorKeyHex != null
+                        else -> null
+                    }
+                },
+                pinSeededSource = {
+                    val seed = repo.snapshots.value.sources.first {
+                        it.providerId ==
+                            app.onym.android.discovery.DiscoverySource
+                                .onymDefault.providerId
+                    }
+                    // Same path as the hub's Verify & Confirm:
+                    // addSource fetches + signature-verifies the
+                    // manifest; confirmAddSource pins the operator
+                    // key and kicks refreshInternal so catalogs
+                    // populate. Later manifests are verified against
+                    // the pinned key — nothing is trusted blindly.
+                    val pending = repo.addSource(seed.url)
+                    check(pending.manifest.providerId == seed.providerId) {
+                        "recommended-accept pin fetched a different provider " +
+                            "(${pending.manifest.providerId})"
+                    }
+                    repo.confirmAddSource(pending, label = seed.label)
+                },
+            )
+        }
+
         val onboardingUi = OnboardingUiDependencies(
             shouldOnboard = onboardingPending,
             makeFlow = { app.onym.android.onboarding.OnboardingFlow(store = onboardingStore) },
@@ -1183,7 +1244,17 @@ class OnymApplication : Application() {
                 applicationScope.launch { runCatching { relayerRepository.refresh() } }
             },
             relayerState = relayerRepository.snapshots,
-            addRelayerEndpoint = relayerRepository::addEndpoint,
+            // Awaits the same idempotent bootstrap the app kicks at
+            // start, so the identity step's checklist reflects the
+            // real outcome instead of asserting one. probeIdentityReady
+            // rethrows CancellationException — a cancelled check must
+            // not masquerade as a bootstrap failure.
+            identityReady = {
+                probeIdentityReady { identityRepository.bootstrap() }
+            },
+            pinRecommendedDirectory = {
+                recommendedDirectoryPinner?.pinIfUnpinned()
+            },
             generation = onboardingGeneration,
             // Explicit restart (Settings → Restart Onboarding): the
             // persisted restart bit survives a mid-walk kill (the
@@ -1206,15 +1277,32 @@ class OnymApplication : Application() {
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
                 RecoveryPhraseBackupViewModel(
                     repository = identityRepository,
-                    authenticator = AndroidBiometricAuthenticator(
-                        activityProvider = activityProvider,
-                    ),
+                    // UI-test seam: instrumented tests that walk the
+                    // reveal (the onboarding recovery step) register
+                    // a fake — a real BiometricPrompt can't be
+                    // answered from a test. Production always takes
+                    // the AndroidBiometricAuthenticator branch.
+                    // debugActive, not enabled: bypassing the
+                    // biometric gate on the mnemonic must be
+                    // impossible in a release binary.
+                    authenticator = if (UITestRegistry.debugActive &&
+                        UITestRegistry.biometricAuthenticator != null
+                    ) {
+                        UITestRegistry.biometricAuthenticator!!
+                    } else {
+                        AndroidBiometricAuthenticator(
+                            activityProvider = activityProvider,
+                        )
+                    },
                     clipboard = clipboard,
                     strings = strings,
                 )
             },
-            makeRelayerSettingsViewModel = {
-                RelayerSettingsViewModel(repository = relayerRepository)
+            makeRelayerSettingsViewModel = { writeScope ->
+                RelayerSettingsViewModel(
+                    repository = relayerRepository,
+                    writeScope = writeScope,
+                )
             },
             makeAnchorsPickerViewModel = {
                 AnchorsPickerViewModel(
@@ -1337,15 +1425,17 @@ class OnymApplication : Application() {
             approveRequestsViewModel = approveRequestsViewModel,
             activeBlsPubkeyHex = activeBlsPubkeyHex,
             pendingInvitesViewModel = pendingInvitesViewModel,
-            makeNostrRelaySettingsViewModel = {
+            makeNostrRelaySettingsViewModel = { writeScope ->
                 app.onym.android.settings.NostrRelaySettingsViewModel(
                     repository = nostrRelaysRepository,
+                    writeScope = writeScope,
                 )
             },
             nostrRelaysFlow = nostrRelaysRepository.snapshots,
-            makeBlossomServerSettingsViewModel = {
+            makeBlossomServerSettingsViewModel = { writeScope ->
                 app.onym.android.settings.BlossomServerSettingsViewModel(
                     repository = blossomServersRepository,
+                    writeScope = writeScope,
                 )
             },
             blossomServersFlow = blossomServersRepository.snapshots,

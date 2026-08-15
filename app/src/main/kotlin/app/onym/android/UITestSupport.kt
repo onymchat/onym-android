@@ -41,6 +41,24 @@ object UITestRegistry {
     @Volatile
     var enabled: Boolean = false
 
+    /**
+     * The gate for registry seams that WEAKEN a security property —
+     * the biometric gate on the recovery phrase, the encrypted
+     * secret store, FLAG_SECURE screenshot protection, the
+     * signature-expiry clock. Those must be bypassable ONLY in debug
+     * builds: [enabled] is a plain mutable static in src/main, so on
+     * its own it would let anything running in a release process
+     * (dynamite, but defense in depth) switch the protections off.
+     * `enabled && BuildConfig.DEBUG` matches
+     * [app.onym.android.recovery.AndroidBiometricAuthenticator]'s
+     * fail-closed `isDebugBuild` posture; instrumented tests always
+     * run the debug build, so the harness is unaffected. Seams that
+     * merely SWAP I/O collaborators (fetchers, transports, stores of
+     * public data, the onboarding gate driver) stay on [enabled].
+     */
+    val debugActive: Boolean
+        get() = enabled && BuildConfig.DEBUG
+
     /** In-memory replacement for
      *  [app.onym.android.chain.DataStorePreferencesRelayerSelectionStore]. */
     var relayerStore: RelayerSelectionStore? = null
@@ -130,6 +148,16 @@ object UITestRegistry {
      */
     var discoveryClock: (() -> java.time.Instant)? = null
 
+    /**
+     * Fake biometric gate for the recovery-phrase reveal. The real
+     * [app.onym.android.recovery.AndroidBiometricAuthenticator]
+     * drives a system BiometricPrompt no instrumented test can
+     * answer; tests that walk the onboarding recovery step (or the
+     * Settings backup flow) register an auto-succeeding fake here.
+     * Null (the default) keeps the real prompt.
+     */
+    var biometricAuthenticator: app.onym.android.recovery.BiometricAuthenticator? = null
+
     /** Reset between tests. Called from `@Before`. */
     fun reset() {
         enabled = false
@@ -147,5 +175,6 @@ object UITestRegistry {
         discoveryStore = null
         onboardingStore = null
         discoveryClock = null
+        biometricAuthenticator = null
     }
 }

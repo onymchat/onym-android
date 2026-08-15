@@ -29,6 +29,19 @@ android {
         minSdk = 26
     }
 
+    // Hard i18n gate, same as :strings and :app: every string this
+    // module adds must land in every `res/values-<lang>/strings.xml`,
+    // otherwise the lint `MissingTranslation` check fails. The gate
+    // must live HERE too — app lint does not check library modules'
+    // resources.
+    lint {
+        checkReleaseBuilds = true
+        abortOnError = true
+        // MissingTranslation is enabled by default; explicit re-enable
+        // below in case it gets suppressed in a future config sweep.
+        disable.remove("MissingTranslation")
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

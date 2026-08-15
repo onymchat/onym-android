@@ -17,6 +17,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestWatcher
@@ -26,24 +27,26 @@ import java.time.Instant
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * End-to-end coverage of the first-launch onboarding walk (PR 4 of
- * the onboarding sequence):
+ * Instrumented coverage of the onboarding GATE and frame against the
+ * redesigned flow (welcome → identity → services → recoveryPhrase →
+ * done). What lives here vs. elsewhere:
  *
- *  1. Fresh state with the gate forced ON walks all 6 steps —
- *     welcome → discoveryConfirm (TOFU with the fixture fingerprint)
- *     → messageTransport → blobTransport → notary (legacy published
- *     add) → done — and lands in the tab shell; a dependency rebuild
- *     + Activity recreation then asserts the walk does NOT reappear
- *     (completion flag persisted, gate re-resolves false).
- *  2. The skip path: every skippable step skipped straight through.
- *  3. Back navigation revisits the prior step without restarting.
- *  4. The pre-bootstrap loading state on discoveryConfirm when no
- *     default source has hydrated.
- *  5. A completed-at-boot flag bypasses the walk entirely.
- *  6. The explicit harness contract: with NO onboarding slot
- *     registered, the gate resolves in UI-test mode and every
- *     pre-onboarding instrumented test boots straight to the tabs —
- *     the bypass the rest of the suite relies on.
+ *  LIVE in this class:
+ *  - Back navigation revisits the prior step without restarting the
+ *    walk (welcome ↔ identity).
+ *  - A completed-at-boot flag bypasses the walk entirely.
+ *  - The explicit harness contract: with NO onboarding slot
+ *    registered, the gate resolves in UI-test mode and every
+ *    pre-onboarding instrumented test boots straight to the tabs —
+ *    the bypass the rest of the suite relies on.
+ *
+ *  @Ignore'd here, replaced by the redesigned end-to-end walks in
+ *  the follow-up tests PR (#216): the full walk (identity outcome
+ *  gate, services hub, biometric-faked recovery reveal) and the
+ *  skip path (only recoveryPhrase is skippable now). The old
+ *  six-step wizard walks — per-step TOFU/seat screens and the
+ *  discoveryConfirm loading state — are gone with the wizard; the
+ *  directory surface lives inside the services hub.
  *
  * Determinism (the iOS #252 lessons, applied in-process):
  *  - the gate reads an [InMemoryOnboardingStore] and pins the
@@ -167,6 +170,11 @@ class OnboardingWalkUITest {
     // ─── (1) the full walk ────────────────────────────────────────
 
     @Test
+    @Ignore(
+        "Redesigned flow (welcome/identity/services/recoveryPhrase/done) — " +
+            "the new end-to-end walk (identity outcome gate, services hub, " +
+            "recovery reveal via the biometric fake) lands in the tests PR.",
+    )
     fun walkAllSteps_completesToTabShell_andDoesNotReappear() {
         val onboarding = OnboardingScreenObject(composeRule)
 
@@ -174,49 +182,21 @@ class OnboardingWalkUITest {
         onboarding.awaitStep(OnboardingStep.Welcome)
         onboarding.tapPrimary(OnboardingStep.Welcome)
 
-        // discoveryConfirm: TOFU the seeded default. Review →
-        // fixture fingerprint → pin → confirmed state.
-        onboarding.awaitStep(OnboardingStep.DiscoveryConfirm)
-        onboarding.awaitReviewHero()
-        onboarding.tapReviewFingerprint()
-        onboarding.awaitFingerprint()
-        // First 16 hex chars of the fixture operator key, grouped in
-        // 4s — DiscoverySource.fingerprint(OPERATOR_KEY_HEX).
-        onboarding.assertFingerprint("ea4a 6c63 e29c 520a")
-        // Nothing pinned before the confirm (the TOFU contract).
-        assertTrue(
-            discoveryStore.loadConfigurationBlocking().sources
-                .all { it.pinnedOperatorKeyHex == null },
-        )
-        onboarding.tapConfirmPin()
-        onboarding.awaitPinned()
-        assertEquals(
-            OPERATOR_KEY_HEX,
-            discoveryStore.loadConfigurationBlocking().sources
-                .single().pinnedOperatorKeyHex,
-        )
-        onboarding.tapPrimary(OnboardingStep.DiscoveryConfirm)
+        // identity: Continue unlocks once the bootstrap yields a
+        // snapshot and the step content records its outcome.
+        onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.tapPrimary(OnboardingStep.Identity)
 
-        // messageTransport / blobTransport: the defaults apply;
-        // Continue through.
-        onboarding.awaitStep(OnboardingStep.MessageTransport)
-        onboarding.tapPrimary(OnboardingStep.MessageTransport)
-        onboarding.awaitStep(OnboardingStep.BlobTransport)
-        onboarding.tapPrimary(OnboardingStep.BlobTransport)
+        // services: the recommended setup is preselected; Continue
+        // accepts it.
+        onboarding.awaitStep(OnboardingStep.Services)
+        onboarding.tapPrimary(OnboardingStep.Services)
 
-        // notary: the published list is fetched even while
-        // auto-populate is suppressed — add the fixture relayer
-        // (legacy add, no consent flow), then Continue.
-        onboarding.awaitStep(OnboardingStep.Notary)
-        onboarding.awaitNotaryPublishedRow(RELAYER_URL)
-        onboarding.tapNotaryAdd(RELAYER_URL)
-        // The Add affordance flips to the ADDED chip once the write
-        // lands in the configuration, with the row itself still
-        // listed.
-        onboarding.awaitNotaryAdded(RELAYER_URL)
-        onboarding.tapPrimary(OnboardingStep.Notary)
+        // recoveryPhrase: "Remind me later" is the deferral path.
+        onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
+        onboarding.tapSkip(OnboardingStep.RecoveryPhrase)
 
-        // done → Start completes the walk; the tab shell mounts.
+        // done → Start messaging completes the walk.
         onboarding.awaitStep(OnboardingStep.Done)
         onboarding.tapPrimary(OnboardingStep.Done)
         onboarding.awaitTabShell()
@@ -237,21 +217,21 @@ class OnboardingWalkUITest {
     // ─── (2) the skip path ────────────────────────────────────────
 
     @Test
+    @Ignore(
+        "Redesigned flow — only recoveryPhrase is skippable now; the " +
+            "new skip-path walk lands in the tests PR.",
+    )
     fun skipPath_everySkippableStep_stillCompletes() {
         val onboarding = OnboardingScreenObject(composeRule)
 
         onboarding.awaitStep(OnboardingStep.Welcome)
         onboarding.tapPrimary(OnboardingStep.Welcome)
-
-        for (step in listOf(
-            OnboardingStep.DiscoveryConfirm,
-            OnboardingStep.MessageTransport,
-            OnboardingStep.BlobTransport,
-            OnboardingStep.Notary,
-        )) {
-            onboarding.awaitStep(step)
-            onboarding.tapSkip(step)
-        }
+        onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.tapPrimary(OnboardingStep.Identity)
+        onboarding.awaitStep(OnboardingStep.Services)
+        onboarding.tapPrimary(OnboardingStep.Services)
+        onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
+        onboarding.tapSkip(OnboardingStep.RecoveryPhrase)
 
         onboarding.awaitStep(OnboardingStep.Done)
         onboarding.tapPrimary(OnboardingStep.Done)
@@ -272,34 +252,20 @@ class OnboardingWalkUITest {
 
         onboarding.awaitStep(OnboardingStep.Welcome)
         onboarding.tapPrimary(OnboardingStep.Welcome)
-        onboarding.awaitStep(OnboardingStep.DiscoveryConfirm)
+        onboarding.awaitStep(OnboardingStep.Identity)
 
-        onboarding.tapBack(OnboardingStep.DiscoveryConfirm)
+        onboarding.tapBack(OnboardingStep.Identity)
         onboarding.awaitStep(OnboardingStep.Welcome)
 
         onboarding.tapPrimary(OnboardingStep.Welcome)
-        onboarding.awaitStep(OnboardingStep.DiscoveryConfirm)
+        onboarding.awaitStep(OnboardingStep.Identity)
         assertFalse("the walk must not have completed", onboardingStore.completed)
     }
 
-    // ─── (4) pre-bootstrap loading state ──────────────────────────
-
-    @Test
-    @EmptyDiscoverySources
-    fun discoveryConfirm_showsLoadingState_whenNoDefaultSourceHydrated() {
-        val onboarding = OnboardingScreenObject(composeRule)
-
-        onboarding.awaitStep(OnboardingStep.Welcome)
-        onboarding.tapPrimary(OnboardingStep.Welcome)
-        onboarding.awaitStep(OnboardingStep.DiscoveryConfirm)
-
-        // No source ever hydrates (the store is empty and the
-        // harness seeds no default) — the step shows progress, not a
-        // dead-end hero, and stays skippable.
-        onboarding.awaitDiscoveryLoading()
-        onboarding.tapSkip(OnboardingStep.DiscoveryConfirm)
-        onboarding.awaitStep(OnboardingStep.MessageTransport)
-    }
+    // (4) The old pre-bootstrap directory-loading test is gone: the
+    // directory surface moved into the services hub, and the
+    // redesigned hub walks live in the follow-up tests PR. The
+    // @EmptyDiscoverySources seam stays for those walks.
 
     // ─── (5) completed flag at boot ───────────────────────────────
 

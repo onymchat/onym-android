@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -220,7 +221,8 @@ private fun IntroScreen(isReady: Boolean, onContinue: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .padding(top = 22.dp),
+                .padding(top = 22.dp)
+                .testTag("recovery.backup.continue"),
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(vertical = 14.dp),
         ) {
@@ -401,7 +403,8 @@ private fun RevealScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .padding(top = 14.dp),
+                .padding(top = 14.dp)
+                .testTag("recovery.backup.reveal_continue"),
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(vertical = 14.dp),
         ) {
@@ -494,7 +497,8 @@ private fun PhraseCard(
             Column(
                 modifier = Modifier
                     .matchParentSize()
-                    .clickable { onReveal() },
+                    .clickable { onReveal() }
+                    .testTag("recovery.backup.reveal"),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -636,6 +640,7 @@ private fun VerifyOption(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("recovery.backup.option.$word")
             .clip(RoundedCornerShape(14.dp))
             .background(bg)
             .border(1.5.dp, border, RoundedCornerShape(14.dp))
@@ -741,7 +746,8 @@ private fun DoneScreen(onDone: () -> Unit) {
             onClick = onDone,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp)
+                .testTag("recovery.backup.done"),
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(vertical = 14.dp),
         ) {

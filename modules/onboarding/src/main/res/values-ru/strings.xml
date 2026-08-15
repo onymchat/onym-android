@@ -2,32 +2,152 @@
 <resources>
     <!-- Buttons -->
     <string name="onboarding_continue">Продолжить</string>
-    <string name="onboarding_start">Начать</string>
     <string name="onboarding_skip">Пропустить</string>
     <string name="onboarding_back">Назад</string>
+    <string name="onboarding_primary_welcome">Создать мою личность</string>
+    <string name="onboarding_primary_recovery">Я записал(а)</string>
+    <string name="onboarding_primary_done">Начать общение</string>
+    <string name="onboarding_skip_recovery">Напомнить позже</string>
 
     <!-- Step titles -->
-    <string name="onboarding_welcome_title">Добро пожаловать в Onym</string>
-    <string name="onboarding_discovery_confirm_title">Каталог сервисов</string>
-    <string name="onboarding_message_transport_title">Доставка сообщений</string>
-    <string name="onboarding_blob_transport_title">Хранилище файлов</string>
-    <string name="onboarding_notary_title">Нотариус</string>
-    <string name="onboarding_moderation_title">Модерация</string>
+    <string name="onboarding_welcome_title">Onym</string>
+    <string name="onboarding_identity_title">Создаём ваши ключи</string>
+    <string name="onboarding_services_title">Ваши сервисы</string>
+    <string name="onboarding_moderation_title">Жалобы и безопасность</string>
+    <string name="onboarding_recovery_title">Сохраните фразу восстановления</string>
     <string name="onboarding_done_title">Всё готово</string>
 
     <!-- Step subtitles -->
-    <string name="onboarding_welcome_subtitle">Ваши ключи, ваши сервисы. Выберите, кто доставляет ваши сообщения, хранит ваши файлы и заверяет вашу историю — каждый выбор за вами, и любой можно изменить позже в настройках.</string>
-    <string name="onboarding_discovery_confirm_subtitle">Подтвердите каталог, через который приложение находит сервисы, или добавьте собственного провайдера.</string>
-    <string name="onboarding_message_transport_subtitle">Выберите, кто передаёт ваши сообщения.</string>
-    <string name="onboarding_blob_transport_subtitle">Выберите, где хранятся ваши вложения.</string>
-    <string name="onboarding_notary_subtitle">Выберите, кто ставит метки времени в истории ваших разговоров.</string>
-    <string name="onboarding_moderation_subtitle">Выберите орган модерации и ознакомьтесь с его условиями.</string>
-    <string name="onboarding_done_subtitle">Ваши выборы сохранены. Любой из них можно изменить в настройках.</string>
+    <string name="onboarding_welcome_subtitle">Мессенджер, который отвечает перед вами, а не перед компанией.</string>
+    <string name="onboarding_identity_subtitle">Это займёт секунду. Всё происходит на этом устройстве — никуда ничего ещё не отправлялось.</string>
+    <string name="onboarding_services_subtitle">Onym работает на независимых сервисах доставки, файлов и меток времени. Начните с готового набора или выберите свои.</string>
+    <string name="onboarding_moderation_subtitle">Если кто-то пожалуется на незаконный контент, жалобу рассмотрит выбранный вами орган. Выберите его, чтобы продолжить, — перед согласием вы увидите, что именно он может делать.</string>
+    <string name="onboarding_recovery_subtitle">Эти 12 слов — единственный способ вернуть доступ к аккаунту, если вы потеряете это устройство. Onym не сможет их сбросить.</string>
+    <string name="onboarding_done_subtitle">Ваша личность на этом устройстве, сервисы подключены.</string>
 
-    <!-- Built-in step bodies -->
-    <string name="onboarding_welcome_body">Следующие несколько экранов настраивают сервисы, на которых работает приложение. Каждый показывает, с чем именно вы соглашаетесь, прежде чем что-либо включится.</string>
-    <string name="onboarding_done_backup_nudge">Ключ вашей личности создан на этом устройстве. Сделайте резервную копию в настройках, чтобы можно было восстановить аккаунт.</string>
+    <!-- Welcome bullets -->
+    <string name="onboarding_welcome_bullet_identity">Ключ вашей личности создаётся на этом устройстве и остаётся на нём. Ни аккаунта, ни номера телефона.</string>
+    <string name="onboarding_welcome_bullet_transport">Вы сами выбираете, кто доставляет ваши сообщения, — и можете заменить их в любой момент в Настройках.</string>
+    <string name="onboarding_welcome_bullet_reports">Вы сами выбираете, кто разбирает жалобы, и до согласия точно видите, что они могут делать.</string>
+
+    <!-- Identity step -->
+    <string name="onboarding_identity_row_key_title">Ключ личности создан</string>
+    <string name="onboarding_identity_row_key_subtitle">Надёжно хранится на этом устройстве</string>
+    <string name="onboarding_identity_row_phrase_title">Фраза восстановления создана</string>
+    <string name="onboarding_identity_row_phrase_subtitle">12 слов — вы сохраните их через минуту</string>
+    <string name="onboarding_identity_failed">Не удалось создать ключи. Никуда ничего не отправлялось — попробуйте ещё раз.</string>
+    <string name="onboarding_identity_retry">Повторить</string>
+    <string name="onboarding_identity_footnote">Только ваш ключ доказывает, что этот аккаунт ваш. Ни один сервер не хранит его копию.</string>
+
+    <!-- Services step -->
+    <string name="onboarding_services_recommended_title">Рекомендуемая настройка</string>
+    <string name="onboarding_services_selected_chip">Выбрано</string>
+    <string name="onboarding_services_recommended_subtitle">Сервисы, опубликованные Onym и проверенные на этом устройстве. Готово за секунду.</string>
+    <string name="onboarding_services_line_delivery">Доставка</string>
+    <string name="onboarding_services_value_delivery">Релеи Onym Official</string>
+    <string name="onboarding_services_line_media">Доставка медиа</string>
+    <string name="onboarding_services_value_media">Onym Official</string>
+    <string name="onboarding_services_line_group">Целостность групп</string>
+    <string name="onboarding_services_value_group">Опубликованные значения по умолчанию</string>
+    <string name="onboarding_services_line_directory">Каталог</string>
+    <string name="onboarding_services_value_directory">Onym Discovery</string>
+    <string name="onboarding_services_custom_title">Выбрать сервисы самостоятельно</string>
+    <string name="onboarding_services_custom_subtitle">Выберите свои каталоги, релеи, хранилище и нотариусов. Около двух минут.</string>
+    <string name="onboarding_services_footnote">Что бы вы ни выбрали, любой сервис можно добавить, заменить или удалить позже в Настройках.</string>
+
+    <!-- Services hub -->
+    <string name="onboarding_hub_intro">Настройте столько, сколько хотите, — всё, чего вы не касались, остаётся на рекомендуемых значениях.</string>
+    <string name="onboarding_hub_section_needed">НУЖНО ДЛЯ ОТПРАВКИ СООБЩЕНИЙ</string>
+    <string name="onboarding_hub_section_optional">НЕОБЯЗАТЕЛЬНО</string>
+    <string name="onboarding_hub_row_message_title">Доставка сообщений</string>
+    <string name="onboarding_hub_row_media_title">Доставка медиа</string>
+    <string name="onboarding_hub_row_directory_title">Каталог</string>
+    <string name="onboarding_hub_row_group_title">Целостность групп</string>
+    <string name="onboarding_hub_row_message_subtitle">Кто переносит ваши запечатанные сообщения</string>
+    <string name="onboarding_hub_row_media_subtitle">Переносит фото, видео и голосовые сообщения</string>
+    <string name="onboarding_hub_row_directory_subtitle">Где Onym ищет сервисы</string>
+    <string name="onboarding_hub_row_group_subtitle">Гарантирует доказуемую честность состава групп</string>
+    <string name="onboarding_hub_footnote">Несколько сервисов работают по-разному в каждой категории: релеи используются все вместе, дополнительные медиасервисы — доверенные источники для скачивания, а нотариус для каждой новой группы выбирается из вашего списка.</string>
+    <string name="onboarding_hub_use_recommended">Вернуться к рекомендуемой настройке</string>
+    <string name="onboarding_hub_use_recommended_footnote">Всё, что вы уже добавили, остаётся настроенным — удалить это можно позже в Настройках.</string>
+    <string name="onboarding_hub_done">Готово</string>
+
+    <!-- Seat surfaces (shared) -->
+    <string name="onboarding_seat_section_in_use">ИСПОЛЬЗУЮТСЯ</string>
+    <string name="onboarding_seat_section_suggested">ПРЕДЛОЖЕНО ВАШИМИ КАТАЛОГАМИ</string>
+    <string name="onboarding_seat_section_add_own">ДОБАВИТЬ СВОЙ</string>
+    <string name="onboarding_seat_add">Добавить</string>
+
+    <!-- Message delivery (Nostr relays) -->
+    <string name="onboarding_message_explainer">Релеи передают запечатанные сообщения дальше. Они не могут их прочитать и никогда не узнают, с кем вы переписываетесь. Каждое сообщение отправляется сразу через все ваши релеи — достаточно любого из них, чтобы дойти до вас.</string>
+    <string name="onboarding_message_list_footnote">Каждый релей из этого списка переносит каждое сообщение — они работают вместе, а не как запасные. Достаточно любого работающего, чтобы до вас дойти.</string>
+    <string name="onboarding_message_empty">Релей ещё не настроен. Добавьте ниже или вернитесь назад, чтобы оставить значение по умолчанию.</string>
+
+    <!-- Media delivery (Blossom) -->
+    <string name="onboarding_media_explainer">Фото, видео и голосовые сообщения слишком велики для релеев, переносящих текст, поэтому они идут через медиасервис. Они заранее шифруются на этом устройстве — сервис имеет дело только с запечатанными данными.</string>
+    <string name="onboarding_media_active_chip">АКТИВНЫЙ</string>
+    <string name="onboarding_media_footnote">Ваши файлы загружаются только через активный сервис. Остальные в списке — узлы, которым вы доверяете скачивание того, что вам присылают.</string>
+    <string name="onboarding_media_empty">Сервер ещё не настроен. Добавьте ниже или вернитесь назад, чтобы оставить значение по умолчанию.</string>
+
+    <!-- Directory (discovery) -->
+    <string name="onboarding_directory_explainer">Каталог — это телефонная книга доступных сервисов. Onym проверяет каждую запись на этом устройстве, прежде чем показать её вам; второй каталог расширяет выбор.</string>
+    <string name="onboarding_directory_confirm">Проверить и подтвердить</string>
+    <string name="onboarding_directory_pinned">Уже подтверждён — его ключ закреплён.</string>
+    <string name="onboarding_directory_empty">Провайдер каталога ещё не настроен. Добавьте собственного ниже или продолжайте со встроенными значениями по умолчанию.</string>
+    <string name="onboarding_directory_unavailable">Эта сборка работает без каталога сервисов. Продолжайте — приложение использует встроенные значения по умолчанию.</string>
+    <string name="onboarding_directory_added_title">Провайдер подтверждён</string>
+    <string name="onboarding_directory_added_subtitle">Его каталоги уже загружаются и проверяются — следующие шаги смогут предложить то, что он публикует.</string>
+    <string name="onboarding_directory_add_own">Добавить URL своего провайдера</string>
+    <string name="onboarding_directory_fetch">Загрузить провайдера</string>
+    <string name="onboarding_directory_fetching">Загружаем манифест провайдера…</string>
+    <string name="onboarding_directory_key">Ключ %1$s</string>
+
+    <!-- Group integrity (notary / relayer) -->
+    <string name="onboarding_notary_explainer">Нотариус следит за честностью состава и истории каждой группы. Он проверяет каждое изменение доказательством с нулевым разглашением: подтверждает подлинность группы, не узнавая, кто в ней состоит и о чём шла речь.</string>
+    <string name="onboarding_notary_primary_chip">ОСНОВНОЙ</string>
+    <string name="onboarding_notary_footnote_random">При создании группы Onym выбирает для неё одного из этих нотариусов случайным образом — дальше вся группа использует именно его.</string>
+    <string name="onboarding_notary_footnote_primary">Новые группы заверяет ваш основной нотариус.</string>
+    <string name="onboarding_notary_empty">Нотариус ещё не выбран. Выберите ниже или оставьте пустым, чтобы использовать опубликованные значения по умолчанию.</string>
+    <string name="onboarding_notary_section_published">ИЗ ОПУБЛИКОВАННОГО СПИСКА</string>
+    <string name="onboarding_notary_leave_empty">Оставьте пустым, чтобы использовать опубликованные значения по умолчанию — они установятся автоматически после завершения настройки.</string>
+    <string name="onboarding_notary_all_added">Все опубликованные нотариусы добавлены.</string>
+    <string name="onboarding_notary_fetching">Загружаю список…</string>
+
+    <!-- Recovery phrase step -->
+    <string name="onboarding_recovery_status_none">Ещё не сохранена</string>
+    <string name="onboarding_recovery_status_revealed">Показана — запишите её</string>
+    <string name="onboarding_recovery_status_verified">Сохранено</string>
+    <string name="onboarding_recovery_body_none">Откройте 12 слов, запишите их и подтвердите несколько из них. Около минуты.</string>
+    <string name="onboarding_recovery_body_revealed">Вы увидели 12 слов. Проверка нескольких из них убедит, что ваша запись верна.</string>
+    <string name="onboarding_recovery_body_verified">Вы открыли и подтвердили фразу. Храните её в надёжном месте — не в скриншотах и не в чатах.</string>
+    <string name="onboarding_recovery_reveal">Показать фразу восстановления</string>
+    <string name="onboarding_recovery_view_again">Посмотреть ещё раз</string>
+    <string name="onboarding_recovery_footnote">Любой, у кого есть эти слова, сможет читать ваши будущие сообщения. Не храните их в скриншотах и чатах.</string>
+
+    <!-- Done step -->
+    <string name="onboarding_done_section_setup">ВАША НАСТРОЙКА</string>
+    <string name="onboarding_done_none_configured">Не настроено</string>
+    <string name="onboarding_done_directory_not_confirmed">Не подтверждён</string>
+    <string name="onboarding_done_footnote">Всё это можно изменить позже в Настройках. Здесь нет ничего окончательного, кроме фразы восстановления.</string>
+    <string name="onboarding_done_nudge_full_title">Сделайте резервную копию фразы восстановления</string>
+    <string name="onboarding_done_nudge_full_body">Ключ вашей личности создан на этом устройстве и больше нигде не существует. Сделайте резервную копию (Настройки → Резервная копия ключей), чтобы можно было восстановить аккаунт.</string>
+    <string name="onboarding_done_nudge_revealed_title">Завершите проверку фразы восстановления</string>
+    <string name="onboarding_done_nudge_revealed_body">Вы увидели 12 слов. Подтвердите несколько из них в Настройки → Резервная копия ключей, чтобы убедиться, что запись верна.</string>
+    <plurals name="onboarding_done_services_count">
+        <item quantity="one">%d сервис</item>
+        <item quantity="few">%d сервиса</item>
+        <item quantity="many">%d сервисов</item>
+        <item quantity="other">%d сервисов</item>
+    </plurals>
+    <plurals name="onboarding_done_sources_count">
+        <item quantity="one">%d источник</item>
+        <item quantity="few">%d источника</item>
+        <item quantity="many">%d источников</item>
+        <item quantity="other">%d источников</item>
+    </plurals>
+
+    <!-- Built-in Done summary (module previews/tests only) -->
     <string name="onboarding_outcome_chosen">Выбрано</string>
     <string name="onboarding_outcome_default">По умолчанию</string>
-    <string name="onboarding_outcome_none">—</string>
+    <string name="onboarding_outcome_unavailable">Недоступно</string>
 </resources>
