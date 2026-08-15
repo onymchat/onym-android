@@ -145,6 +145,26 @@ No test changes needed; verified on device rather than assumed:
   `onboarding.services.stays_configured` footnote is Custom-path
   copy the walks don't assert.
 
+## Review-fix round 5 (83468dd)
+
+- Rebase conflict: only the old walk test's rewritten KDoc — resolved
+  keeping this branch's file (its KDoc describes the merged suite).
+- Hub-Done pin trigger: in the custom walk the Directory seat is
+  interactively pinned first (deliberately, so the other seats'
+  catalogs populate), so hub-Done's unconditional pinner call reads
+  AlreadyPinned and no-ops — the walk's store + Done-summary
+  assertions are unchanged and stayed green. The interesting new
+  branch (custom setup that LEAVES the Directory seat alone still
+  ends pinned) is NOT instrumented here — it would cost a third full
+  walk — and is covered at the unit level by
+  RecommendedDirectoryPinnerTest's hub-Done cases.
+- addKnown(onAdded:) callback consent: the group-integrity leg
+  awaits the configured row (UI state), not the outcome record —
+  no timing assumption to adjust; green on device.
+- ServicesCard selectable/RadioButton semantics: the page object
+  addresses the cards by test tag, and `selectable`'s descendant
+  merging doesn't affect tag lookup — no change needed.
+
 ## Lint-annotation commit (not authored by the tests branch)
 
 While this branch was being reconciled, a local commit ("Lint:
