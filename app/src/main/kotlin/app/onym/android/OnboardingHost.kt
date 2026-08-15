@@ -35,12 +35,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -145,9 +147,14 @@ internal fun OnboardingHost(
     }
 
     // Overlay state, held at the host (not per-step) so the overlays
-    // survive the step content recomposing beneath them.
-    var hubVisible by remember { mutableStateOf(false) }
-    var backupVisible by remember { mutableStateOf(false) }
+    // survive the step content recomposing beneath them. Saveable so
+    // a rotation with the hub or the reveal open re-presents the
+    // overlay instead of dropping the user back to the step (the
+    // backup overlay re-presents at its INTRO — its ViewModel is
+    // scrubbed on dispose, see RecoveryBackupOverlay — so the
+    // re-entry crosses the biometric gate again, which is desired).
+    var hubVisible by rememberSaveable { mutableStateOf(false) }
+    var backupVisible by rememberSaveable { mutableStateOf(false) }
     var consentEntry by remember { mutableStateOf<AttributedCatalogEntry?>(null) }
 
     Surface(
@@ -259,20 +266,28 @@ internal fun OnboardingHost(
                             }
                         },
                     )
+                    val closeConsent = {
+                        val consented = consentViewModel.state.value.step ==
+                            ModuleConsentViewModel.Step.Done
+                        if (consented &&
+                            flow.state.value.step == OnboardingStep.Services
+                        ) {
+                            flow.recordOutcome(
+                                StepOutcome.Consented(entry.entry.componentId),
+                            )
+                        }
+                        consentEntry = null
+                    }
+                    // ModuleConsentScreen registers no BackHandler of
+                    // its own — without this, back would pop the hub
+                    // seat screen UNDERNEATH the consent overlay.
+                    // Registered here (deeper than the host's swallow
+                    // and the hub's NavHost) so it wins while the
+                    // overlay is up, taking the same path as Close.
+                    BackHandler(enabled = true) { closeConsent() }
                     ModuleConsentScreen(
                         viewModel = consentViewModel,
-                        onClose = {
-                            val consented = consentViewModel.state.value.step ==
-                                ModuleConsentViewModel.Step.Done
-                            if (consented &&
-                                flow.state.value.step == OnboardingStep.Services
-                            ) {
-                                flow.recordOutcome(
-                                    StepOutcome.Consented(entry.entry.componentId),
-                                )
-                            }
-                            consentEntry = null
-                        },
+                        onClose = closeConsent,
                     )
                 }
             }
@@ -789,6 +804,20 @@ private fun RecoveryBackupOverlay(
             initializer { dependencies.makeRecoveryPhraseBackupViewModel(activityProvider) }
         },
     )
+
+    // The VM stays Activity-scoped (so it still gets a real
+    // onCleared), but it is scrubbed on EVERY exit from this overlay
+    // — dismiss, walk completion, rotation. Without this the retained
+    // instance would keep Step.Reveal(phrase = <mnemonic>) alive for
+    // the rest of the walk and beyond, and "View it again" would
+    // re-render the words with no biometric re-auth. reset() drops
+    // the phrase + cached identity and rewinds to Intro, so every
+    // re-entry crosses the biometric gate again. The flow-held
+    // recoveryBackupState (the status card) deliberately survives —
+    // that is progress, not secret material.
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.reset() }
+    }
 
     // Back closes the overlay (never the walk) — composed after the
     // host's swallow-all handler, so it wins while mounted.

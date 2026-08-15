@@ -33,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -904,6 +905,17 @@ private fun DirectoryContent(
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     var showAddOwn by remember { mutableStateOf(false) }
+
+    // The VM is store-scoped and outlives this screen — without a
+    // reset, a completed confirm would leave AddPhase.Added sticky,
+    // so every re-entry rendered the "Provider confirmed" card
+    // forever instead of the live IN USE / pinned / add-your-own
+    // state. Reset the add flow when the seat screen leaves the
+    // composition (back to the hub, hub dismissed, rotation); the
+    // pinned source itself is repository state and survives.
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.resetAdd() }
+    }
 
     val pinnedSource = state.discovery.sources.firstOrNull { it.pinnedOperatorKeyHex != null }
     // Pinning is the consent — record it (once pinned it stays
