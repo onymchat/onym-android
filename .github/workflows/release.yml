@@ -173,7 +173,11 @@ jobs:
           # a fresh process). They run in ui-tests.yml (manual + nightly)
           # instead of gating releases — mirroring onym-ios keeping its
           # heavy E2E tests out of the release gate.
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notPackage=app.onym.android.uitests
+          # :identity's instrumented suites (IdentityRepositoryTest +
+          # seal/signer tests) moved out of :app's androidTest when the
+          # module extraction made their internal access illegal there
+          # — they must keep gating releases from their new home.
+          script: ./gradlew :app:connectedDebugAndroidTest :identity:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.notPackage=app.onym.android.uitests
 
       - name: Upload androidTest report
         # Always upload — the `report-to-issue` job needs to read the
@@ -187,6 +191,8 @@ jobs:
           path: |
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
+            modules/identity/build/reports/androidTests/
+            modules/identity/build/outputs/androidTest-results/
 
   # ─── GitHub Release creation ─────────────────────────────────────
 
@@ -574,8 +580,14 @@ jobs:
           set -eu
           BODY=$(gh issue view ${{ inputs.issue_number }} \
             --repo ${{ github.repository }} --json body --jq .body)
+          # `artifact` (the download root), NOT a deeper hardcoded
+          # path: the upload now spans app/build AND modules/*/build,
+          # which moved the archive's common ancestor to the repo
+          # root — a stale deeper path would rglob an empty dir and
+          # silently tick nothing / report green on real failures.
+          # The parser rglobs TEST-*.xml at any depth.
           NEW_BODY=$(printf '%s' "$BODY" | python3 scripts/release_issue.py tick \
-            --results artifact/outputs/androidTest-results)
+            --results artifact)
           # Idempotent: re-runs of the same Release dispatch overwrite
           # the section in full.
           printf '%s' "$NEW_BODY" | gh issue edit ${{ inputs.issue_number }} \
@@ -588,7 +600,7 @@ jobs:
           set -eu
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           python3 scripts/release_issue.py comment \
-            --results artifact/outputs/androidTest-results \
+            --results artifact \
             --run-url "$RUN_URL" > /tmp/comment.md
           if [ -s /tmp/comment.md ]; then
             gh issue comment ${{ inputs.issue_number }} \

@@ -41,12 +41,12 @@ import kotlin.time.Duration.Companion.seconds
  * stay byte-identical because every signature verifies over the exact
  * bytes against the operator key embedded in the manifest).
  *
- * Shelf life: the app wires [app.onym.android.discovery.DiscoveryRepository]
- * with the real clock, so these tests are valid only while the
- * fixtures are — `snapshot-1.json` expires 2026-09-12 and
- * `provider-manifest.json` 2026-12-31; past those dates the trust
- * layer correctly rejects them and the fixtures need re-signing in
- * onym-discovery.
+ * Shelf life: none — [app.onym.android.UITestRegistry.discoveryClock]
+ * pins the trust layer to a fixture-era instant (2026-08-14), inside
+ * the signed fixtures' validity windows (`snapshot-1.json` expires
+ * 2026-09-12, `provider-manifest.json` 2026-12-31), so the suite
+ * stays green after those dates instead of rotting with them. Same
+ * injected-clock posture as [OnboardingWalkUITest].
  *
  * Registry discipline follows [RelayerSettingsUITest]: an
  * `order = 0` rule populates [UITestRegistry] (branching on the
@@ -132,6 +132,8 @@ class DiscoverySettingsUITest {
                 }
                 UITestRegistry.discoveryFetcher = discoveryFetcher
                 UITestRegistry.discoveryStore = discoveryStore
+                // Fixture-era clock — see the "Shelf life" note above.
+                UITestRegistry.discoveryClock = { FIXTURE_ERA }
             }
             UITestRegistry.enabled = true
             val app = ApplicationProvider.getApplicationContext<OnymApplication>()
@@ -281,6 +283,9 @@ class DiscoverySettingsUITest {
         const val PROVIDER_ID = "onym:component:onym-discovery"
         const val OPERATOR_KEY_HEX =
             "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
+
+        /** Inside the fixtures' validity windows — see "Shelf life". */
+        val FIXTURE_ERA: java.time.Instant = java.time.Instant.parse("2026-08-14T00:00:00Z")
 
         fun fixture(name: String): ByteArray =
             checkNotNull(

@@ -289,11 +289,23 @@ class OnymApplication : Application() {
             else app.onym.android.discovery.DataStorePreferencesDiscoveryStore(
                 dataStore = applicationContext.discoveryDataStore,
             )
+        // Fixture-era clock (PR 4): instrumented tests inject a fixed
+        // instant so the signed discovery fixtures' expiries can't
+        // rot the suites; production always runs the real clock.
+        // Captured into a local before the null-check: the registry
+        // slots are mutable vars, so a re-read after the check would
+        // race a concurrent test-runner write (same capture style as
+        // the other slots).
+        val registryDiscoveryClock =
+            if (UITestRegistry.enabled) UITestRegistry.discoveryClock else null
+        val discoveryClock: () -> java.time.Instant =
+            registryDiscoveryClock ?: java.time.Instant::now
         val discoveryRepository: app.onym.android.discovery.DiscoveryRepository? =
             if (discoveryFetcher != null && discoveryStore != null) {
                 app.onym.android.discovery.DiscoveryRepository(
                     store = discoveryStore,
                     fetcher = discoveryFetcher,
+                    now = discoveryClock,
                     // The Onym-operated default source, UNPINNED —
                     // refresh skips it until the user confirms its
                     // operator-key fingerprint (onboarding's
@@ -351,10 +363,22 @@ class OnymApplication : Application() {
         // its own DataStore file; the pending decision resolves in the
         // gate block below (after the transport stores it probes are
         // constructed) and RootScreen collects it.
+        // Registry override (PR 4): a set slot makes the walk
+        // drivable from instrumented tests; unset keeps the explicit
+        // harness bypass (see the gate block below).
+        // Captured into a local (not re-read through `!!`) so the
+        // store choice and the driven-by-harness bit below can't
+        // disagree if a test-runner write races this block.
+        val registryOnboardingStore =
+            if (UITestRegistry.enabled) UITestRegistry.onboardingStore else null
         val onboardingStore: app.onym.android.onboarding.OnboardingStore =
-            app.onym.android.onboarding.DataStorePreferencesOnboardingStore(
-                dataStore = applicationContext.onboardingDataStore,
-            )
+            registryOnboardingStore
+                ?: app.onym.android.onboarding.DataStorePreferencesOnboardingStore(
+                    dataStore = applicationContext.onboardingDataStore,
+                )
+        // Whether the harness deliberately drives the gate. Captured
+        // once so the gate block and its probe agree on the branch.
+        val onboardingDrivenByHarness = registryOnboardingStore != null
         val onboardingPending =
             kotlinx.coroutines.flow.MutableStateFlow<Boolean?>(null)
         // Relayer auto-populate policy (#211 seam): suppressed until
@@ -601,21 +625,34 @@ class OnymApplication : Application() {
             // the decision null (which RootScreen renders as a
             // permanent blank frame). Worst case a fresh user skips
             // the walk; every surface still works via defaults.
+            // Harness contract (PR 4), explicit rather than
+            // incidental: with NO onboarding slot registered the gate
+            // resolves in UI-test mode — never onboard, the bypass
+            // every pre-onboarding instrumented test relies on. With
+            // the slot registered, the gate reads the fake store's
+            // flag and the grandfathering probe is pinned to "fresh
+            // user" so device-persisted DataStore state from earlier
+            // runs can't flip the decision (the probe's truth table
+            // is unit-tested; the walk test drives the flag).
             val pending = OnboardingGateProbe.resolvePending(
-                uiTestMode = UITestRegistry.enabled,
+                uiTestMode = UITestRegistry.enabled && !onboardingDrivenByHarness,
                 store = onboardingStore,
                 isExistingUser = {
-                    OnboardingGateProbe.isExistingUser(
-                        relayer = relayerRepository.snapshots.value.configuration,
-                        nostr = nostrRelaysStore.load(),
-                        blossom = blossomServersRepository.snapshots.value,
-                        // Raw stored names — the fresh-install
-                        // auto-bootstrap identity is single and
-                        // blank-named, so it doesn't count.
-                        identityInteracted = runCatching {
-                            identityRepository.hasNamedOrMultipleIdentities()
-                        }.getOrDefault(false),
-                    )
+                    if (onboardingDrivenByHarness) {
+                        false
+                    } else {
+                        OnboardingGateProbe.isExistingUser(
+                            relayer = relayerRepository.snapshots.value.configuration,
+                            nostr = nostrRelaysStore.load(),
+                            blossom = blossomServersRepository.snapshots.value,
+                            // Raw stored names — the fresh-install
+                            // auto-bootstrap identity is single and
+                            // blank-named, so it doesn't count.
+                            identityInteracted = runCatching {
+                                identityRepository.hasNamedOrMultipleIdentities()
+                            }.getOrDefault(false),
+                        )
+                    }
                 },
             )
             try {
@@ -713,6 +750,7 @@ class OnymApplication : Application() {
                             consentStore = pinnedConsentStore,
                             selectionStore = seatSelectionStore,
                             applyToConfiguration = applySeatEndpoint,
+                            now = discoveryClock,
                         )
                     },
                     activeConsent = { componentId ->

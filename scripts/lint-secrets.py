@@ -62,7 +62,12 @@ ALLOWED: set[str] = {
     "modules/identity/src/main/kotlin/app/onym/android/identity/IdentityRepository.kt",
     "modules/identity/src/main/kotlin/app/onym/android/identity/StoredSnapshot.kt",
     "modules/identity/src/main/kotlin/app/onym/android/identity/Identity.kt",
-    "app/src/androidTest/kotlin/app/onym/android/identity/IdentityRepositoryTest.kt",
+    # Instrumented repository test — asserts the shape/derivation of the
+    # secret material itself, so it must read it. Moved from
+    # app/src/androidTest/... into the :identity module's androidTest
+    # (internal visibility doesn't cross module boundaries); same file,
+    # same justification as when the entry pointed at the old path.
+    "modules/identity/src/androidTest/kotlin/app/onym/android/identity/IdentityRepositoryTest.kt",
 }
 
 # Field-access patterns that read identity secrets. The `.` prefix
