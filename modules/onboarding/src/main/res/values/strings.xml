@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Buttons -->
+    <string name="onboarding_continue">Continue</string>
+    <string name="onboarding_start">Start</string>
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_back">Back</string>
+
+    <!-- Step titles -->
+    <string name="onboarding_welcome_title">Welcome to Onym</string>
+    <string name="onboarding_discovery_confirm_title">Service Directory</string>
+    <string name="onboarding_message_transport_title">Message Transport</string>
+    <string name="onboarding_blob_transport_title">File Storage</string>
+    <string name="onboarding_notary_title">Notary</string>
+    <string name="onboarding_moderation_title">Moderation</string>
+    <string name="onboarding_done_title">You\'re Set</string>
+
+    <!-- Step subtitles -->
+    <string name="onboarding_welcome_subtitle">Your keys, your services. Pick who carries your messages, stores your files, and vouches for your history — every choice is yours, and every one can change later in Settings.</string>
+    <string name="onboarding_discovery_confirm_subtitle">Confirm the directory your app uses to find services, or add your own provider.</string>
+    <string name="onboarding_message_transport_subtitle">Choose who relays your messages.</string>
+    <string name="onboarding_blob_transport_subtitle">Choose where your attachments are stored.</string>
+    <string name="onboarding_notary_subtitle">Choose who timestamps your conversation history.</string>
+    <string name="onboarding_moderation_subtitle">Choose a moderation authority and review its terms.</string>
+    <string name="onboarding_done_subtitle">Your choices are saved. You can revisit any of them in Settings.</string>
+
+    <!-- Built-in step bodies -->
+    <string name="onboarding_welcome_body">The next few screens set up the services this app runs on. Each one shows exactly what you\'re agreeing to before anything is turned on.</string>
+    <string name="onboarding_done_backup_nudge">Your identity key was created on this device. Back it up from Settings so you can recover your account.</string>
+    <string name="onboarding_outcome_chosen">Chosen</string>
+    <string name="onboarding_outcome_default">Default</string>
+    <string name="onboarding_outcome_none">—</string>
+</resources>

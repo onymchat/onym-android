@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Buttons -->
+    <string name="onboarding_continue">Продолжить</string>
+    <string name="onboarding_start">Начать</string>
+    <string name="onboarding_skip">Пропустить</string>
+    <string name="onboarding_back">Назад</string>
+
+    <!-- Step titles -->
+    <string name="onboarding_welcome_title">Добро пожаловать в Onym</string>
+    <string name="onboarding_discovery_confirm_title">Каталог сервисов</string>
+    <string name="onboarding_message_transport_title">Доставка сообщений</string>
+    <string name="onboarding_blob_transport_title">Хранилище файлов</string>
+    <string name="onboarding_notary_title">Нотариус</string>
+    <string name="onboarding_moderation_title">Модерация</string>
+    <string name="onboarding_done_title">Всё готово</string>
+
+    <!-- Step subtitles -->
+    <string name="onboarding_welcome_subtitle">Ваши ключи, ваши сервисы. Выберите, кто доставляет ваши сообщения, хранит ваши файлы и заверяет вашу историю — каждый выбор за вами, и любой можно изменить позже в настройках.</string>
+    <string name="onboarding_discovery_confirm_subtitle">Подтвердите каталог, через который приложение находит сервисы, или добавьте собственного провайдера.</string>
+    <string name="onboarding_message_transport_subtitle">Выберите, кто передаёт ваши сообщения.</string>
+    <string name="onboarding_blob_transport_subtitle">Выберите, где хранятся ваши вложения.</string>
+    <string name="onboarding_notary_subtitle">Выберите, кто ставит метки времени в истории ваших разговоров.</string>
+    <string name="onboarding_moderation_subtitle">Выберите орган модерации и ознакомьтесь с его условиями.</string>
+    <string name="onboarding_done_subtitle">Ваши выборы сохранены. Любой из них можно изменить в настройках.</string>
+
+    <!-- Built-in step bodies -->
+    <string name="onboarding_welcome_body">Следующие несколько экранов настраивают сервисы, на которых работает приложение. Каждый показывает, с чем именно вы соглашаетесь, прежде чем что-либо включится.</string>
+    <string name="onboarding_done_backup_nudge">Ключ вашей личности создан на этом устройстве. Сделайте резервную копию в настройках, чтобы можно было восстановить аккаунт.</string>
+    <string name="onboarding_outcome_chosen">Выбрано</string>
+    <string name="onboarding_outcome_default">По умолчанию</string>
+    <string name="onboarding_outcome_none">—</string>
+</resources>
