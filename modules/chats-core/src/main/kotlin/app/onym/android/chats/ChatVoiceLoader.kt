@@ -19,6 +19,11 @@ import java.io.File
 class ChatVoiceLoader(
     private val blossomClient: BlossomClient,
     private val cacheDir: File,
+    /** The user's configured Blossom endpoint URLs — the ONLY servers
+     *  an attachment's `server` stamp may route a download to (see
+     *  [BlossomServerStampPolicy]). Defaults to empty: stamps are
+     *  ignored unless the composition root wires the configured set. */
+    private val allowedStampServers: suspend () -> List<String> = { emptyList() },
 ) {
     private val mutex = Mutex()
 
@@ -33,15 +38,30 @@ class ChatVoiceLoader(
         val dest = diskFile(attachment.sha256)
         if (dest.exists() && dest.length() > 0) return dest
 
+        // Whole download under the mutex — same posture as
+        // ChatVideoLoader (no inflight map, no check-and-insert races).
         return mutex.withLock {
             if (dest.exists() && dest.length() > 0) return@withLock dest
             val plaintext = try {
-                val blob = blossomClient.download(attachment.sha256)
+                // Stamped server honored ONLY within the user's own
+                // configured endpoint set — see BlossomServerStampPolicy.
+                val client = BlossomServerStampPolicy.client(
+                    stamp = attachment.server,
+                    allowedServers = allowedStampServers(),
+                    live = blossomClient,
+                )
+                val blob = client.download(attachment.sha256)
                 ChatImageCrypto.open(blob, attachment.encKey, attachment.sha256)
             } catch (_: Exception) {
                 return@withLock null
             }
-            runCatching { dest.writeBytes(plaintext) }.getOrNull() ?: return@withLock null
+            // Write-temp-then-rename — see ChatVideoLoader.
+            val tmp = File(dest.parentFile, dest.name + ".tmp")
+            runCatching { tmp.writeBytes(plaintext) }.getOrNull() ?: return@withLock null
+            if (!tmp.renameTo(dest)) {
+                tmp.delete()
+                return@withLock null
+            }
             dest
         }
     }

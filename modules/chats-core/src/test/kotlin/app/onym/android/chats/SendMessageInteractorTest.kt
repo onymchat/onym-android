@@ -758,6 +758,97 @@ class SendMessageInteractorTest {
 
     // ─── helpers ──────────────────────────────────────────────────
 
+    // ─── per-send server binding (onboarding unblockers) ─────────
+    //
+    // The base URL resolves once per send; the stamp and every upload
+    // of that send go through a client bound to the resolved URL, so
+    // a configuration change mid-send can't strand the descriptor.
+
+    @Test
+    fun sendImage_stampsResolvedUrl_andUploadsThroughBoundClient() = runTest {
+        val client = BindingRecordingBlossomClient()
+        val fixture = newFixture(
+            blossomClient = client,
+            resolveBlossomServerUrl = { "https://resolved.example" },
+        )
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.sendImage(groupIdHex, ByteArray(64) { it.toByte() })
+
+        assertEquals("https://resolved.example", result.imageAttachment?.server)
+        assertEquals(listOf("https://resolved.example"), client.boundUrls)
+        assertEquals(listOf("https://resolved.example"), client.uploadedVia)
+    }
+
+    @Test
+    fun sendVideo_resolvesOnce_bothBlobsUploadThroughSameBoundClient() = runTest {
+        // The resolver result changes after the first call — a
+        // mid-send configuration change. Poster + video must still
+        // land on the URL resolved at send start, which is also the
+        // one stamped into the attachment.
+        var calls = 0
+        val client = BindingRecordingBlossomClient()
+        val fixture = newFixture(
+            blossomClient = client,
+            resolveBlossomServerUrl = {
+                calls++
+                if (calls == 1) "https://first.example" else "https://changed.example"
+            },
+        )
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.sendVideo(groupIdHex, Uri.parse("content://test/v"))
+
+        assertEquals(1, calls)
+        assertEquals("https://first.example", result.videoAttachment?.server)
+        assertEquals("https://first.example", result.videoAttachment?.poster?.server)
+        assertEquals(
+            listOf("https://first.example", "https://first.example"),
+            client.uploadedVia,
+        )
+    }
+
+    @Test
+    fun sendVoice_stampsResolvedUrl() = runTest {
+        val client = BindingRecordingBlossomClient()
+        val fixture = newFixture(
+            blossomClient = client,
+            resolveBlossomServerUrl = { "https://resolved.example" },
+        )
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.sendVoice(
+            groupIdHex, ByteArray(64) { it.toByte() }, 2.5, listOf(1, 2, 3),
+        )
+
+        assertEquals("https://resolved.example", result.voiceAttachment?.server)
+        assertEquals(listOf("https://resolved.example"), client.uploadedVia)
+    }
+
+    @Test
+    fun retry_reuploadsToTheStampedServer_notTheCurrentConfiguration() = runTest {
+        val client = BindingRecordingBlossomClient(failUploads = true)
+        var resolved = "https://original.example"
+        val fixture = newFixture(
+            blossomClient = client,
+            resolveBlossomServerUrl = { resolved },
+        )
+        fixture.seedGroup(includePeer = true)
+
+        val failed = fixture.interactor.sendImage(groupIdHex, ByteArray(64) { it.toByte() })
+        assertEquals(MessageStatus.FAILED, failed.status)
+        assertEquals("https://original.example", failed.imageAttachment?.server)
+
+        // The configuration changes between the failed send and the
+        // retry; the descriptor recipients will read still points at
+        // the original server, so the re-upload must go there.
+        resolved = "https://switched.example"
+        client.failUploads = false
+        fixture.interactor.retry(groupIdHex, failed.id)
+
+        assertEquals("https://original.example", client.uploadedVia.last())
+    }
+
     /** Canned encoding so the test doesn't run Media3 transcoding: a
      *  poster (encoded bytes) + placeholder MP4 bytes. */
     private fun cannedVideoEncoded(mp4: ByteArray = ByteArray(64) { it.toByte() }) =
@@ -776,6 +867,7 @@ class SendMessageInteractorTest {
 
     private fun newFixture(
         blossomClient: BlossomClient = FakeBlossomClient(),
+        resolveBlossomServerUrl: suspend () -> String = { "https://blossom.test" },
         encodeImage: (ByteArray) -> ChatImageEncoder.Encoded? = { data ->
             ChatImageEncoder.Encoded(
                 jpeg = data,
@@ -822,7 +914,7 @@ class SendMessageInteractorTest {
             messageRepository = messageRepository,
             inboxTransport = transport,
             blossomClient = blossomClient,
-            blossomServerUrl = "https://blossom.test",
+            resolveBlossomServerUrl = resolveBlossomServerUrl,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_700_000_000_000L },
             idFactory = { UUID.randomUUID() },
@@ -897,6 +989,39 @@ class SendMessageInteractorTest {
         isPublishedOnChain = true,
         ownerIdentityId = activeId.value,
     )
+}
+
+/** Records which base URL each upload went through, via the
+ *  [BlossomClient.bound] contract: `bound(url)` returns a child whose
+ *  uploads log the pinned URL. Un-bound uploads log "live". */
+private class BindingRecordingBlossomClient(
+    var failUploads: Boolean = false,
+) : BlossomClient {
+    val boundUrls = mutableListOf<String>()
+    val uploadedVia = mutableListOf<String>()
+
+    override suspend fun upload(blob: ByteArray, mimeType: String): BlobDescriptor =
+        record("live", blob)
+
+    override suspend fun download(sha256: String): ByteArray =
+        throw IllegalStateException("not used")
+
+    override fun bound(serverUrl: String): BlossomClient {
+        boundUrls.add(serverUrl)
+        return object : BlossomClient {
+            override suspend fun upload(blob: ByteArray, mimeType: String): BlobDescriptor =
+                record(serverUrl, blob)
+            override suspend fun download(sha256: String): ByteArray =
+                throw IllegalStateException("not used")
+        }
+    }
+
+    private fun record(via: String, blob: ByteArray): BlobDescriptor {
+        if (failUploads) throw java.io.IOException("network down")
+        uploadedVia.add(via)
+        val sha = ChatImageCrypto.sha256Hex(blob)
+        return BlobDescriptor(sha256 = sha, url = "$via/$sha", size = blob.size)
+    }
 }
 
 /** In-memory Blossom store: `upload` keeps the ciphertext keyed by its

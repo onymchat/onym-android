@@ -73,6 +73,13 @@ class BlossomServerSettingsViewModel(
         viewModelScope.launch { repository.removeEndpoint(url) }
     }
 
+    /** Promote [url] to the head of the list — the FIRST endpoint is
+     *  the one uploads/downloads target, and the change applies to the
+     *  very next operation. */
+    fun tappedMakeActive(url: String) {
+        viewModelScope.launch { repository.makeActive(url) }
+    }
+
     fun tappedResetToDefault() {
         viewModelScope.launch { repository.resetToDefault() }
     }

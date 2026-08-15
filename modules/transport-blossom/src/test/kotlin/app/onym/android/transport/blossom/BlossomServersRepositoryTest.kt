@@ -75,6 +75,85 @@ class BlossomServersRepositoryTest {
         assertFalse(repo.snapshots.value.hasUserInteracted)
     }
 
+    // ─── make-active semantics (onboarding unblockers) ────────────
+    //
+    // Uploads/downloads target the FIRST configured server, so an
+    // append-only add left a consented catalog pick silently inert
+    // behind the seeded default. Mirrors iOS `addEndpoint(_:makeActive:)`
+    // / `makeActive(url:)`.
+
+    @Test
+    fun addEndpoint_makeActive_insertsNewEndpointAtHead() = runTest {
+        val repo = bootstrappedRepo()
+        val picked = BlossomServerEndpoint.custom("https://picked.example")
+
+        val added = repo.addEndpoint(picked, makeActive = true)
+
+        assertTrue(added)
+        assertEquals(
+            listOf("https://picked.example", "https://blossom.onym.app"),
+            repo.snapshots.value.endpoints.map { it.url },
+        )
+        assertTrue(repo.snapshots.value.hasUserInteracted)
+    }
+
+    @Test
+    fun addEndpoint_makeActive_movesExistingEndpointToHead() = runTest {
+        val repo = bootstrappedRepo()
+        val picked = BlossomServerEndpoint.custom("https://picked.example")
+        repo.addEndpoint(picked) // plain append: [official, picked]
+
+        val added = repo.addEndpoint(picked, makeActive = true)
+
+        assertFalse("existing URL is a move, not an insert", added)
+        assertEquals(
+            listOf("https://picked.example", "https://blossom.onym.app"),
+            repo.snapshots.value.endpoints.map { it.url },
+        )
+    }
+
+    @Test
+    fun addEndpoint_withoutMakeActive_stillAppends() = runTest {
+        val repo = bootstrappedRepo()
+        repo.addEndpoint(BlossomServerEndpoint.custom("https://appended.example"))
+        assertEquals(
+            listOf("https://blossom.onym.app", "https://appended.example"),
+            repo.snapshots.value.endpoints.map { it.url },
+        )
+    }
+
+    @Test
+    fun makeActive_promotesConfiguredEndpoint() = runTest {
+        val repo = bootstrappedRepo()
+        repo.addEndpoint(BlossomServerEndpoint.custom("https://second.example"))
+
+        repo.makeActive("https://second.example")
+
+        assertEquals(
+            listOf("https://second.example", "https://blossom.onym.app"),
+            repo.snapshots.value.endpoints.map { it.url },
+        )
+        assertTrue(repo.snapshots.value.hasUserInteracted)
+    }
+
+    @Test
+    fun makeActive_unknownUrl_isNoOp() = runTest {
+        val repo = bootstrappedRepo()
+        repo.makeActive("https://unknown.example")
+        assertEquals(
+            listOf("https://blossom.onym.app"),
+            repo.snapshots.value.endpoints.map { it.url },
+        )
+        assertFalse("no-op must not count as user interaction", repo.snapshots.value.hasUserInteracted)
+    }
+
+    @Test
+    fun makeActive_alreadyFirst_isNoOp_andDoesNotFlipInteraction() = runTest {
+        val repo = bootstrappedRepo()
+        repo.makeActive("https://blossom.onym.app")
+        assertFalse(repo.snapshots.value.hasUserInteracted)
+    }
+
     // NOTE (extraction): the `viewModel_validatesScheme` test moved out of
     // this file — its subject is `app.onym.android.settings
     // .BlossomServerSettingsViewModel.validate`, which lives in :app, and a

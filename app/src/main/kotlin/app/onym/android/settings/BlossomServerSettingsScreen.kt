@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -87,6 +88,7 @@ fun BlossomServerSettingsScreen(
                 ConfiguredCard(
                     endpoints = state.snapshot.endpoints,
                     onRemove = viewModel::tappedRemove,
+                    onMakeActive = viewModel::tappedMakeActive,
                 )
             }
             item {
@@ -131,6 +133,7 @@ fun BlossomServerSettingsScreen(
 private fun ConfiguredCard(
     endpoints: List<BlossomServerEndpoint>,
     onRemove: (String) -> Unit,
+    onMakeActive: (String) -> Unit,
 ) {
     SectionLabel(text = stringResource(R.string.endpoints_section_configured, endpoints.size))
     Column(
@@ -149,7 +152,15 @@ private fun ConfiguredCard(
             )
         } else {
             endpoints.forEachIndexed { idx, endpoint ->
-                EndpointRow(endpoint = endpoint, onRemove = { onRemove(endpoint.url) })
+                EndpointRow(
+                    endpoint = endpoint,
+                    // The FIRST endpoint is the one uploads/downloads
+                    // target — badge it; every other row gets the
+                    // promote affordance.
+                    isActive = idx == 0,
+                    onRemove = { onRemove(endpoint.url) },
+                    onMakeActive = { onMakeActive(endpoint.url) },
+                )
                 if (idx != endpoints.lastIndex) HorizontalDivider(thickness = 0.5.dp)
             }
         }
@@ -159,7 +170,9 @@ private fun ConfiguredCard(
 @Composable
 private fun EndpointRow(
     endpoint: BlossomServerEndpoint,
+    isActive: Boolean,
     onRemove: () -> Unit,
+    onMakeActive: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
@@ -170,6 +183,10 @@ private fun EndpointRow(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(endpoint.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                if (isActive) {
+                    Spacer(Modifier.size(6.dp))
+                    ActivePill(modifier = Modifier.testTag("blossom.configured.active.${endpoint.url}"))
+                }
                 if (endpoint.isDefault) {
                     Spacer(Modifier.size(6.dp))
                     DefaultPill()
@@ -180,6 +197,15 @@ private fun EndpointRow(
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (!isActive) {
+                TextButton(
+                    onClick = onMakeActive,
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.testTag("blossom.configured.make_active.${endpoint.url}"),
+                ) {
+                    Text(stringResource(R.string.blossom_make_active), fontSize = 12.sp)
+                }
+            }
         }
         IconButton(
             onClick = onRemove,
@@ -187,6 +213,23 @@ private fun EndpointRow(
         ) {
             Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.create_group_photo_remove))
         }
+    }
+}
+
+@Composable
+private fun ActivePill(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(
+            stringResource(R.string.blossom_active_pill),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.tertiary,
+        )
     }
 }
 

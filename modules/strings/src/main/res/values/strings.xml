@@ -597,7 +597,9 @@
   <string name="nostr_empty_configured">No relays configured.</string>
   <string name="nostr_reset_subtitle">Re-seed the configuration with the Onym Official relay.</string>
   <string name="blossom_relays_footnote">Blossom servers store your media blobs (images, video, voice). Use Onym\'s, a private deployment, or any Blossom server you trust. URLs must use the https:// (or http://) scheme.</string>
-  <string name="blossom_reboot_footnote">Changes apply on the next app launch. Uploads target the first configured server.</string>
+  <string name="blossom_reboot_footnote">Changes apply to the next upload or download. Uploads target the active (first) server.</string>
+  <string name="blossom_active_pill">ACTIVE</string>
+  <string name="blossom_make_active">Make Active</string>
   <string name="blossom_run_your_own_title">Run your own server</string>
   <string name="blossom_run_your_own_subtitle">Deploy a Blossom server with Docker</string>
   <string name="blossom_empty_configured">No servers configured. Media can\'t be sent or received.</string>

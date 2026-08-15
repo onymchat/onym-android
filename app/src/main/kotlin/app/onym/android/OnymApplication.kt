@@ -509,8 +509,10 @@ class OnymApplication : Application() {
 
         // User-configurable Blossom media servers (Settings → Transport →
         // Blossom Relays). Bootstrapped synchronously here (a single local
-        // DataStore read) so the blob client below can be built with the
-        // first configured server's URL. Changes apply on the next launch.
+        // DataStore read) so the very first upload/download already sees
+        // the persisted configuration. The blob client resolves its base
+        // URL per operation from this repository, so later changes apply
+        // to the next upload/download — no relaunch needed.
         val legacyBlossomServersFetcher: app.onym.android.transport.blossom.KnownBlossomServersFetcher? =
             if (UITestRegistry.enabled) UITestRegistry.blossomServersFetcher
             else app.onym.android.transport.blossom.GitHubReleasesKnownBlossomServersFetcher(httpClient = httpClient)
@@ -569,12 +571,18 @@ class OnymApplication : Application() {
                                 }
                             DiscoveryBackedKnownBlossomServersFetcher.SEAT_TYPE ->
                                 fields.firstEndpointUri(setOf("https"))?.let { url ->
+                                    // makeActive: uploads/downloads target
+                                    // the FIRST configured server, so a
+                                    // plain append behind the seeded
+                                    // default would leave the consented
+                                    // pick silently inert.
                                     blossomServersRepository.addEndpoint(
                                         app.onym.android.transport.blossom.BlossomServerEndpoint(
                                             url = url,
                                             name = name,
                                             isDefault = false,
                                         ),
+                                        makeActive = true,
                                     )
                                 }
                             // No moderation branch: the moderation
@@ -656,33 +664,52 @@ class OnymApplication : Application() {
                     OkHttpSepContractTransport(httpClient = relayerClient, endpointUrl = url)
                 }
             }
-        // Blossom media server for image messages + the lazy loader.
+        // Blossom media server for image messages + the lazy loaders.
         // Swapped for an in-memory store under the UI-test harness.
-        // The base URL is the first user-configured server (falls back to
-        // the Onym default if the list was explicitly cleared).
-        val blossomServerUrl = blossomServersRepository.currentEndpoints()
-            .firstOrNull()?.url ?: "https://blossom.onym.app"
+        // The base URL resolves PER OPERATION to the first
+        // user-configured server (falling back to the Onym default if
+        // the list was explicitly cleared), so a server change in
+        // Settings — or a pick made during onboarding — applies to the
+        // very next upload/download, no relaunch needed.
+        val resolveBlossomServerUrl: suspend () -> String = {
+            blossomServersRepository.currentEndpoints().firstOrNull()?.url
+                ?: DEFAULT_BLOSSOM_SERVER_URL
+        }
         val blossomClient: app.onym.android.transport.blossom.BlossomClient =
             if (UITestRegistry.enabled && UITestRegistry.blossomClient != null) {
                 UITestRegistry.blossomClient!!
             } else {
-                app.onym.android.transport.blossom.OkHttpBlossomClient(
-                    baseUrl = blossomServerUrl,
-                    httpClient = httpClient,
-                    signerProvider = nostrSignerProvider,
+                app.onym.android.transport.blossom.DynamicBaseUrlBlossomClient(
+                    resolveBaseUrl = resolveBlossomServerUrl,
+                    makeClient = { url ->
+                        app.onym.android.transport.blossom.OkHttpBlossomClient(
+                            baseUrl = url,
+                            httpClient = httpClient,
+                            signerProvider = nostrSignerProvider,
+                        )
+                    },
                 )
             }
+        // The user's configured endpoint URLs — the ONLY servers an
+        // attachment's peer-supplied `server` stamp may route a
+        // download to (BlossomServerStampPolicy has the rationale).
+        val allowedStampServers: suspend () -> List<String> = {
+            blossomServersRepository.currentEndpoints().map { it.url }
+        }
         val imageLoader = app.onym.android.chats.ChatImageLoader(
             blossomClient = blossomClient,
             cacheDir = java.io.File(applicationContext.cacheDir, "chat_images"),
+            allowedStampServers = allowedStampServers,
         )
         val videoLoader = app.onym.android.chats.ChatVideoLoader(
             blossomClient = blossomClient,
             cacheDir = java.io.File(applicationContext.cacheDir, "chat_videos"),
+            allowedStampServers = allowedStampServers,
         )
         val voiceLoader = app.onym.android.chats.ChatVoiceLoader(
             blossomClient = blossomClient,
             cacheDir = java.io.File(applicationContext.cacheDir, "chat_voice"),
+            allowedStampServers = allowedStampServers,
         )
         // Outbox: persists sealed media blobs so a failed send can be
         // resent (survives restart) by re-uploading the exact bytes.
@@ -1081,7 +1108,7 @@ class OnymApplication : Application() {
                     messageRepository = messageRepository,
                     inboxTransport = inboxTransport,
                     blossomClient = blossomClient,
-                    blossomServerUrl = blossomServerUrl,
+                    resolveBlossomServerUrl = resolveBlossomServerUrl,
                     encodeVideo = encodeVideo,
                     outbox = chatOutbox,
                     imageLoader = imageLoader,
@@ -1185,6 +1212,11 @@ class OnymApplication : Application() {
         resumedActivity?.get() as? FragmentActivity
             ?: error("No resumed FragmentActivity to host BiometricPrompt")
 }
+
+/** Fallback Blossom base URL when the configured list is empty (the
+ *  user explicitly cleared it). Matches the seeded
+ *  `BlossomServerEndpoint.onymOfficial` URL. */
+private const val DEFAULT_BLOSSOM_SERVER_URL = "https://blossom.onym.app"
 
 /**
  * A small solid-color JPEG for the UI-test video-send path's poster.

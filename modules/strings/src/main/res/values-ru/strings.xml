@@ -593,7 +593,9 @@
   <string name="nostr_empty_configured">Релеи не настроены.</string>
   <string name="nostr_reset_subtitle">Заново заполнить конфигурацию официальным релеем Onym.</string>
   <string name="blossom_relays_footnote">Серверы Blossom хранят ваши медиафайлы (изображения, видео, голос). Используйте сервер Onym, свой деплой или любой доверенный сервер Blossom. URL должны использовать схему https:// (или http://).</string>
-  <string name="blossom_reboot_footnote">Изменения применяются при следующем запуске приложения. Загрузки идут на первый настроенный сервер.</string>
+  <string name="blossom_reboot_footnote">Изменения применяются к следующей загрузке или скачиванию. Загрузки идут на активный (первый) сервер.</string>
+  <string name="blossom_active_pill">АКТИВНЫЙ</string>
+  <string name="blossom_make_active">Сделать активным</string>
   <string name="blossom_run_your_own_title">Запустите свой сервер</string>
   <string name="blossom_run_your_own_subtitle">Разверните сервер Blossom с помощью Docker</string>
   <string name="blossom_empty_configured">Серверы не настроены. Медиа нельзя отправлять и получать.</string>
