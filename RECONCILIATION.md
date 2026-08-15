@@ -102,6 +102,27 @@ needed, verified rather than assumed:
   registry seam upstream kept for future hub-loading tests is not
   yet used here.
 
+## Review-fix round 3 (d833baa, 2f580b4)
+
+No test changes needed; verified on device rather than assumed:
+
+- `UITestRegistry.debugActive` (enabled && BuildConfig.DEBUG) now
+  gates the security-weakening seams this suite uses
+  (`biometricAuthenticator`, `identitySecretStore`,
+  `discoveryClock`). Instrumented tests always run the debug build,
+  so all three stay live — the biometric-fake reveal leg passed on
+  device post-change. Release fails closed; nothing to adjust here.
+- Hub NavController hoist + closeHub() popping to the hub root: the
+  walks re-enter the hub between seats via the same pop path and
+  stayed green (seat VM clearing is invisible to the assertions —
+  each seat is visited once).
+- `identityReady` as a required AppDependencies parameter: this
+  suite never constructs AppDependencies directly (all wiring goes
+  through `OnymApplication.rebuildDependenciesForTest()`), so no
+  change.
+- The new `:onboarding` lint gate runs as part of `:onboarding:test`
+  builds — green over the contract suite.
+
 ## Lint-annotation commit (not authored by the tests branch)
 
 While this branch was being reconciled, a local commit ("Lint:
