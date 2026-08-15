@@ -96,52 +96,70 @@ internal fun LazyListScope.discoveryCatalogSection(
     if (entries.isEmpty()) return
     item { SettingsSectionLabel(stringResource(R.string.discovery_catalog_section)) }
     item {
-        SettingsCard {
-            entries.forEachIndexed { idx, entry ->
-                val record = consentByComponentId[entry.entry.componentId]
-                SettingsRow(
-                    leading = {
-                        SettingsTileBox(Icons.Filled.TravelExplore, SettingsTile.Purple)
-                    },
-                    title = ModuleConsentViewModel.shortComponentId(entry.entry.componentId),
-                    subtitle = stringResource(
-                        R.string.discovery_listed_by,
-                        entry.attribution.sourceLabel,
-                        ModuleConsentViewModel.disclosureText(
-                            entry.attribution.relationship.wireValue,
-                        ),
-                    ),
-                    showChevron = false,
-                    trailing = {
-                        // §4.2 disclosed warning/review status:
-                        // rendered distinctly — the field exists so a
-                        // warned entry never renders indistinguishable
-                        // from a clean one.
-                        entry.entry.status?.let { status ->
-                            DiscoveryChip(
-                                text = stringResource(
-                                    if (status.state == "warning") {
-                                        R.string.discovery_chip_status_warning
-                                    } else {
-                                        R.string.discovery_chip_status_review
-                                    },
-                                ),
-                                color = SettingsTile.Amber,
-                            )
-                        }
-                        consentedOffer(record)?.let { OfferBadge(it) }
-                        ConsentStateChip(entry = entry, record = record)
-                    },
-                    onClick = { onEntryClick(entry) },
-                    isLast = idx == entries.lastIndex,
-                    modifier = Modifier.testTag(
-                        "discovery.catalog.${entry.entry.seatType}.${entry.entry.componentId}",
-                    ),
-                )
-            }
-        }
+        DiscoveryCatalogCard(
+            entries = entries,
+            consentByComponentId = consentByComponentId,
+            onEntryClick = onEntryClick,
+        )
     }
     item { SettingsFootnote(stringResource(R.string.discovery_catalog_footnote)) }
+}
+
+/**
+ * The card itself, extracted from [discoveryCatalogSection] so
+ * non-lazy hosts (the onboarding step contents render inside a
+ * `verticalScroll` Column) can embed the exact same rows.
+ */
+@Composable
+internal fun DiscoveryCatalogCard(
+    entries: List<AttributedCatalogEntry>,
+    consentByComponentId: Map<String, PinnedConsentRecord>,
+    onEntryClick: (AttributedCatalogEntry) -> Unit,
+) {
+    SettingsCard {
+        entries.forEachIndexed { idx, entry ->
+            val record = consentByComponentId[entry.entry.componentId]
+            SettingsRow(
+                leading = {
+                    SettingsTileBox(Icons.Filled.TravelExplore, SettingsTile.Purple)
+                },
+                title = ModuleConsentViewModel.shortComponentId(entry.entry.componentId),
+                subtitle = stringResource(
+                    R.string.discovery_listed_by,
+                    entry.attribution.sourceLabel,
+                    ModuleConsentViewModel.disclosureText(
+                        entry.attribution.relationship.wireValue,
+                    ),
+                ),
+                showChevron = false,
+                trailing = {
+                    // §4.2 disclosed warning/review status:
+                    // rendered distinctly — the field exists so a
+                    // warned entry never renders indistinguishable
+                    // from a clean one.
+                    entry.entry.status?.let { status ->
+                        DiscoveryChip(
+                            text = stringResource(
+                                if (status.state == "warning") {
+                                    R.string.discovery_chip_status_warning
+                                } else {
+                                    R.string.discovery_chip_status_review
+                                },
+                            ),
+                            color = SettingsTile.Amber,
+                        )
+                    }
+                    consentedOffer(record)?.let { OfferBadge(it) }
+                    ConsentStateChip(entry = entry, record = record)
+                },
+                onClick = { onEntryClick(entry) },
+                isLast = idx == entries.lastIndex,
+                modifier = Modifier.testTag(
+                    "discovery.catalog.${entry.entry.seatType}.${entry.entry.componentId}",
+                ),
+            )
+        }
+    }
 }
 
 /** The offer accepted at consent time, resolved from the pinned

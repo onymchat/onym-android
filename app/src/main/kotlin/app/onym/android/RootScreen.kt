@@ -4,7 +4,9 @@ package app.onym.android
 // `app.onym.android.R` no longer carries R.string entries under
 // android.nonTransitiveRClass.
 import app.onym.android.strings.R
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forum
@@ -107,6 +109,28 @@ fun RootScreen(
      *  later back-navigation doesn't re-fire the same capability. */
     onPendingCapabilityHandled: () -> Unit = {},
 ) {
+    // First-launch onboarding gate (PR 3): while the completed/
+    // grandfathered decision is unresolved hold a blank frame (a
+    // single fast DataStore read — flashing the tabs at a user who is
+    // about to be onboarded is worse); when onboarding is due, the
+    // walk replaces the whole shell, full-screen and back-blocked,
+    // until `OnboardingFlow.complete` flips the decision to false.
+    val onboarding = dependencies.onboarding
+    if (onboarding != null) {
+        val shouldOnboard by onboarding.shouldOnboard.collectAsStateWithLifecycle()
+        when (shouldOnboard) {
+            null -> {
+                Box(androidx.compose.ui.Modifier.fillMaxSize())
+                return
+            }
+            true -> {
+                OnboardingHost(dependencies = dependencies, onboarding = onboarding)
+                return
+            }
+            false -> Unit // fall through to the tab shell
+        }
+    }
+
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
@@ -703,7 +727,7 @@ private fun moduleConsentRoute(
  * the consent flow re-runs [produceState]).
  */
 @Composable
-private fun rememberSeatCatalog(
+internal fun rememberSeatCatalog(
     dependencies: AppDependencies,
     seatType: String,
 ): Pair<

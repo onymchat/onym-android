@@ -138,6 +138,7 @@ dependencies {
     implementation(project(":chats-core"))
     implementation(project(":inbox"))
     implementation(project(":search"))
+    implementation(project(":onboarding"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -241,6 +242,8 @@ dependencies {
     // src/sharedTest to :chats-core's testFixtures — consumed by
     // ChatsViewModelTest / ChatThreadViewModelTest.
     testImplementation(testFixtures(project(":chats-core")))
+    // InMemoryOnboardingStore — consumed by the gate-resolution tests.
+    testImplementation(testFixtures(project(":onboarding")))
     // Android unit tests stub `org.json` (every method throws "not
     // mocked"). The transport layer's NostrEvent / subscriptionFilters
     // use JSONObject + JSONArray for canonical JSON, so tests need a

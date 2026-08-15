@@ -339,6 +339,20 @@ class IdentityRepository(
         }
     }
 
+    /**
+     * Whether identity storage carries user-produced state: any
+     * STORED identity with a user-set (non-blank) name, or more than
+     * one identity. The fresh-install auto-bootstrap identity is
+     * single and blank-named on disk (its summary display name is
+     * mapped to "Identity 1" — which is exactly why the onboarding
+     * grandfathering probe must read the raw stored names through
+     * this method, not [identities]).
+     */
+    suspend fun hasNamedOrMultipleIdentities(): Boolean = withContext(ioDispatcher) {
+        val ids = store.listIds()
+        ids.size > 1 || ids.any { id -> store.load(id)?.name?.isNotBlank() == true }
+    }
+
     /** Auto-fill blank display names with `Identity N`. */
     private fun resolveDisplayName(requested: String): String {
         val trimmed = requested.trim()
