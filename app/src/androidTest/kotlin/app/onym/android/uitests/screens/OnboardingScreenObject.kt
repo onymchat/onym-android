@@ -41,7 +41,7 @@ import kotlin.time.Duration.Companion.seconds
  *                `.confirm/.fingerprint/.pin/.added`; configured rows
  *                `.configured.<url>`; published notary rows
  *                `onboarding.services.groupIntegrity.published.<url>`
- *  - recovery:   `onboarding.recoveryPhrase.{status,reveal}`
+ *  - recovery:   `onboarding.recoveryPhrase.{status,reveal}` <!-- onym:allow-secret-read -->
  *  - done:       `onboarding.done.{summary,backup_nudge}`
  *
  * Same style as [DiscoverySettingsScreenObject]: thin tag wrappers +
@@ -351,12 +351,15 @@ class OnboardingScreenObject(private val rule: ComposeContentTestRule) {
     // ─── recoveryPhrase step content ──────────────────────────────
 
     fun recoveryStatus(): SemanticsNodeInteraction =
+        // onym:allow-secret-read — UI test tag literal, not a mnemonic read
         rule.onNodeWithTag("onboarding.recoveryPhrase.status")
 
     fun recoveryRevealButton(): SemanticsNodeInteraction =
+        // onym:allow-secret-read — UI test tag literal, not a mnemonic read
         rule.onNodeWithTag("onboarding.recoveryPhrase.reveal")
 
     fun awaitRecoveryStatus(): OnboardingScreenObject {
+        // onym:allow-secret-read — UI test tag literal, not a mnemonic read
         awaitTag("onboarding.recoveryPhrase.status")
         return this
     }
