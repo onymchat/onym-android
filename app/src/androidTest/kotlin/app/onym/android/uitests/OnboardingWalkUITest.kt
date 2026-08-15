@@ -1,5 +1,8 @@
 package app.onym.android.uitests
 
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -8,45 +11,49 @@ import app.onym.android.OnymApplication
 import app.onym.android.UITestRegistry
 import app.onym.android.discovery.DiscoverySource
 import app.onym.android.discovery.DiscoverySourcesConfiguration
+import app.onym.android.identity.IdentitySecretStore
 import app.onym.android.onboarding.OnboardingStep
 import app.onym.android.support.FakeDiscoveryFetcher
 import app.onym.android.support.InMemoryDiscoveryStore
 import app.onym.android.support.InMemoryOnboardingStore
 import app.onym.android.uitests.screens.OnboardingScreenObject
 import kotlinx.coroutines.runBlocking
+import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 import org.junit.runner.RunWith
+import java.security.Security
 import java.time.Instant
-import kotlin.time.Duration.Companion.seconds
 
 /**
- * Instrumented coverage of the onboarding GATE and frame against the
- * redesigned flow (welcome → identity → services → recoveryPhrase →
- * done). What lives here vs. elsewhere:
+ * End-to-end coverage of the redesigned first-launch onboarding walk:
  *
- *  LIVE in this class:
- *  - Back navigation revisits the prior step without restarting the
- *    walk (welcome ↔ identity).
- *  - A completed-at-boot flag bypasses the walk entirely.
- *  - The explicit harness contract: with NO onboarding slot
- *    registered, the gate resolves in UI-test mode and every
- *    pre-onboarding instrumented test boots straight to the tabs —
- *    the bypass the rest of the suite relies on.
+ *   welcome → identity → services → (moderation, reserved & disabled)
+ *   → recoveryPhrase → done
  *
- *  @Ignore'd here, replaced by the redesigned end-to-end walks in
- *  the follow-up tests PR (#216): the full walk (identity outcome
- *  gate, services hub, biometric-faked recovery reveal) and the
- *  skip path (only recoveryPhrase is skippable now). The old
- *  six-step wizard walks — per-step TOFU/seat screens and the
- *  discoveryConfirm loading state — are gone with the wizard; the
- *  directory surface lives inside the services hub.
+ * mirroring the iOS suite (`OnboardingUITests.swift`):
+ *
+ *  1. [smokeDefaultPathCompletesThenNeverAgain] — the shortest happy
+ *     path (recommended services kept, recovery deferred via "Remind
+ *     me later"), then a dependency rebuild + Activity recreation
+ *     proving the completion flag persisted and the walk never
+ *     re-presents.
+ *  2. [customServicesPathWalk] — the "Choose services myself" hub
+ *     touching every seat surface (directory TOFU pin, message
+ *     delivery module consent, seeded ACTIVE media row, group
+ *     integrity published add), then recovery through the REAL
+ *     reveal with the registry-faked biometric.
+ *  3. Back navigation revisits the prior step without restarting.
+ *  4. A completed-at-boot flag bypasses the walk entirely.
+ *  5. The explicit harness contract: with NO onboarding slot
+ *     registered, the gate resolves in UI-test mode and every
+ *     pre-onboarding instrumented test boots straight to the tabs —
+ *     the bypass the rest of the suite relies on.
  *
  * Determinism (the iOS #252 lessons, applied in-process):
  *  - the gate reads an [InMemoryOnboardingStore] and pins the
@@ -54,7 +61,13 @@ import kotlin.time.Duration.Companion.seconds
  *    on the emulator by earlier runs can never flip the decision;
  *  - [UITestRegistry.discoveryClock] injects a fixture-era instant
  *    (the signed fixtures expire — `snapshot-1.json` on 2026-09-12 —
- *    and these tests must not rot with them).
+ *    and these tests must not rot with them);
+ *  - identity flows use a per-suite wiped [IdentitySecretStore]
+ *    prefs file (the [IdentitiesUITest] pattern) — the identity
+ *    step's bootstrap must actually run, because its snapshot is
+ *    what unlocks the step's outcome-gated primary;
+ *  - [UITestRegistry.biometricAuthenticator] auto-passes the
+ *    recovery reveal's biometric gate.
  *
  * Coverage caveat: grandfathering ("existing user → no walk") has NO
  * instrumented coverage through the real probe wiring — with the
@@ -83,13 +96,9 @@ class OnboardingWalkUITest {
     @Target(AnnotationTarget.FUNCTION)
     annotation class AlreadyCompleted
 
-    /** Don't seed the unpinned default source — the discoveryConfirm
-     *  step must render its loading state, not a dead-end hero. */
-    @Retention(AnnotationRetention.RUNTIME)
-    @Target(AnnotationTarget.FUNCTION)
-    annotation class EmptyDiscoverySources
-
     private val onboardingStore = InMemoryOnboardingStore()
+
+    private lateinit var identityStore: IdentitySecretStore
 
     private val discoveryStore = InMemoryDiscoveryStore()
     private val discoveryFetcher = FakeDiscoveryFetcher().apply {
@@ -99,7 +108,8 @@ class OnboardingWalkUITest {
     }
 
     // Non-discovery seams, seeded exactly like DiscoverySettingsUITest
-    // so the rest of boot stays offline.
+    // so the rest of boot stays offline. The relayer fetcher's one
+    // endpoint is the groupIntegrity surface's published list.
     private val relayerStore = app.onym.android.support.InMemoryRelayerSelectionStore()
     private val relayerFetcher = app.onym.android.support.FakeKnownRelayersFetcher(
         app.onym.android.support.FakeKnownRelayersFetcher.Mode.Succeeds(
@@ -122,6 +132,15 @@ class OnboardingWalkUITest {
     @get:Rule(order = 0)
     val registrySetup = object : TestWatcher() {
         override fun starting(description: Description) {
+            if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
+                Security.insertProviderAt(BouncyCastleProvider(), 2)
+            }
+            val app = ApplicationProvider.getApplicationContext<OnymApplication>()
+            identityStore = IdentitySecretStore(
+                app,
+                prefsFileName = "app.onym.android.identity.onboardingwalkuitests",
+            ).also { it.wipeAll() }
+            UITestRegistry.identitySecretStore = identityStore
             UITestRegistry.relayerStore = relayerStore
             UITestRegistry.relayerFetcher = relayerFetcher
             UITestRegistry.contractsStore = contractsStore
@@ -129,24 +148,23 @@ class OnboardingWalkUITest {
             UITestRegistry.discoveryFetcher = discoveryFetcher
             UITestRegistry.discoveryStore = discoveryStore
             UITestRegistry.discoveryClock = { FIXTURE_ERA }
-            if (description.getAnnotation(EmptyDiscoverySources::class.java) == null) {
-                // The unpinned default source the discoveryConfirm
-                // hero reviews — the production seed is skipped under
-                // the harness, so the walk test provides its own.
-                runBlocking {
-                    discoveryStore.saveConfiguration(
-                        DiscoverySourcesConfiguration(
-                            sources = listOf(
-                                DiscoverySource(
-                                    url = MANIFEST_URL,
-                                    label = "Onym Discovery",
-                                    providerId = PROVIDER_ID,
-                                    pinnedOperatorKeyHex = null,
-                                ),
+            UITestRegistry.biometricAuthenticator = AlwaysSucceedsAuthenticator
+            // The seeded, unpinned default source the directory
+            // surface TOFU-reviews (production seeding is suppressed
+            // under the harness).
+            runBlocking {
+                discoveryStore.saveConfiguration(
+                    DiscoverySourcesConfiguration(
+                        sources = listOf(
+                            DiscoverySource(
+                                url = MANIFEST_URL,
+                                label = "Onym Discovery",
+                                providerId = PROVIDER_ID,
+                                pinnedOperatorKeyHex = null,
                             ),
                         ),
-                    )
-                }
+                    ),
+                )
             }
             if (description.getAnnotation(NoOnboardingSlot::class.java) == null) {
                 if (description.getAnnotation(AlreadyCompleted::class.java) != null) {
@@ -155,7 +173,6 @@ class OnboardingWalkUITest {
                 UITestRegistry.onboardingStore = onboardingStore
             }
             UITestRegistry.enabled = true
-            val app = ApplicationProvider.getApplicationContext<OnymApplication>()
             app.rebuildDependenciesForTest()
         }
 
@@ -167,37 +184,90 @@ class OnboardingWalkUITest {
     @get:Rule(order = 1)
     val composeRule = createAndroidComposeRule<MainActivity>()
 
-    // ─── (1) the full walk ────────────────────────────────────────
+    // ─── (1) default-path smoke + persistence ─────────────────────
 
+    /**
+     * The shortest happy path a real first launch takes: welcome →
+     * identity (wait out the bootstrap gate) → services (keep the
+     * preselected recommended setup) → recovery (primary locked,
+     * defer via "Remind me later") → done ("Start messaging") → tab
+     * shell. Then a dependency rebuild + Activity recreation proves
+     * the completion flag persisted and the walk never re-presents —
+     * the in-process equivalent of the iOS relaunch without
+     * `--reset-keychain`.
+     */
     @Test
-    @Ignore(
-        "Redesigned flow (welcome/identity/services/recoveryPhrase/done) — " +
-            "the new end-to-end walk (identity outcome gate, services hub, " +
-            "recovery reveal via the biometric fake) lands in the tests PR.",
-    )
-    fun walkAllSteps_completesToTabShell_andDoesNotReappear() {
+    fun smokeDefaultPathCompletesThenNeverAgain() {
         val onboarding = OnboardingScreenObject(composeRule)
 
-        // welcome → the only path forward is Continue (no Skip).
+        // Welcome: unskippable; the primary reads "Create my
+        // identity".
         onboarding.awaitStep(OnboardingStep.Welcome)
+        onboarding.assertNoSkip(OnboardingStep.Welcome)
+        onboarding.assertPrimaryLabel(OnboardingStep.Welcome, "Create my identity")
         onboarding.tapPrimary(OnboardingStep.Welcome)
 
-        // identity: Continue unlocks once the bootstrap yields a
-        // snapshot and the step content records its outcome.
+        // Identity: no skip; Continue is outcome-gated on the key
+        // bootstrap yielding a snapshot — wait for the unlock.
         onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.assertNoSkip(OnboardingStep.Identity)
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
         onboarding.tapPrimary(OnboardingStep.Identity)
 
-        // services: the recommended setup is preselected; Continue
-        // accepts it.
+        // Services: SEEDED — recommended card preselected, primary
+        // enabled immediately. Keep the defaults. Nothing is pinned
+        // yet (pin-on-accept runs on leaving the step forward).
         onboarding.awaitStep(OnboardingStep.Services)
+        onboarding.awaitRecommendedCard()
+        onboarding.primaryButton(OnboardingStep.Services).assertIsEnabled()
+        assertTrue(
+            discoveryStore.loadConfigurationBlocking().sources
+                .all { it.pinnedOperatorKeyHex == null },
+        )
         onboarding.tapPrimary(OnboardingStep.Services)
 
-        // recoveryPhrase: "Remind me later" is the deferral path.
+        // Moderation is RESERVED (flag off): the step must never
+        // present — the walk goes straight to recoveryPhrase.
         onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
+        onboarding.assertStepAbsent(OnboardingStep.Moderation)
+
+        // PIN-ON-ACCEPT: advancing past services with Recommended
+        // selected is the explicit confirm of the seeded directory —
+        // under the harness (fixture fetcher + pinned clock) the
+        // programmatic TOFU must SUCCEED and pin the operator key.
+        // Async in the host scope, so poll.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            discoveryStore.loadConfigurationBlocking().sources
+                .any { it.pinnedOperatorKeyHex == OPERATOR_KEY_HEX }
+        }
+
+        // Recovery: the primary ("I've written it down") stays
+        // disabled before any reveal; the deferral reads "Remind me
+        // later" — the only skip in the whole walk.
+        onboarding.awaitRecoveryStatus()
+        onboarding.assertPrimaryDisabled(OnboardingStep.RecoveryPhrase)
+        onboarding.assertPrimaryLabel(OnboardingStep.RecoveryPhrase, "I've written it down")
+        onboarding.skipButton(OnboardingStep.RecoveryPhrase)
+            .assertTextEquals("Remind me later")
         onboarding.tapSkip(OnboardingStep.RecoveryPhrase)
 
-        // done → Start messaging completes the walk.
+        // Skip → Done → Back must RE-LOCK the gate: the surviving
+        // Skipped outcome is a decision to defer, not proof of a
+        // reveal — "I've written it down" renders disabled again
+        // (the outcomeSatisfiesGate rule, pinned end-to-end).
         onboarding.awaitStep(OnboardingStep.Done)
+        onboarding.tapBack(OnboardingStep.Done)
+        onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
+        onboarding.assertPrimaryDisabled(OnboardingStep.RecoveryPhrase)
+        onboarding.tapSkip(OnboardingStep.RecoveryPhrase)
+
+        // Done: the summary's directory row reflects the pin honestly
+        // — fingerprint detail, no "Not confirmed" trailing — and
+        // "Start messaging" completes; the tab shell mounts.
+        onboarding.awaitStep(OnboardingStep.Done)
+        onboarding.awaitDoneSummary()
+        onboarding.assertDoneDirectoryPinned("ea4a 6c63 e29c 520a")
+        onboarding.assertPrimaryLabel(OnboardingStep.Done, "Start messaging")
         onboarding.tapPrimary(OnboardingStep.Done)
         onboarding.awaitTabShell()
         assertTrue("completion flag must be persisted", onboardingStore.completed)
@@ -205,7 +275,7 @@ class OnboardingWalkUITest {
 
         // Re-resolution: rebuild the dependency graph (fresh gate
         // decision off the same store) and recreate the Activity —
-        // onboarding must NOT reappear.
+        // the walk must NOT reappear.
         val app = ApplicationProvider.getApplicationContext<OnymApplication>()
         app.rebuildDependenciesForTest()
         composeRule.activityRule.scenario.recreate()
@@ -214,34 +284,150 @@ class OnboardingWalkUITest {
         assertEquals("re-resolution must not re-write the flag", 1, onboardingStore.markCount)
     }
 
-    // ─── (2) the skip path ────────────────────────────────────────
+    // ─── (2) the custom-services hub walk ─────────────────────────
 
+    /**
+     * The "Choose services myself" branch, touching every seat
+     * surface (the Android port of the iOS
+     * `test_onboardingWalk_customServicesPath_thenNeverAgain` minus
+     * the moderation leg, which is flag-off on Android):
+     *
+     *  - directory FIRST: TOFU-review the seeded source, check the
+     *    fixture fingerprint, pin — so the other seats' catalogs have
+     *    a pinned provider to draw from;
+     *  - messageDelivery: seeded relay in use (and per fan-out
+     *    semantics showing NO PRIMARY/BACKUP role chips), then
+     *    consent to the fixture courier through the existing
+     *    ModuleConsentScreen;
+     *  - mediaDelivery: the seeded Blossom endpoint renders ACTIVE —
+     *    keep it;
+     *  - groupIntegrity: auto-populate suppressed, add the testnet
+     *    relayer from the published list; the footnote under the
+     *    default RANDOM strategy names the random pick (and no
+     *    PRIMARY chip renders);
+     *
+     * then hub Done, moderation absent, recovery via the REAL reveal
+     * (biometric faked through the registry slot), and the done
+     * summary.
+     */
     @Test
-    @Ignore(
-        "Redesigned flow — only recoveryPhrase is skippable now; the " +
-            "new skip-path walk lands in the tests PR.",
-    )
-    fun skipPath_everySkippableStep_stillCompletes() {
+    fun customServicesPathWalk() {
         val onboarding = OnboardingScreenObject(composeRule)
 
         onboarding.awaitStep(OnboardingStep.Welcome)
         onboarding.tapPrimary(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
         onboarding.tapPrimary(OnboardingStep.Identity)
-        onboarding.awaitStep(OnboardingStep.Services)
-        onboarding.tapPrimary(OnboardingStep.Services)
-        onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
-        onboarding.tapSkip(OnboardingStep.RecoveryPhrase)
 
-        onboarding.awaitStep(OnboardingStep.Done)
-        onboarding.tapPrimary(OnboardingStep.Done)
-        onboarding.awaitTabShell()
-        assertTrue(onboardingStore.completed)
-        // Skipping trusted nothing: the seeded source stays unpinned.
+        // Services → the hub.
+        onboarding.awaitStep(OnboardingStep.Services)
+        onboarding.awaitRecommendedCard()
+        onboarding.tapCustomCard()
+        onboarding.awaitHub()
+
+        // Hub → directory: TOFU pin the seeded source.
+        onboarding.openHubRow("directory")
+        onboarding.awaitDirectoryConfirm()
+        onboarding.tapDirectoryConfirm()
+        onboarding.awaitDirectoryFingerprint()
+        // First 16 hex chars of the fixture operator key, grouped in
+        // 4s — DiscoverySource.fingerprint(OPERATOR_KEY_HEX).
+        onboarding.assertDirectoryFingerprint("ea4a 6c63 e29c 520a")
+        // Nothing pinned before the confirm (the TOFU contract).
         assertTrue(
             discoveryStore.loadConfigurationBlocking().sources
                 .all { it.pinnedOperatorKeyHex == null },
         )
+        onboarding.tapDirectoryPin()
+        onboarding.awaitDirectoryAdded()
+        assertEquals(
+            OPERATOR_KEY_HEX,
+            discoveryStore.loadConfigurationBlocking().sources
+                .single().pinnedOperatorKeyHex,
+        )
+        onboarding.tapSeatBack("directory")
+        onboarding.awaitHub()
+
+        // Hub → messageDelivery: seeded relay in use; fan-out means
+        // no per-row role chips. Consent to the fixture courier
+        // through the same sheet Settings uses (courier-free-v1 is
+        // the free offer).
+        onboarding.openHubRow("messageDelivery")
+        onboarding.awaitConfiguredRow("messageDelivery", NOSTR_SEED_URL)
+        onboarding.assertNoRoleChips("messageDelivery", NOSTR_SEED_URL)
+        onboarding.awaitMessageCatalogRow(COURIER_COMPONENT_ID)
+        onboarding.openMessageCatalogRow(COURIER_COMPONENT_ID)
+        onboarding.awaitConsentSheet()
+        onboarding.tapConsentOffer(COURIER_OFFER_ID)
+        onboarding.awaitConsentAcceptEnabled()
+        onboarding.tapConsentAccept()
+        onboarding.awaitConsentDone()
+        onboarding.tapConsentDismiss()
+        onboarding.tapSeatBack("messageDelivery")
+        onboarding.awaitHub()
+
+        // Hub → mediaDelivery: the seeded Blossom endpoint is the
+        // ACTIVE pick (first row only — uploads target it); keep it.
+        onboarding.openHubRow("mediaDelivery")
+        onboarding.awaitConfiguredRow("mediaDelivery", BLOSSOM_SEED_URL)
+        onboarding.assertActiveChip("mediaDelivery", BLOSSOM_SEED_URL)
+        onboarding.tapSeatBack("mediaDelivery")
+        onboarding.awaitHub()
+
+        // Hub → groupIntegrity: configuration starts empty
+        // (auto-populate suppressed during onboarding); add the
+        // testnet relayer from the published list. Under the default
+        // RANDOM strategy the footnote names the random pick and the
+        // configured row carries no PRIMARY chip.
+        onboarding.openHubRow("groupIntegrity")
+        onboarding.awaitNotaryPublishedRow(RELAYER_URL)
+        onboarding.tapNotaryAdd(RELAYER_URL)
+        onboarding.awaitConfiguredRow("groupIntegrity", RELAYER_URL)
+        onboarding.assertNoRoleChips("groupIntegrity", RELAYER_URL)
+        onboarding.assertNotaryFootnoteMentionsRandom()
+        onboarding.tapSeatBack("groupIntegrity")
+        onboarding.awaitHub()
+
+        // Close the hub — three seats configured by hand.
+        onboarding.tapHubDone()
+        onboarding.awaitStep(OnboardingStep.Services)
+        onboarding.tapPrimary(OnboardingStep.Services)
+
+        // Moderation absent (reserved, flag off).
+        onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
+        onboarding.assertStepAbsent(OnboardingStep.Moderation)
+
+        // Recovery through the REAL reveal: the primary is locked,
+        // the reveal affordance opens RecoveryPhraseBackupScreen with
+        // the faked biometric auto-passing; revealing the words is
+        // what unlocks "I've written it down" (the verify quiz has
+        // its own coverage in RecoveryPhraseBackupScreenTest).
+        onboarding.awaitRecoveryStatus()
+        onboarding.assertPrimaryDisabled(OnboardingStep.RecoveryPhrase)
+        onboarding.recoveryRevealButton().assertIsDisplayed()
+        onboarding.tapRecoveryReveal()
+        onboarding.awaitBackupIntro()
+        onboarding.awaitBackupIntroContinueEnabled()
+        onboarding.tapBackupIntroContinue()
+        onboarding.awaitBackupRevealCard()
+        onboarding.tapBackupRevealCard()
+        // Leave the backup surface without the quiz — the reveal
+        // alone is the step's outcome.
+        onboarding.tapBackupBack()
+        onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
+        onboarding.awaitPrimaryEnabled(OnboardingStep.RecoveryPhrase)
+        onboarding.tapPrimary(OnboardingStep.RecoveryPhrase)
+
+        // Done: summary card renders alongside the frame; the
+        // hub-pinned directory shows its fingerprint (never "Not
+        // confirmed").
+        onboarding.awaitStep(OnboardingStep.Done)
+        onboarding.awaitDoneSummary()
+        onboarding.assertDoneDirectoryPinned("ea4a 6c63 e29c 520a")
+        onboarding.tapPrimary(OnboardingStep.Done)
+        onboarding.awaitTabShell()
+        assertTrue(onboardingStore.completed)
     }
 
     // ─── (3) back navigation ──────────────────────────────────────
@@ -262,12 +448,7 @@ class OnboardingWalkUITest {
         assertFalse("the walk must not have completed", onboardingStore.completed)
     }
 
-    // (4) The old pre-bootstrap directory-loading test is gone: the
-    // directory surface moved into the services hub, and the
-    // redesigned hub walks live in the follow-up tests PR. The
-    // @EmptyDiscoverySources seam stays for those walks.
-
-    // ─── (5) completed flag at boot ───────────────────────────────
+    // ─── (4) completed flag at boot ───────────────────────────────
 
     @Test
     @AlreadyCompleted
@@ -277,7 +458,7 @@ class OnboardingWalkUITest {
         onboarding.assertNotShown()
     }
 
-    // ─── (6) explicit harness bypass contract ─────────────────────
+    // ─── (5) explicit harness bypass contract ─────────────────────
 
     @Test
     @NoOnboardingSlot
@@ -297,13 +478,28 @@ class OnboardingWalkUITest {
         const val SNAPSHOT_URL = "https://discovery.onym.app/catalogs/public-all-seats.json"
         const val ENTRY_MANIFEST_URL = "https://discovery.onym.app/manifests/onym-courier.json"
         const val PROVIDER_ID = "onym:component:onym-discovery"
+        const val COURIER_COMPONENT_ID = "onym:component:onym-courier"
+        const val COURIER_OFFER_ID = "courier-free-v1"
         const val OPERATOR_KEY_HEX =
             "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
         const val RELAYER_URL = "https://relayer-testnet.onym.chat"
 
+        /** The hardcoded transport seeds the seat surfaces render
+         *  when the published-feed fetchers are left null
+         *  (no-network contract). */
+        const val NOSTR_SEED_URL = "wss://nostr.onym.app"
+        const val BLOSSOM_SEED_URL = "https://blossom.onym.app"
+
         /** Inside the fixtures' validity window (snapshot expires
          *  2026-09-12) — frozen so the suite can't rot. */
         val FIXTURE_ERA: Instant = Instant.parse("2026-08-14T00:00:00Z")
+
+        /** Auto-passing fake for [UITestRegistry.biometricAuthenticator]
+         *  — the recovery reveal's biometric gate. */
+        val AlwaysSucceedsAuthenticator =
+            object : app.onym.android.recovery.BiometricAuthenticator {
+                override suspend fun authenticate(title: String, subtitle: String?) = Unit
+            }
 
         fun fixture(name: String): ByteArray =
             checkNotNull(
