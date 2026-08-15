@@ -79,17 +79,22 @@ class BlossomServerStampPolicyTest {
     }
 
     @Test
-    fun originComparison_normalizesCaseAndIgnoresPath() {
+    fun matchedStamp_bindsTheConfiguredUrl_neverTheRawPeerString() {
+        // A stamp carrying a path/query still matches on origin, but
+        // the client is bound to the CONFIGURED endpoint URL — the
+        // peer string would otherwise ride into every GET as
+        // `<base>/some/path/<sha>` on the user's own server.
         val client = BlossomServerStampPolicy.client(
-            stamp = "HTTPS://Mine.Example/some/path",
+            stamp = "HTTPS://Mine.Example/some/path?q=1",
             allowedServers = listOf("https://mine.example"),
             live = live,
         )
         assertSame(live.boundResult, client)
+        assertEquals(listOf("https://mine.example"), live.boundCalls)
     }
 
     @Test
-    fun originComparison_distinguishesSchemeAndPort() {
+    fun originComparison_distinguishesSchemeAndNonDefaultPort() {
         // http stamp vs https allowlist entry: different origin.
         assertSame(
             live,
@@ -99,7 +104,7 @@ class BlossomServerStampPolicyTest {
                 live = live,
             ),
         )
-        // Explicit port vs none: different origin.
+        // Non-default explicit port vs none: different origin.
         assertSame(
             live,
             BlossomServerStampPolicy.client(
@@ -108,7 +113,7 @@ class BlossomServerStampPolicyTest {
                 live = live,
             ),
         )
-        // Same explicit port matches.
+        // Same explicit port matches — bound to the configured URL.
         assertSame(
             live.boundResult,
             BlossomServerStampPolicy.client(
@@ -117,6 +122,49 @@ class BlossomServerStampPolicyTest {
                 live = live,
             ),
         )
+        assertEquals(listOf("https://mine.example:8443"), live.boundCalls)
+    }
+
+    @Test
+    fun originComparison_foldsDefaultPorts_bothDirections() {
+        // Explicit :443 stamp vs portless allowlist entry.
+        assertSame(
+            live.boundResult,
+            BlossomServerStampPolicy.client(
+                stamp = "https://mine.example:443",
+                allowedServers = listOf("https://mine.example"),
+                live = live,
+            ),
+        )
+        assertEquals(listOf("https://mine.example"), live.boundCalls)
+
+        // Portless stamp vs explicit :443 allowlist entry — binds the
+        // configured URL as the user typed it.
+        live.boundCalls.clear()
+        assertSame(
+            live.boundResult,
+            BlossomServerStampPolicy.client(
+                stamp = "https://mine.example",
+                allowedServers = listOf("https://mine.example:443"),
+                live = live,
+            ),
+        )
+        assertEquals(listOf("https://mine.example:443"), live.boundCalls)
+    }
+
+    @Test
+    fun httpStamp_neverHonored_evenAgainstOwnHttpEndpoint() {
+        // Two trust levels: the user's own http endpoint (local dev)
+        // is a legitimate live/upload target, but a PEER's cleartext
+        // stamp is never honored — the peer string clears a higher
+        // bar. Downloads for such rows go through live resolution.
+        val client = BlossomServerStampPolicy.client(
+            stamp = "http://localhost:3000",
+            allowedServers = listOf("http://localhost:3000"),
+            live = live,
+        )
+        assertSame(live, client)
+        assertEquals(emptyList<String>(), live.boundCalls)
     }
 
     @Test
@@ -138,6 +186,11 @@ class BlossomServerStampPolicyTest {
     fun originKey_shapes() {
         assertEquals("https://mine.example", BlossomServerStampPolicy.originKey("https://mine.example/path"))
         assertEquals("https://mine.example:8443", BlossomServerStampPolicy.originKey("https://mine.example:8443"))
+        // Default ports fold, both schemes.
+        assertEquals("https://mine.example", BlossomServerStampPolicy.originKey("https://mine.example:443"))
+        assertEquals("http://mine.example", BlossomServerStampPolicy.originKey("http://mine.example:80"))
+        // Non-default ports survive.
+        assertEquals("http://mine.example:8080", BlossomServerStampPolicy.originKey("http://mine.example:8080"))
         assertNull(BlossomServerStampPolicy.originKey("blossom.example"))
         assertNull(BlossomServerStampPolicy.originKey("https://"))
         assertNull(BlossomServerStampPolicy.originKey(""))

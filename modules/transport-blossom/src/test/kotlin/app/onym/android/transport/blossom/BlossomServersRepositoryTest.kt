@@ -113,6 +113,54 @@ class BlossomServersRepositoryTest {
     }
 
     @Test
+    fun addEndpoint_makeActive_onExistingUrl_movesTheStoredRow_preservingIdentity() = runTest {
+        // Consent-apply on a catalog seat whose URL equals the seeded
+        // default: the STORED row (seed name + DEFAULT badge) moves to
+        // the head; the passed endpoint's catalog identity must not
+        // replace it.
+        val repo = bootstrappedRepo()
+        repo.addEndpoint(BlossomServerEndpoint.custom("https://picked.example"), makeActive = true)
+        // Head is now picked; the seeded default sits behind it.
+
+        val added = repo.addEndpoint(
+            BlossomServerEndpoint(
+                url = "https://blossom.onym.app",
+                name = "Catalog Blob Module",
+                isDefault = false,
+            ),
+            makeActive = true,
+        )
+
+        assertFalse(added)
+        val head = repo.snapshots.value.endpoints.first()
+        assertEquals("https://blossom.onym.app", head.url)
+        assertEquals("Onym Official", head.name)
+        assertTrue("seed identity (DEFAULT badge) must survive the move", head.isDefault)
+    }
+
+    @Test
+    fun addEndpoint_makeActive_alreadyFirst_isNoOp_andDoesNotFlipInteraction() = runTest {
+        // Aligned with makeActive(): "nothing moved" doesn't count as
+        // user interaction, so the first-launch seed stays re-seedable.
+        val repo = bootstrappedRepo()
+
+        val added = repo.addEndpoint(
+            BlossomServerEndpoint(
+                url = "https://blossom.onym.app",
+                name = "Catalog Blob Module",
+                isDefault = false,
+            ),
+            makeActive = true,
+        )
+
+        assertFalse(added)
+        val head = repo.snapshots.value.endpoints.first()
+        assertEquals("Onym Official", head.name)
+        assertTrue(head.isDefault)
+        assertFalse(repo.snapshots.value.hasUserInteracted)
+    }
+
+    @Test
     fun addEndpoint_withoutMakeActive_stillAppends() = runTest {
         val repo = bootstrappedRepo()
         repo.addEndpoint(BlossomServerEndpoint.custom("https://appended.example"))
