@@ -131,6 +131,22 @@ private val Context.consentDataStore: DataStore<Preferences> by preferencesDataS
 )
 
 /**
+ * DataStore Preferences for the onboarding completion flag
+ * (`onboarding.completed`). Its own file per the one-domain-one-blob
+ * convention — the test reset path can wipe onboarding without
+ * touching any transport configuration. A corrupt file is replaced
+ * with empty prefs (flag reads false → the gate falls back through
+ * the grandfathering probe) instead of throwing IOException into the
+ * gate block.
+ */
+private val Context.onboardingDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.onboarding_prefs",
+    corruptionHandler = androidx.datastore.core.handlers.ReplaceFileCorruptionHandler {
+        androidx.datastore.preferences.core.emptyPreferences()
+    },
+)
+
+/**
  * Composition root. Two responsibilities:
  *
  *  - Register the BouncyCastle JCE provider once at process start
@@ -278,6 +294,18 @@ class OnymApplication : Application() {
                 app.onym.android.discovery.DiscoveryRepository(
                     store = discoveryStore,
                     fetcher = discoveryFetcher,
+                    // The Onym-operated default source, UNPINNED —
+                    // refresh skips it until the user confirms its
+                    // operator-key fingerprint (onboarding's
+                    // discovery-confirm step, or Settings →
+                    // Discovery). Not seeded under the UI harness so
+                    // the discovery UI tests keep their exact source
+                    // fixtures.
+                    defaultSources = if (UITestRegistry.enabled) {
+                        emptyList()
+                    } else {
+                        listOf(app.onym.android.discovery.DiscoverySource.onymDefault)
+                    },
                 )
             } else {
                 null
@@ -319,6 +347,23 @@ class OnymApplication : Application() {
                 dataStore = applicationContext.discoveryDataStore,
             )
 
+        // Onboarding gate state (PR 3). The completion flag lives in
+        // its own DataStore file; the pending decision resolves in the
+        // gate block below (after the transport stores it probes are
+        // constructed) and RootScreen collects it.
+        val onboardingStore: app.onym.android.onboarding.OnboardingStore =
+            app.onym.android.onboarding.DataStorePreferencesOnboardingStore(
+                dataStore = applicationContext.onboardingDataStore,
+            )
+        val onboardingPending =
+            kotlinx.coroutines.flow.MutableStateFlow<Boolean?>(null)
+        // Relayer auto-populate policy (#211 seam): suppressed until
+        // the gate resolves to "no onboarding" or the walk completes,
+        // so a first-launch fetch can't install the whole published
+        // list before the notary step offers the choice. Deferred, not
+        // cancelled — the fetched list still lands in knownRelayers.
+        val relayerAutoPopulateAllowed = java.util.concurrent.atomic.AtomicBoolean(false)
+
         // Relayer wiring (PR #17). Bootstrap loads cached + selection
         // from disk; start() fires the network fetch. Both run on the
         // application scope so launch never blocks on the network.
@@ -349,11 +394,13 @@ class OnymApplication : Application() {
             store = relayerStore,
             fetcher = relayerFetcher,
             errorMessageResolver = relayerFetchErrorMessageResolver(applicationContext.resources),
+            autoPopulatePolicy = { relayerAutoPopulateAllowed.get() },
         )
-        applicationScope.launch {
-            relayerRepository.bootstrap()
-            relayerRepository.start()
-        }
+        // bootstrap() + start() run in the onboarding-gate block below:
+        // the grandfathering probe must read the persisted relayer
+        // configuration BEFORE the first fetch (auto-populate flips its
+        // hasUserInteracted bit, which would misread a fresh user as
+        // existing), so the two are sequenced in one launch.
 
         // Contracts/anchors wiring — same shape as the relayer block.
         // Separate DataStore file so the two domains' storage layers
@@ -494,10 +541,13 @@ class OnymApplication : Application() {
             fallback = legacyNostrRelaysFetcher,
             catalog = discoveryCatalog,
         )
+        // Held as a local (not inlined) so the onboarding gate's
+        // grandfathering probe below can read the persisted config.
+        val nostrRelaysStore = app.onym.android.transport.nostr.DataStoreNostrRelaysSelectionStore(
+            dataStore = applicationContext.nostrRelaysDataStore,
+        )
         val nostrRelaysRepository = app.onym.android.transport.nostr.NostrRelaysRepository(
-            store = app.onym.android.transport.nostr.DataStoreNostrRelaysSelectionStore(
-                dataStore = applicationContext.nostrRelaysDataStore,
-            ),
+            store = nostrRelaysStore,
             fetcher = nostrRelaysFetcher,
         )
         // Disk hydrate (seed on first launch) then refresh from GitHub in
@@ -531,6 +581,53 @@ class OnymApplication : Application() {
         kotlinx.coroutines.runBlocking { blossomServersRepository.bootstrap() }
         // Background-refresh the published default for the next launch.
         applicationScope.launch { blossomServersRepository.start() }
+
+        // Onboarding gate resolution (PR 3). One launch, strictly
+        // ordered: hydrate the relayer config from disk, resolve the
+        // completed-flag + grandfathering decision, arm (or keep
+        // suppressed) the relayer auto-populate policy, and only THEN
+        // fire the relayer's first fetch — auto-populate flips the
+        // relayer's hasUserInteracted bit, so letting the fetch race
+        // the probe would misread a fresh user as existing. Under the
+        // UI-test harness the gate resolves to false immediately
+        // (existing instrumented tests never see the walk; PR 4 adds
+        // registry slots to drive it deliberately) and the policy
+        // arms, preserving current behavior exactly.
+        applicationScope.launch {
+            runCatching { relayerRepository.bootstrap() }
+            // Fail-open resolution (resolvePending): any storage error
+            // — corrupt prefs, a throwing probe — resolves to "no
+            // onboarding" rather than crashing the launch or leaving
+            // the decision null (which RootScreen renders as a
+            // permanent blank frame). Worst case a fresh user skips
+            // the walk; every surface still works via defaults.
+            val pending = OnboardingGateProbe.resolvePending(
+                uiTestMode = UITestRegistry.enabled,
+                store = onboardingStore,
+                isExistingUser = {
+                    OnboardingGateProbe.isExistingUser(
+                        relayer = relayerRepository.snapshots.value.configuration,
+                        nostr = nostrRelaysStore.load(),
+                        blossom = blossomServersRepository.snapshots.value,
+                        // Raw stored names — the fresh-install
+                        // auto-bootstrap identity is single and
+                        // blank-named, so it doesn't count.
+                        identityInteracted = runCatching {
+                            identityRepository.hasNamedOrMultipleIdentities()
+                        }.getOrDefault(false),
+                    )
+                },
+            )
+            try {
+                relayerAutoPopulateAllowed.set(!pending)
+                onboardingPending.value = pending
+            } finally {
+                // The relayer fetch must fire regardless of how the
+                // gate resolved — a launch where relayers never fetch
+                // is a strictly worse failure than a skipped walk.
+                relayerRepository.start()
+            }
+        }
 
         // Discovery settings UI (PR A4). One nullable bundle: when
         // the repository is absent (UI-test harness without discovery
@@ -1031,6 +1128,25 @@ class OnymApplication : Application() {
         )
         pendingInvitesViewModel.start()
 
+        // Onboarding bundle (PR 3): the gate decision RootScreen
+        // collects, the flow factory, and the step contents' seat
+        // hooks. Completion re-arms the auto-populate policy and
+        // refreshes the relayer list so a skipped notary step gets
+        // the published defaults now instead of at the next launch
+        // (harmless after an explicit pick — hasUserInteracted is
+        // set, so the refresh only updates the known list).
+        val onboardingUi = OnboardingUiDependencies(
+            shouldOnboard = onboardingPending,
+            makeFlow = { app.onym.android.onboarding.OnboardingFlow(store = onboardingStore) },
+            onCompleted = {
+                relayerAutoPopulateAllowed.set(true)
+                onboardingPending.value = false
+                applicationScope.launch { runCatching { relayerRepository.refresh() } }
+            },
+            relayerState = relayerRepository.snapshots,
+            addRelayerEndpoint = relayerRepository::addEndpoint,
+        )
+
         return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
@@ -1181,6 +1297,7 @@ class OnymApplication : Application() {
             blossomServersFlow = blossomServersRepository.snapshots,
             clearAllMessages = { messageRepository.clearAll() },
             discovery = discoveryUi,
+            onboarding = onboardingUi,
             makeJoinViewModel = { capability ->
                 // PR 92: prefill the display-name field from the
                 // active identity's alias. Empty when the identity

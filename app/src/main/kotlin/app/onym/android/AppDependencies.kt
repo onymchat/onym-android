@@ -100,6 +100,49 @@ class AppDependencies(
      *  constructed (UI-test harness without discovery fakes) — every
      *  consumer renders as before discovery existed. */
     val discovery: DiscoveryUiDependencies? = null,
+    /** First-launch onboarding gate + flow factory + the step
+     *  contents' seat hooks. Always constructed in production; under
+     *  the UI-test harness the gate resolves to `false` immediately
+     *  so existing instrumented tests never see the walk (PR 4 adds
+     *  registry slots to drive it deliberately). */
+    val onboarding: OnboardingUiDependencies? = null,
+)
+
+/**
+ * Everything [RootScreen]'s onboarding gate and the onboarding step
+ * contents need, bundled so [AppDependencies] carries one value.
+ *
+ * The gate decision ([shouldOnboard]) resolves asynchronously at app
+ * start — the grandfathering probe reads the persisted transport
+ * configurations — and is `null` until resolved so RootScreen can
+ * hold a blank frame instead of flashing the tabs at a user who is
+ * about to be onboarded (or vice versa).
+ */
+class OnboardingUiDependencies(
+    /** null → still resolving; true → present the walk; false →
+     *  straight to the tabs. Flips to false on completion. */
+    val shouldOnboard: kotlinx.coroutines.flow.StateFlow<Boolean?>,
+    /** Fresh state machine per presentation. Partial progress is
+     *  deliberately in-memory only (see OnboardingFlow's KDoc). */
+    val makeFlow: () -> app.onym.android.onboarding.OnboardingFlow,
+    /** Invoked once when the flow publishes `completed`: re-enables
+     *  the relayer auto-populate policy (suppressed for the whole
+     *  walk so the notary step's choice isn't preempted), kicks a
+     *  relayer refresh so a skipped notary step gets the published
+     *  defaults now rather than at next launch, and flips
+     *  [shouldOnboard] to false so RootScreen proceeds to the tabs.
+     *  The completion flag itself was already persisted by
+     *  `OnboardingFlow.complete`. */
+    val onCompleted: () -> Unit,
+    /** Live relayer state — the notary step lists the published
+     *  relayers ([app.onym.android.chain.RelayerState.knownRelayers],
+     *  fetched even while auto-populate is suppressed) and shows
+     *  which are already configured. */
+    val relayerState: kotlinx.coroutines.flow.StateFlow<app.onym.android.chain.RelayerState>,
+    /** Legacy add-without-consent for the notary step's published
+     *  list — the same `RelayerRepository.addEndpoint` the Settings
+     *  picker uses. */
+    val addRelayerEndpoint: suspend (app.onym.android.chain.RelayerEndpoint) -> Unit,
 )
 
 /**

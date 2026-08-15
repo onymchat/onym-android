@@ -56,6 +56,26 @@ data class DiscoverySource(
          */
         fun fingerprint(keyHex: String): String =
             keyHex.take(16).chunked(4).joinToString(" ")
+
+        /**
+         * The Onym-operated default provider, passed as a shipped
+         * default to [DiscoveryRepository] so first-run (and existing)
+         * installs list it. Ships UNPINNED **by design**: pinning is
+         * the user's own trust-on-first-use act, so even the bundled
+         * default goes through the same TOFU confirmation as any
+         * other source — refresh skips unpinned sources, and nothing
+         * this provider publishes is trusted until the user confirms
+         * its operator-key fingerprint (the onboarding
+         * discovery-confirm step, or Settings → Discovery). Never
+         * pre-pin a key here. Mirrors onym-ios
+         * `DiscoverySource.onymDefault`.
+         */
+        val onymDefault = DiscoverySource(
+            url = "https://discovery.onym.app/manifest.json",
+            label = "Onym Discovery",
+            providerId = "onym:component:onym-discovery",
+            pinnedOperatorKeyHex = null,
+        )
     }
 }
 

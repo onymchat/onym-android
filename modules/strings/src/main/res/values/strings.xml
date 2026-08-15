@@ -698,6 +698,21 @@
   <string name="discovery_added_subtitle">Its catalogs are being fetched and verified now.</string>
   <string name="discovery_catalog_section">FROM CATALOG</string>
   <string name="discovery_catalog_footnote">Published by the discovery providers you trust. Tapping an entry shows the operator\'s manifest and terms — nothing is added without your explicit acceptance.</string>
+  <!-- Onboarding wiring (PR 3): app-layer step content. The step
+       frame's strings live in the :onboarding module. -->
+  <string name="onboarding_discovery_section_provider">DEFAULT PROVIDER</string>
+  <string name="onboarding_discovery_review_fingerprint">Review Fingerprint</string>
+  <string name="onboarding_discovery_add_own">Add your own provider</string>
+  <string name="onboarding_discovery_use_default">Use the default provider</string>
+  <string name="onboarding_discovery_pinned_title">Provider pinned</string>
+  <string name="onboarding_discovery_pinned_subtitle">Its catalog loads in the background — the next steps can pick from it.</string>
+  <string name="onboarding_discovery_chip_pinned">PINNED</string>
+  <string name="onboarding_seat_section_defaults">APPLIED BY DEFAULT</string>
+  <string name="onboarding_seat_defaults_footnote">These defaults apply automatically. Skipping this step keeps them.</string>
+  <string name="onboarding_seat_section_published">PUBLISHED LIST</string>
+  <string name="onboarding_seat_add">Add</string>
+  <string name="onboarding_seat_added_chip">ADDED</string>
+  <string name="onboarding_seat_no_catalog">No verified catalog modules yet. Confirm a discovery provider to choose one here — the defaults still apply.</string>
   <string name="discovery_listed_by">Listed by %1$s — %2$s</string>
   <string name="discovery_chip_consented">CONSENTED</string>
   <string name="discovery_chip_terms_changed">TERMS CHANGED</string>
