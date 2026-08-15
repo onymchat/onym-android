@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Anchor
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.TravelExplore
@@ -112,6 +113,10 @@ fun SettingsScreen(
     /** Wipe every local message (keeps chats). Invoked only after the
      *  Data → "Clear local message cache" two-step confirmation. */
     onClearMessages: () -> Unit = {},
+    /** Re-run the first-launch seat-selection walk (keeps identity,
+     *  chats, messages). Invoked only after the confirmation dialog.
+     *  Null hides the row (onboarding not wired). */
+    onRestartOnboarding: (() -> Unit)? = null,
     /** Settings → Discovery entry. Null when discovery isn't wired
      *  (UI-test harness) — the section is omitted entirely. */
     onDiscoveryClick: (() -> Unit)? = null,
@@ -122,6 +127,8 @@ fun SettingsScreen(
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
     var showClearConfirm2 by remember { mutableStateOf(false) }
+    // Single confirm for the (non-destructive) onboarding restart.
+    var showRestartConfirm by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
         rememberTopAppBarState()
     )
@@ -281,6 +288,18 @@ fun SettingsScreen(
                         },
                         onClick = { onToggleReadReceipts(!sendReadReceipts) },
                     )
+                    if (onRestartOnboarding != null) {
+                        SettingsRow(
+                            leading = {
+                                SettingsTileBox(Icons.Filled.RestartAlt, SettingsTile.Gray)
+                            },
+                            title = stringResource(R.string.settings_restart_onboarding_title),
+                            subtitle = stringResource(R.string.settings_restart_onboarding_subtitle),
+                            showChevron = false,
+                            onClick = { showRestartConfirm = true },
+                            modifier = Modifier.testTag("settings.restart_onboarding_row"),
+                        )
+                    }
                     SettingsRow(
                         leading = {
                             SettingsTileBox(Icons.Filled.DeleteSweep, SettingsTile.Red)
@@ -308,6 +327,34 @@ fun SettingsScreen(
             item { BrandFooter() }
             item { Spacer(Modifier.height(32.dp)) }
         }
+    }
+
+    // Restart onboarding: one confirmation, stating explicitly what is
+    // KEPT (identity, chats, messages) and what re-runs (the seat
+    // selections). Nothing is deleted, so no double-confirm.
+    if (showRestartConfirm && onRestartOnboarding != null) {
+        AlertDialog(
+            onDismissRequest = { showRestartConfirm = false },
+            title = { Text(stringResource(R.string.settings_restart_dialog_title)) },
+            text = { Text(stringResource(R.string.settings_restart_dialog_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showRestartConfirm = false
+                        onRestartOnboarding()
+                    },
+                    modifier = Modifier.testTag("settings.restart_onboarding.confirm"),
+                ) {
+                    Text(stringResource(R.string.settings_restart_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showRestartConfirm = false },
+                    modifier = Modifier.testTag("settings.restart_onboarding.cancel"),
+                ) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 
     // Double confirmation: the first dialog explains what's lost and that

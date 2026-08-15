@@ -346,6 +346,14 @@ fun RootScreen(
                     onClearMessages = {
                         coroutineScope.launch { dependencies.clearAllMessages() }
                     },
+                    // Confirmed restart: RootScreen's top-level gate
+                    // reacts to `shouldOnboard` flipping true and
+                    // presents the walk immediately — no cold-boot
+                    // probe re-run (the restart bit overrides
+                    // grandfathering by design).
+                    onRestartOnboarding = dependencies.onboarding?.let { onboardingDeps ->
+                        { coroutineScope.launch { onboardingDeps.requestRestart() } }
+                    },
                     // Null when discovery isn't wired (UI-test
                     // harness) — the DISCOVERY section is omitted.
                     onDiscoveryClick = dependencies.discovery?.let {

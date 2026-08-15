@@ -17,7 +17,8 @@ interface OnboardingStore {
     /** Whether the completion flag is set. */
     suspend fun hasCompleted(): Boolean
 
-    /** Set the completion flag. Idempotent. */
+    /** Set the completion flag. Idempotent. ALSO clears any pending
+     *  [requestRestart] — completing the walk satisfies the request. */
     suspend fun markCompleted()
 
     /**
@@ -26,6 +27,23 @@ interface OnboardingStore {
      * storage key. Idempotent.
      */
     suspend fun reset()
+
+    /**
+     * Whether the user explicitly asked to re-run onboarding
+     * (Settings → Restart Onboarding). Distinct from a merely-absent
+     * completion flag: the gate treats an explicit request as
+     * authoritative and SKIPS the grandfathering probe — a configured
+     * user is by definition "grandfathered", so without this bit the
+     * probe would immediately cancel the restart they just asked for.
+     * Persisted, so an app killed mid-restart-walk resumes onboarding
+     * on the next launch.
+     */
+    suspend fun isRestartRequested(): Boolean
+
+    /** Record an explicit restart: clears the completion flag and
+     *  sets the restart bit (cleared again by [markCompleted]).
+     *  Idempotent. */
+    suspend fun requestRestart()
 }
 
 /**
@@ -41,17 +59,36 @@ class DataStorePreferencesOnboardingStore(
         dataStore.data.first()[KEY_COMPLETED] ?: false
 
     override suspend fun markCompleted() {
-        dataStore.edit { it[KEY_COMPLETED] = true }
+        dataStore.edit {
+            it[KEY_COMPLETED] = true
+            // The walk the user asked for just finished.
+            it.remove(KEY_RESTART_REQUESTED)
+        }
     }
 
     override suspend fun reset() {
         dataStore.edit { it.remove(KEY_COMPLETED) }
     }
 
+    override suspend fun isRestartRequested(): Boolean =
+        dataStore.data.first()[KEY_RESTART_REQUESTED] ?: false
+
+    override suspend fun requestRestart() {
+        dataStore.edit {
+            it.remove(KEY_COMPLETED)
+            it[KEY_RESTART_REQUESTED] = true
+        }
+    }
+
     internal companion object {
         /** Internal so tests can assert the exact key the app's reset
          *  path must clear. */
         internal val KEY_COMPLETED = booleanPreferencesKey("onboarding.completed")
+
+        /** Explicit Settings → Restart Onboarding request; survives
+         *  process death so a mid-restart-walk kill resumes. */
+        internal val KEY_RESTART_REQUESTED =
+            booleanPreferencesKey("onboarding.restartRequested")
     }
 }
 
@@ -81,6 +118,14 @@ object OnboardingGate {
         store: OnboardingStore,
         isExistingUser: suspend () -> Boolean,
     ): Boolean {
+        // Explicit Settings → Restart Onboarding request: the user's
+        // own intent overrides BOTH negative signals below. In
+        // particular the grandfathering probe must not run — a user
+        // asking to re-run setup is, by definition, a configured
+        // (grandfathered) user, and the probe would immediately
+        // cancel the restart. Cold-boot grandfathering is untouched:
+        // this bit is only ever set by the explicit Settings action.
+        if (store.isRestartRequested()) return true
         if (store.hasCompleted()) return false
         if (isExistingUser()) return false
         return true

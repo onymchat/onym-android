@@ -1135,6 +1135,7 @@ class OnymApplication : Application() {
         // the published defaults now instead of at the next launch
         // (harmless after an explicit pick — hasUserInteracted is
         // set, so the refresh only updates the known list).
+        val onboardingGeneration = kotlinx.coroutines.flow.MutableStateFlow(0)
         val onboardingUi = OnboardingUiDependencies(
             shouldOnboard = onboardingPending,
             makeFlow = { app.onym.android.onboarding.OnboardingFlow(store = onboardingStore) },
@@ -1145,6 +1146,21 @@ class OnymApplication : Application() {
             },
             relayerState = relayerRepository.snapshots,
             addRelayerEndpoint = relayerRepository::addEndpoint,
+            generation = onboardingGeneration,
+            // Explicit restart (Settings → Restart Onboarding): the
+            // persisted restart bit survives a mid-walk kill (the
+            // gate short-circuits on it at next launch — no
+            // grandfathering probe), the policy re-suppresses for the
+            // walk exactly like a first run, and the generation bump
+            // gives the host a FRESH flow instance. Completion goes
+            // through the same complete() → onCompleted path as the
+            // first run (markCompleted clears the restart bit).
+            requestRestart = {
+                onboardingStore.requestRestart()
+                relayerAutoPopulateAllowed.set(false)
+                onboardingGeneration.value += 1
+                onboardingPending.value = true
+            },
         )
 
         return AppDependencies(

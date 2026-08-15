@@ -98,4 +98,53 @@ class OnboardingStoreTest {
         val second = DataStorePreferencesOnboardingStore(dataStore)
         assertTrue(second.hasCompleted())
     }
+
+    // ── Restart request (Settings → Restart Onboarding) ───────────
+
+    @Test
+    fun freshStore_hasNoRestartRequest() = runTest {
+        assertFalse(store.isRestartRequested())
+    }
+
+    @Test
+    fun requestRestart_setsTheBit_andClearsTheCompletedFlag() = runTest {
+        store.markCompleted()
+        store.requestRestart()
+        assertTrue(store.isRestartRequested())
+        assertFalse(store.hasCompleted())
+    }
+
+    @Test
+    fun markCompleted_clearsTheRestartRequest() = runTest {
+        store.requestRestart()
+        store.markCompleted()
+        assertFalse(store.isRestartRequested())
+        assertTrue(store.hasCompleted())
+    }
+
+    @Test
+    fun reset_leavesTheRestartRequestAlone() = runTest {
+        // reset() is the completion-flag wipe (test harness path) —
+        // an explicit restart request is separate state.
+        store.requestRestart()
+        store.reset()
+        assertTrue(store.isRestartRequested())
+    }
+
+    @Test
+    fun restartRequest_persistsAcrossStoreInstances() = runTest {
+        // Mid-walk process death: the next launch's store instance
+        // still sees the request.
+        store.requestRestart()
+        val second = DataStorePreferencesOnboardingStore(dataStore)
+        assertTrue(second.isRestartRequested())
+        assertFalse(second.hasCompleted())
+    }
+
+    @Test
+    fun restartBit_livesUnderTheDocumentedKey() = runTest {
+        store.requestRestart()
+        val prefs = dataStore.data.first()
+        assertEquals(true, prefs[booleanPreferencesKey("onboarding.restartRequested")])
+    }
 }

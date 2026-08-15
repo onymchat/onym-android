@@ -93,8 +93,15 @@ internal fun OnboardingHost(
     dependencies: AppDependencies,
     onboarding: OnboardingUiDependencies,
 ) {
+    // Keyed on the presentation generation: an explicit restart bumps
+    // it, so the re-run gets a FRESH flow instead of the retained VM
+    // whose prior walk already published `completed` (which would
+    // dismiss the new walk on first composition). Within one
+    // presentation the key is stable, preserving the config-change
+    // survival this VM exists for.
+    val generation by onboarding.generation.collectAsStateWithLifecycle()
     val hostViewModel: OnboardingHostViewModel = viewModel(
-        key = "onboarding.host",
+        key = "onboarding.host.$generation",
         factory = viewModelFactory {
             initializer { OnboardingHostViewModel(onboarding.makeFlow()) }
         },

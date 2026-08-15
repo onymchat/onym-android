@@ -19,14 +19,25 @@ class InMemoryOnboardingStore(
     var markCount: Int = 0
         private set
 
+    var restartRequested: Boolean = false
+        private set
+
     override suspend fun hasCompleted(): Boolean = completed
 
     override suspend fun markCompleted() {
         completed = true
+        restartRequested = false
         markCount += 1
     }
 
     override suspend fun reset() {
         completed = false
+    }
+
+    override suspend fun isRestartRequested(): Boolean = restartRequested
+
+    override suspend fun requestRestart() {
+        completed = false
+        restartRequested = true
     }
 }

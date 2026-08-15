@@ -40,6 +40,60 @@ class OnboardingGateTest {
         assertFalse(OnboardingGate.shouldOnboard(store) { true })
     }
 
+    // ── Explicit restart (Settings → Restart Onboarding) ──────────
+
+    @Test
+    fun restartRequested_overridesGrandfathering() = runTest {
+        // The whole point of the bit: a user asking to re-run setup
+        // is by definition a configured (grandfathered) user, so the
+        // request must win over the probe.
+        val store = InMemoryOnboardingStore(initiallyCompleted = false)
+        store.requestRestart()
+        assertTrue(OnboardingGate.shouldOnboard(store) { true })
+    }
+
+    @Test
+    fun restartRequested_overridesTheCompletedFlag() = runTest {
+        val store = InMemoryOnboardingStore(initiallyCompleted = true)
+        store.requestRestart()
+        assertFalse("requestRestart clears the flag", store.completed)
+        assertTrue(OnboardingGate.shouldOnboard(store) { true })
+    }
+
+    @Test
+    fun restartRequested_skipsTheProbeEntirely() = runTest {
+        // Explicit intent, not a probe question — the cold-boot
+        // grandfathering read must not run (and so can't veto).
+        val store = InMemoryOnboardingStore()
+        store.requestRestart()
+        var probes = 0
+        assertTrue(OnboardingGate.shouldOnboard(store) { probes += 1; true })
+        assertEquals(0, probes)
+    }
+
+    @Test
+    fun completingTheRestartWalk_clearsTheRequest_gateGoesQuiet() = runTest {
+        val store = InMemoryOnboardingStore(initiallyCompleted = true)
+        store.requestRestart()
+        assertTrue(OnboardingGate.shouldOnboard(store) { true })
+
+        // The walk finishes the same way a first run does.
+        store.markCompleted()
+        assertFalse(store.restartRequested)
+        assertFalse(OnboardingGate.shouldOnboard(store) { true })
+    }
+
+    @Test
+    fun restartRequest_persistsAcrossResolutions_untilCompleted() = runTest {
+        // Mid-walk kill: the next launch re-resolves and must still
+        // onboard — the request is durable, not consumed by the read.
+        val store = InMemoryOnboardingStore(initiallyCompleted = true)
+        store.requestRestart()
+        repeat(3) {
+            assertTrue(OnboardingGate.shouldOnboard(store) { true })
+        }
+    }
+
     // ── Probe laziness + purity ───────────────────────────────────
 
     @Test

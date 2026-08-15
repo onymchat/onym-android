@@ -713,6 +713,13 @@
   <string name="onboarding_seat_add">Add</string>
   <string name="onboarding_seat_added_chip">ADDED</string>
   <string name="onboarding_seat_no_catalog">No verified catalog modules yet. Confirm a discovery provider to choose one here — the defaults still apply.</string>
+  <!-- Settings → Restart Onboarding (keeps identity + chats; re-runs
+       the seat-selection walk). -->
+  <string name="settings_restart_onboarding_title">Restart Onboarding</string>
+  <string name="settings_restart_onboarding_subtitle">Re-run the first-launch setup</string>
+  <string name="settings_restart_dialog_title">Restart onboarding?</string>
+  <string name="settings_restart_dialog_body">Your identity, chats, and messages are kept. Only the setup choices run again — discovery provider, message transport, media storage, and notary selection. Nothing is deleted.</string>
+  <string name="settings_restart_confirm">Restart</string>
   <string name="discovery_listed_by">Listed by %1$s — %2$s</string>
   <string name="discovery_chip_consented">CONSENTED</string>
   <string name="discovery_chip_terms_changed">TERMS CHANGED</string>

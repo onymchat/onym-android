@@ -712,6 +712,12 @@
   <string name="onboarding_seat_add">Добавить</string>
   <string name="onboarding_seat_added_chip">ДОБАВЛЕНО</string>
   <string name="onboarding_seat_no_catalog">Проверенных модулей каталога пока нет. Подтвердите провайдера обнаружения, чтобы выбрать модуль здесь — значения по умолчанию всё равно применяются.</string>
+  <!-- Настройки → Перезапуск онбординга. -->
+  <string name="settings_restart_onboarding_title">Перезапустить онбординг</string>
+  <string name="settings_restart_onboarding_subtitle">Пройти первоначальную настройку заново</string>
+  <string name="settings_restart_dialog_title">Перезапустить онбординг?</string>
+  <string name="settings_restart_dialog_body">Ваша личность, чаты и сообщения сохраняются. Заново выполняются только настройки — провайдер обнаружения, транспорт сообщений, хранилище медиа и выбор нотариуса. Ничего не удаляется.</string>
+  <string name="settings_restart_confirm">Перезапустить</string>
   <string name="discovery_listed_by">Размещено %1$s — %2$s</string>
   <string name="discovery_chip_consented">ПРИНЯТО</string>
   <string name="discovery_chip_terms_changed">УСЛОВИЯ ИЗМЕНИЛИСЬ</string>
