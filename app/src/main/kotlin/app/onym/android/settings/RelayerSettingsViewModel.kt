@@ -87,8 +87,16 @@ class RelayerSettingsViewModel(
 
     // ─── intents ──────────────────────────────────────────────────
 
-    fun addKnown(endpoint: RelayerEndpoint) {
-        writes.launch { repository.addEndpoint(endpoint) }
+    /** Add from the published list. [onAdded] fires after the
+     *  endpoint actually LANDED in the configuration (the repository
+     *  upserts) — same landed-callback contract as
+     *  [tappedAddCustom], so callers never record a consent for a
+     *  write that didn't happen. */
+    fun addKnown(endpoint: RelayerEndpoint, onAdded: () -> Unit = {}) {
+        writes.launch {
+            repository.addEndpoint(endpoint)
+            onAdded()
+        }
     }
 
     fun customDraftChanged(text: String) {

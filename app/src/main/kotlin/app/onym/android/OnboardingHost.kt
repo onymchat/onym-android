@@ -3,7 +3,7 @@ package app.onym.android
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +53,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -206,18 +207,22 @@ internal fun OnboardingHost(
         if (state.step != OnboardingStep.RecoveryPhrase) backupVisible = false
     }
 
-    // PIN-ON-ACCEPT: advancing PAST the services step with the
-    // recommendation selected is the explicit confirm of the seeded
-    // default directory — run the programmatic TOFU (same
-    // fetch→verify→pin path as the hub's Verify & Confirm; see
-    // RecommendedDirectoryPinner for the trust rationale). Trigger
-    // semantics: previous step was Services AND the new step is
-    // LATER in the walk (Back to Identity never triggers) AND the
-    // choice is Recommended at that moment. Idempotent (no-op when
-    // already pinned or removed) and non-blocking (failure leaves
-    // the source unpinned; the Done summary says "Not confirmed").
-    // Runs in the host-retained scope so further navigation can't
-    // cancel the pin mid-flight.
+    // PIN-ON-ACCEPT: accepting the recommendation is the explicit
+    // confirm of the seeded default directory — run the programmatic
+    // TOFU (same fetch→verify→pin path as the hub's Verify &
+    // Confirm; see RecommendedDirectoryPinner for the trust
+    // rationale). TWO triggers, same pinner, same host-retained
+    // scope, same idempotence:
+    //  1. here — previous step was Services AND the new step is
+    //     LATER in the walk (Back to Identity never triggers) AND
+    //     the choice is Recommended at that moment;
+    //  2. hub Done (see onDone below) — a custom setup that LEFT the
+    //     Directory seat alone still keeps the recommended default,
+    //     per the hub's own promise.
+    // Idempotent (no-op when already pinned or removed) and
+    // non-blocking (failure leaves the source unpinned; the Done
+    // summary says "Not confirmed"). Runs in the host-retained scope
+    // so further navigation can't cancel the pin mid-flight.
     var stepBeforeChange by remember { mutableStateOf<OnboardingStep?>(null) }
     LaunchedEffect(state.step) {
         val previous = stepBeforeChange
@@ -313,6 +318,20 @@ internal fun OnboardingHost(
                             flow.state.value.step == OnboardingStep.Services
                         ) {
                             flow.recordOutcome(StepOutcome.Consented(null))
+                        }
+                        // Hub Done sets Custom, so the advance-time
+                        // pin trigger never fires — but a seat LEFT
+                        // ALONE keeps the recommended default (the
+                        // hub's own promise), so a Directory seat the
+                        // user never touched still gets its seeded
+                        // source pinned here. The pinner's tri-state
+                        // keeps this honest: an interactive pin in
+                        // the seat reads AlreadyPinned, a removed
+                        // seed reads SourceAbsent (respected), and
+                        // replacing the seed means removing it —
+                        // covered by the same signal.
+                        hostViewModel.viewModelScope.launch {
+                            onboarding.pinRecommendedDirectory()
                         }
                         closeHub()
                     },
@@ -746,7 +765,16 @@ private fun ServicesCard(
                 },
                 shape = shape,
             )
-            .clickable(onClick = onClick)
+            // The two cards are a mutually exclusive pair —
+            // selectable (not a bare clickable) so TalkBack reads
+            // "selected, radio button" and merges the card's text
+            // into one announced node (selectable merges
+            // descendants), mirroring the visual chip.
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
             .padding(16.dp)
             .testTag(testTag),
     ) { content() }

@@ -731,13 +731,11 @@ private fun GroupIntegrityContent(
         )
         PublishedNotaryList(
             state = state,
+            // Recorded from the landed callback (the repository
+            // upserted the endpoint), not synchronously at tap time —
+            // same contract as the custom-URL adds.
             onAdd = { endpoint ->
-                viewModel.addKnown(endpoint)
-                if (flow.state.value.step ==
-                    app.onym.android.onboarding.OnboardingStep.Services
-                ) {
-                    flow.recordOutcome(StepOutcome.Consented(null))
-                }
+                viewModel.addKnown(endpoint) { recordCustomAdd(flow) }
             },
         )
 
@@ -926,10 +924,18 @@ private fun DirectoryContent(
     }
 
     val pinnedSource = state.discovery.sources.firstOrNull { it.pinnedOperatorKeyHex != null }
-    // Pinning is the consent — record it (once pinned it stays
-    // recorded; the guard keeps the write on the services step).
+    // Pinning is the consent — but only a pin the user PERFORMS
+    // HERE records: the effect is guarded to the unpinned→pinned
+    // TRANSITION observed within this composition. Re-entering the
+    // seat with an already-pinned source must NOT re-record
+    // Consented(null) — that would clobber a componentId consent a
+    // catalog pick recorded and make the hub-Done null-check
+    // order-dependent.
+    var sawUnpinnedHere by remember { mutableStateOf(false) }
     LaunchedEffect(pinnedSource?.providerId) {
-        if (pinnedSource != null &&
+        if (pinnedSource == null) {
+            sawUnpinnedHere = true
+        } else if (sawUnpinnedHere &&
             flow.state.value.step == app.onym.android.onboarding.OnboardingStep.Services
         ) {
             flow.recordOutcome(StepOutcome.Consented(null))

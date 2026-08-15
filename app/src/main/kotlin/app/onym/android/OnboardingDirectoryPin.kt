@@ -9,10 +9,16 @@ import kotlinx.coroutines.sync.withLock
  *
  * TRUST RATIONALE. The recommended services card promises "Services
  * published by Onym, verified on this device" — accepting it IS the
- * user's explicit confirm of the seeded directory, so advancing from
- * the services step with the recommendation selected runs the same
+ * user's explicit confirm of the seeded directory, so the same
  * fetch → verify → TOFU-pin path the hub Directory seat's "Verify &
- * Confirm" drives, programmatically. Scope is deliberately narrow:
+ * Confirm" drives runs programmatically on BOTH accept paths:
+ * advancing from the services step with the recommendation
+ * selected, and closing the hub via Done with the Directory seat
+ * left on the recommended default (the hub promises that anything
+ * left alone keeps the recommended default — an untouched seeded
+ * source is exactly that; an interactively pinned one reads
+ * AlreadyPinned, a removed one SourceAbsent). Scope is deliberately
+ * narrow:
  *
  *  - SEEDED SOURCE ONLY — never a user-added URL. A URL the user
  *    typed gets the interactive fingerprint confirmation (the

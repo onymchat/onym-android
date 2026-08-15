@@ -1188,13 +1188,30 @@ class OnymApplication : Application() {
         val recommendedDirectoryPinner = discoveryRepository?.let { repo ->
             RecommendedDirectoryPinner(
                 seededSourcePinned = {
-                    repo.snapshots.value.sources
-                        .firstOrNull {
-                            it.providerId ==
-                                app.onym.android.discovery.DiscoverySource
-                                    .onymDefault.providerId
-                        }
-                        ?.let { it.pinnedOperatorKeyHex != null }
+                    // HYDRATE FIRST: before bootstrap the snapshot
+                    // has no sources, and a raw read would misreport
+                    // "user removed the seed" (SourceAbsent — never
+                    // retried) for a store that simply hadn't loaded.
+                    // bootstrap() is idempotent (mutex-guarded
+                    // re-read + default re-seed), so awaiting it here
+                    // resolves the tri-state from REAL data:
+                    //  - seed present        → its pin status;
+                    //  - seed absent because the providerId is in
+                    //    removedDefaultProviderIds → null, the
+                    //    deliberate-removal signal, respected;
+                    //  - seed absent otherwise is unreachable after
+                    //    bootstrap (mergeDefaults re-seeds unless
+                    //    removed) — answered null defensively.
+                    repo.bootstrap()
+                    val configuration = repo.snapshots.value.configuration
+                    val seededId = app.onym.android.discovery.DiscoverySource
+                        .onymDefault.providerId
+                    val seed = configuration.sources
+                        .firstOrNull { it.providerId == seededId }
+                    when {
+                        seed != null -> seed.pinnedOperatorKeyHex != null
+                        else -> null
+                    }
                 },
                 pinSeededSource = {
                     val seed = repo.snapshots.value.sources.first {

@@ -85,7 +85,7 @@
 
     <!-- Media delivery (Blossom) -->
     <string name="onboarding_media_explainer">Фото, видео и голосовые сообщения слишком велики для релеев, переносящих текст, поэтому они идут через медиасервис. Они заранее шифруются на этом устройстве — сервис имеет дело только с запечатанными данными.</string>
-    <string name="onboarding_media_active_chip">АКТИВНАЯ</string>
+    <string name="onboarding_media_active_chip">АКТИВНЫЙ</string>
     <string name="onboarding_media_footnote">Ваши файлы загружаются только через активный сервис. Остальные в списке — узлы, которым вы доверяете скачивание того, что вам присылают.</string>
     <string name="onboarding_media_empty">Сервер ещё не настроен. Добавьте ниже или вернитесь назад, чтобы оставить значение по умолчанию.</string>
 

@@ -27,24 +27,26 @@ import java.time.Instant
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * End-to-end coverage of the first-launch onboarding walk (PR 4 of
- * the onboarding sequence):
+ * Instrumented coverage of the onboarding GATE and frame against the
+ * redesigned flow (welcome → identity → services → recoveryPhrase →
+ * done). What lives here vs. elsewhere:
  *
- *  1. Fresh state with the gate forced ON walks all 6 steps —
- *     welcome → discoveryConfirm (TOFU with the fixture fingerprint)
- *     → messageTransport → blobTransport → notary (legacy published
- *     add) → done — and lands in the tab shell; a dependency rebuild
- *     + Activity recreation then asserts the walk does NOT reappear
- *     (completion flag persisted, gate re-resolves false).
- *  2. The skip path: every skippable step skipped straight through.
- *  3. Back navigation revisits the prior step without restarting.
- *  4. The pre-bootstrap loading state on discoveryConfirm when no
- *     default source has hydrated.
- *  5. A completed-at-boot flag bypasses the walk entirely.
- *  6. The explicit harness contract: with NO onboarding slot
- *     registered, the gate resolves in UI-test mode and every
- *     pre-onboarding instrumented test boots straight to the tabs —
- *     the bypass the rest of the suite relies on.
+ *  LIVE in this class:
+ *  - Back navigation revisits the prior step without restarting the
+ *    walk (welcome ↔ identity).
+ *  - A completed-at-boot flag bypasses the walk entirely.
+ *  - The explicit harness contract: with NO onboarding slot
+ *    registered, the gate resolves in UI-test mode and every
+ *    pre-onboarding instrumented test boots straight to the tabs —
+ *    the bypass the rest of the suite relies on.
+ *
+ *  @Ignore'd here, replaced by the redesigned end-to-end walks in
+ *  the follow-up tests PR (#216): the full walk (identity outcome
+ *  gate, services hub, biometric-faked recovery reveal) and the
+ *  skip path (only recoveryPhrase is skippable now). The old
+ *  six-step wizard walks — per-step TOFU/seat screens and the
+ *  discoveryConfirm loading state — are gone with the wizard; the
+ *  directory surface lives inside the services hub.
  *
  * Determinism (the iOS #252 lessons, applied in-process):
  *  - the gate reads an [InMemoryOnboardingStore] and pins the

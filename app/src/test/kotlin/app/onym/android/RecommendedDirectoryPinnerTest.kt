@@ -92,6 +92,30 @@ class RecommendedDirectoryPinnerTest {
     }
 
     @Test
+    fun slowHydration_isAwaited_thenAnswersFromRealData() = runTest {
+        // The status probe hydrates the repository (bootstrap) before
+        // reading — an unhydrated snapshot must never masquerade as
+        // "the user removed the seed" (SourceAbsent, never retried).
+        // The pinner must AWAIT the suspend probe and act on the real
+        // post-hydration answer.
+        var hydrated = false
+        var pinCalls = 0
+        val pinner = RecommendedDirectoryPinner(
+            seededSourcePinned = {
+                kotlinx.coroutines.delay(5_000) // slow disk load
+                hydrated = true
+                false // hydrated answer: present, unpinned
+            },
+            pinSeededSource = {
+                check(hydrated) { "pin ran before hydration resolved" }
+                pinCalls += 1
+            },
+        )
+        assertEquals(RecommendedDirectoryPinner.Outcome.Pinned, pinner.pinIfUnpinned())
+        assertEquals(1, pinCalls)
+    }
+
+    @Test
     fun cancellation_propagates() = runTest {
         val pinner = RecommendedDirectoryPinner(
             seededSourcePinned = { false },
