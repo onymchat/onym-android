@@ -9,11 +9,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [OnboardingFlow] state machine: step order for both moderation
- * flags, the review-hardened gating rules ported from onym-ios
- * PR #249 (no advance-bypass around a mandatory step, fail-closed
- * unresolved probe, complete() only from Done), and outcome
- * bookkeeping across back().
+ * [OnboardingFlow] state machine, redesigned model (onym-ios PR
+ * #259 parity): step order for both moderation flags, the indicator
+ * coverage over the core steps, only-recovery skippability, the
+ * requiresOutcomeToAdvance matrix (identity / recovery / mandatory
+ * moderation), the seeded services outcome, flow-held
+ * servicesChoice / recoveryBackupState, and outcome bookkeeping
+ * across back().
  */
 class OnboardingFlowTest {
 
@@ -31,6 +33,26 @@ class OnboardingFlowTest {
     private fun OnboardingFlow.outcome(step: OnboardingStep): StepOutcome? =
         state.value.outcomes[step]
 
+    /** Walk the flow to [target], recording what the gated steps need. */
+    private fun OnboardingFlow.walkTo(target: OnboardingStep) {
+        while (step != target) {
+            when (step) {
+                OnboardingStep.Identity ->
+                    if (outcome(OnboardingStep.Identity) == null) {
+                        recordOutcome(StepOutcome.NotApplicable)
+                    }
+                OnboardingStep.RecoveryPhrase -> {
+                    skip()
+                    continue
+                }
+                else -> Unit
+            }
+            val before = step
+            advance()
+            check(step != before) { "stuck on $before walking to $target" }
+        }
+    }
+
     // ── Step order ────────────────────────────────────────────────
 
     @Test
@@ -39,121 +61,216 @@ class OnboardingFlowTest {
         assertEquals(
             listOf(
                 OnboardingStep.Welcome,
-                OnboardingStep.DiscoveryConfirm,
-                OnboardingStep.MessageTransport,
-                OnboardingStep.BlobTransport,
-                OnboardingStep.Notary,
+                OnboardingStep.Identity,
+                OnboardingStep.Services,
+                OnboardingStep.RecoveryPhrase,
                 OnboardingStep.Done,
             ),
             flow.steps,
         )
-        assertEquals(6, flow.stepCount)
     }
 
     @Test
-    fun stepOrder_moderationEnabled_matchesIosSevenSteps() {
+    fun stepOrder_moderationEnabled_matchesIosSixSteps() {
         val flow = flow(moderationEnabled = true)
         assertEquals(
             listOf(
                 OnboardingStep.Welcome,
-                OnboardingStep.DiscoveryConfirm,
-                OnboardingStep.MessageTransport,
-                OnboardingStep.BlobTransport,
-                OnboardingStep.Notary,
+                OnboardingStep.Identity,
+                OnboardingStep.Services,
                 OnboardingStep.Moderation,
+                OnboardingStep.RecoveryPhrase,
                 OnboardingStep.Done,
             ),
             flow.steps,
         )
-        assertEquals(7, flow.stepCount)
+    }
+
+    // ── Indicator coverage ────────────────────────────────────────
+
+    @Test
+    fun indicator_coversExactlyTheCoreSteps_moderationDisabled() {
+        val flow = flow(moderationEnabled = false)
+        assertEquals(
+            OnboardingFlow.Indicator(index = 0, count = 2),
+            flow.indicator(OnboardingStep.Identity),
+        )
+        assertEquals(
+            OnboardingFlow.Indicator(index = 1, count = 2),
+            flow.indicator(OnboardingStep.Services),
+        )
+        // Unnumbered steps carry no indicator — the scaffold must not
+        // reserve blank indicator space on them.
+        assertNull(flow.indicator(OnboardingStep.Welcome))
+        assertNull(flow.indicator(OnboardingStep.RecoveryPhrase))
+        assertNull(flow.indicator(OnboardingStep.Done))
+        // The reserved slot isn't counted while disabled.
+        assertNull(flow.indicator(OnboardingStep.Moderation))
     }
 
     @Test
-    fun advance_walksTheWholeDisabledSequence_withoutEverBlocking() {
-        val flow = flow(moderationEnabled = false)
-        // With moderation absent there are no mandatory steps — the
-        // primary button alone walks welcome → done.
-        repeat(flow.stepCount - 1) { flow.advance() }
-        assertEquals(OnboardingStep.Done, flow.step)
-        // Terminal: advance on Done is a no-op.
-        flow.advance()
-        assertEquals(OnboardingStep.Done, flow.step)
+    fun indicator_countsModeration_whenEnabled() {
+        val flow = flow(moderationEnabled = true)
+        assertEquals(
+            OnboardingFlow.Indicator(index = 0, count = 3),
+            flow.indicator(OnboardingStep.Identity),
+        )
+        assertEquals(
+            OnboardingFlow.Indicator(index = 1, count = 3),
+            flow.indicator(OnboardingStep.Services),
+        )
+        assertEquals(
+            OnboardingFlow.Indicator(index = 2, count = 3),
+            flow.indicator(OnboardingStep.Moderation),
+        )
+        assertNull(flow.indicator(OnboardingStep.Welcome))
+        assertNull(flow.indicator(OnboardingStep.RecoveryPhrase))
+        assertNull(flow.indicator(OnboardingStep.Done))
     }
 
+    // ── Skippability: only the recovery phrase ────────────────────
+
     @Test
-    fun moderationDisabled_noStepIsEverMandatory() {
-        val flow = flow(moderationEnabled = false)
-        flow.steps.forEach { step ->
-            assertFalse("$step must not be mandatory", flow.isMandatory(step))
+    fun onlyRecoveryPhrase_isSkippable() {
+        val flow = flow(moderationEnabled = true)
+        OnboardingStep.entries.forEach { step ->
+            if (step == OnboardingStep.RecoveryPhrase) {
+                assertTrue(flow.isSkippable(step))
+            } else {
+                assertFalse("$step must not be skippable", flow.isSkippable(step))
+            }
         }
     }
 
     @Test
-    fun stepIndex_tracksThePositionInTheActiveSequence() {
-        val flow = flow(moderationEnabled = false)
-        assertEquals(0, flow.stepIndex)
-        flow.advance()
-        assertEquals(1, flow.stepIndex)
-    }
-
-    // ── Skippability ──────────────────────────────────────────────
-
-    @Test
-    fun welcome_isUnskippable() {
+    fun skip_onUnskippableStep_isANoOp() {
         val flow = flow()
-        assertFalse(flow.isSkippable(OnboardingStep.Welcome))
         flow.skip()
         assertEquals(OnboardingStep.Welcome, flow.step)
         assertNull(flow.outcome(OnboardingStep.Welcome))
     }
 
     @Test
-    fun done_isUnskippable() {
+    fun skip_onRecoveryPhrase_recordsSkipped() {
         val flow = flow()
-        repeat(flow.stepCount - 1) { flow.advance() }
-        assertEquals(OnboardingStep.Done, flow.step)
-        assertFalse(flow.isSkippable(OnboardingStep.Done))
+        flow.walkTo(OnboardingStep.RecoveryPhrase)
         flow.skip()
+        assertEquals(OnboardingStep.Done, flow.step)
+        assertEquals(StepOutcome.Skipped, flow.outcome(OnboardingStep.RecoveryPhrase))
+    }
+
+    // ── requiresOutcomeToAdvance matrix ───────────────────────────
+
+    @Test
+    fun requiresOutcome_identityAndRecovery_always() {
+        val flow = flow(moderationEnabled = false)
+        assertTrue(flow.requiresOutcomeToAdvance(OnboardingStep.Identity))
+        assertTrue(flow.requiresOutcomeToAdvance(OnboardingStep.RecoveryPhrase))
+        assertFalse(flow.requiresOutcomeToAdvance(OnboardingStep.Welcome))
+        assertFalse(flow.requiresOutcomeToAdvance(OnboardingStep.Services))
+        assertFalse(flow.requiresOutcomeToAdvance(OnboardingStep.Done))
+    }
+
+    @Test
+    fun requiresOutcome_moderation_failsClosedUntilTheProbeAnswersEmpty() = runTest {
+        // Unresolved probe: fail-closed, moderation is gated.
+        val unresolved = flow(moderationEnabled = true)
+        assertTrue(unresolved.requiresOutcomeToAdvance(OnboardingStep.Moderation))
+
+        // Resolved non-empty: still gated (the user must consent).
+        val nonEmpty = flow(moderationEnabled = true, directoryNonEmpty = { true })
+        nonEmpty.start()
+        assertTrue(nonEmpty.requiresOutcomeToAdvance(OnboardingStep.Moderation))
+
+        // Resolved EMPTY: Continue-only informational.
+        val empty = flow(moderationEnabled = true, directoryNonEmpty = { false })
+        empty.start()
+        assertFalse(empty.requiresOutcomeToAdvance(OnboardingStep.Moderation))
+    }
+
+    @Test
+    fun advance_onIdentityWithoutOutcome_isANoOp() {
+        val flow = flow()
+        flow.advance() // welcome → identity
+        assertEquals(OnboardingStep.Identity, flow.step)
+
+        // No outcome yet (the bootstrap hasn't produced a snapshot):
+        // the primary path must not walk past — the fail-closed dead
+        // end is intentional.
+        flow.advance()
+        assertEquals(OnboardingStep.Identity, flow.step)
+
+        // The step content reports the snapshot — now advance
+        // proceeds.
+        flow.recordOutcome(StepOutcome.NotApplicable)
+        flow.advance()
+        assertEquals(OnboardingStep.Services, flow.step)
+    }
+
+    @Test
+    fun advance_onRecoveryPhraseWithoutOutcome_isANoOp() {
+        val flow = flow()
+        flow.walkTo(OnboardingStep.Services)
+        flow.advance() // services → recoveryPhrase (seeded outcome)
+        assertEquals(OnboardingStep.RecoveryPhrase, flow.step)
+
+        // "I've written it down" must not be a back door around the
+        // must-reveal rule.
+        flow.advance()
+        assertEquals(OnboardingStep.RecoveryPhrase, flow.step)
+
+        // The reveal records the outcome — now advance proceeds.
+        flow.recordOutcome(StepOutcome.Consented(null))
+        flow.advance()
         assertEquals(OnboardingStep.Done, flow.step)
     }
 
     @Test
-    fun middleSteps_areSkippable_recordingSkipped() {
-        val flow = flow()
-        flow.advance() // welcome → discoveryConfirm
-        assertTrue(flow.isSkippable(OnboardingStep.DiscoveryConfirm))
+    fun advance_onMandatoryModerationWithoutOutcome_isANoOp() = runTest {
+        val flow = flow(moderationEnabled = true, directoryNonEmpty = { true })
+        flow.start()
+        flow.walkTo(OnboardingStep.Moderation)
+
+        flow.advance()
+        assertEquals(OnboardingStep.Moderation, flow.step)
         flow.skip()
-        assertEquals(OnboardingStep.MessageTransport, flow.step)
-        assertEquals(StepOutcome.Skipped, flow.outcome(OnboardingStep.DiscoveryConfirm))
+        assertEquals(OnboardingStep.Moderation, flow.step)
+
+        flow.recordOutcome(StepOutcome.Consented("onym:component:onym-moderation"))
+        flow.advance()
+        assertEquals(OnboardingStep.RecoveryPhrase, flow.step)
+    }
+
+    @Test
+    fun emptyDirectory_moderationAdvances_recordingUnavailable() = runTest {
+        val flow = flow(moderationEnabled = true, directoryNonEmpty = { false })
+        flow.start()
+        flow.walkTo(OnboardingStep.Moderation)
+        flow.advance()
+        assertEquals(OnboardingStep.RecoveryPhrase, flow.step)
+        // NOT Skipped and NOT NotApplicable: moderation wasn't
+        // offered; the user did not opt out.
+        assertEquals(StepOutcome.Unavailable, flow.outcome(OnboardingStep.Moderation))
     }
 
     // ── Moderation probe: tri-state, fail-closed ──────────────────
 
     @Test
-    fun probeUnresolved_failsClosed_mandatoryAndUnskippable() {
-        // start() never called — the probe stays null.
+    fun probeUnresolved_failsClosed() {
         val flow = flow(moderationEnabled = true)
         assertFalse(flow.state.value.moderationProbeResolved)
         assertTrue(flow.isMandatory(OnboardingStep.Moderation))
-        assertFalse(flow.isSkippable(OnboardingStep.Moderation))
     }
 
     @Test
-    fun probeTrue_moderationIsMandatoryAndUnskippable() = runTest {
-        val flow = flow(moderationEnabled = true, directoryNonEmpty = { true })
-        flow.start()
-        assertEquals(true, flow.state.value.moderationDirectoryHasEntries)
-        assertTrue(flow.isMandatory(OnboardingStep.Moderation))
-        assertFalse(flow.isSkippable(OnboardingStep.Moderation))
-    }
+    fun probeResolution_drivesMandatory() = runTest {
+        val nonEmpty = flow(moderationEnabled = true, directoryNonEmpty = { true })
+        nonEmpty.start()
+        assertTrue(nonEmpty.isMandatory(OnboardingStep.Moderation))
 
-    @Test
-    fun probeFalse_moderationIsSkippableAndNotMandatory() = runTest {
-        val flow = flow(moderationEnabled = true, directoryNonEmpty = { false })
-        flow.start()
-        assertEquals(false, flow.state.value.moderationDirectoryHasEntries)
-        assertFalse(flow.isMandatory(OnboardingStep.Moderation))
-        assertTrue(flow.isSkippable(OnboardingStep.Moderation))
+        val empty = flow(moderationEnabled = true, directoryNonEmpty = { false })
+        empty.start()
+        assertFalse(empty.isMandatory(OnboardingStep.Moderation))
     }
 
     @Test
@@ -174,93 +291,106 @@ class OnboardingFlowTest {
         assertNull(flow.state.value.moderationDirectoryHasEntries)
     }
 
-    // ── Mandatory gating (generic, exercised via moderation) ──────
+    // ── Services outcome: seeded, overwritten ─────────────────────
 
     @Test
-    fun advance_onMandatoryStepWithoutOutcome_isANoOp() = runTest {
-        val flow = flow(moderationEnabled = true, directoryNonEmpty = { true })
-        flow.start()
-        repeat(5) { flow.advance() } // welcome … notary → moderation
-        assertEquals(OnboardingStep.Moderation, flow.step)
+    fun servicesOutcome_isSeededConsented_fromConstruction() {
+        // The recommended card shows "Selected" from the first frame,
+        // so Continue from the services step IS accepting it — the
+        // outcome must say the same thing before any interaction.
+        val flow = flow()
+        assertEquals(StepOutcome.Consented(null), flow.outcome(OnboardingStep.Services))
+    }
 
-        // No outcome recorded: neither the primary path nor skip may
-        // walk past a mandatory step.
-        flow.advance()
-        assertEquals(OnboardingStep.Moderation, flow.step)
-        flow.skip()
-        assertEquals(OnboardingStep.Moderation, flow.step)
-
-        // The step content reports a consent — now advance proceeds.
-        flow.recordOutcome(StepOutcome.Consented("onym:component:onym-moderation"))
-        flow.advance()
-        assertEquals(OnboardingStep.Done, flow.step)
+    @Test
+    fun servicesOutcome_hubComponentConsent_overwritesTheSeed() {
+        val flow = flow()
+        flow.walkTo(OnboardingStep.Services)
+        flow.recordOutcome(StepOutcome.Consented("onym:component:custom-relay"))
         assertEquals(
-            StepOutcome.Consented("onym:component:onym-moderation"),
-            flow.outcome(OnboardingStep.Moderation),
+            StepOutcome.Consented("onym:component:custom-relay"),
+            flow.outcome(OnboardingStep.Services),
         )
+        // Last-consent-wins across the hub's seats: a later consent
+        // (another seat, or re-accepting the recommendation)
+        // overwrites — arbitrary but harmless, the Done summary reads
+        // live repository state.
+        flow.recordOutcome(StepOutcome.Consented(null))
+        assertEquals(StepOutcome.Consented(null), flow.outcome(OnboardingStep.Services))
     }
 
     @Test
-    fun advance_onMandatoryStepWithUnresolvedProbe_isANoOp() {
-        val flow = flow(moderationEnabled = true)
-        repeat(5) { flow.advance() }
-        assertEquals(OnboardingStep.Moderation, flow.step)
-        // Probe never resolved — fail closed, no advance without an
-        // outcome, no skip at all.
+    fun servicesChoice_isFlowHeld_survivingBackAndForward() {
+        val flow = flow()
+        assertEquals(ServicesChoice.Recommended, flow.state.value.servicesChoice)
+        flow.walkTo(OnboardingStep.Services)
+        flow.recordServicesChoice(ServicesChoice.Custom)
+        // Navigate away and back — the choice must not reset (it
+        // lives on the flow, not on any composable).
+        flow.back()
         flow.advance()
-        flow.skip()
-        assertEquals(OnboardingStep.Moderation, flow.step)
+        assertEquals(OnboardingStep.Services, flow.step)
+        assertEquals(ServicesChoice.Custom, flow.state.value.servicesChoice)
+    }
+
+    // ── Recovery backup state: never downgrades ───────────────────
+
+    @Test
+    fun recoveryBackupState_neverDowngrades() {
+        val flow = flow()
+        assertEquals(RecoveryBackupState.None, flow.state.value.recoveryBackupState)
+
+        flow.recordRecoveryBackup(RecoveryBackupState.Revealed)
+        assertEquals(RecoveryBackupState.Revealed, flow.state.value.recoveryBackupState)
+
+        flow.recordRecoveryBackup(RecoveryBackupState.Verified)
+        assertEquals(RecoveryBackupState.Verified, flow.state.value.recoveryBackupState)
+
+        // A re-reveal after verifying must not downgrade.
+        flow.recordRecoveryBackup(RecoveryBackupState.Revealed)
+        assertEquals(RecoveryBackupState.Verified, flow.state.value.recoveryBackupState)
+        flow.recordRecoveryBackup(RecoveryBackupState.None)
+        assertEquals(RecoveryBackupState.Verified, flow.state.value.recoveryBackupState)
     }
 
     @Test
-    fun emptyDirectory_moderationAdvancesAsInformational() = runTest {
-        val flow = flow(moderationEnabled = true, directoryNonEmpty = { false })
-        flow.start()
-        repeat(5) { flow.advance() }
-        assertEquals(OnboardingStep.Moderation, flow.step)
-        flow.advance()
-        assertEquals(OnboardingStep.Done, flow.step)
-        assertEquals(StepOutcome.NotApplicable, flow.outcome(OnboardingStep.Moderation))
+    fun recoveryBackupState_survivesNavigation() {
+        val flow = flow()
+        flow.walkTo(OnboardingStep.RecoveryPhrase)
+        flow.recordRecoveryBackup(RecoveryBackupState.Revealed)
+        flow.recordOutcome(StepOutcome.Consented(null))
+        flow.advance() // → done
+        flow.back() // → recoveryPhrase
+        assertEquals(RecoveryBackupState.Revealed, flow.state.value.recoveryBackupState)
     }
 
-    // ── Outcomes ──────────────────────────────────────────────────
+    // ── Outcomes across navigation ────────────────────────────────
 
     @Test
     fun advance_backfillsNotApplicable_onlyWhenNothingWasRecorded() {
         val flow = flow()
         flow.advance() // welcome: backfilled
         assertEquals(StepOutcome.NotApplicable, flow.outcome(OnboardingStep.Welcome))
-
-        flow.recordOutcome(StepOutcome.Consented(null))
-        flow.advance() // discoveryConfirm: recorded consent kept
-        assertEquals(StepOutcome.Consented(null), flow.outcome(OnboardingStep.DiscoveryConfirm))
     }
 
     @Test
-    fun recordOutcome_overwritesAPriorRecord() {
+    fun back_preservesOutcome_untilOverwritten() {
         val flow = flow()
+        flow.walkTo(OnboardingStep.RecoveryPhrase)
+        flow.skip() // → done, recoveryPhrase = Skipped
+        flow.back() // → recoveryPhrase
+        assertEquals(OnboardingStep.RecoveryPhrase, flow.step)
+        assertEquals(StepOutcome.Skipped, flow.outcome(OnboardingStep.RecoveryPhrase))
+
+        // Redoing the step (the reveal) overwrites the preserved
+        // outcome.
+        flow.recordOutcome(StepOutcome.Consented(null))
         flow.advance()
-        flow.recordOutcome(StepOutcome.Consented("onym:component:a"))
-        flow.recordOutcome(StepOutcome.Consented("onym:component:b"))
+        assertEquals(OnboardingStep.Done, flow.step)
         assertEquals(
-            StepOutcome.Consented("onym:component:b"),
-            flow.outcome(OnboardingStep.DiscoveryConfirm),
+            StepOutcome.Consented(null),
+            flow.outcome(OnboardingStep.RecoveryPhrase),
         )
-    }
-
-    @Test
-    fun back_preservesTheRevisitedStepsOutcome() {
-        val flow = flow()
-        flow.advance() // welcome → discoveryConfirm
-        flow.skip() // → messageTransport, discoveryConfirm = Skipped
-        flow.back() // → discoveryConfirm
-        assertEquals(OnboardingStep.DiscoveryConfirm, flow.step)
-        assertEquals(StepOutcome.Skipped, flow.outcome(OnboardingStep.DiscoveryConfirm))
-
-        // Redoing the step overwrites the preserved outcome.
-        flow.recordOutcome(StepOutcome.Consented(null))
-        flow.advance()
-        assertEquals(StepOutcome.Consented(null), flow.outcome(OnboardingStep.DiscoveryConfirm))
     }
 
     @Test
@@ -276,7 +406,7 @@ class OnboardingFlowTest {
     fun complete_midSequence_isANoOp_andNeverWritesTheFlag() = runTest {
         val store = InMemoryOnboardingStore()
         val flow = flow(store = store)
-        flow.advance() // discoveryConfirm — not Done
+        flow.advance() // identity — not Done
         flow.complete()
         assertFalse(store.completed)
         assertFalse(flow.state.value.completed)
@@ -286,13 +416,20 @@ class OnboardingFlowTest {
     fun complete_onDone_writesTheFlagAndPublishesCompleted() = runTest {
         val store = InMemoryOnboardingStore()
         val flow = flow(store = store)
-        repeat(flow.stepCount - 1) { flow.advance() }
-        assertEquals(OnboardingStep.Done, flow.step)
+        flow.walkTo(OnboardingStep.Done)
 
         flow.complete()
         assertTrue(store.completed)
         assertEquals(1, store.markCount)
         assertTrue(flow.state.value.completed)
         assertEquals(StepOutcome.NotApplicable, flow.outcome(OnboardingStep.Done))
+    }
+
+    @Test
+    fun advance_onDone_isANoOp() {
+        val flow = flow()
+        flow.walkTo(OnboardingStep.Done)
+        flow.advance()
+        assertEquals(OnboardingStep.Done, flow.step)
     }
 }

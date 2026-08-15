@@ -52,17 +52,23 @@ fun OnboardingScaffold(
     onPrimary: () -> Unit,
     /** null hides the Skip affordance (unskippable steps). */
     onSkip: (() -> Unit)? = null,
+    /** The Skip affordance's label — the recovery step's reads
+     *  "Remind me later" (a deferral, not a skip). Ignored when
+     *  [onSkip] is null. */
+    skipTitle: String? = null,
     /**
      * Renders a small progress indicator in the Skip slot — used
      * while the flow's moderation-directory probe is unresolved and
-     * skippability is not yet known.
+     * the step's gating is not yet known.
      */
     showSkipProgress: Boolean = false,
     /** null hides the Back affordance (the first step). */
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    /** Step indicator slot, rendered centered above the title. */
-    indicator: @Composable () -> Unit = {},
+    /** Step indicator slot, rendered centered above the title. null
+     *  on the unnumbered steps — no blank indicator band is
+     *  reserved for them. */
+    indicator: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -76,12 +82,14 @@ fun OnboardingScaffold(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState()),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 24.dp),
-                contentAlignment = Alignment.Center,
-            ) { indicator() }
+            if (indicator != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) { indicator() }
+            }
 
             Text(
                 text = title,
@@ -89,7 +97,7 @@ fun OnboardingScaffold(
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
-                    .padding(top = 16.dp)
+                    .padding(top = if (indicator != null) 16.dp else 24.dp)
                     .testTag("onboarding.${step.tag}.title"),
             )
 
@@ -141,7 +149,7 @@ fun OnboardingScaffold(
                     TextButton(
                         onClick = onSkip,
                         modifier = Modifier.testTag("onboarding.${step.tag}.skip"),
-                    ) { Text(stringResource(R.string.onboarding_skip)) }
+                    ) { Text(skipTitle ?: stringResource(R.string.onboarding_skip)) }
                 } else if (showSkipProgress) {
                     CircularProgressIndicator(
                         strokeWidth = 2.dp,
