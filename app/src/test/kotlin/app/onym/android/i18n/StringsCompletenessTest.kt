@@ -50,6 +50,27 @@ class StringsCompletenessTest {
     }
 
     @Test
+    fun `onboarding module catalogs are key-complete in both locales`() {
+        // The :onboarding module carries its own res catalogs (the
+        // redesigned walk's copy) — pin them to the same en/ru key
+        // parity as the shared :strings catalog.
+        val enKeys = readStringKeys(File(ONBOARDING_EN_PATH))
+        val ruKeys = readStringKeys(File(ONBOARDING_RU_PATH))
+        assertTrue(
+            "onboarding values-ru is missing: ${(enKeys - ruKeys).sorted()}",
+            (enKeys - ruKeys).isEmpty(),
+        )
+        assertTrue(
+            "onboarding values-ru has extra keys: ${(ruKeys - enKeys).sorted()}",
+            (ruKeys - enKeys).isEmpty(),
+        )
+        assertEquals(
+            readPluralKeys(File(ONBOARDING_EN_PATH)),
+            readPluralKeys(File(ONBOARDING_RU_PATH)),
+        )
+    }
+
+    @Test
     fun `chain UI keys are present in both locales`() {
         // Sanity: PR #21's chain-UI catalog work landed every
         // load-bearing relayer / anchors / network / governance key.
@@ -112,5 +133,9 @@ class StringsCompletenessTest {
         // to match.
         private const val EN_PATH = "../modules/strings/src/main/res/values/strings.xml"
         private const val RU_PATH = "../modules/strings/src/main/res/values-ru/strings.xml"
+        private const val ONBOARDING_EN_PATH =
+            "../modules/onboarding/src/main/res/values/strings.xml"
+        private const val ONBOARDING_RU_PATH =
+            "../modules/onboarding/src/main/res/values-ru/strings.xml"
     }
 }
