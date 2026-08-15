@@ -292,6 +292,8 @@ fun RootScreen(
                 )
                 val nostrRelays by dependencies.nostrRelaysFlow.collectAsStateWithLifecycle()
                 val blossomServers by dependencies.blossomServersFlow.collectAsStateWithLifecycle()
+                val discoveryState = dependencies.discovery?.stateFlow
+                    ?.collectAsStateWithLifecycle()
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
@@ -320,6 +322,12 @@ fun RootScreen(
                     onClearMessages = {
                         coroutineScope.launch { dependencies.clearAllMessages() }
                     },
+                    // Null when discovery isn't wired (UI-test
+                    // harness) — the DISCOVERY section is omitted.
+                    onDiscoveryClick = dependencies.discovery?.let {
+                        { navController.navigate(ROUTE_DISCOVERY_SETTINGS) }
+                    },
+                    discoveryProvidersCount = discoveryState?.value?.sources?.size ?: 0,
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -445,10 +453,19 @@ fun RootScreen(
                         initializer { dependencies.makeNostrRelaySettingsViewModel() }
                     },
                 ) as app.onym.android.settings.NostrRelaySettingsViewModel
+                val (entries, consents) = rememberSeatCatalog(
+                    dependencies = dependencies,
+                    seatType = DiscoveryBackedKnownNostrRelaysFetcher.SEAT_TYPE,
+                )
                 app.onym.android.settings.NostrRelaySettingsScreen(
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
                     onRunYourOwn = { navController.navigate(ROUTE_RUN_NOSTR) },
+                    catalogEntries = entries,
+                    consentByComponentId = consents,
+                    onCatalogEntryClick = { entry ->
+                        navController.navigate(moduleConsentRoute(entry))
+                    },
                 )
             }
             composable(ROUTE_RUN_NOSTR) {
@@ -479,14 +496,72 @@ fun RootScreen(
                         initializer { dependencies.makeRelayerSettingsViewModel() }
                     },
                 )
+                val (entries, consents) = rememberSeatCatalog(
+                    dependencies = dependencies,
+                    seatType = DiscoveryBackedKnownRelayersFetcher.SEAT_TYPE,
+                )
                 RelayerSettingsScreen(
                     viewModel = vm,
                     onBackClick = { navController.popBackStack() },
                     onRunYourOwnClick = { navController.navigate(ROUTE_RUN_RELAYER) },
+                    catalogEntries = entries,
+                    consentByComponentId = consents,
+                    onCatalogEntryClick = { entry ->
+                        navController.navigate(moduleConsentRoute(entry))
+                    },
                 )
             }
             composable(ROUTE_RUN_RELAYER) {
                 RunRelayerScreen(onBack = { navController.popBackStack() })
+            }
+            composable(ROUTE_DISCOVERY_SETTINGS) {
+                // Reachable only through the Settings row, which is
+                // hidden when discovery isn't wired — the guard keeps
+                // a stale deep link from crashing.
+                val discovery = dependencies.discovery ?: return@composable
+                val vm: app.onym.android.settings.DiscoverySettingsViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { discovery.makeDiscoverySettingsViewModel() }
+                    },
+                )
+                app.onym.android.settings.DiscoverySettingsScreen(
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                    onAddProvider = { navController.navigate(ROUTE_ADD_DISCOVERY_PROVIDER) },
+                )
+            }
+            composable(ROUTE_ADD_DISCOVERY_PROVIDER) {
+                val discovery = dependencies.discovery ?: return@composable
+                // Fresh ViewModel instance per visit: the add flow's
+                // phase state is local to this destination, while the
+                // pinned outcome propagates through the repository.
+                val vm: app.onym.android.settings.DiscoverySettingsViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { discovery.makeDiscoverySettingsViewModel() }
+                    },
+                )
+                app.onym.android.settings.AddDiscoveryProviderScreen(
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            // Module consent for one catalog entry. The path carries
+            // seat type + short component id (not the value type) so
+            // the destination survives process death; the entry is
+            // re-looked-up from the live aggregate by the factory.
+            composable("module_consent/{seatType}/{componentShortId}") { entry ->
+                val discovery = dependencies.discovery ?: return@composable
+                val seatType = entry.arguments?.getString("seatType") ?: return@composable
+                val shortId = entry.arguments?.getString("componentShortId") ?: return@composable
+                val vm: app.onym.android.settings.ModuleConsentViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer { discovery.makeModuleConsentViewModel(seatType, shortId) }
+                    },
+                )
+                app.onym.android.settings.ModuleConsentScreen(
+                    viewModel = vm,
+                    onClose = { navController.popBackStack() },
+                )
             }
             composable(ROUTE_ANCHORS_ROOT) {
                 val vm: AnchorsPickerViewModel = viewModel(
@@ -609,6 +684,50 @@ fun RootScreen(
     }
 }
 
+/** Route into the module-consent flow for one catalog entry. The
+ *  `onym:component:` prefix is stripped so the path arg stays a plain
+ *  `[a-z0-9-]` token (component ids can't collide after stripping —
+ *  the prefix is fixed). */
+private fun moduleConsentRoute(
+    entry: app.onym.android.discovery.AttributedCatalogEntry,
+): String {
+    val shortId = entry.entry.componentId.removePrefix("onym:component:")
+    return "module_consent/${entry.entry.seatType}/$shortId"
+}
+
+/**
+ * Discovery entries for one seat type + the active pinned consent per
+ * componentId, for a picker's "From catalog" section. Both empty when
+ * discovery isn't wired. Consents reload whenever the entry list
+ * changes or the destination re-enters composition (returning from
+ * the consent flow re-runs [produceState]).
+ */
+@Composable
+private fun rememberSeatCatalog(
+    dependencies: AppDependencies,
+    seatType: String,
+): Pair<
+    List<app.onym.android.discovery.AttributedCatalogEntry>,
+    Map<String, app.onym.android.foundation.PinnedConsentRecord>,
+> {
+    val discovery = dependencies.discovery
+        ?: return emptyList<app.onym.android.discovery.AttributedCatalogEntry>() to emptyMap()
+    val state by discovery.stateFlow.collectAsStateWithLifecycle()
+    val entries = remember(state.entries, seatType) {
+        state.entries.filter { it.entry.seatType == seatType }
+    }
+    val consents by androidx.compose.runtime.produceState(
+        initialValue = emptyMap<String, app.onym.android.foundation.PinnedConsentRecord>(),
+        entries,
+    ) {
+        value = entries.mapNotNull { entry ->
+            discovery.activeConsent(entry.entry.componentId)
+                ?.let { entry.entry.componentId to it }
+        }.toMap()
+    }
+    return entries to consents
+}
+
 private enum class Tab(val route: String, val labelRes: Int) {
     // Chats is the leftmost + default tab post-PR-30.
     Chats("chats", R.string.chats_tab),
@@ -627,6 +746,8 @@ private const val ROUTE_RECOVERY_BACKUP = "recovery_backup"
 private const val ROUTE_IDENTITIES = "identities"
 private const val ROUTE_ABOUT = "about_onym"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
+private const val ROUTE_DISCOVERY_SETTINGS = "discovery_settings"
+private const val ROUTE_ADD_DISCOVERY_PROVIDER = "add_discovery_provider"
 private const val ROUTE_NOSTR_RELAYS = "nostr_relays"
 private const val ROUTE_BLOSSOM_RELAYS = "blossom_relays"
 private const val ROUTE_RUN_NOSTR = "run_nostr_relay"
