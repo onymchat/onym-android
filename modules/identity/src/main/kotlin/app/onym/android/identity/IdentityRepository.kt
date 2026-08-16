@@ -138,6 +138,30 @@ class IdentityRepository(
     }
 
     /**
+     * Ed25519 detached signature with the Stellar-derived identity
+     * key — the key `Identity.stellarPublicKey` is the public half of,
+     * and the one moderation mandates/sessions name as
+     * `onym:key:<hex>` (exact iOS parity: `IdentityModerationSigner`
+     * signs with the same derivation, so one identity carries one
+     * moderation enrollment across platforms).
+     *
+     * The private-key object is derived per call and discarded, per
+     * [stellarSigningPrivateKey]'s single-use contract; only the
+     * detached signature crosses this boundary.
+     *
+     * @throws IdentityError.IdentityNotLoaded before [bootstrap].
+     */
+    suspend fun signWithStellarKey(message: ByteArray): ByteArray = withContext(ioDispatcher) {
+        val id = store.loadCurrent() ?: throw IdentityError.IdentityNotLoaded
+        val snapshot = store.load(id) ?: throw IdentityError.IdentityNotLoaded
+        val signingKey = stellarSigningPrivateKey(snapshot.nostrSecretKey)
+        Ed25519Signer().apply {
+            init(true, signingKey)
+            update(message, 0, message.size)
+        }.generateSignature()
+    }
+
+    /**
      * Load the persisted identity (the currently-selected one), or
      * generate a fresh BIP39-backed identity if no snapshot exists.
      * Idempotent: a second call after success returns the same

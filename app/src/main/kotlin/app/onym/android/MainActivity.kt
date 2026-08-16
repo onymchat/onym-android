@@ -73,6 +73,16 @@ import app.onym.android.group.DeeplinkCapture
  */
 class MainActivity : FragmentActivity() {
 
+    override fun onStart() {
+        super.onStart()
+        // Foreground gate-check trigger (device-recall profile §5.2):
+        // returning to the app must not ride only on the background
+        // interval timer. The repository's scheduler coalesces this
+        // with any in-flight check, so foreground thrash never
+        // multiplies Play Integrity calls.
+        (application as OnymApplication).dependencies.moderation?.gate?.appForegrounded()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         // Block screenshots / screen recording and blank the recents

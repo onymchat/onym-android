@@ -54,6 +54,56 @@ android {
         // See `OnymApplication.buildDependencies` for the OkHttp
         // interceptor that consumes this.
         buildConfigField("String", "RELAYER_AUTH_TOKEN", "\"${relayerAuthToken()}\"")
+
+        // Moderation enforcement backend (the `android/` service in
+        // onym-moderation). Sourced like RELAYER_AUTH_TOKEN: ENV
+        // `MODERATION_BASE_URL` → local.properties `moderation.baseUrl`
+        // → empty. EMPTY IS THE DARK-LAUNCH SWITCH: with no base URL
+        // (and no UI-test fakes) OnymApplication builds no moderation
+        // dependencies at all — no gate, no onboarding step, no Play
+        // Integrity calls.
+        //
+        // GO-LIVE CHECKLIST — every item is a blocker before this is
+        // set in a release build:
+        //  1. The enforcement backend is deployed and the authority
+        //     routes onym:component:onym-android verdicts to it.
+        //  2. Play Console: Play Integrity enrolled, device-recall
+        //     beta approved + opted in, Cloud project linked;
+        //     PLAY_CLOUD_PROJECT_NUMBER set (the check below enforces
+        //     the pairing).
+        //  3. The authority directory is SIGNED or its root key is
+        //     app-pinned — issue #219. Today the operator-key pin
+        //     chain bottoms out in an unsigned GitHub release URL
+        //     (see KnownAuthoritiesFetcher's TRUST ASYMMETRY note),
+        //     which is a consent-hijack surface for first-time users.
+        buildConfigField("String", "MODERATION_BASE_URL", "\"${moderationBaseUrl()}\"")
+        // The Google Cloud project number linked in the Play Console —
+        // StandardIntegrityManager.prepare needs it. ENV
+        // `PLAY_CLOUD_PROJECT_NUMBER` → local.properties
+        // `play.cloudProjectNumber` → 0 (unusable, kept dark).
+        buildConfigField("long", "PLAY_CLOUD_PROJECT_NUMBER", "${playCloudProjectNumber()}L")
+
+        // Half-configured moderation is worse than dark: a base URL
+        // with no cloud project number makes the Play provider latch
+        // CLOUD_PROJECT_NUMBER_IS_INVALID as "unsupported" for the
+        // process, so every session goes token-less and every user
+        // blocks at the gate. Refuse the build instead — except for a
+        // loopback dev backend (the emulator loop against a local
+        // service has no Play Console pairing to demand, and the
+        // runtime client only honors loopback under a debug build).
+        // (Release builds additionally demand https — see the
+        // androidComponents block below: the runtime client honors
+        // loopback only under debug, so a release with a loopback URL
+        // would throw on every check and block every user at grace.)
+        check(
+            moderationBaseUrl().isBlank() ||
+                moderationUrlIsLoopback() ||
+                playCloudProjectNumber() != 0L
+        ) {
+            "MODERATION_BASE_URL is set but PLAY_CLOUD_PROJECT_NUMBER is not — the moderation " +
+                "seat needs both (or neither, to stay dark). Set play.cloudProjectNumber in " +
+                "local.properties or the PLAY_CLOUD_PROJECT_NUMBER env var."
+        }
     }
 
     buildTypes {
@@ -120,6 +170,20 @@ android {
     // :transport-blossom, :chats-core), wired below.
 }
 
+// The loopback exemption above is a DEBUG convenience; the runtime
+// client (OkHttpEnforcementBackendClient) refuses non-https outside a
+// debug build, so a release carrying a loopback MODERATION_BASE_URL
+// would fail every gate check until grace expired — for every user.
+// Refuse to build that.
+androidComponents {
+    onVariants(selector().withBuildType("release")) {
+        check(moderationBaseUrl().isBlank() || moderationBaseUrl().startsWith("https://")) {
+            "MODERATION_BASE_URL must be https in a release build (got a non-https URL the " +
+                "release client refuses at runtime)."
+        }
+    }
+}
+
 dependencies {
     // Extracted library modules (modules/): string resources, brand/
     // settings UI atoms, crypto/encoding primitives, transport seam
@@ -139,6 +203,8 @@ dependencies {
     implementation(project(":inbox"))
     implementation(project(":search"))
     implementation(project(":onboarding"))
+    implementation(project(":moderation"))
+    implementation(project(":moderation-ui"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -282,6 +348,7 @@ dependencies {
     // InMemoryOnboardingStore — drives the onboarding gate in the
     // walk-through UI test (PR 4).
     androidTestImplementation(testFixtures(project(":onboarding")))
+    androidTestImplementation(testFixtures(project(":moderation")))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)
@@ -324,6 +391,35 @@ dependencies {
  * different storage primitives (UserDefaults / Info.plist over there;
  * `BuildConfig` here) but same precedence + fallback story.
  */
+fun moderationBaseUrl(): String {
+    System.getenv("MODERATION_BASE_URL")?.takeIf { it.isNotBlank() }?.let { return it }
+    val props = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    return props.getProperty("moderation.baseUrl").orEmpty()
+}
+
+// Keep in lockstep with OkHttpEnforcementBackendClient.isLoopbackHost
+// (modules/moderation/.../EnforcementBackendClient.kt), which is the
+// tested twin (WireCodecTest): drift between the two re-opens the
+// half-configured case this build check exists to catch.
+fun moderationUrlIsLoopback(): Boolean {
+    val rest = moderationBaseUrl().removePrefix("http://")
+    if (rest == moderationBaseUrl()) return false
+    val host = rest.takeWhile { it != ':' && it != '/' }
+    return host == "localhost" || host == "10.0.2.2"
+}
+
+fun playCloudProjectNumber(): Long {
+    System.getenv("PLAY_CLOUD_PROJECT_NUMBER")?.toLongOrNull()?.let { return it }
+    val props = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    return props.getProperty("play.cloudProjectNumber")?.toLongOrNull() ?: 0L
+}
+
 fun relayerAuthToken(): String {
     System.getenv("RELAYER_AUTH_TOKEN")?.takeIf { it.isNotBlank() }?.let { return it }
     val props = Properties().apply {

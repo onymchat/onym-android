@@ -44,6 +44,16 @@ androidx-datastore = "1.1.1"
 # Compatibility" warning + will be Play-Store-rejected from Nov 2025.
 onym-sdk = "0.0.2"
 
+# Play Integrity — StandardIntegrityManager for the moderation seat's
+# device-recall profile: prepared token provider + standard requests
+# whose requestHash binds the backend-issued challenge. First (and
+# only) Google Play services dependency in the app; the moderation
+# manifest must disclose the resulting reach limitation (emulators and
+# de-Googled devices fail to checkRequired by design).
+play-integrity = "1.4.0"
+# kotlinx-coroutines-play-services — Task.await() over the Play
+# Integrity Tasks API.
+
 # Crypto
 bouncycastle = "1.78.1"
 
@@ -144,6 +154,10 @@ androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref =
 
 # BouncyCastle — Curve25519 (Ed25519 + X25519) raw-key APIs not in the JDK
 bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+
+# Play Integrity (see the version entry for why this exists at all).
+play-integrity = { module = "com.google.android.play:integrity", version.ref = "play-integrity" }
+kotlinx-coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "kotlinx-coroutines" }
 
 # ZXing core — QR-bit-matrix generator (encode) + `MultiFormatReader`
 # (decode). Drawn by `OnymQrCode` onto a Compose Canvas; decoded from

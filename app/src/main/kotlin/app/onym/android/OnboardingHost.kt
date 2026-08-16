@@ -139,18 +139,6 @@ internal fun OnboardingHost(
     )
     val flow = hostViewModel.flow
 
-    // MODERATION TRIPWIRE: the reserved slot has NO Android surface
-    // yet. If the flag ever flips without one, the walk would render
-    // the module's inert placeholder on an outcome-gated,
-    // unskippable, back-blocked step — a bricked wizard. Fail fast
-    // and name the missing piece instead of shipping the dead end.
-    require(OnboardingStep.Moderation !in flow.steps) {
-        "OnboardingFlow was constructed with moderationEnabled = true, but " +
-            "OnboardingHost provides no OnboardingStep.Moderation surface — the " +
-            "step is outcome-gated and unskippable, so the walk would dead-end. " +
-            "Wire the moderation step content before enabling the reserved slot."
-    }
-
     val state by flow.state.collectAsState()
 
     // Full-screen and back-blocked: the only exits are Done's primary
@@ -273,10 +261,12 @@ internal fun OnboardingHost(
                                 flow = flow,
                             )
                         })
-                        // Moderation stays reserved — no Android
-                        // surface yet; the module placeholder renders
-                        // if the flag ever flips without content.
-                        OnboardingStep.Moderation -> null
+                        OnboardingStep.Moderation -> ({
+                            ModerationStepContent(
+                                dependencies = dependencies,
+                                flow = flow,
+                            )
+                        })
                     }
                 },
             )
@@ -600,6 +590,59 @@ private fun IdentityChecklistRow(phase: IdentityPhase, title: String, subtitle: 
 }
 
 // ── Services ──────────────────────────────────────────────────────
+
+/**
+ * The moderation consent step: the reviewed manifest snapshot with
+ * Agree wired to `ModerationRepository.consent`. Outcome-gated like
+ * every core step — Consented on success; Unavailable when the
+ * directory offers nothing (Continue acknowledges, per the flow's
+ * mandatory/Unavailable arithmetic — opting out of moderation is not
+ * a thing, but an empty directory cannot demand consent). A null
+ * `dependencies.moderation` under an enabled step is unreachable:
+ * the flow only enters the step when the seat is wired.
+ */
+@Composable
+private fun ModerationStepContent(
+    dependencies: AppDependencies,
+    flow: OnboardingFlow,
+) {
+    // The step only enters the walk when the seat is wired (both read
+    // the same moderationUi), but if that invariant ever breaks, a
+    // silent `?: return` renders an EMPTY outcome-gated, unskippable,
+    // back-blocked step — the bricked wizard the old tripwire
+    // existed to prevent. Fail fast and name the missing piece.
+    val moderation = checkNotNull(dependencies.moderation) {
+        "OnboardingStep.Moderation is in the walk but AppDependencies.moderation is null — " +
+            "OnymApplication must construct the moderation dependencies whenever it enables " +
+            "the step (moderationEnabled = moderationUi != null)"
+    }
+    val controller = remember { moderation.makeConsentController(true) }
+    app.onym.android.moderation.ui.ModerationConsentContent(
+        controller = controller,
+        // The step scaffold already scrolls; the surface must not
+        // nest its own unbounded scroll inside it.
+        standalone = false,
+        onConsented = { record ->
+            if (flow.state.value.step == OnboardingStep.Moderation) {
+                flow.recordOutcome(StepOutcome.Consented(record.mandate.authority))
+            }
+            // The iOS `consentCompleted` invariant: a fresh gate
+            // check immediately, so the gate reflects the mandate.
+            moderation.gate.consentCompleted()
+        },
+        onUnavailableContinue = {
+            if (flow.state.value.step == OnboardingStep.Moderation) {
+                flow.recordOutcome(StepOutcome.Unavailable)
+            }
+            // Also defer the ROOT gate for this process: without it,
+            // finishing the walk lands the user straight on the
+            // full-screen NeedsConsent surface they just continued
+            // past — the same unreachable authority, asked twice.
+            moderation.gate.deferConsent()
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
 
 /**
  * "Your services" — one screen instead of the old four wizard steps.

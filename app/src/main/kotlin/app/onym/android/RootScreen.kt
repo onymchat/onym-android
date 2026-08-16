@@ -4,6 +4,7 @@ package app.onym.android
 // `app.onym.android.R` no longer carries R.string entries under
 // android.nonTransitiveRClass.
 import app.onym.android.strings.R
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -128,6 +129,81 @@ fun RootScreen(
                 return
             }
             false -> Unit // fall through to the tab shell
+        }
+    }
+
+    // Moderation gate (device-recall profile): after onboarding — the
+    // walk's own moderation step handles first-run consent, so the
+    // cover must not stack on top of it — the RootGate decides whether
+    // the shell renders at all. Banned and CheckRequired replace it
+    // full-screen and back-blocked (the same early-return pattern as
+    // the onboarding gate above); NeedsConsent hosts the consent
+    // surface for users who onboarded before the seat existed (or
+    // whose enrollment the backend lost). Null dependencies = the seat
+    // is dark, and everything renders as before it existed.
+    val moderation = dependencies.moderation
+    if (moderation != null) {
+        val rootGate by moderation.gate.snapshots.collectAsStateWithLifecycle()
+        when (val gate = rootGate) {
+            is app.onym.android.moderation.ui.RootGate.Banned -> {
+                BackHandler(enabled = true) {}
+                val context = LocalContext.current
+                app.onym.android.moderation.ui.BannedScreen(
+                    state = gate.state,
+                    onOpenUrl = { url ->
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(url),
+                                ),
+                            )
+                        }
+                    },
+                )
+                return
+            }
+            is app.onym.android.moderation.ui.RootGate.CheckRequired -> {
+                BackHandler(enabled = true) {}
+                app.onym.android.moderation.ui.GateCheckRequiredScreen(
+                    reason = gate.reason,
+                    onRetry = { moderation.gate.tappedRetry() },
+                    authorityContact = gate.authorityContact,
+                )
+                return
+            }
+            is app.onym.android.moderation.ui.RootGate.NeedsConsent -> {
+                BackHandler(enabled = true) {}
+                // resumeExistingMandate = canDefer: the never-mandated
+                // host resumes a just-persisted consent after rotation;
+                // the enrollment-lost host (canDefer=false) must run a
+                // FRESH transaction despite the local record.
+                val controller = remember(gate.canDefer) {
+                    moderation.makeConsentController(gate.canDefer)
+                }
+                app.onym.android.moderation.ui.ModerationConsentContent(
+                    controller = controller,
+                    onConsented = { moderation.gate.consentCompleted() },
+                    // An unreachable authority (directory up, manifest
+                    // fetch or signature verify down) must not lock a
+                    // never-mandated user out of the app for the
+                    // outage's duration: Continue defers consent for
+                    // this process, mirroring the empty-directory
+                    // softening, and the next launch asks again. An
+                    // ENROLLMENT-LOST user also lands here (re-consent
+                    // is their route back), but deferring past a gate
+                    // that refused them is not on offer — canDefer is
+                    // false and no Continue renders, because a dead
+                    // button is worse than none.
+                    onUnavailableContinue = if (gate.canDefer) {
+                        { moderation.gate.deferConsent() }
+                    } else {
+                        null
+                    },
+                )
+                return
+            }
+            is app.onym.android.moderation.ui.RootGate.Operational -> Unit
         }
     }
 

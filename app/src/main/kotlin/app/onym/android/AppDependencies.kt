@@ -112,6 +112,34 @@ class AppDependencies(
      *  so existing instrumented tests never see the walk (PR 4 adds
      *  registry slots to drive it deliberately). */
     val onboarding: OnboardingUiDependencies? = null,
+    /** The moderation seat's gate + consent surfaces. `null` exactly
+     *  when moderation is dark — no `MODERATION_BASE_URL` configured
+     *  and no UI-test fakes registered — in which case RootScreen and
+     *  onboarding render as before the seat existed. */
+    val moderation: ModerationUiDependencies? = null,
+)
+
+/**
+ * Everything RootScreen's moderation gate and the consent surfaces
+ * need, bundled so [AppDependencies] carries one value.
+ */
+class ModerationUiDependencies(
+    /** The RootGate the app root switches on, plus the foreground /
+     *  retry / post-consent hooks. */
+    val gate: app.onym.android.moderation.ui.ModerationGateFlow,
+    /** Fresh consent controller per surface (onboarding step or the
+     *  full-screen NeedsConsent host) — each runs its own
+     *  one-snapshot review. `resumeExistingMandate`: true for
+     *  first-consent hosts (a rotation after a persisted consent
+     *  re-emits Consented); false for the enrollment-lost re-consent
+     *  host, which needs a FRESH transaction despite the local
+     *  record. */
+    val makeConsentController: (resumeExistingMandate: Boolean) -> app.onym.android.moderation.ui.ModerationConsentController,
+    /** Whether the authority directory currently offers anything to
+     *  consent to — the onboarding step's mandatory/Unavailable
+     *  arithmetic reads this. Failure answers false (softening toward
+     *  operational, never a block on the network). */
+    val directoryNonEmpty: suspend () -> Boolean,
 )
 
 /**

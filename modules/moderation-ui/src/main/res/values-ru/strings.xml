@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Ban gate -->
+  <string name="moderation_banned_title">Это устройство заблокировано в Onym</string>
+  <string name="moderation_banned_permanent">Блокировка бессрочная — согласно условиям, которые вы приняли.</string>
+  <string name="moderation_banned_expires">Блокировка действует до %1$s.</string>
+  <string name="moderation_banned_verdict_ref">Ссылка на вердикт: %1$s</string>
+  <string name="moderation_banned_contact">Контакт органа модерации: %1$s</string>
+  <string name="moderation_banned_appeal">Обжаловать блокировку</string>
+  <string name="moderation_banned_new_holder">Я новый владелец этого устройства</string>
+  <string name="moderation_banned_contact_action">Связаться с органом модерации</string>
+
+  <!-- Verification-required gate -->
+  <string name="moderation_gate_required_title">Требуется проверка</string>
+  <string name="moderation_gate_required_token_invalid">Google не смог подтвердить это устройство для этой сборки приложения. Убедитесь, что приложение установлено из Google Play, и попробуйте снова.</string>
+  <string name="moderation_gate_required_attestation_unavailable">Проверка устройства недоступна. Onym требуются сервисы Google Play и сборка, установленная из Play.</string>
+  <string name="moderation_gate_required_reidentification">На этом устройстве есть метка модерации, которую не удалось сопоставить с вашей учётной записью. Свяжитесь с органом модерации, указанным в уведомлении о блокировке или деле.</string>
+  <string name="moderation_gate_required_grace_expired">Onym несколько дней не мог связаться со службой проверки. Подключитесь к интернету и попробуйте снова.</string>
+  <string name="moderation_gate_required_never_checked">Это устройство ещё не прошло первую проверку. Подключитесь к интернету и попробуйте снова.</string>
+  <string name="moderation_gate_required_clock_rollback">Похоже, часы устройства были переведены назад. Исправьте дату и время и попробуйте снова.</string>
+  <string name="moderation_gate_required_backend_refused">Служба проверки отклонила запрос этого устройства. Попробуйте снова; если это повторяется, свяжитесь с органом модерации.</string>
+  <string name="moderation_gate_required_enrollment_lost">Служба проверки больше не распознаёт регистрацию этого устройства. Просмотрите и примите условия модерации заново, чтобы перерегистрироваться.</string>
+  <string name="moderation_gate_required_retry">Повторить</string>
+  <string name="moderation_gate_required_contact_fallback">Свяжитесь с органом модерации, чьи условия вы приняли — его контакты указаны в условиях, которые вы просматривали при настройке.</string>
+
+  <!-- Consent -->
+  <string name="moderation_consent_title">Модерация: %1$s</string>
+  <string name="moderation_consent_body">Для работы Onym требуется согласие на независимую модерацию. Ознакомьтесь с условиями ниже — вы соглашаетесь именно с этими условиями и ни с чем другим.</string>
+  <string name="moderation_consent_agree">Принять и продолжить</string>
+  <string name="moderation_consent_loading">Готовим условия модерации…</string>
+  <string name="moderation_consent_unavailable">Условия модерации сейчас недоступны. Можно повторить попытку или продолжить и дать согласие позже — Onym спросит снова.</string>
+  <string name="moderation_consent_retry">Повторить</string>
+  <string name="moderation_consent_continue">Продолжить</string>
+  <string name="moderation_consent_done">Согласие на модерацию записано.</string>
+</resources>

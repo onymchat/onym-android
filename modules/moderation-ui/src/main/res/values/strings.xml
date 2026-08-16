@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Ban gate -->
+  <string name="moderation_banned_title">This device is banned from Onym</string>
+  <string name="moderation_banned_permanent">The ban is permanent under the terms you consented to.</string>
+  <string name="moderation_banned_expires">The ban is in force until %1$s.</string>
+  <string name="moderation_banned_verdict_ref">Verdict reference: %1$s</string>
+  <string name="moderation_banned_contact">Authority contact: %1$s</string>
+  <string name="moderation_banned_appeal">Appeal this ban</string>
+  <string name="moderation_banned_new_holder">I\'m this device\'s new owner</string>
+  <string name="moderation_banned_contact_action">Contact the authority</string>
+
+  <!-- Verification-required gate -->
+  <string name="moderation_gate_required_title">Verification required</string>
+  <string name="moderation_gate_required_token_invalid">Google could not verify this device for this app build. Make sure the app was installed from Google Play, then try again.</string>
+  <string name="moderation_gate_required_attestation_unavailable">Device verification is unavailable. Onym needs Google Play services and a Play-installed build to verify this device.</string>
+  <string name="moderation_gate_required_reidentification">This device carries a moderation mark that can\'t be matched to your identity. Contact the moderation authority named in your ban or case notice to restore or clear it.</string>
+  <string name="moderation_gate_required_grace_expired">Onym couldn\'t reach the verification service for several days. Connect to the internet and try again.</string>
+  <string name="moderation_gate_required_never_checked">This device hasn\'t completed its first verification yet. Connect to the internet and try again.</string>
+  <string name="moderation_gate_required_clock_rollback">This device\'s clock appears to have been set backwards. Fix the date and time, then try again.</string>
+  <string name="moderation_gate_required_backend_refused">The verification service refused this device\'s request. Try again; if this keeps happening, contact the moderation authority.</string>
+  <string name="moderation_gate_required_enrollment_lost">The verification service no longer recognizes this device\'s enrollment. Review and accept the moderation terms again to re-enroll.</string>
+  <string name="moderation_gate_required_retry">Try again</string>
+  <string name="moderation_gate_required_contact_fallback">Contact the moderation authority whose terms you accepted — its contact details are published in the terms you reviewed at setup.</string>
+
+  <!-- Consent -->
+  <string name="moderation_consent_title">Moderation by %1$s</string>
+  <string name="moderation_consent_body">Onym requires consenting to independent moderation. Review the authority\'s terms below — exactly these terms, and nothing else, are what you agree to.</string>
+  <string name="moderation_consent_agree">Agree and continue</string>
+  <string name="moderation_consent_loading">Preparing moderation terms…</string>
+  <string name="moderation_consent_unavailable">Moderation terms can\'t be loaded right now. You can retry, or continue and consent later — Onym will ask again.</string>
+  <string name="moderation_consent_retry">Retry</string>
+  <string name="moderation_consent_continue">Continue</string>
+  <string name="moderation_consent_done">Moderation consent recorded.</string>
+</resources>

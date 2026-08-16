@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.fragment.app.FragmentActivity
 import androidx.room.Room
 import app.onym.android.chain.BearerAuthInterceptor
+import app.onym.android.moderation.authorityContactLine
 import app.onym.android.chain.ContractsRepository
 import app.onym.android.chain.DataStoreNetworkPreferenceProvider
 import app.onym.android.chain.OkHttpSepContractTransport
@@ -107,6 +108,16 @@ private val Context.blossomServersDataStore: DataStore<Preferences> by preferenc
  */
 private val Context.chatPreferencesDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "app.onym.android.chat_prefs",
+)
+
+/**
+ * DataStore Preferences for the moderation seat: the consented
+ * mandate records (mandate + exact manifest bytes — consent records,
+ * not secrets) and the persisted last gate result. Separate file per
+ * the one-domain-one-blob convention.
+ */
+private val Context.moderationDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.moderation_prefs",
 )
 
 /**
@@ -1235,9 +1246,153 @@ class OnymApplication : Application() {
             )
         }
 
+        // ─── Moderation seat (device-recall enforcement client) ─────
+        // Dark by default: active only when the enforcement backend is
+        // configured (MODERATION_BASE_URL — see app/build.gradle.kts)
+        // or an instrumented test registered fakes. The two seams that
+        // weaken attestation (backend, provider, clock) are
+        // debugActive-gated; store/fetcher swaps ride plain `enabled`.
+        val moderationBackend: app.onym.android.moderation.EnforcementBackendClient? = when {
+            UITestRegistry.debugActive && UITestRegistry.moderationBackend != null ->
+                UITestRegistry.moderationBackend
+            // Harness without moderation fakes: the whole seat stays
+            // absent, keeping pre-moderation instrumented tests
+            // offline and unchanged. debugActive, not enabled:
+            // darkening the seat IS disabling moderation, and a
+            // release process flipping the plain static must not get
+            // that for free (same defense-in-depth as FLAG_SECURE).
+            UITestRegistry.debugActive -> null
+            BuildConfig.MODERATION_BASE_URL.isNotBlank() ->
+                app.onym.android.moderation.OkHttpEnforcementBackendClient(
+                    httpClient = httpClient,
+                    baseUrl = BuildConfig.MODERATION_BASE_URL,
+                    // Emulator loopback (http://10.0.2.2 / localhost)
+                    // is a debug-build convenience only; a release
+                    // binary refuses any non-https base URL.
+                    allowInsecureLoopback = BuildConfig.DEBUG,
+                )
+            else -> null
+        }
+        val moderationUi: ModerationUiDependencies?
+        if (moderationBackend == null) {
+            moderationUi = null
+        } else {
+            val attestation = if (UITestRegistry.debugActive &&
+                UITestRegistry.moderationAttestation != null
+            ) {
+                UITestRegistry.moderationAttestation!!
+            } else {
+                app.onym.android.moderation.PlayIntegrityAttestationProvider(
+                    context = applicationContext,
+                    cloudProjectNumber = BuildConfig.PLAY_CLOUD_PROJECT_NUMBER,
+                )
+            }
+            val moderationSigner = IdentityModerationSigner(identityRepository)
+            // debugActive, not enabled: these stores hold the sticky
+            // refusal and the cached ban — substituting them is
+            // exactly the laundering the persistence wall prevents,
+            // which puts them in moderationClock's class, not the
+            // I/O-swap class.
+            val moderationMandateStore =
+                (if (UITestRegistry.debugActive) UITestRegistry.moderationMandateStore else null)
+                    ?: app.onym.android.moderation.DataStorePreferencesMandateStore(
+                        applicationContext.moderationDataStore,
+                    )
+            val moderationGateStateStore =
+                (if (UITestRegistry.debugActive) UITestRegistry.moderationGateStateStore else null)
+                    ?: app.onym.android.moderation.DataStorePreferencesGateStateStore(
+                        applicationContext.moderationDataStore,
+                    )
+            val moderationClock: () -> java.time.Instant =
+                (if (UITestRegistry.debugActive) UITestRegistry.moderationClock else null)
+                    ?: { java.time.Instant.now() }
+            val authoritiesFetcher =
+                (if (UITestRegistry.enabled) UITestRegistry.moderationAuthoritiesFetcher else null)
+                    ?: app.onym.android.moderation.OkHttpKnownAuthoritiesFetcher(httpClient)
+            val manifestFetcher =
+                (if (UITestRegistry.enabled) UITestRegistry.moderationManifestFetcher else null)
+                    ?: app.onym.android.moderation.OkHttpAuthorityManifestFetcher(httpClient)
+
+            val moderationRepository = app.onym.android.moderation.ModerationRepository(
+                backend = moderationBackend,
+                attestation = attestation,
+                signer = moderationSigner,
+                mandateStore = moderationMandateStore,
+                clock = moderationClock,
+            )
+            val gateCheckRepository = app.onym.android.moderation.GateCheckRepository(
+                attestation = attestation,
+                backend = moderationBackend,
+                moderation = moderationRepository,
+                signer = moderationSigner,
+                store = moderationGateStateStore,
+                scope = applicationScope,
+                clock = moderationClock,
+            )
+            val moderationGateFlow = app.onym.android.moderation.ui.ModerationGateFlow(
+                gate = gateCheckRepository,
+                authoritiesAvailable = {
+                    runCatching { authoritiesFetcher.fetchLatest().isNotEmpty() }
+                        .getOrDefault(false)
+                },
+                reidentificationContact = {
+                    moderationRepository.activeMandateRecord()?.authorityContactLine()
+                },
+                scope = applicationScope,
+            )
+            applicationScope.launch {
+                // Each start is guarded independently: sequential
+                // unguarded calls meant one store failure in
+                // moderationRepository.start() skipped the gate and
+                // flow starts entirely, leaving RootGate Operational
+                // — the process running UNMODERATED for its lifetime,
+                // the exact inversion of "never toward unmoderated
+                // operation". (The DataStore-backed stores also
+                // degrade instead of throwing now; this is the second
+                // wall.) The gate re-runs the repository load lazily,
+                // so a failed eager start self-heals at first check.
+                runCatching { moderationRepository.start() }
+                    .onFailure { android.util.Log.e("OnymApplication", "moderation start", it) }
+                // Launch check + the P1D cadence loop. Without a
+                // mandate checkNow answers NotMandated and sends
+                // nothing, so starting unconditionally is free.
+                runCatching { gateCheckRepository.start() }
+                    .onFailure { android.util.Log.e("OnymApplication", "gate start", it) }
+                runCatching { moderationGateFlow.start() }
+                    .onFailure { android.util.Log.e("OnymApplication", "gate flow start", it) }
+            }
+            moderationUi = ModerationUiDependencies(
+                gate = moderationGateFlow,
+                makeConsentController = { resumeExistingMandate ->
+                    app.onym.android.moderation.ui.ModerationConsentController(
+                        authoritiesFetcher = authoritiesFetcher,
+                        manifestFetcher = manifestFetcher,
+                        moderation = moderationRepository,
+                        resumeExistingMandate = resumeExistingMandate,
+                    )
+                },
+                directoryNonEmpty = {
+                    runCatching { authoritiesFetcher.fetchLatest().isNotEmpty() }
+                        .getOrDefault(false)
+                },
+            )
+        }
+
         val onboardingUi = OnboardingUiDependencies(
             shouldOnboard = onboardingPending,
-            makeFlow = { app.onym.android.onboarding.OnboardingFlow(store = onboardingStore) },
+            makeFlow = {
+                app.onym.android.onboarding.OnboardingFlow(
+                    store = onboardingStore,
+                    // The moderation step enters the walk exactly when
+                    // the seat is wired (dark launch: absent backend =
+                    // absent step). The directory probe drives the
+                    // step's mandatory/Unavailable arithmetic.
+                    moderationEnabled = moderationUi != null,
+                    moderationDirectoryNonEmpty = {
+                        moderationUi?.directoryNonEmpty?.invoke() ?: false
+                    },
+                )
+            },
             onCompleted = {
                 relayerAutoPopulateAllowed.set(true)
                 onboardingPending.value = false
@@ -1274,6 +1429,7 @@ class OnymApplication : Application() {
 
         return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
+            moderation = moderationUi,
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
                 RecoveryPhraseBackupViewModel(
                     repository = identityRepository,
