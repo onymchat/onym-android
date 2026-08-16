@@ -79,11 +79,12 @@ import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -535,6 +536,13 @@ private fun BubbleBody(
  * accent, while an underline reads as a link on any fill. Detection
  * is [ChatBodyLinks] (https/http/www only — a chat message must not
  * become an intent launcher); taps open the system browser.
+ *
+ * Accessibility trade-off, stated rather than silently dropped: the
+ * `LinkAnnotation` this replaced contributed per-link TalkBack link
+ * semantics, and a hand-rolled span cannot. The bubble-level semantics
+ * ([BubbleBody]'s `onLongClick` / `onClick`) still cover Copy and
+ * retry; per-link a11y activation — a semantics node per link range,
+ * each with its own `onClick` — is a follow-up, not part of this PR.
  */
 @Composable
 private fun LinkifiedBody(
@@ -582,7 +590,7 @@ private fun LinkifiedBody(
             }
         }
     }
-    var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val latestOnTap by rememberUpdatedState(onTap)
     Text(
         text = annotated,

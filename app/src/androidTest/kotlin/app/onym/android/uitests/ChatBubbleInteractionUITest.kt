@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
@@ -104,7 +105,7 @@ class ChatBubbleInteractionUITest {
 
         composeRule.onNode(
             SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick).and(
-                androidx.compose.ui.test.hasTestTag("chat_thread.bubble.${message.id}"),
+                hasTestTag("chat_thread.bubble.${message.id}"),
             ),
             useUnmergedTree = true,
         ).performSemanticsAction(SemanticsActions.OnLongClick)
