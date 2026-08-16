@@ -5,11 +5,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -62,7 +65,18 @@ fun OnboardingScaffold(
     indicator: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    Column(modifier = modifier.fillMaxSize()) {
+    // safeDrawing, applied here rather than by a host Scaffold: the
+    // onboarding walk renders on RootScreen's early-return path, which
+    // never reaches the tab shell's inset-applying Scaffold — without
+    // this the title draws under the status bar and the pinned action
+    // bar under the gesture-navigation bar (edge-to-edge is on for
+    // every SDK via enableEdgeToEdge). Covers cutouts and landscape
+    // side bars too, not just top/bottom.
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+    ) {
         // The content slot renders edge-to-edge: the Settings atoms
         // (SettingsCard / SettingsFootnote) and the PR 3 app surfaces
         // carry their own 16dp inset, so only the header text gets
