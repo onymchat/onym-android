@@ -1,5 +1,6 @@
 package app.onym.android.moderation
 
+import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
 import app.onym.android.moderation.support.FakeModerationSigner
 import app.onym.android.moderation.support.InMemoryGateStateStore
@@ -27,6 +28,7 @@ class GateCheckRepositoryTest {
             attestation = attestation,
             signer = signer,
             mandateStore = mandateStore,
+            authority = FakeAuthorityClient(),
             clock = { now },
         )
         return GateCheckRepository(
@@ -46,6 +48,7 @@ class GateCheckRepositoryTest {
             attestation = attestation,
             signer = signer,
             mandateStore = mandateStore,
+            authority = FakeAuthorityClient(),
             clock = { now },
         ).consent(ModerationFixtures.listing(), ModerationFixtures.reviewedManifest())
     }
@@ -455,6 +458,7 @@ class GateCheckRepositoryTest {
             attestation = attestation,
             signer = signer,
             mandateStore = mandateStore,
+            authority = FakeAuthorityClient(),
             clock = { now },
         )
         val repository = GateCheckRepository(

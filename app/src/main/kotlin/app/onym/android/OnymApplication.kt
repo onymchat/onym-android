@@ -1309,6 +1309,14 @@ class OnymApplication : Application() {
             val authoritiesFetcher =
                 (if (UITestRegistry.enabled) UITestRegistry.moderationAuthoritiesFetcher else null)
                     ?: app.onym.android.moderation.OkHttpKnownAuthoritiesFetcher(httpClient)
+            // debugActive, same class as the backend client: where a
+            // signed consent gets delivered is a security property.
+            val moderationAuthority =
+                (if (UITestRegistry.debugActive) UITestRegistry.moderationAuthorityClient else null)
+                    ?: app.onym.android.moderation.OkHttpAuthorityClient(
+                        httpClient = httpClient,
+                        allowInsecureLoopback = BuildConfig.DEBUG,
+                    )
             val manifestFetcher =
                 (if (UITestRegistry.enabled) UITestRegistry.moderationManifestFetcher else null)
                     ?: app.onym.android.moderation.OkHttpAuthorityManifestFetcher(httpClient)
@@ -1318,6 +1326,7 @@ class OnymApplication : Application() {
                 attestation = attestation,
                 signer = moderationSigner,
                 mandateStore = moderationMandateStore,
+                authority = moderationAuthority,
                 clock = moderationClock,
             )
             val gateCheckRepository = app.onym.android.moderation.GateCheckRepository(
@@ -1360,6 +1369,27 @@ class OnymApplication : Application() {
                     .onFailure { android.util.Log.e("OnymApplication", "gate start", it) }
                 runCatching { moderationGateFlow.start() }
                     .onFailure { android.util.Log.e("OnymApplication", "gate flow start", it) }
+                // Complete delivery of a consent whose authority
+                // registration a previous session could not finish
+                // (registration is retried, never re-consented — the
+                // user already signed those exact bytes). Guarded by
+                // the pending check so the common every-boot path
+                // fetches no directory. Transient failures wait for
+                // next boot; a PERMANENT refusal deactivates the
+                // record with its reason persisted
+                // (MandateRecord.registrationRefusal), which the next
+                // consent surface renders — the log below is for
+                // operators, not the user's only explanation.
+                runCatching {
+                    val pending = moderationRepository.pendingRegistration()
+                    if (pending != null) {
+                        authoritiesFetcher.fetchLatest()
+                            .firstOrNull { it.componentId == pending.mandate.authority }
+                            ?.let { moderationRepository.registerPending(it) }
+                    }
+                }.onFailure {
+                    android.util.Log.e("OnymApplication", "mandate registration retry", it)
+                }
             }
             moderationUi = ModerationUiDependencies(
                 gate = moderationGateFlow,

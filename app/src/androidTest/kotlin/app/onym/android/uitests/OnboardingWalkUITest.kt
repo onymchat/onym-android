@@ -16,6 +16,7 @@ import app.onym.android.onboarding.OnboardingStep
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeAuthorityManifestFetcher
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
 import app.onym.android.moderation.support.FakeKnownAuthoritiesFetcher
@@ -187,6 +188,7 @@ class OnboardingWalkUITest {
             }
             if (description.getAnnotation(ModerationEnabled::class.java) != null) {
                 UITestRegistry.moderationBackend = moderationBackend
+                UITestRegistry.moderationAuthorityClient = FakeAuthorityClient()
                 UITestRegistry.moderationAttestation = FakeDeviceAttestationProvider()
                 UITestRegistry.moderationMandateStore = InMemoryMandateStore()
                 UITestRegistry.moderationGateStateStore = InMemoryGateStateStore()

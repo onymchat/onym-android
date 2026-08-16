@@ -183,6 +183,11 @@ object UITestRegistry {
      *  laundering the persistence wall exists to prevent. */
     var moderationGateStateStore: app.onym.android.moderation.GateStateStore? = null
 
+    /** Fake authority client (mandate registration). [debugActive]-
+     *  gated like [moderationBackend]: where a consent gets delivered
+     *  is a security property, not an I/O detail. */
+    var moderationAuthorityClient: app.onym.android.moderation.AuthorityClient? = null
+
     /** Fake authority directory (I/O swap; [enabled]). */
     var moderationAuthoritiesFetcher: app.onym.android.moderation.KnownAuthoritiesFetcher? = null
 
@@ -216,6 +221,7 @@ object UITestRegistry {
         discoveryClock = null
         biometricAuthenticator = null
         moderationBackend = null
+        moderationAuthorityClient = null
         moderationAttestation = null
         moderationMandateStore = null
         moderationGateStateStore = null

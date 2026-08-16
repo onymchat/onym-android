@@ -4,6 +4,7 @@ import app.onym.android.moderation.CheckRequiredReason
 import app.onym.android.moderation.GateCheckRepository
 import app.onym.android.moderation.GateStatus
 import app.onym.android.moderation.ModerationRepository
+import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
 import app.onym.android.moderation.support.FakeModerationSigner
 import app.onym.android.moderation.support.InMemoryGateStateStore
@@ -37,6 +38,7 @@ class ModerationGateFlowTest {
             attestation = attestation,
             signer = signer,
             mandateStore = mandateStore,
+            authority = FakeAuthorityClient(),
             clock = { now },
         )
         val gate = GateCheckRepository(
@@ -63,6 +65,7 @@ class ModerationGateFlowTest {
             attestation = attestation,
             signer = signer,
             mandateStore = mandateStore,
+            authority = FakeAuthorityClient(),
             clock = { now },
         ).consent(ModerationFixtures.listing(), ModerationFixtures.reviewedManifest())
     }

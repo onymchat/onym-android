@@ -28,18 +28,17 @@ data class ModerationState(
  * Owns mandate consent: the minimal Android port of iOS's
  * `ModerationRepository.performConsent` — validate the reviewed
  * manifest, enroll (challenge + signed payload + requestHash-bound
- * integrity token), build and sign the mandate, countersign, persist.
+ * integrity token), build and sign the mandate, countersign, persist,
+ * register with the authority.
  *
- * Deferred with seams (see `MandateRecord.authorityRegistered`):
- * authority register-mandate, terms-currency / re-consent, and case
- * status. A record here is active once countersigned; registration
- * retry hangs off the persisted flag when that vertical lands.
+ * Deferred with seams: terms-currency / re-consent and case status.
  */
 class ModerationRepository(
     private val backend: EnforcementBackendClient,
     private val attestation: DeviceAttestationProvider,
     private val signer: ModerationSigner,
     private val mandateStore: MandateStore,
+    private val authority: AuthorityClient,
     private val interfaceComponentId: String = INTERFACE_COMPONENT_ID,
     private val clock: () -> Instant = Instant::now,
 ) {
@@ -194,7 +193,11 @@ class ModerationRepository(
         // keep their own active mandates (activeMandate is
         // per-identity). Only this final read-modify-write needs the
         // state lock.
+        var previousActive: MandateRecord? = null
         mutex.withLock {
+            previousActive = state.value.records.firstOrNull {
+                it.isActive && it.mandate.user == record.mandate.user
+            }
             val records = listOf(record) + state.value.records.map { existing ->
                 if (existing.mandate.user == record.mandate.user) {
                     existing.copy(isActive = false)
@@ -205,7 +208,154 @@ class ModerationRepository(
             mandateStore.save(records)
             state.value = ModerationState(loaded = true, records = records)
         }
-        record
+        // Registration is delivery of the already-persisted artifact,
+        // so it runs AFTER the save: a crash or network loss here
+        // leaves a countersigned record whose registration retries
+        // later ([registerPending]), never a signed consent that
+        // evaporated.
+        try {
+            registerWithAuthority(record, listing)
+        } catch (e: Exception) {
+            // A permanent refusal of the NEW mandate must not cost the
+            // identity its PREVIOUS, authority-accepted one: the
+            // re-consent path deactivated it in the save above, and
+            // without this rollback a stale-manifest 400 would leave
+            // zero active mandates — re-consenting made things
+            // strictly worse than not trying. Only the deterministic
+            // pair reaches here (transients return the record).
+            if (e is AuthorityRejectedException || e is AuthorityRegistrationRefusedException) {
+                previousActive?.let { previous ->
+                    updateRecord(previous) { it.copy(isActive = true) }
+                }
+            }
+            throw e
+        }
+    }
+
+    /**
+     * The current identity's active record still awaiting authority
+     * registration, or null. The retry hook: a caller holding a
+     * directory listing for its authority completes delivery with
+     * [registerPending].
+     */
+    suspend fun pendingRegistration(): MandateRecord? =
+        activeMandateRecord()?.takeIf { it.countersigned && !it.authorityRegistered }
+
+    /**
+     * Complete delivery of a persisted countersigned mandate to its
+     * authority. The user already signed these exact bytes — this
+     * creates no consent, it only retries the registration a previous
+     * session could not finish. No-op when nothing is pending or when
+     * [listing] designates a different authority than the pending
+     * mandate names.
+     */
+    suspend fun registerPending(listing: AuthorityListing) = consentMutex.withLock {
+        val pending = pendingRegistration() ?: return@withLock
+        if (pending.mandate.authority != listing.componentId) return@withLock
+        registerWithAuthority(pending, listing)
+    }
+
+    /**
+     * Register [record]'s mandate with the authority and return the
+     * record as persisted afterwards.
+     *
+     * Failure policy (mirroring iOS `registerPending`):
+     *  - transport failure / 5xx / 408 / 429 — the authority may have
+     *    committed or may accept an exact replay, so the artifact is
+     *    KEPT (`authorityRegistered = false`) and the consent still
+     *    stands; a later [registerPending] completes delivery. The
+     *    authority accepts exact replays idempotently.
+     *  - deterministic 4xx, a receipt naming a different mandateRef,
+     *    or `accepted: false` — exact replay can never turn this into
+     *    an acceptance (e.g. the authority rotated its manifest after
+     *    the review snapshot), so the record is DEACTIVATED — leaving
+     *    it active would pin the identity to a mandate its authority
+     *    never accepted, unfixable by retry — and the failure thrown
+     *    for the consent surface to present. A fresh consent against
+     *    current terms is the only repair.
+     */
+    private suspend fun registerWithAuthority(
+        record: MandateRecord,
+        listing: AuthorityListing,
+    ): MandateRecord {
+        val receipt = try {
+            authority.registerMandate(listing, record.mandate)
+        } catch (_: AuthorityUnreachableException) {
+            return record
+        } catch (e: AuthorityRejectedException) {
+            if (!e.isDeterministic) return record
+            deactivate(record, refusal = e.message)
+            throw e
+        }
+
+        // Receipt refusals are AuthorityRegistrationRefusedException,
+        // not ModerationConsentException: consent surfaces classify the
+        // type as deterministic, and a permanently refused registration
+        // routed through the generic path would escalate to the
+        // deferrable Unavailable state — a refused caller handed the
+        // bypass the deterministic split exists to close.
+        val expectedRef = record.mandate.mandateHash()
+        if (receipt.mandateRef != expectedRef) {
+            val refusal = "authority acknowledged a different mandate reference " +
+                "(expected $expectedRef, received ${receipt.mandateRef})"
+            deactivate(record, refusal)
+            throw AuthorityRegistrationRefusedException(refusal)
+        }
+        if (!receipt.accepted) {
+            val refusal = "authority did not accept the mandate"
+            deactivate(record, refusal)
+            throw AuthorityRegistrationRefusedException(refusal)
+        }
+
+        return updateRecord(record) { it.copy(authorityRegistered = true) }
+    }
+
+    /**
+     * The reason the current identity's registration was permanently
+     * refused, or null — non-null only while the identity holds NO
+     * active mandate, so a consent surface can say WHY consent needs
+     * redoing (the boot-time retry swallows its exceptions; this is
+     * how the reason survives to the next screen). Goes quiet by
+     * construction once a fresh consent activates a record.
+     */
+    suspend fun registrationRefusal(): String? {
+        start()
+        val userKey = signer.userKeyId()
+        if (state.value.activeMandate(userKey) != null) return null
+        return state.value.records
+            .firstOrNull { it.mandate.user == userKey && it.registrationRefusal != null }
+            ?.registrationRefusal
+    }
+
+    private suspend fun deactivate(record: MandateRecord, refusal: String?) {
+        updateRecord(record) { it.copy(isActive = false, registrationRefusal = refusal) }
+    }
+
+    /** Replace the exact persisted [record] (matched by its finalized
+     * mandate and creation instant) with [transform] of it. Failing
+     * loudly on a miss is deliberate: every caller has just read or
+     * written the record under a lock, so a miss is a logic error —
+     * silently reporting an un-persisted registration or deactivation
+     * as done would be worse than the crash. */
+    private suspend fun updateRecord(
+        record: MandateRecord,
+        transform: (MandateRecord) -> MandateRecord,
+    ): MandateRecord = mutex.withLock {
+        ensureLoadedLocked()
+        var updated: MandateRecord? = null
+        val records = state.value.records.map { existing ->
+            if (existing.mandate == record.mandate && existing.createdAt == record.createdAt) {
+                transform(existing).also { updated = it }
+            } else {
+                existing
+            }
+        }
+        val result = checkNotNull(updated) {
+            "no persisted record matches the one being updated (user ${record.mandate.user})"
+        }
+        mandateStore.save(records)
+        state.value = ModerationState(loaded = true, records = records)
+        result
     }
 
     companion object {

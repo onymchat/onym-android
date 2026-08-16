@@ -92,13 +92,24 @@ data class MandateRecord(
     val countersigned: Boolean,
     /**
      * Whether the finalized mandate reached the authority's
-     * register-mandate endpoint. Deferred seam: registration is not
-     * yet implemented on Android, so this stays false and re-consent /
-     * registration retry logic hangs off it later.
+     * register-mandate endpoint. False means delivery is still owed:
+     * consent survived a transient registration failure, and
+     * [app.onym.android.moderation.ModerationRepository.registerPending]
+     * completes it on a later session.
      */
     val authorityRegistered: Boolean = false,
     val isActive: Boolean,
     val createdAt: String,
+    /**
+     * Why the authority PERMANENTLY refused this mandate's
+     * registration, set when the refusal deactivates the record.
+     * Persisted so the reason survives to the next consent surface:
+     * the boot-time registration retry swallows its exceptions (there
+     * is no screen to show them on), and without this the user lands
+     * on the consent gate with no explanation of why their consent
+     * needs redoing. Null on active records and ordinary history.
+     */
+    val registrationRefusal: String? = null,
 )
 
 /**

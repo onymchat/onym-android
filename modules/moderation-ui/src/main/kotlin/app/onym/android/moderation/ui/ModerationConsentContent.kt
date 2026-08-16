@@ -3,7 +3,10 @@ package app.onym.android.moderation.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -176,6 +179,11 @@ fun ModerationConsentContent(
             body(
                 Modifier
                     .fillMaxSize()
+                    // Standalone = full-screen NeedsConsent host on
+                    // RootScreen's early-return path — the safe area
+                    // is this surface's own job (the embedded mode
+                    // inherits OnboardingScaffold's insets instead).
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .verticalScroll(rememberScrollState()),
             )
         }
