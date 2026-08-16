@@ -492,6 +492,52 @@ class ModerationRepositoryTest {
         assertEquals(null, repository.pendingRegistration())
     }
 
+    /** The Settings read model: one suspend call, all three facts
+     * about ONE identity — a caller can never pair identity A's
+     * "active" with identity B's history. */
+    @Test
+    fun `identityConsentState resolves the current identity only`() = runTest {
+        val repository = repository()
+        val recordA = repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        // A re-consents: previous history exists for A.
+        now = now.plusSeconds(3600)
+        repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        // B consents with delivery still owed.
+        signer.userKey = "onym:key:ccdd"
+        now = now.plusSeconds(3600)
+        authority.failure = AuthorityUnreachableException("fixture offline")
+        repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+
+        val forB = repository.identityConsentState()
+        assertEquals("onym:key:ccdd", forB.active!!.mandate.user)
+        assertTrue(forB.registrationPending)
+        // A's deactivated first record is NOT B's history.
+        assertEquals(0, forB.previous.size)
+
+        signer.userKey = "onym:key:aabb"
+        val forA = repository.identityConsentState()
+        assertEquals("onym:key:aabb", forA.active!!.mandate.user)
+        assertTrue(!forA.registrationPending)
+        assertEquals(listOf(recordA.mandate.acceptedAt), forA.previous.map { it.mandate.acceptedAt })
+    }
+
+    @Test
+    fun `identityConsentState with no records answers empty, not null active surprise`() = runTest {
+        val state = repository().identityConsentState()
+        assertEquals(null, state.active)
+        assertEquals(0, state.previous.size)
+        assertTrue(!state.registrationPending)
+    }
+
     @Test
     fun `registerPending is a no-op without a pending record`() = runTest {
         val repository = repository()

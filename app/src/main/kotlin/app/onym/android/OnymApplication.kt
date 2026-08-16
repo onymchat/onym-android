@@ -1347,6 +1347,10 @@ class OnymApplication : Application() {
                 scope = applicationScope,
                 clock = moderationClock,
             )
+            // Shared by the consent surface and the Settings terms
+            // view, so definition links open in-app identically.
+            val policyDocuments =
+                app.onym.android.moderation.OkHttpPolicyDocumentFetcher(httpClient)
             val moderationGateFlow = app.onym.android.moderation.ui.ModerationGateFlow(
                 gate = gateCheckRepository,
                 authoritiesAvailable = {
@@ -1411,15 +1415,50 @@ class OnymApplication : Application() {
                         // In-app markdown viewer for policy documents
                         // (definitions, evidence rules) — display
                         // path, plain https GET.
-                        documents = app.onym.android.moderation.OkHttpPolicyDocumentFetcher(
-                            httpClient,
-                        ),
+                        documents = policyDocuments,
                     )
                 },
                 directoryNonEmpty = {
                     runCatching { authoritiesFetcher.fetchLatest().isNotEmpty() }
                         .getOrDefault(false)
                 },
+                repository = moderationRepository,
+                retryRegistration = {
+                    try {
+                        val pending = moderationRepository.pendingRegistration()
+                        if (pending != null) {
+                            val listing = authoritiesFetcher.fetchLatest()
+                                .firstOrNull { it.componentId == pending.mandate.authority }
+                            if (listing == null) {
+                                "the directory no longer lists ${pending.mandate.authority}"
+                            } else {
+                                moderationRepository.registerPending(listing)
+                                // registerPending swallows TRANSIENT
+                                // failures by design (the artifact is
+                                // kept for a later retry) — so "no
+                                // exception" is not "delivered". Ask
+                                // the store, and say so when the tap
+                                // changed nothing; a silent Pending
+                                // row reads as a dead button.
+                                if (moderationRepository.pendingRegistration() != null) {
+                                    getString(
+                                        app.onym.android.strings.R.string
+                                            .moderation_settings_registration_still_pending,
+                                    )
+                                } else {
+                                    null
+                                }
+                            }
+                        } else {
+                            null
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        e.message ?: "registration retry failed"
+                    }
+                },
+                documents = policyDocuments,
             )
         }
 

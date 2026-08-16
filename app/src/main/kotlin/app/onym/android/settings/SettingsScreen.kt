@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.TravelExplore
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
@@ -123,6 +124,14 @@ fun SettingsScreen(
     /** Live count of configured discovery providers — drives the
      *  Discovery row's subtitle. */
     discoveryProvidersCount: Int = 0,
+    /** Settings → Moderation entry. Null when the moderation seat is
+     *  dark — the section is omitted entirely. */
+    onModerationClick: (() -> Unit)? = null,
+    /** The CURRENT IDENTITY's resolved consent state, driving the
+     *  Moderation row's subtitle. Null = unresolved (or seat dark):
+     *  no subtitle is shown rather than another identity's answer. */
+    moderationConsent:
+        app.onym.android.moderation.ModerationRepository.IdentityConsentState? = null,
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -225,6 +234,33 @@ fun SettingsScreen(
                     SettingsFootnote(
                         stringResource(R.string.settings_discovery_footnote),
                     )
+                }
+            }
+
+            // ─── MODERATION ────────────────────────────────────────
+            if (onModerationClick != null) {
+                item { SettingsSectionLabel(stringResource(R.string.settings_section_moderation)) }
+                item {
+                    SettingsCard {
+                        SettingsRow(
+                            leading = {
+                                SettingsTileBox(Icons.Filled.VerifiedUser, SettingsTile.Indigo)
+                            },
+                            title = stringResource(R.string.settings_moderation_row_title),
+                            subtitle = when {
+                                moderationConsent == null -> null
+                                moderationConsent.active != null -> stringResource(
+                                    R.string.settings_moderation_row_consented,
+                                    moderationConsent.active!!.authorityName,
+                                )
+                                else ->
+                                    stringResource(R.string.settings_moderation_row_none)
+                            },
+                            onClick = onModerationClick,
+                            isLast = true,
+                            modifier = Modifier.testTag("settings.moderation_row"),
+                        )
+                    }
                 }
             }
 

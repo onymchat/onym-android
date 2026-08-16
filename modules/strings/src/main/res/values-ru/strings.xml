@@ -729,4 +729,34 @@
   <string name="consent_done_title">Сервис добавлен</string>
   <string name="consent_done_subtitle">Его эндпоинт теперь в вашем списке настроенных.</string>
   <string name="consent_placement_suffix">" · размещение: %1$s"</string>
+
+  <!-- Настройки → Модерация -->
+  <string name="settings_section_moderation">Модерация</string>
+  <string name="settings_moderation_row_title">Модерация</string>
+  <string name="settings_moderation_row_consented">Согласие: %1$s</string>
+  <string name="settings_moderation_row_none">Инстанция ещё не выбрана</string>
+  <string name="moderation_settings_title">Модерация</string>
+  <string name="moderation_settings_current_authority">Текущая инстанция</string>
+  <string name="moderation_settings_authority">Инстанция</string>
+  <string name="moderation_settings_component">Компонент</string>
+  <string name="moderation_settings_consented">Согласие дано</string>
+  <string name="moderation_settings_manifest_hash">Хеш манифеста</string>
+  <string name="moderation_settings_valid_until">Условия действительны до</string>
+  <string name="moderation_settings_classes">Классы нарушений</string>
+  <string name="moderation_settings_registration">Регистрация у инстанции</string>
+  <string name="moderation_settings_registered">Доставлено инстанции</string>
+  <string name="moderation_settings_registration_pending">Ожидает — нажмите «Повторить», чтобы доставить подписанный мандат</string>
+  <string name="moderation_settings_registration_retry">Повторить доставку</string>
+  <string name="moderation_settings_registration_retrying">Подтверждение у инстанции…</string>
+  <string name="moderation_settings_switch_title">Сменить инстанцию</string>
+  <string name="moderation_settings_switch_subtitle">Подписывает новый мандат на условиях новой инстанции</string>
+  <string name="moderation_settings_choose_title">Выбрать модерационную инстанцию</string>
+  <string name="moderation_settings_choose_subtitle">Для этой личности мандат ещё не подписан</string>
+  <string name="moderation_settings_view_terms">Посмотреть принятые условия</string>
+  <string name="moderation_settings_previous">Прежние мандаты</string>
+  <string name="moderation_settings_previous_row">Согласие %1$s · %2$s…</string>
+  <string name="moderation_settings_footnote">Ваше согласие — вся юрисдикция инстанции: она может решать дела против вас только по классам и условиям, которые вы подписали, а её вердикты должны быть обоснованными, истекающими и обжалуемыми.</string>
+  <string name="moderation_settings_previous_footnote">Старые мандаты остаются связаны с теми условиями, на которые было дано согласие. Смена инстанции их не переписывает.</string>
+  <string name="moderation_settings_registration_still_pending">Пока не доставлено — инстанция недоступна. Подписанный мандат сохранён; попробуйте позже.</string>
+  <string name="moderation_settings_terms_unavailable">Не удаётся показать принятые условия — сохранённая запись отсутствует или нечитаема. Сам мандат не затронут.</string>
 </resources>
