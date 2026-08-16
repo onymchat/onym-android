@@ -206,7 +206,7 @@ object ModerationFixtures {
             componentId = AUTHORITY_ID,
             operatorKey = "onym:key:" + "03".repeat(32),
             moderationProfileId =
-                "onym:moderation-enforcement-profile:google-device-recall-v1",
+                "onym:moderation-profile:consent-bound-v1",
             violationClasses = listOf(
                 ViolationClass(
                     classId = "csam",

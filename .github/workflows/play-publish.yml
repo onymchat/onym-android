@@ -100,6 +100,15 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.tag }}
           RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
+          # MODERATION_BASE_URL + PLAY_CLOUD_PROJECT_NUMBER light up the
+          # moderation seat (empty vars keep the dark launch — see
+          # moderationBaseUrl() in app/build.gradle.kts; the build
+          # refuses a base URL without a project number, and a release
+          # refuses a non-https URL). Repo VARIABLES, not secrets:
+          # neither value is sensitive, and flipping the seat on is a
+          # visible configuration act, not a credential.
+          MODERATION_BASE_URL: ${{ vars.MODERATION_BASE_URL }}
+          PLAY_CLOUD_PROJECT_NUMBER: ${{ vars.PLAY_CLOUD_PROJECT_NUMBER }}
         run: ./gradlew :app:bundleRelease --no-daemon
 
       - name: Locate AAB

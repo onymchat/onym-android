@@ -296,6 +296,10 @@ dependencies {
     // Discovery-subject fakes (FakeDiscoveryFetcher,
     // InMemoryDiscoveryStore) for the seat-adapter unit tests.
     testImplementation(testFixtures(project(":discovery")))
+
+    // FakeKnownAuthoritiesFetcher + the moderation listing fixtures,
+    // consumed by the moderation seat adapter's unit tests.
+    testImplementation(testFixtures(project(":moderation")))
     // Identity fakes (FakeActiveIdentityProvider,
     // FakeInvitationEnvelopeDecrypter, TestInvitationEncryptor) moved
     // from src/sharedTest to :identity's testFixtures.

@@ -16,6 +16,7 @@ import app.onym.android.onboarding.OnboardingStep
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeAuthorityManifestFetcher
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
@@ -354,6 +355,10 @@ class OnboardingWalkUITest {
         composeRule.onNodeWithTag("moderation.consent.terms", useUnmergedTree = true)
             .assertIsDisplayed()
         composeRule.onNodeWithTag("moderation.consent.agree", useUnmergedTree = true)
+            // The structured terms cards put Agree below the fold;
+            // scroll to it as a user would before tapping — a click
+            // on an off-viewport node injects outside the window.
+            .performScrollTo()
             .performClick()
         // Consent ran the full scripted path and unlocked Continue.
         onboarding.awaitPrimaryEnabled(OnboardingStep.Moderation)

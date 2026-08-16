@@ -24,6 +24,9 @@
   <string name="moderation_gate_required_contact_fallback">Свяжитесь с органом модерации, чьи условия вы приняли — его контакты указаны в условиях, которые вы просматривали при настройке.</string>
 
   <!-- Consent -->
+  <string name="moderation_consent_pick_title">Выберите, кто рассматривает жалобы</string>
+  <string name="moderation_consent_pick_body">Доступно несколько модерационных инстанций. Выберите одну, чтобы изучить её условия — вы соглашаетесь только с условиями, которые увидите далее, и только для выбранной инстанции.</string>
+  <string name="moderation_consent_pick_another">Выбрать другую инстанцию</string>
   <string name="moderation_consent_title">Модерация: %1$s</string>
   <string name="moderation_consent_body">Для работы Onym требуется согласие на независимую модерацию. Ознакомьтесь с условиями ниже — вы соглашаетесь именно с этими условиями и ни с чем другим.</string>
   <string name="moderation_consent_agree">Принять и продолжить</string>
@@ -32,4 +35,32 @@
   <string name="moderation_consent_retry">Повторить</string>
   <string name="moderation_consent_continue">Продолжить</string>
   <string name="moderation_consent_done">Согласие на модерацию записано.</string>
+  <string name="moderation_terms_procedure">Процедура</string>
+  <string name="moderation_terms_signing">Что вы подписываете</string>
+  <string name="moderation_terms_hash_footnote">Ваше согласие привязано к хешу именно этих условий. Инстанция не может изменить их в рамках вашего мандата — изменённые условия связывают только новые согласия.</string>
+  <string name="moderation_term_response_window">Окно ответа</string>
+  <string name="moderation_term_decision_deadline">Срок решения</string>
+  <string name="moderation_term_ban">Срок бана</string>
+  <string name="moderation_term_ban_permanent">Бессрочный (можно обжаловать во внешней апелляционной инстанции, пока он действует)</string>
+  <string name="moderation_term_appeal_window">Окно апелляции</string>
+  <string name="moderation_term_appeal_effect">Действие апелляции</string>
+  <string name="moderation_term_appeal_suspensive">Приостанавливающая — бан не вступает в силу, пока не истечёт окно апелляции</string>
+  <string name="moderation_term_appeal_nonsuspensive">Неприостанавливающая — бан вступает в силу сразу; апелляция может его отменить</string>
+  <string name="moderation_term_lawful_reporting">Правовое информирование</string>
+  <string name="moderation_term_definition">Определение</string>
+  <string name="moderation_term_appellate">Апелляции рассматривает</string>
+  <string name="moderation_term_new_holder">Новый владелец устройства</string>
+  <string name="moderation_term_valid_until">Условия действительны до</string>
+  <string name="moderation_term_operator">Оператор</string>
+  <string name="moderation_term_manifest_hash">Хеш манифеста</string>
+  <plurals name="moderation_term_days">
+    <item quantity="one">%d день</item>
+    <item quantity="few">%d дня</item>
+    <item quantity="many">%d дней</item>
+    <item quantity="other">%d дня</item>
+  </plurals>
+  <string name="moderation_document_done">Готово</string>
+  <string name="moderation_document_web_page">Этот документ — веб-страница.</string>
+  <string name="moderation_document_failed">Не удалось загрузить документ.</string>
+  <string name="moderation_document_open_browser">Открыть в браузере</string>
 </resources>

@@ -35,12 +35,102 @@ class ModerationConsentControllerTest {
 
     private fun controller(
         resumeExistingMandate: Boolean = true,
+        authoritiesFetcher: FakeKnownAuthoritiesFetcher = FakeKnownAuthoritiesFetcher(),
+        manifestFetcher: FakeAuthorityManifestFetcher = FakeAuthorityManifestFetcher(),
     ): ModerationConsentController = ModerationConsentController(
-        authoritiesFetcher = FakeKnownAuthoritiesFetcher(),
-        manifestFetcher = FakeAuthorityManifestFetcher(),
+        authoritiesFetcher = authoritiesFetcher,
+        manifestFetcher = manifestFetcher,
         moderation = moderation,
         resumeExistingMandate = resumeExistingMandate,
     )
+
+    private fun twoAuthorities() = FakeKnownAuthoritiesFetcher(
+        listings = listOf(
+            app.onym.android.moderation.support.ModerationFixtures.listing(),
+            app.onym.android.moderation.support.ModerationFixtures.listing().copy(
+                componentId = "onym:component:second-authority",
+                name = "Second Authority",
+            ),
+        ),
+    )
+
+    // ─── Authority picker ────────────────────────────────────────
+
+    /** More than one authority: the user picks WHO before reviewing
+     * WHAT — no silent `.first()` selection of a judge. */
+    @Test
+    fun `a multi-authority directory presents the picker`() = runTest {
+        val controller = controller(authoritiesFetcher = twoAuthorities())
+        controller.load()
+        val state = controller.snapshots.value
+        assertTrue("$state", state is ModerationConsentController.UiState.Picking)
+        assertEquals(2, (state as ModerationConsentController.UiState.Picking).listings.size)
+
+        // Row tap: that authority's manifest goes on review, with the
+        // way back to the list.
+        controller.select(state.listings[1])
+        val review = controller.snapshots.value
+        assertTrue("$review", review is ModerationConsentController.UiState.Review)
+        assertEquals(
+            "onym:component:second-authority",
+            (review as ModerationConsentController.UiState.Review).listing.componentId,
+        )
+        assertTrue(review.canPickAnother)
+
+        // Back returns to the SAME directory without a refetch.
+        controller.backToAuthorities()
+        assertTrue(
+            "${controller.snapshots.value}",
+            controller.snapshots.value is ModerationConsentController.UiState.Picking,
+        )
+    }
+
+    /** One authority's manifest being unreachable must not declare
+     * the whole step unavailable — the OTHER authorities are still
+     * offerable, so the failure returns to the picker with the
+     * reason. */
+    @Test
+    fun `a failed manifest fetch returns to the picker not Unavailable`() = runTest {
+        val manifests = FakeAuthorityManifestFetcher(
+            failure = app.onym.android.moderation.ModerationConsentException("manifest host down"),
+        )
+        val controller = controller(
+            authoritiesFetcher = twoAuthorities(),
+            manifestFetcher = manifests,
+        )
+        controller.load()
+        val picking = controller.snapshots.value as ModerationConsentController.UiState.Picking
+
+        controller.select(picking.listings[0])
+        val after = controller.snapshots.value
+        assertTrue(
+            "$after",
+            after is ModerationConsentController.UiState.Picking &&
+                after.error!!.contains("manifest host down"),
+        )
+
+        // The other row still works once its manifest serves.
+        manifests.failure = null
+        controller.select(picking.listings[1])
+        assertTrue(
+            "${controller.snapshots.value}",
+            controller.snapshots.value is ModerationConsentController.UiState.Review,
+        )
+    }
+
+    /** A single-entry directory keeps today's behavior: the pick is
+     * forced, so the review IS the decision — no picker interlude and
+     * no back affordance. */
+    @Test
+    fun `a single-authority directory skips the picker`() = runTest {
+        val controller = controller()
+        controller.load()
+        val state = controller.snapshots.value
+        assertTrue(
+            "$state",
+            state is ModerationConsentController.UiState.Review && !state.canPickAnother,
+        )
+    }
 
     @Test
     fun `the happy path reviews and consents`() = runTest {

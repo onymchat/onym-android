@@ -36,11 +36,10 @@ import java.net.URI
  *
  * `ContractsManifestFetcher` is deliberately NOT adapted: contracts
  * stay legacy-only in this effort (see the discovery design plan).
- * There is no moderation adapter either — the moderation seat has no
- * running code on Android.
  *
- * Mirrors `DiscoverySeatAdapters.swift` in onym-ios (minus the
- * moderation seat).
+ * Mirrors `DiscoverySeatAdapters.swift` in onym-ios, including the
+ * moderation seat ([DiscoveryBackedKnownAuthoritiesFetcher]) — whose
+ * merge rules differ from the endpoint adapters', see its doc.
  */
 
 // ─── Shared catalog seam ──────────────────────────────────────────
@@ -183,6 +182,94 @@ class SeatManifestFields(rawBytes: ByteArray) {
     private companion object {
         fun JsonObject.stringField(key: String): String? =
             (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    }
+}
+
+// ─── Moderation seat (authorities) ────────────────────────────────
+
+/**
+ * [app.onym.android.moderation.KnownAuthoritiesFetcher] backed by
+ * discovery entries with seat type "moderation", MERGED with the
+ * legacy signed `authorities.json` directory, keyed by componentId.
+ *
+ * The merge rules are DELIBERATELY different from the endpoint
+ * adapters' discovered-else-fallback, because these rows are
+ * trust-carrying: a listing's `apiBaseURL` is where the user's signed
+ * mandate is sent, its operator key is what the authority manifest
+ * pins against, and the active mandate resolves its authority by
+ * componentId. So (mirroring iOS):
+ *
+ *  - **Add, never subtract**: a catalog with one moderation entry
+ *    must not hide every published authority — the legacy directory
+ *    is always in the merge (it is itself root-key-signed, #219).
+ *  - **Legacy wins on collision**: a catalog entry reusing a
+ *    published authority's componentId must never replace that
+ *    authority's endpoint or key — discovery contributes only
+ *    componentIds the published directory doesn't list.
+ *  - **Provider-flagged `warning` entries are excluded outright**:
+ *    the provider itself says the row is suspect, and a consent
+ *    surface has no field to carry that flag on.
+ *
+ * The directory rows feed the consent picker; consent itself stays
+ * the signed-mandate flow downstream of the pick, with the operator
+ * key pinned from the VERIFIED catalog entry (signed by the pinned
+ * provider key) — never from the fetched manifest.
+ */
+class DiscoveryBackedKnownAuthoritiesFetcher(
+    private val catalog: DiscoverySeatCatalog,
+    private val fallback: app.onym.android.moderation.KnownAuthoritiesFetcher,
+) : app.onym.android.moderation.KnownAuthoritiesFetcher {
+
+    override suspend fun fetchLatest(): List<app.onym.android.moderation.AuthorityListing> {
+        val discovered = discoveredListings().distinctBy { it.componentId }
+        val legacy = try {
+            fallback.fetchLatest()
+        } catch (e: Exception) {
+            // The legacy directory unreachable is survivable only when
+            // discovery yields something; both empty is the caller's
+            // "directory unavailable" path, same as before.
+            if (discovered.isEmpty()) throw e
+            return discovered
+        }
+        val legacyIds = legacy.map { it.componentId }.toSet()
+        return discovered.filter { it.componentId !in legacyIds } + legacy
+    }
+
+    private suspend fun discoveredListings(): List<app.onym.android.moderation.AuthorityListing> =
+        catalog.reviewedEntries(SEAT_TYPE)
+            .filter { it.attributed.entry.status?.state != "warning" }
+            .mapNotNull { reviewed ->
+                val entry = reviewed.attributed.entry
+                // Same trust shape as the legacy directory: the
+                // operator key comes from the VERIFIED catalog entry,
+                // never from the fetched manifest.
+                val keyBytes = app.onym.android.moderation
+                    .keyBytesFromReference(entry.operator)
+                    ?.takeIf { it.size == 32 }
+                    ?: return@mapNotNull null
+                val apiBaseURL = reviewed.firstEndpointUri(setOf("https"))
+                    ?: return@mapNotNull null
+                app.onym.android.moderation.AuthorityListing(
+                    componentId = entry.componentId,
+                    name = reviewed.displayName,
+                    manifestURL = entry.manifest.uri,
+                    apiBaseURL = apiBaseURL,
+                    operatorPublicKeyBase64 =
+                        java.util.Base64.getEncoder().encodeToString(keyBytes),
+                )
+            }
+
+    companion object {
+        const val SEAT_TYPE = "moderation"
+
+        /** Wrap [fallback] when a discovery catalog is available;
+         *  identity when it isn't (UI-test harness). */
+        fun wrapping(
+            fallback: app.onym.android.moderation.KnownAuthoritiesFetcher,
+            catalog: DiscoverySeatCatalog?,
+        ): app.onym.android.moderation.KnownAuthoritiesFetcher =
+            if (catalog == null) fallback
+            else DiscoveryBackedKnownAuthoritiesFetcher(catalog = catalog, fallback = fallback)
     }
 }
 

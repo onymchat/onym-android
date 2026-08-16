@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,7 +25,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.onym.android.moderation.MandateRecord
 import kotlinx.coroutines.launch
@@ -115,6 +113,51 @@ fun ModerationConsentContent(
                 }
             }
 
+            is ModerationConsentController.UiState.Picking -> {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = stringResource(R.string.moderation_consent_pick_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.moderation_consent_pick_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    current.error?.let { error ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.testTag("moderation.consent.error"),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    current.listings.forEach { listing ->
+                        OutlinedButton(
+                            onClick = { scope.launch { controller.select(listing) } },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("moderation.consent.pick.${listing.componentId}"),
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = listing.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = listing.componentId,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+            }
+
             is ModerationConsentController.UiState.Review -> {
                 Text(
                     text = stringResource(R.string.moderation_consent_title, current.listing.name),
@@ -125,24 +168,17 @@ fun ModerationConsentContent(
                     text = stringResource(R.string.moderation_consent_body),
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = current.termsDisplay,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    // Bounded, not weighted: the onboarding step hosts
-                    // this inside a scrolling Column, where a weighted
-                    // child measures against an unbounded max and
-                    // collapses to ZERO height — the terms invisibly
-                    // "reviewed" while Agree still rendered and
-                    // clicked, contradicting the consent copy. A fixed
-                    // window with its own scroll renders identically
-                    // in both the walk and the full-screen host.
-                    modifier = Modifier
-                        .heightIn(min = 160.dp, max = 320.dp)
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .testTag("moderation.consent.terms"),
+                Spacer(Modifier.height(4.dp))
+                // Structured cards from the DECODED manifest (iOS
+                // parity), laid out in the host's own scroll — no
+                // nested fixed-height JSON window. What the mandate
+                // pins stays the exact retained bytes; the hash card
+                // at the bottom shows what the signature binds.
+                ModerationTermsDisplay(
+                    manifest = current.manifest,
+                    manifestHash = current.manifestHash,
+                    modifier = Modifier.testTag("moderation.consent.terms"),
+                    documents = controller.documents,
                 )
                 current.error?.let { error ->
                     Spacer(Modifier.height(8.dp))
@@ -162,6 +198,15 @@ fun ModerationConsentContent(
                         .fillMaxWidth()
                         .testTag("moderation.consent.agree"),
                 ) { Text(stringResource(R.string.moderation_consent_agree)) }
+                if (current.canPickAnother) {
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = { scope.launch { controller.backToAuthorities() } },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("moderation.consent.pickAnother"),
+                    ) { Text(stringResource(R.string.moderation_consent_pick_another)) }
+                }
             }
 
             is ModerationConsentController.UiState.Consented -> {

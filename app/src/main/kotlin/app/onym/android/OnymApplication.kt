@@ -1306,9 +1306,18 @@ class OnymApplication : Application() {
             val moderationClock: () -> java.time.Instant =
                 (if (UITestRegistry.debugActive) UITestRegistry.moderationClock else null)
                     ?: { java.time.Instant.now() }
+            // Discovery-merged directory (iOS parity): catalog
+            // entries with seat type "moderation" join the root-key-
+            // signed legacy directory, legacy winning on componentId
+            // collision — see DiscoveryBackedKnownAuthoritiesFetcher.
+            // The registry fake, when present, is used unwrapped:
+            // instrumented tests script the exact directory they mean.
             val authoritiesFetcher =
                 (if (UITestRegistry.enabled) UITestRegistry.moderationAuthoritiesFetcher else null)
-                    ?: app.onym.android.moderation.OkHttpKnownAuthoritiesFetcher(httpClient)
+                    ?: DiscoveryBackedKnownAuthoritiesFetcher.wrapping(
+                        fallback = app.onym.android.moderation.OkHttpKnownAuthoritiesFetcher(httpClient),
+                        catalog = discoveryCatalog,
+                    )
             // debugActive, same class as the backend client: where a
             // signed consent gets delivered is a security property.
             val moderationAuthority =
@@ -1399,6 +1408,12 @@ class OnymApplication : Application() {
                         manifestFetcher = manifestFetcher,
                         moderation = moderationRepository,
                         resumeExistingMandate = resumeExistingMandate,
+                        // In-app markdown viewer for policy documents
+                        // (definitions, evidence rules) — display
+                        // path, plain https GET.
+                        documents = app.onym.android.moderation.OkHttpPolicyDocumentFetcher(
+                            httpClient,
+                        ),
                     )
                 },
                 directoryNonEmpty = {

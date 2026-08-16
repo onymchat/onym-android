@@ -52,6 +52,9 @@ dependencies {
     // implementation: MaterialTheme reads, Text/Button/Scaffold — no
     // material3 type escapes this module.
     implementation(libs.androidx.compose.material3)
+    // BackHandler in the in-app markdown document viewer (pop one
+    // followed document per system back).
+    implementation(libs.androidx.activity.compose)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

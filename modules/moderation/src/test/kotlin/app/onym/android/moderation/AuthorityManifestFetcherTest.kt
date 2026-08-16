@@ -53,7 +53,7 @@ class AuthorityManifestFetcherTest {
     ): ByteArray = """{
         "componentId": "$componentId",
         "operator": "$operator",
-        "moderationProfileId": "onym:moderation-enforcement-profile:google-device-recall-v1",
+        "moderationProfileId": "onym:moderation-profile:consent-bound-v1",
         "violationClasses": [{"classId": "csam"}],
         "validUntil": "2100-01-01T00:00:00Z"
     }""".encodeToByteArray()

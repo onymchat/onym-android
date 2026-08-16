@@ -139,9 +139,15 @@ fun OnboardingScaffold(
                 Text(primaryTitle, style = MaterialTheme.typography.titleMedium)
             }
 
+            // Back and Skip anchor opposite edges when both exist; a
+            // lone affordance centers under the primary button instead
+            // of hugging one edge of an otherwise empty row.
+            val loneAffordance = (onBack == null) != (onSkip == null)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement =
+                    if (loneAffordance) Arrangement.Center else Arrangement.SpaceBetween,
             ) {
                 if (onBack != null) {
                     TextButton(
@@ -149,7 +155,6 @@ fun OnboardingScaffold(
                         modifier = Modifier.testTag("onboarding.${step.tag}.back"),
                     ) { Text(stringResource(R.string.onboarding_back)) }
                 }
-                Spacer(Modifier.weight(1f))
                 if (onSkip != null) {
                     TextButton(
                         onClick = onSkip,
