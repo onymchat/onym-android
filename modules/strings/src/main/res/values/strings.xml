@@ -729,4 +729,32 @@
   <string name="consent_done_title">Service added</string>
   <string name="consent_done_subtitle">Its endpoint is now in your configured list.</string>
   <string name="consent_placement_suffix">" · placement: %1$s"</string>
+
+  <!-- Settings → Moderation (iOS ModerationSettingsView parity) -->
+  <string name="settings_section_moderation">Moderation</string>
+  <string name="settings_moderation_row_title">Moderation</string>
+  <string name="settings_moderation_row_consented">Consented to %1$s</string>
+  <string name="settings_moderation_row_none">No authority chosen yet</string>
+  <string name="moderation_settings_title">Moderation</string>
+  <string name="moderation_settings_current_authority">Current authority</string>
+  <string name="moderation_settings_authority">Authority</string>
+  <string name="moderation_settings_component">Component</string>
+  <string name="moderation_settings_consented">Consented</string>
+  <string name="moderation_settings_manifest_hash">Manifest hash</string>
+  <string name="moderation_settings_valid_until">Terms valid until</string>
+  <string name="moderation_settings_classes">Violation classes</string>
+  <string name="moderation_settings_registration">Authority registration</string>
+  <string name="moderation_settings_registered">Delivered to the authority</string>
+  <string name="moderation_settings_registration_pending">Pending — tap Retry to redeliver the signed mandate</string>
+  <string name="moderation_settings_registration_retry">Retry delivery</string>
+  <string name="moderation_settings_registration_retrying">Confirming with authority…</string>
+  <string name="moderation_settings_switch_title">Switch authority</string>
+  <string name="moderation_settings_switch_subtitle">Signs a fresh mandate under the new authority\'s terms</string>
+  <string name="moderation_settings_choose_title">Choose a moderation authority</string>
+  <string name="moderation_settings_choose_subtitle">No mandate signed for this identity yet</string>
+  <string name="moderation_settings_view_terms">View the consented terms</string>
+  <string name="moderation_settings_previous">Previous mandates</string>
+  <string name="moderation_settings_previous_row">Consented %1$s · %2$s…</string>
+  <string name="moderation_settings_footnote">Your consent is the authority\'s entire jurisdiction: it can only decide cases against you under the classes and terms you signed, and its verdicts must be reasoned, expiring, and appealable.</string>
+  <string name="moderation_settings_previous_footnote">Old mandates stay bound to the exact terms they consented to. Switching authorities never rewrites them.</string>
 </resources>

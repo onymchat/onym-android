@@ -1420,6 +1420,28 @@ class OnymApplication : Application() {
                     runCatching { authoritiesFetcher.fetchLatest().isNotEmpty() }
                         .getOrDefault(false)
                 },
+                repository = moderationRepository,
+                retryRegistration = {
+                    try {
+                        val pending = moderationRepository.pendingRegistration()
+                        if (pending != null) {
+                            val listing = authoritiesFetcher.fetchLatest()
+                                .firstOrNull { it.componentId == pending.mandate.authority }
+                            if (listing == null) {
+                                "the directory no longer lists ${pending.mandate.authority}"
+                            } else {
+                                moderationRepository.registerPending(listing)
+                                null
+                            }
+                        } else {
+                            null
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        e.message ?: "registration retry failed"
+                    }
+                },
             )
         }
 

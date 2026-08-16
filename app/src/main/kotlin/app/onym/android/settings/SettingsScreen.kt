@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.TravelExplore
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
@@ -123,6 +124,12 @@ fun SettingsScreen(
     /** Live count of configured discovery providers — drives the
      *  Discovery row's subtitle. */
     discoveryProvidersCount: Int = 0,
+    /** Settings → Moderation entry. Null when the moderation seat is
+     *  dark — the section is omitted entirely. */
+    onModerationClick: (() -> Unit)? = null,
+    /** Consent snapshot driving the Moderation row's subtitle (the
+     *  consented authority's name, or "none yet"). */
+    moderationState: app.onym.android.moderation.ModerationState? = null,
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -225,6 +232,34 @@ fun SettingsScreen(
                     SettingsFootnote(
                         stringResource(R.string.settings_discovery_footnote),
                     )
+                }
+            }
+
+            // ─── MODERATION ────────────────────────────────────────
+            if (onModerationClick != null) {
+                item { SettingsSectionLabel(stringResource(R.string.settings_section_moderation)) }
+                item {
+                    SettingsCard {
+                        val consentedName = moderationState?.records
+                            ?.firstOrNull { it.isActive }?.authorityName
+                        SettingsRow(
+                            leading = {
+                                SettingsTileBox(Icons.Filled.VerifiedUser, SettingsTile.Indigo)
+                            },
+                            title = stringResource(R.string.settings_moderation_row_title),
+                            subtitle = consentedName
+                                ?.let {
+                                    stringResource(
+                                        R.string.settings_moderation_row_consented,
+                                        it,
+                                    )
+                                }
+                                ?: stringResource(R.string.settings_moderation_row_none),
+                            onClick = onModerationClick,
+                            isLast = true,
+                            modifier = Modifier.testTag("settings.moderation_row"),
+                        )
+                    }
                 }
             }
 

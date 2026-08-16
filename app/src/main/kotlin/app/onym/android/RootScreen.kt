@@ -436,6 +436,14 @@ fun RootScreen(
                         { navController.navigate(ROUTE_DISCOVERY_SETTINGS) }
                     },
                     discoveryProvidersCount = discoveryState?.value?.sources?.size ?: 0,
+                    // Null when the moderation seat is dark — the
+                    // MODERATION section is omitted, exactly like the
+                    // discovery row above.
+                    onModerationClick = dependencies.moderation?.let {
+                        { navController.navigate(ROUTE_MODERATION_SETTINGS) }
+                    },
+                    moderationState = dependencies.moderation?.repository?.snapshots
+                        ?.collectAsStateWithLifecycle()?.value,
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -636,6 +644,47 @@ fun RootScreen(
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
                     onAddProvider = { navController.navigate(ROUTE_ADD_DISCOVERY_PROVIDER) },
+                )
+            }
+            composable(ROUTE_MODERATION_SETTINGS) {
+                val moderation = dependencies.moderation ?: return@composable
+                app.onym.android.settings.ModerationSettingsScreen(
+                    repository = moderation.repository,
+                    onRetryRegistration = moderation.retryRegistration,
+                    onSwitchAuthority = {
+                        navController.navigate(ROUTE_MODERATION_SWITCH_CONSENT)
+                    },
+                    onViewTerms = { navController.navigate(ROUTE_MODERATION_TERMS) },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_MODERATION_TERMS) {
+                val moderation = dependencies.moderation ?: return@composable
+                app.onym.android.settings.ConsentedTermsScreen(
+                    repository = moderation.repository,
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_MODERATION_SWITCH_CONSENT) {
+                val moderation = dependencies.moderation ?: return@composable
+                // resumeExistingMandate = false: switching is ALWAYS a
+                // fresh one-snapshot review + fresh mandate — an
+                // existing healthy record must not short-circuit to
+                // Consented (same contract as the enrollment-lost
+                // re-consent host).
+                val controller = remember {
+                    moderation.makeConsentController(false)
+                }
+                app.onym.android.moderation.ui.ModerationConsentContent(
+                    controller = controller,
+                    onConsented = {
+                        moderation.gate.consentCompleted()
+                        navController.popBackStack()
+                    },
+                    // Settings can be walked away from — no deferral
+                    // affordance needed; Back is the exit.
+                    onUnavailableContinue = null,
+                    standalone = true,
                 )
             }
             composable(ROUTE_ADD_DISCOVERY_PROVIDER) {
@@ -855,6 +904,9 @@ private const val ROUTE_IDENTITIES = "identities"
 private const val ROUTE_ABOUT = "about_onym"
 private const val ROUTE_RELAYER_SETTINGS = "relayer_settings"
 private const val ROUTE_DISCOVERY_SETTINGS = "discovery_settings"
+private const val ROUTE_MODERATION_SETTINGS = "moderation_settings"
+private const val ROUTE_MODERATION_SWITCH_CONSENT = "moderation_switch_consent"
+private const val ROUTE_MODERATION_TERMS = "moderation_terms"
 private const val ROUTE_ADD_DISCOVERY_PROVIDER = "add_discovery_provider"
 private const val ROUTE_NOSTR_RELAYS = "nostr_relays"
 private const val ROUTE_BLOSSOM_RELAYS = "blossom_relays"

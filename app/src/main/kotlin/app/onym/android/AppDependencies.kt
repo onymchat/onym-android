@@ -140,6 +140,14 @@ class ModerationUiDependencies(
      *  arithmetic reads this. Failure answers false (softening toward
      *  operational, never a block on the network). */
     val directoryNonEmpty: suspend () -> Boolean,
+    /** The consent/mandate state, for the Settings → Moderation
+     *  surface (records, per-identity active mandate, registration
+     *  state). */
+    val repository: app.onym.android.moderation.ModerationRepository,
+    /** Retry delivery of the pending signed mandate (directory lookup
+     *  + registerPending); answers a human-readable failure or null
+     *  on success / nothing pending. */
+    val retryRegistration: suspend () -> String?,
 )
 
 /**
