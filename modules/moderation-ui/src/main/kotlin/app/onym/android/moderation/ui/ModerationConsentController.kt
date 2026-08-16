@@ -54,9 +54,23 @@ class ModerationConsentController(
     /** The retained review snapshot `agree` consents with. */
     private var reviewed: Pair<AuthorityListing, SignedManifest>? = null
 
+    /**
+     * Consecutive failed consent transactions. One failure keeps the
+     * Review surface (a blip — retry Agree in place); reaching
+     * [MAX_AGREE_FAILURES] routes to [UiState.Unavailable], the one
+     * state whose host offers Continue. The moderation step is
+     * unskippable and outcome-gated, so a down or refusing
+     * enforcement backend (or a de-Googled device whose token-less
+     * enrollment a production backend refuses) must land on a state
+     * with a way forward — an error string with only Agree is an
+     * unpassable wizard for a new user.
+     */
+    private var agreeFailures = 0
+
     /** Fetch directory + manifest for review. Idempotent per surface;
      * safe to call again to retry. */
     suspend fun load() = mutex.withLock {
+        agreeFailures = 0
         state.value = UiState.Loading
         val listing = try {
             // The reference deployment designates one authority; a
@@ -84,18 +98,25 @@ class ModerationConsentController(
         state.value = UiState.Consenting
         try {
             val record = moderation.consent(listing, ReviewedManifest(signed))
+            agreeFailures = 0
             state.value = UiState.Consented(record)
             record
-        } catch (e: ModerationConsentException) {
-            state.value = UiState.Review(listing, signed.displayJson(), error = e.message)
-            null
         } catch (e: Exception) {
-            state.value = UiState.Review(
-                listing,
-                signed.displayJson(),
-                error = e.message ?: "consent failed",
-            )
+            agreeFailures += 1
+            state.value = if (agreeFailures >= MAX_AGREE_FAILURES) {
+                UiState.Unavailable(e.message)
+            } else {
+                UiState.Review(
+                    listing,
+                    signed.displayJson(),
+                    error = e.message ?: "consent failed",
+                )
+            }
             null
         }
+    }
+
+    private companion object {
+        const val MAX_AGREE_FAILURES = 2
     }
 }

@@ -305,12 +305,23 @@ class GateCheckRepository(
             now: Instant,
             policy: GateCheckPolicy,
         ): Pair<GateStatus, PersistedGateState?> = when (attempt) {
+            // Success clears any sticky refusal — the backend that
+            // refused has now answered.
             is AttemptOutcome.Success -> statusFor(attempt.result) to PersistedGateState(
                 lastResult = attempt.result,
                 lastSuccessAt = Rfc3339InstantSerializer.format(now),
             )
+            // The refusal is persisted (sticky, cleared only by a
+            // later success), so a force-stop + offline relaunch
+            // cannot launder it into the grace window's territory.
+            // With no history there is nothing to stamp it on — and
+            // nothing cached for a relaunch to serve either, so the
+            // relaunch blocks (neverChecked) regardless.
             is AttemptOutcome.Refused ->
-                GateStatus.GateCheckRequired(attempt.reason) to persisted
+                GateStatus.GateCheckRequired(attempt.reason) to persisted?.copy(
+                    refusalReason = attempt.reason,
+                    refusedAt = Rfc3339InstantSerializer.format(now),
+                )
             AttemptOutcome.Unreachable ->
                 graceOrBlock(persisted, now, policy, CheckRequiredReason.OFFLINE_GRACE_EXPIRED)
             AttemptOutcome.Throttled ->
@@ -323,6 +334,12 @@ class GateCheckRepository(
             policy: GateCheckPolicy,
             expiredReason: CheckRequiredReason,
         ): Pair<GateStatus, PersistedGateState?> {
+            // A persisted refusal outranks the cached success it rode
+            // in on: grace exists for network conditions, and a
+            // refusal is a reachable backend's answer.
+            persisted?.refusalReason?.let { reason ->
+                return GateStatus.GateCheckRequired(reason) to persisted
+            }
             if (persisted == null) {
                 val reason = if (expiredReason == CheckRequiredReason.ATTESTATION_UNAVAILABLE) {
                     CheckRequiredReason.ATTESTATION_UNAVAILABLE

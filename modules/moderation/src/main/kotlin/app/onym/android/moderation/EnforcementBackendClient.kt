@@ -70,8 +70,7 @@ class OkHttpEnforcementBackendClient(
      */
     private fun validatedBaseUrl(): String {
         val secure = baseUrl.startsWith("https://")
-        val loopback = allowInsecureLoopback &&
-            (baseUrl.startsWith("http://localhost") || baseUrl.startsWith("http://10.0.2.2"))
+        val loopback = allowInsecureLoopback && isLoopbackHost(baseUrl)
         if (!secure && !loopback) {
             throw BackendUnreachableException(
                 "enforcement backend base URL must be https (or emulator loopback under a " +
@@ -152,10 +151,26 @@ class OkHttpEnforcementBackendClient(
     @Serializable
     private data class ChallengeRequest(val purpose: String)
 
+
+
     @Serializable
     private data class ErrorEnvelope(val error: String? = null, val message: String? = null)
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
+
+        /**
+         * A HOST comparison, not a prefix match — a prefix accepted
+         * `http://localhost.attacker.example` and
+         * `http://10.0.2.2.evil.test`. The host ends at the first
+         * `:`/`/` (or end of string) and must equal a loopback name
+         * exactly.
+         */
+        internal fun isLoopbackHost(url: String): Boolean {
+            val rest = url.removePrefix("http://")
+            if (rest == url) return false
+            val host = rest.takeWhile { it != ':' && it != '/' }
+            return host == "localhost" || host == "10.0.2.2"
+        }
     }
 }

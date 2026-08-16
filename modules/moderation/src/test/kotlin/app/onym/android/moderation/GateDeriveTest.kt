@@ -34,7 +34,7 @@ class GateDeriveTest {
     }
 
     @Test
-    fun `a refusal blocks immediately and keeps the persisted state`() {
+    fun `a refusal blocks immediately and is stamped onto the persisted state`() {
         val cached = persisted(GateCheckResult.Clear, ageOf = Duration.ofHours(1))
         val (status, saved) = derive(
             cached,
@@ -46,7 +46,79 @@ class GateDeriveTest {
             GateStatus.GateCheckRequired(CheckRequiredReason.BACKEND_REFUSED),
             status,
         )
-        assertEquals(cached, saved)
+        // The cached success survives (a later success overwrites it
+        // wholesale), but the refusal rides along, sticky.
+        assertEquals(
+            cached.copy(
+                refusalReason = CheckRequiredReason.BACKEND_REFUSED,
+                refusedAt = "2026-08-08T12:00:00Z",
+            ),
+            saved,
+        )
+    }
+
+    /**
+     * The laundering exploit: refuse → force-stop → airplane mode →
+     * relaunch. The relaunch derives Unreachable against the persisted
+     * state; without the sticky refusal it served the cached Clear for
+     * the whole grace window on the say-so of a refusal.
+     */
+    @Test
+    fun `a persisted refusal is not laundered through grace on relaunch`() {
+        val (_, afterRefusal) = derive(
+            persisted(GateCheckResult.Clear, ageOf = Duration.ofHours(1)),
+            AttemptOutcome.Refused(CheckRequiredReason.ENROLLMENT_LOST),
+            now,
+            policy,
+        )
+        // Relaunch, offline, well inside grace of the cached Clear.
+        val (status, saved) = derive(
+            afterRefusal,
+            AttemptOutcome.Unreachable,
+            now.plusSeconds(3600),
+            policy,
+        )
+        assertEquals(
+            GateStatus.GateCheckRequired(CheckRequiredReason.ENROLLMENT_LOST),
+            status,
+        )
+        assertEquals(afterRefusal, saved)
+
+        // Throttled attestation must not launder it either.
+        val (throttled, _) = derive(
+            afterRefusal,
+            AttemptOutcome.Throttled,
+            now.plusSeconds(3600),
+            policy,
+        )
+        assertEquals(
+            GateStatus.GateCheckRequired(CheckRequiredReason.ENROLLMENT_LOST),
+            throttled,
+        )
+    }
+
+    /** Only a later successful check clears the sticky refusal. */
+    @Test
+    fun `a later success clears the persisted refusal`() {
+        val (_, afterRefusal) = derive(
+            persisted(GateCheckResult.Clear, ageOf = Duration.ofHours(1)),
+            AttemptOutcome.Refused(CheckRequiredReason.BACKEND_REFUSED),
+            now,
+            policy,
+        )
+        val (status, saved) = derive(
+            afterRefusal,
+            AttemptOutcome.Success(GateCheckResult.Clear),
+            now.plusSeconds(60),
+            policy,
+        )
+        assertEquals(GateStatus.Operational(), status)
+        assertEquals(null, saved?.refusalReason)
+        assertEquals(null, saved?.refusedAt)
+
+        // And grace serves again afterwards.
+        val (later, _) = derive(saved, AttemptOutcome.Unreachable, now.plusSeconds(120), policy)
+        assertEquals(GateStatus.Operational(), later)
     }
 
     @Test

@@ -61,8 +61,21 @@ android {
         // → empty. EMPTY IS THE DARK-LAUNCH SWITCH: with no base URL
         // (and no UI-test fakes) OnymApplication builds no moderation
         // dependencies at all — no gate, no onboarding step, no Play
-        // Integrity calls. Flip only when the backend and the Play
-        // Console device-recall opt-in are live.
+        // Integrity calls.
+        //
+        // GO-LIVE CHECKLIST — every item is a blocker before this is
+        // set in a release build:
+        //  1. The enforcement backend is deployed and the authority
+        //     routes onym:component:onym-android verdicts to it.
+        //  2. Play Console: Play Integrity enrolled, device-recall
+        //     beta approved + opted in, Cloud project linked;
+        //     PLAY_CLOUD_PROJECT_NUMBER set (the check below enforces
+        //     the pairing).
+        //  3. The authority directory is SIGNED or its root key is
+        //     app-pinned — issue #219. Today the operator-key pin
+        //     chain bottoms out in an unsigned GitHub release URL
+        //     (see KnownAuthoritiesFetcher's TRUST ASYMMETRY note),
+        //     which is a consent-hijack surface for first-time users.
         buildConfigField("String", "MODERATION_BASE_URL", "\"${moderationBaseUrl()}\"")
         // The Google Cloud project number linked in the Play Console —
         // StandardIntegrityManager.prepare needs it. ENV

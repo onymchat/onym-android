@@ -81,8 +81,12 @@ class ScriptedEnforcementBackendClient : EnforcementBackendClient {
         )
     }
 
+    /** When set, enrollDevice throws it — consent-failure tests. */
+    var enrollFailure: Exception? = null
+
     override suspend fun enrollDevice(request: EnrollmentRequest): DeviceEnrollment {
         lastEnrollment = request
+        enrollFailure?.let { throw it }
         return DeviceEnrollment(deviceBinding)
     }
 

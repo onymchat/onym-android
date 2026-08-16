@@ -11,9 +11,11 @@ import app.onym.android.moderation.support.InMemoryMandateStore
 import app.onym.android.moderation.support.ModerationFixtures
 import app.onym.android.moderation.support.ScriptedEnforcementBackendClient
 import java.time.Instant
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ModerationGateFlowTest {
@@ -121,6 +123,39 @@ class ModerationGateFlowTest {
         gate.checkNow()
         advanceUntilIdle()
         assertEquals(RootGate.NeedsConsent(canDefer = true), flow.snapshots.value)
+        flow.stop()
+    }
+
+    /**
+     * With the directory reachable, enrollment-lost must settle on
+     * the consent surface WITHOUT first flashing the back-blocked
+     * CheckRequired screen — a directory-dependent status is withheld
+     * until the probe lands, then emitted once.
+     */
+    @Test
+    fun `enrollment lost does not flash CheckRequired when the directory answers`() = runTest {
+        consent()
+        backend.failWith(400, "no_mandate")
+        directoryAvailable = true
+
+        val (flow, gate) = harness()
+        val seen = mutableListOf<RootGate>()
+        val watcher = launch {
+            flow.snapshots.collect { seen += it }
+        }
+        flow.start()
+        gate.checkNow()
+        advanceUntilIdle()
+
+        assertEquals(RootGate.NeedsConsent(canDefer = false), flow.snapshots.value)
+        assertTrue(
+            "no blocked flash on the way to consent: $seen",
+            seen.none {
+                it is RootGate.CheckRequired &&
+                    it.reason == CheckRequiredReason.ENROLLMENT_LOST
+            },
+        )
+        watcher.cancel()
         flow.stop()
     }
 

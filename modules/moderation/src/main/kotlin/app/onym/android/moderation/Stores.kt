@@ -18,6 +18,17 @@ data class PersistedGateState(
     val lastResult: GateCheckResult,
     /** RFC 3339 UTC. */
     val lastSuccessAt: String,
+    /**
+     * A refusal the backend answered after [lastSuccessAt] — STICKY:
+     * only a later successful check clears it. Without persistence a
+     * refusal survived only in memory, so refuse → force-stop →
+     * airplane mode → relaunch derived `Unreachable` against the
+     * cached `Clear` and served the app for the whole grace window —
+     * a reachable backend's "no" laundered into a network condition.
+     */
+    val refusalReason: CheckRequiredReason? = null,
+    /** RFC 3339 UTC; when [refusalReason] landed. */
+    val refusedAt: String? = null,
 )
 
 interface GateStateStore {

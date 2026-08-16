@@ -130,6 +130,21 @@ class WireCodecTest {
         )
     }
 
+    /** The debug loopback allowance is a host comparison, not a
+     * prefix match — `http://localhost.attacker.example` must not
+     * ride the exemption. */
+    @Test
+    fun `loopback allowance matches hosts exactly`() {
+        assertTrue(isLoopback("http://localhost"))
+        assertTrue(isLoopback("http://localhost:8080/base"))
+        assertTrue(isLoopback("http://10.0.2.2:8080"))
+        assertFalse(isLoopback("http://localhost.attacker.example"))
+        assertFalse(isLoopback("http://10.0.2.2.evil.test"))
+        assertFalse(isLoopback("https://localhost"))
+    }
+
+    private fun isLoopback(url: String) = OkHttpEnforcementBackendClient.isLoopbackHost(url)
+
     /** Unknown extra fields must not brick the client. */
     @Test
     fun `decoding tolerates unknown fields`() {

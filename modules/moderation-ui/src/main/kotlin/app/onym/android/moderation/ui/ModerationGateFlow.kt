@@ -97,23 +97,25 @@ class ModerationGateFlow(
     fun start() {
         if (collectJob != null) return
         collectJob = scope.launch {
-            // collectLatest + recompute-first: a status is applied with
-            // the cached answers immediately, THEN refined once the
-            // probes land — and a newer status (a `Banned` arriving
-            // behind a `NotMandated`) cancels a hung probe instead of
-            // queueing behind its network timeout.
+            // A status whose RootGate depends on inputs still unknown
+            // (directory answer, reidentification contact) is WITHHELD
+            // until they resolve, then emitted once — recomputing
+            // first with the stale answers flashed the back-blocked
+            // CheckRequired screen for an instant before settling on
+            // the consent surface. Everything else applies
+            // immediately, and `collectLatest` keeps a hung probe
+            // from delaying a newer status (a `Banned` arriving
+            // behind a `NotMandated` cancels it): while a probe runs,
+            // the previous RootGate simply keeps rendering — the
+            // "checking renders the app" softening.
             gate.snapshots.collectLatest { status ->
-                recomputeFrom(status)
-                var refined = false
                 if (dependsOnDirectory(status) && !directoryNonEmpty) {
                     probeDirectory()
-                    refined = true
                 }
                 if (needsContact(status) && contactLine == null) {
                     contactLine = swallowingFailures { reidentificationContact() }
-                    refined = true
                 }
-                if (refined) recomputeFrom(status)
+                recomputeFrom(status)
             }
         }
     }
