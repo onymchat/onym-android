@@ -121,6 +121,45 @@ class ModerationRepositoryTest {
         assertEquals(null, backend.lastEnrollment!!.integrityToken)
     }
 
+    /**
+     * The Huawei-class case: no GMS locally AND a production backend
+     * refusing the token-less enrollment. Typed as unsupported-device
+     * (the rail cannot exist on this hardware, §8.5) so consent
+     * surfaces defer instead of looping a retry that cannot change
+     * the hardware. A refusal WITH a token stays an ordinary
+     * BackendRejectedException — that device was judged.
+     */
+    @Test
+    fun `a refused token-less enrollment is typed as unsupported hardware`() = runTest {
+        attestation.answer = AttestationToken.Unsupported
+        backend.enrollFailure = BackendRejectedException(
+            400,
+            null,
+            "integrityToken is required when Play Integrity is configured",
+        )
+        try {
+            repository().consent(
+                ModerationFixtures.listing(),
+                ModerationFixtures.reviewedManifest(),
+            )
+            fail("the refusal must surface")
+        } catch (e: ModerationUnsupportedDeviceException) {
+            assertTrue(e.message!!.contains("Google Play services"))
+        }
+
+        // With a token, the same refusal stays an ordinary rejection.
+        attestation.answer = AttestationToken.Token("fixture-integrity-token")
+        try {
+            repository().consent(
+                ModerationFixtures.listing(),
+                ModerationFixtures.reviewedManifest(),
+            )
+            fail("the refusal must surface")
+        } catch (e: BackendRejectedException) {
+            assertTrue(e !is ModerationUnsupportedDeviceException)
+        }
+    }
+
     @Test
     fun `a fresh consent deactivates the previous record`() = runTest {
         val repository = repository()

@@ -21,9 +21,10 @@ class ModerationConsentControllerTest {
     private val backend = ScriptedEnforcementBackendClient()
 
     private val mandateStore = InMemoryMandateStore()
+    private val attestation = FakeDeviceAttestationProvider()
     private val moderation = ModerationRepository(
         backend = backend,
-        attestation = FakeDeviceAttestationProvider(),
+        attestation = attestation,
         signer = FakeModerationSigner(),
         mandateStore = mandateStore,
         clock = { Instant.parse("2026-08-08T12:00:00Z") },
@@ -138,6 +139,31 @@ class ModerationConsentControllerTest {
         assertTrue(
             "${controller.snapshots.value}",
             controller.snapshots.value is ModerationConsentController.UiState.Consented,
+        )
+    }
+
+    /**
+     * The Huawei-class product decision: GMS-less hardware whose
+     * token-less enrollment a production backend refuses routes to
+     * the deferrable Unavailable state on the FIRST attempt —
+     * retrying cannot change the hardware, and blocking onboarding
+     * there would exclude those users from the protocol entirely
+     * rather than from moderated enforcement (§8.5 reach limitation).
+     */
+    @Test
+    fun `an unsupported device defers immediately`() = runTest {
+        attestation.answer = app.onym.android.moderation.AttestationToken.Unsupported
+        backend.enrollFailure = app.onym.android.moderation.BackendRejectedException(
+            400,
+            null,
+            "integrityToken is required when Play Integrity is configured",
+        )
+        val controller = controller()
+        controller.load()
+        assertEquals(null, controller.agree())
+        assertTrue(
+            "${controller.snapshots.value}",
+            controller.snapshots.value is ModerationConsentController.UiState.Unavailable,
         )
     }
 

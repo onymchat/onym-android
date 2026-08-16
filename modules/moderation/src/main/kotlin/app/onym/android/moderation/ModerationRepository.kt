@@ -125,15 +125,33 @@ class ModerationRepository(
             )
         }
         val signature = Base64.getEncoder().encodeToString(signer.sign(payload))
-        val enrollment = backend.enrollDevice(
-            EnrollmentRequest(
-                userKey = userKey,
-                timestamp = timestamp,
-                challenge = challenge.challenge,
-                integrityToken = token,
-                signature = signature,
-            ),
-        )
+        val enrollment = try {
+            backend.enrollDevice(
+                EnrollmentRequest(
+                    userKey = userKey,
+                    timestamp = timestamp,
+                    challenge = challenge.challenge,
+                    integrityToken = token,
+                    signature = signature,
+                ),
+            )
+        } catch (e: BackendRejectedException) {
+            // A token-less enrollment (no usable Play environment)
+            // refused by a production backend is not "this device was
+            // judged and refused" — it is "the rail cannot exist on
+            // this hardware". Typed so consent surfaces can route it
+            // to the deferrable Unavailable path (see
+            // ModerationUnsupportedDeviceException) instead of the
+            // retry-forever refusal loop a supported device gets.
+            if (token == null) {
+                throw ModerationUnsupportedDeviceException(
+                    "this device has no Google Play services, and the enforcement backend " +
+                        "requires them; moderation enforcement is unavailable on this hardware",
+                    e,
+                )
+            }
+            throw e
+        }
 
         var mandate = ModerationMandate(
             user = userKey,

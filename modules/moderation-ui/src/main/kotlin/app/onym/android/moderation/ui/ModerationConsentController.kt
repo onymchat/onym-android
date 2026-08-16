@@ -150,6 +150,13 @@ class ModerationConsentController(
             agreeFailures = 0
             state.value = UiState.Consented(record)
             record
+        } catch (e: app.onym.android.moderation.ModerationUnsupportedDeviceException) {
+            // No-GMS hardware (Huawei-class) refused a token-less
+            // enrollment: the rail structurally cannot exist here, so
+            // this is deferrable unavailability, not a judged
+            // refusal — retrying cannot change the hardware.
+            state.value = UiState.Unavailable(e.message)
+            null
         } catch (e: Exception) {
             val deterministicRefusal = e is BackendRejectedException
             if (!deterministicRefusal) agreeFailures += 1

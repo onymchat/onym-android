@@ -12,8 +12,22 @@ import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 
 /** Consent-path failures, with the operator-facing reason kept. */
-class ModerationConsentException(message: String, cause: Throwable? = null) :
+open class ModerationConsentException(message: String, cause: Throwable? = null) :
     Exception(message, cause)
+
+/**
+ * The device cannot mint Play Integrity tokens (no Google Mobile
+ * Services — Huawei post-2019, de-Googled distributions) AND the
+ * backend refused the token-less enrollment: the enforcement rail
+ * structurally cannot exist on this hardware (profile §8.5's
+ * disclosed reach limitation). Product decision: such devices MAY
+ * skip moderation selection — consent surfaces route this to the
+ * deferrable Unavailable path, unlike an ordinary refusal of a
+ * device the rail *does* support. Backend-side identity refusal
+ * remains in force for banned identities regardless.
+ */
+class ModerationUnsupportedDeviceException(message: String, cause: Throwable? = null) :
+    ModerationConsentException(message, cause)
 
 /**
  * Fetches the interface's published authority directory. Lossy per
