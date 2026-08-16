@@ -375,6 +375,72 @@ class OnboardingWalkUITest {
         onboarding.awaitTabShell()
     }
 
+    /**
+     * The debug-build escape hatch: a DETERMINISTIC backend refusal
+     * (the classifier's answer to every sideloaded debug/emulator
+     * build) keeps the strict Review + retry surface — but under a
+     * debug build a "Skip (debug build)" action takes the same
+     * deferral path as Unavailable's Continue, so the walk still
+     * completes. The instrumented process is a debug build, which is
+     * exactly the gate the affordance keys on.
+     */
+    @Test
+    @ModerationEnabled
+    fun moderationStepDebugSkipPassesTheWalkOnRefusal() {
+        moderationBackend.enrollFailure =
+            app.onym.android.moderation.BackendRejectedException(
+                statusCode = 400,
+                rawCode = "signature_invalid",
+                message = "Google did not validate this integrity token",
+            )
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
+        onboarding.tapPrimary(OnboardingStep.Identity)
+        onboarding.awaitStep(OnboardingStep.Services)
+        onboarding.awaitRecommendedCard()
+        onboarding.tapPrimary(OnboardingStep.Services)
+
+        onboarding.awaitStep(OnboardingStep.Moderation)
+        onboarding.assertPrimaryDisabled(OnboardingStep.Moderation)
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.onAllNodes(
+                hasTestTag("moderation.consent.agree"),
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
+        }
+        // Agree is refused deterministically: the surface stays
+        // Review with the reason — no consent, primary still locked.
+        composeRule.onNodeWithTag("moderation.consent.agree", useUnmergedTree = true)
+            .performScrollTo()
+            .performClick()
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.onAllNodes(
+                hasTestTag("moderation.consent.error"),
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
+        }
+        onboarding.assertPrimaryDisabled(OnboardingStep.Moderation)
+
+        // The debug-only skip takes the deferral path and unlocks
+        // the step without a mandate.
+        composeRule.onNodeWithTag("moderation.consent.debugSkip", useUnmergedTree = true)
+            .performScrollTo()
+            .performClick()
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Moderation)
+        onboarding.tapPrimary(OnboardingStep.Moderation)
+
+        onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
+        onboarding.tapSkip(OnboardingStep.RecoveryPhrase)
+        onboarding.awaitStep(OnboardingStep.Done)
+        onboarding.awaitDoneSummary()
+        onboarding.tapPrimary(OnboardingStep.Done)
+        onboarding.awaitTabShell()
+    }
+
     // ─── (2) the custom-services hub walk ─────────────────────────
 
     /**

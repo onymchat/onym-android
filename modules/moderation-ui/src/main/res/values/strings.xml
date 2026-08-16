@@ -61,4 +61,5 @@
   <string name="moderation_document_web_page">This document is a web page.</string>
   <string name="moderation_document_failed">The document could not be fetched.</string>
   <string name="moderation_document_open_browser">Open in browser</string>
+  <string name="moderation_consent_debug_skip">Skip for now (debug build)</string>
 </resources>
