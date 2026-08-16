@@ -178,6 +178,7 @@ fun ModerationConsentContent(
                     manifest = current.manifest,
                     manifestHash = current.manifestHash,
                     modifier = Modifier.testTag("moderation.consent.terms"),
+                    documents = controller.documents,
                 )
                 current.error?.let { error ->
                     Spacer(Modifier.height(8.dp))

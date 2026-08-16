@@ -11,9 +11,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -39,11 +42,14 @@ fun ModerationTermsDisplay(
     manifest: AuthorityManifest,
     manifestHash: String,
     modifier: Modifier = Modifier,
+    /** In-app markdown viewer for definition links; null falls back
+     *  to the system browser. */
+    documents: app.onym.android.moderation.PolicyDocumentFetcher? = null,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         manifest.violationClasses.forEach { violationClass ->
             TermSectionLabel(violationClass.classId.replace('-', ' ').uppercase())
-            ViolationClassCard(violationClass)
+            ViolationClassCard(violationClass, documents)
         }
 
         TermSectionLabel(stringResource(R.string.moderation_terms_procedure).uppercase())
@@ -84,7 +90,10 @@ fun ModerationTermsDisplay(
 
 /** One violation class with all five mandatory terms visible. */
 @Composable
-private fun ViolationClassCard(violationClass: ViolationClass) {
+private fun ViolationClassCard(
+    violationClass: ViolationClass,
+    documents: app.onym.android.moderation.PolicyDocumentFetcher?,
+) {
     TermCard {
         violationClass.responseWindow.takeIf { it.isNotBlank() }?.let {
             TermRow(stringResource(R.string.moderation_term_response_window), durationDisplay(it))
@@ -122,17 +131,33 @@ private fun ViolationClassCard(violationClass: ViolationClass) {
             TermRow(stringResource(R.string.moderation_term_lawful_reporting), it)
         }
         violationClass.definition.takeIf { it.isNotBlank() }?.let {
-            DefinitionRow(it)
+            DefinitionRow(it, documents)
         }
     }
 }
 
 /** Definitions are content-addressed; when the address is https, make
- * it tappable so the exact wording is one tap away. */
+ * it tappable so the exact wording is one tap away — rendered in-app
+ * as markdown ([MarkdownDocumentDialog]) when a fetcher is wired,
+ * else in the browser. */
 @Composable
-private fun DefinitionRow(address: String) {
+private fun DefinitionRow(
+    address: String,
+    documents: app.onym.android.moderation.PolicyDocumentFetcher?,
+) {
     val uriHandler = LocalUriHandler.current
     val isLink = address.startsWith("https://")
+    var viewing by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    if (viewing && documents != null) {
+        MarkdownDocumentDialog(
+            title = MarkdownBlocks.impliedTitle(address),
+            url = address,
+            documents = documents,
+            onDismiss = { viewing = false },
+        )
+    }
     Column(modifier = Modifier.padding(top = 2.dp)) {
         Text(
             text = stringResource(R.string.moderation_term_definition),
@@ -148,10 +173,13 @@ private fun DefinitionRow(address: String) {
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
-            modifier = if (isLink) {
-                Modifier.clickable { runCatching { uriHandler.openUri(address) } }
-            } else {
-                Modifier
+            modifier = when {
+                isLink && documents != null ->
+                    Modifier
+                        .clickable { viewing = true }
+                        .testTag("moderation.consent.definition")
+                isLink -> Modifier.clickable { runCatching { uriHandler.openUri(address) } }
+                else -> Modifier
             },
         )
     }

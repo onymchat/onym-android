@@ -59,4 +59,8 @@
     <item quantity="many">%d дней</item>
     <item quantity="other">%d дня</item>
   </plurals>
+  <string name="moderation_document_done">Готово</string>
+  <string name="moderation_document_web_page">Этот документ — веб-страница.</string>
+  <string name="moderation_document_failed">Не удалось загрузить документ.</string>
+  <string name="moderation_document_open_browser">Открыть в браузере</string>
 </resources>

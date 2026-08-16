@@ -40,6 +40,16 @@ class ModerationConsentController(
      * forever.
      */
     private val resumeExistingMandate: Boolean = true,
+    /**
+     * Fetcher for policy documents (violation-class definitions,
+     * evidence rules) so the review surface can render them in-app as
+     * markdown instead of bouncing to a browser. Null (tests, hosts
+     * predating the viewer) falls back to opening the address
+     * externally. Display-path only — nothing fetched through this is
+     * consented to; the definition ADDRESS is what the hashed bytes
+     * carry.
+     */
+    val documents: app.onym.android.moderation.PolicyDocumentFetcher? = null,
 ) {
     sealed interface UiState {
         data object Loading : UiState

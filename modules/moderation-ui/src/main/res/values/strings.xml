@@ -57,4 +57,8 @@
     <item quantity="one">%d day</item>
     <item quantity="other">%d days</item>
   </plurals>
+  <string name="moderation_document_done">Done</string>
+  <string name="moderation_document_web_page">This document is a web page.</string>
+  <string name="moderation_document_failed">The document could not be fetched.</string>
+  <string name="moderation_document_open_browser">Open in browser</string>
 </resources>

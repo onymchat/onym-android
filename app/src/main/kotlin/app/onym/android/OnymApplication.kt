@@ -1408,6 +1408,12 @@ class OnymApplication : Application() {
                         manifestFetcher = manifestFetcher,
                         moderation = moderationRepository,
                         resumeExistingMandate = resumeExistingMandate,
+                        // In-app markdown viewer for policy documents
+                        // (definitions, evidence rules) — display
+                        // path, plain https GET.
+                        documents = app.onym.android.moderation.OkHttpPolicyDocumentFetcher(
+                            httpClient,
+                        ),
                     )
                 },
                 directoryNonEmpty = {
