@@ -258,6 +258,26 @@ class GateCheckRepositoryTest {
         assertEquals(GateStatus.Operational(), repository.snapshots.value)
     }
 
+    /** After an identity switch the gate answers NotMandated (the
+     * consent path) — it must never send the old identity's userKey
+     * under the new identity's signature, which is a sticky
+     * backendRefused no retry can clear. */
+    @Test
+    fun `an identity switch routes to consent not a mismatched session`() = runTest {
+        consent()
+        backend.gateResults.addLast(GateCheckResult.Clear)
+        val repository = repository()
+        repository.checkNow()
+        assertEquals(GateStatus.Operational(), repository.snapshots.value)
+        val requestsBefore = backend.challengeCounter
+
+        signer.userKey = "onym:key:ccdd"
+        now = now.plusSeconds(61)
+        repository.checkNow()
+        assertEquals(GateStatus.NotMandated, repository.snapshots.value)
+        assertEquals("no session is sent for an unmandated identity", requestsBefore, backend.challengeCounter)
+    }
+
     /** Serial passive triggers inside the min-recheck window skip the
      * network (coalescing only shares CONCURRENT flights; foreground
      * cycles are serial); an explicit force always runs. */

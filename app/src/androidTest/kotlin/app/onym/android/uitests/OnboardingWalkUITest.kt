@@ -346,6 +346,11 @@ class OnboardingWalkUITest {
                 useUnmergedTree = true,
             ).fetchSemanticsNodes().isNotEmpty()
         }
+        // The terms must be VISIBLE, not merely composed: inside the
+        // step's scrolling host a weighted terms body once measured to
+        // zero height — invisible terms with a live Agree below them.
+        composeRule.onNodeWithTag("moderation.consent.terms", useUnmergedTree = true)
+            .assertIsDisplayed()
         composeRule.onNodeWithTag("moderation.consent.agree", useUnmergedTree = true)
             .performClick()
         // Consent ran the full scripted path and unlocked Continue.

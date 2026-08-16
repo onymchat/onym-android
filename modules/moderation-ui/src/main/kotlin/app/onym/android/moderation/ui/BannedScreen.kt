@@ -83,7 +83,32 @@ fun BannedScreen(
                         .testTag("moderation.banned.newHolder"),
                 ) { Text(stringResource(R.string.moderation_banned_new_holder)) }
             }
+            if (state.appealUrl == null && state.newHolderUrl == null) {
+                // With no declared routes, the contact itself becomes
+                // the tappable route out when it parses as one — a
+                // screen with only untappable text is a step away from
+                // the silent brick §5.2 forbids.
+                contactActionUri(state.authorityContact)?.let { uri ->
+                    OutlinedButton(
+                        onClick = { onOpenUrl(uri) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("moderation.banned.contactAction"),
+                    ) { Text(stringResource(R.string.moderation_banned_contact_action)) }
+                }
+            }
         }
+    }
+}
+
+/** The authority contact as an openable URI: a URL verbatim, an
+ * email as `mailto:`, anything else null (text-only). */
+private fun contactActionUri(contact: String): String? {
+    val trimmed = contact.trim()
+    return when {
+        trimmed.startsWith("https://") || trimmed.startsWith("http://") -> trimmed
+        Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$").matches(trimmed) -> "mailto:$trimmed"
+        else -> null
     }
 }
 

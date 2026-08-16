@@ -8,6 +8,7 @@
   <string name="moderation_banned_contact">Контакт органа модерации: %1$s</string>
   <string name="moderation_banned_appeal">Обжаловать блокировку</string>
   <string name="moderation_banned_new_holder">Я новый владелец этого устройства</string>
+  <string name="moderation_banned_contact_action">Связаться с органом модерации</string>
 
   <!-- Verification-required gate -->
   <string name="moderation_gate_required_title">Требуется проверка</string>

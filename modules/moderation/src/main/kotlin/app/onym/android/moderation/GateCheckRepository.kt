@@ -223,14 +223,17 @@ class GateCheckRepository(
             val record = moderation.activeMandateRecord()
             if (record == null) {
                 // No mandate on file — but the PERSISTED gate state
-                // may still carry a ban or a sticky refusal, and a
-                // cleared/corrupt mandate store must not walk around
-                // the laundering wall: Settings -> Clear data ->
-                // offline used to land Operational through the
-                // consent softening. Platform-state-first: a cached
-                // ban keeps blocking, a sticky refusal keeps
-                // blocking; only a genuinely clean history answers
-                // NotMandated (-> the consent gate).
+                // may still carry a ban or a sticky refusal.
+                // Platform-state-first: a cached ban keeps blocking, a
+                // sticky refusal keeps blocking; only a genuinely
+                // clean history answers NotMandated (-> the consent
+                // gate). Scope honestly: this defends a corrupt or
+                // partially-lost MANDATE blob (which reads as empty)
+                // and any future selective clearing — a full system
+                // "Clear data" wipes both stores' shared file (and
+                // the identity with it), which no local wall can
+                // survive; the durable ban for that case is the
+                // recall value at Google, re-read at next enrollment.
                 val persisted = store.load()
                 val lastResult = persisted?.lastResult
                 val fallback = when {
@@ -270,7 +273,11 @@ class GateCheckRepository(
                 }
             }
         } finally {
-            mutex.withLock { lastRunCompletedAt = clock() }
+            // Only the newest run stamps the min-recheck guard: a
+            // stale generation-discarded flight landing late must not
+            // suppress the next passive check as if fresh state had
+            // just been derived.
+            mutex.withLock { if (taken == generation) lastRunCompletedAt = clock() }
         }
     }
 

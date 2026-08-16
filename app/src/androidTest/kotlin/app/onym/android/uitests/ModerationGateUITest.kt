@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.onym.android.MainActivity
 import app.onym.android.OnymApplication
 import app.onym.android.UITestRegistry
+import app.onym.android.identity.IdentityRepository
 import app.onym.android.identity.IdentitySecretStore
 import app.onym.android.moderation.BanState
 import app.onym.android.moderation.CheckRequiredReason
@@ -19,6 +20,7 @@ import app.onym.android.moderation.support.FakeKnownAuthoritiesFetcher
 import app.onym.android.moderation.support.InMemoryGateStateStore
 import app.onym.android.moderation.support.InMemoryMandateStore
 import app.onym.android.moderation.support.ScriptedEnforcementBackendClient
+import app.onym.android.moderation.keyReference
 import app.onym.android.moderation.support.fixtureMandateRecord
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Assert.assertNotNull
@@ -166,9 +168,20 @@ class ModerationGateUITest {
     @get:Rule(order = 1)
     val composeRule = createAndroidComposeRule<MainActivity>()
 
+    /**
+     * Seed the mandate under the REAL device identity's key: the
+     * repository resolves the active mandate per identity
+     * (mandate.user must equal the current signer's key), so a
+     * fixture key would resolve NotMandated and boot into the consent
+     * surface instead of the scripted gate. Bootstrapping here is
+     * idempotent — the app's own repository loads the same persisted
+     * identity.
+     */
     private fun seedMandate() {
         kotlinx.coroutines.runBlocking {
-            mandateStore.save(listOf(fixtureMandateRecord()))
+            val identity = IdentityRepository(identityStore).bootstrap()
+            val userKey = keyReference(identity.stellarPublicKey)
+            mandateStore.save(listOf(fixtureMandateRecord(userKey = userKey)))
         }
     }
 

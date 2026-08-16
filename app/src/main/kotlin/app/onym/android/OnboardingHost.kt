@@ -631,6 +631,11 @@ private fun ModerationStepContent(
             if (flow.state.value.step == OnboardingStep.Moderation) {
                 flow.recordOutcome(StepOutcome.Unavailable)
             }
+            // Also defer the ROOT gate for this process: without it,
+            // finishing the walk lands the user straight on the
+            // full-screen NeedsConsent surface they just continued
+            // past — the same unreachable authority, asked twice.
+            moderation.gate.deferConsent()
         },
         modifier = Modifier.fillMaxWidth(),
     )

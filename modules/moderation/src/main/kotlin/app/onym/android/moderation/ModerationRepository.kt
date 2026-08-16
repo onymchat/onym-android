@@ -13,7 +13,15 @@ data class ModerationState(
     val loaded: Boolean = false,
     val records: List<MandateRecord> = emptyList(),
 ) {
-    val activeMandate: MandateRecord? get() = records.firstOrNull { it.isActive }
+    /** The active record FOR ONE IDENTITY. Never resolve an active
+     * record without naming whose: the device can hold several
+     * identities ([app.onym.android.identity.IdentityRepository.select]
+     * is a Settings surface), each with its own mandate, and a gate
+     * check that sends identity A's `userKey` while identity B signs
+     * the session is a `signature_invalid` refusal — sticky, and
+     * clearable only by a success that can never come. */
+    fun activeMandate(userKey: String): MandateRecord? =
+        records.firstOrNull { it.isActive && it.mandate.user == userKey }
 }
 
 /**
@@ -59,9 +67,17 @@ class ModerationRepository(
         state.value = ModerationState(loaded = true, records = mandateStore.load())
     }
 
+    /**
+     * The CURRENT identity's active mandate, or null — a switch to an
+     * unmandated identity (or deleting the mandated one) resolves
+     * `NotMandated` and routes to the consent gate, never to a
+     * mismatched session the backend refuses forever. Switching back
+     * finds the original record again.
+     */
     suspend fun activeMandateRecord(): MandateRecord? {
         start()
-        return state.value.activeMandate
+        val userKey = signer.userKeyId()
+        return state.value.activeMandate(userKey)
     }
 
     /**
@@ -155,10 +171,19 @@ class ModerationRepository(
         )
 
         // Mandates are immutable: the previous active record is
-        // deactivated, never edited beyond that flag. Only this final
-        // read-modify-write needs the state lock.
+        // deactivated, never edited beyond that flag — and only THIS
+        // IDENTITY's previous record: other identities on the device
+        // keep their own active mandates (activeMandate is
+        // per-identity). Only this final read-modify-write needs the
+        // state lock.
         mutex.withLock {
-            val records = listOf(record) + state.value.records.map { it.copy(isActive = false) }
+            val records = listOf(record) + state.value.records.map { existing ->
+                if (existing.mandate.user == record.mandate.user) {
+                    existing.copy(isActive = false)
+                } else {
+                    existing
+                }
+            }
             mandateStore.save(records)
             state.value = ModerationState(loaded = true, records = records)
         }

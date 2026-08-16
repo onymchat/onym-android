@@ -91,6 +91,10 @@ android {
         // loopback dev backend (the emulator loop against a local
         // service has no Play Console pairing to demand, and the
         // runtime client only honors loopback under a debug build).
+        // (Release builds additionally demand https — see the
+        // androidComponents block below: the runtime client honors
+        // loopback only under debug, so a release with a loopback URL
+        // would throw on every check and block every user at grace.)
         check(
             moderationBaseUrl().isBlank() ||
                 moderationUrlIsLoopback() ||
@@ -164,6 +168,20 @@ android {
     // fake in `app.onym.android.support` now lives in the owning
     // module's testFixtures (:transport, :chain, :identity, :group,
     // :transport-blossom, :chats-core), wired below.
+}
+
+// The loopback exemption above is a DEBUG convenience; the runtime
+// client (OkHttpEnforcementBackendClient) refuses non-https outside a
+// debug build, so a release carrying a loopback MODERATION_BASE_URL
+// would fail every gate check until grace expired — for every user.
+// Refuse to build that.
+androidComponents {
+    onVariants(selector().withBuildType("release")) {
+        check(moderationBaseUrl().isBlank() || moderationBaseUrl().startsWith("https://")) {
+            "MODERATION_BASE_URL must be https in a release build (got a non-https URL the " +
+                "release client refuses at runtime)."
+        }
+    }
 }
 
 dependencies {

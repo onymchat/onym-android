@@ -8,6 +8,7 @@
   <string name="moderation_banned_contact">Authority contact: %1$s</string>
   <string name="moderation_banned_appeal">Appeal this ban</string>
   <string name="moderation_banned_new_holder">I\'m this device\'s new owner</string>
+  <string name="moderation_banned_contact_action">Contact the authority</string>
 
   <!-- Verification-required gate -->
   <string name="moderation_gate_required_title">Verification required</string>

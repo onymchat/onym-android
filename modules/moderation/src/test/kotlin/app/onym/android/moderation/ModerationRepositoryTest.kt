@@ -141,6 +141,45 @@ class ModerationRepositoryTest {
         assertTrue(!previous.isActive)
     }
 
+    /**
+     * The identity-switch brick: resolving "the active mandate" with
+     * no identity filter sent identity A's userKey while identity B
+     * signed — signature_invalid, a STICKY backendRefused, cleared
+     * only by a success that could never come. The active record is
+     * per-identity: a switch resolves NotMandated (-> consent), a
+     * switch back finds the original record, and a fresh consent
+     * deactivates only the same identity's previous record.
+     */
+    @Test
+    fun `switching identity resolves that identity's mandate or none`() = runTest {
+        val repository = repository()
+        val recordA = repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        assertEquals(recordA, repository.activeMandateRecord())
+
+        // Switch to an unmandated identity: no record, never a
+        // mismatched session.
+        signer.userKey = "onym:key:ccdd"
+        assertEquals(null, repository.activeMandateRecord())
+
+        // The new identity consents; both identities now hold their
+        // own active records.
+        now = now.plusSeconds(3600)
+        backend.deviceBinding = "enrollment:fixture-b"
+        val recordB = repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        assertEquals(recordB, repository.activeMandateRecord())
+        assertEquals("onym:key:ccdd", recordB.mandate.user)
+
+        // Switching back finds A's record, still active.
+        signer.userKey = "onym:key:aabb"
+        assertEquals(recordA, repository.activeMandateRecord())
+    }
+
     /** The user signature travels base64 over the canonical bytes the
      * backend will re-derive. */
     @Test

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -110,8 +111,16 @@ fun ModerationConsentContent(
                     text = current.termsDisplay,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
+                    // Bounded, not weighted: the onboarding step hosts
+                    // this inside a scrolling Column, where a weighted
+                    // child measures against an unbounded max and
+                    // collapses to ZERO height — the terms invisibly
+                    // "reviewed" while Agree still rendered and
+                    // clicked, contradicting the consent copy. A fixed
+                    // window with its own scroll renders identically
+                    // in both the walk and the full-screen host.
                     modifier = Modifier
-                        .weight(1f)
+                        .heightIn(min = 160.dp, max = 320.dp)
                         .fillMaxWidth()
                         .verticalScroll(rememberScrollState())
                         .testTag("moderation.consent.terms"),

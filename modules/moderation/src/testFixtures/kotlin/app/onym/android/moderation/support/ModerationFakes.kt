@@ -40,7 +40,9 @@ class FakeDeviceAttestationProvider(
 /** Deterministic signer: 64 fixed bytes, a fixed key reference. The
  * backend fakes below never verify. */
 class FakeModerationSigner(
-    private val userKey: String = "onym:key:aabb",
+    /** Mutable: identity-switch tests point the signer at another
+     * identity mid-test, as `IdentityRepository.select` does. */
+    var userKey: String = "onym:key:aabb",
 ) : ModerationSigner {
     val signedPayloads = mutableListOf<ByteArray>()
 
