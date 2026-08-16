@@ -20,6 +20,7 @@
   <string name="moderation_gate_required_backend_refused">Служба проверки отклонила запрос этого устройства. Попробуйте снова; если это повторяется, свяжитесь с органом модерации.</string>
   <string name="moderation_gate_required_enrollment_lost">Служба проверки больше не распознаёт регистрацию этого устройства. Просмотрите и примите условия модерации заново, чтобы перерегистрироваться.</string>
   <string name="moderation_gate_required_retry">Повторить</string>
+  <string name="moderation_gate_required_contact_fallback">Свяжитесь с органом модерации, чьи условия вы приняли — его контакты указаны в условиях, которые вы просматривали при настройке.</string>
 
   <!-- Consent -->
   <string name="moderation_consent_title">Модерация: %1$s</string>

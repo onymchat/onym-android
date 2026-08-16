@@ -79,6 +79,8 @@ class PlayIntegrityAttestationProvider(
             ).await()
             backoff = INITIAL_BACKOFF
             AttestationToken.Token(token.token())
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: StandardIntegrityException) {
             when (e.errorCode) {
                 StandardIntegrityErrorCode.INTEGRITY_TOKEN_PROVIDER_INVALID -> {
@@ -96,12 +98,21 @@ class PlayIntegrityAttestationProvider(
                         // matching the primary request path.
                         backoff = INITIAL_BACKOFF
                         AttestationToken.Token(token.token())
+                    } catch (retry: kotlinx.coroutines.CancellationException) {
+                        throw retry
                     } catch (retry: StandardIntegrityException) {
                         classify(retry)
+                    } catch (_: Exception) {
+                        AttestationToken.Throttled
                     }
                 }
                 else -> classify(e)
             }
+        } catch (_: Exception) {
+            // Same rationale as prepare(): a non-Integrity Task
+            // failure is an attestation-side condition, not network
+            // unreachability.
+            AttestationToken.Throttled
         }
     }
 
@@ -113,8 +124,17 @@ class PlayIntegrityAttestationProvider(
                     .setCloudProjectNumber(cloudProjectNumber)
                     .build(),
             ).await().also { provider = it }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: StandardIntegrityException) {
             classify(e)
+            null
+        } catch (e: Exception) {
+            // A generic Tasks failure escaping to performAttempt's
+            // catch-all would be reported as backend unreachability
+            // (offlineGraceExpired past grace) — but nothing was on
+            // the network. Throttled is honest: grace serves, and the
+            // eventual reason is attestationUnavailable.
             null
         }
     }

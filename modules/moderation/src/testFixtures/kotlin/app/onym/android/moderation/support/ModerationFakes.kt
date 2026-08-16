@@ -84,8 +84,13 @@ class ScriptedEnforcementBackendClient : EnforcementBackendClient {
     /** When set, enrollDevice throws it — consent-failure tests. */
     var enrollFailure: Exception? = null
 
+    /** When set, enrollDevice suspends on it — mid-transaction
+     * cancellation tests. */
+    var enrollGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
     override suspend fun enrollDevice(request: EnrollmentRequest): DeviceEnrollment {
         lastEnrollment = request
+        enrollGate?.await()
         enrollFailure?.let { throw it }
         return DeviceEnrollment(deviceBinding)
     }

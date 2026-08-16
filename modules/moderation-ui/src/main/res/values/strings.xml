@@ -20,6 +20,7 @@
   <string name="moderation_gate_required_backend_refused">The verification service refused this device\'s request. Try again; if this keeps happening, contact the moderation authority.</string>
   <string name="moderation_gate_required_enrollment_lost">The verification service no longer recognizes this device\'s enrollment. Review and accept the moderation terms again to re-enroll.</string>
   <string name="moderation_gate_required_retry">Try again</string>
+  <string name="moderation_gate_required_contact_fallback">Contact the moderation authority whose terms you accepted — its contact details are published in the terms you reviewed at setup.</string>
 
   <!-- Consent -->
   <string name="moderation_consent_title">Moderation by %1$s</string>

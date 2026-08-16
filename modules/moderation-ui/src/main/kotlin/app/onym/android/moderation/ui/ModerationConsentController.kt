@@ -91,10 +91,24 @@ class ModerationConsentController(
         }
     }
 
-    /** Consent with the retained snapshot. On success the caller
-     * records the step outcome and pokes the gate (`consentCompleted`). */
-    suspend fun agree(): MandateRecord? = mutex.withLock {
-        val (listing, signed) = reviewed ?: return null
+    /**
+     * Consent with the retained snapshot. On success the caller
+     * records the step outcome and pokes the gate (`consentCompleted`).
+     *
+     * NonCancellable: `agree` runs on the surface's composition scope,
+     * and the surface can leave composition mid-transaction (a gate
+     * flip re-rendering the root). Cancellation between `enrollDevice`
+     * and the mandate save would orphan a backend enrollment and
+     * strand the controller in `Consenting` with no way back — the
+     * transaction is short, so it completes; only the caller's
+     * follow-up (`onConsented`) is lost, and the gate's own next check
+     * re-derives from the persisted record.
+     */
+    suspend fun agree(): MandateRecord? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { agreeInner() }
+
+    private suspend fun agreeInner(): MandateRecord? = mutex.withLock {
+        val (listing, signed) = reviewed ?: return@withLock null
         state.value = UiState.Consenting
         try {
             val record = moderation.consent(listing, ReviewedManifest(signed))

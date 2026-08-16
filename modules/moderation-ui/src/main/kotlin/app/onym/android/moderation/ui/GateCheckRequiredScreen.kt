@@ -52,12 +52,17 @@ fun GateCheckRequiredScreen(
                 text = stringResource(reasonBody(reason)),
                 style = MaterialTheme.typography.bodyLarge,
             )
-            if (reason == CheckRequiredReason.REIDENTIFICATION_REQUIRED &&
-                authorityContact != null
-            ) {
+            if (reason == CheckRequiredReason.REIDENTIFICATION_REQUIRED) {
+                // Unconditional: this is the one blocked state with no
+                // retry and no ban notice, so SOMETHING contactable
+                // must render even when the mandate store yields no
+                // line — a back-blocked screen with nothing tappable
+                // and nothing named is the silent brick §5.2 forbids.
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = stringResource(R.string.moderation_banned_contact, authorityContact),
+                    text = authorityContact
+                        ?.let { stringResource(R.string.moderation_banned_contact, it) }
+                        ?: stringResource(R.string.moderation_gate_required_contact_fallback),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.testTag("moderation.gateRequired.contact"),
                 )

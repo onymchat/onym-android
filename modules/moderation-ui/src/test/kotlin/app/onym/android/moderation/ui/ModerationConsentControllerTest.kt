@@ -9,6 +9,8 @@ import app.onym.android.moderation.support.FakeModerationSigner
 import app.onym.android.moderation.support.InMemoryMandateStore
 import app.onym.android.moderation.support.ScriptedEnforcementBackendClient
 import java.time.Instant
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -68,6 +70,40 @@ class ModerationConsentControllerTest {
         assertTrue(
             "${controller.snapshots.value}",
             controller.snapshots.value is ModerationConsentController.UiState.Unavailable,
+        )
+    }
+
+    /**
+     * The orphaned-enrollment defect: `agree` runs on the surface's
+     * composition scope, and the surface can leave composition
+     * mid-transaction (a gate flip). Cancellation between enroll and
+     * the mandate save stranded a backend enrollment and pinned the
+     * controller in Consenting. The transaction is NonCancellable:
+     * it completes, the record persists, the state reaches Consented.
+     */
+    @Test
+    fun `cancelling the surface mid-agree still completes the consent`() = runTest {
+        val holdEnroll = kotlinx.coroutines.CompletableDeferred<Unit>()
+        backend.enrollGate = holdEnroll
+        val controller = controller()
+        controller.load()
+
+        val surfaceScope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + testScheduler.let {
+                kotlinx.coroutines.test.StandardTestDispatcher(it)
+            },
+        )
+        val agreeing = surfaceScope.launch { controller.agree() }
+        testScheduler.runCurrent() // suspended inside enrollDevice
+
+        // The surface leaves composition: its scope is cancelled.
+        surfaceScope.cancel()
+        holdEnroll.complete(Unit)
+        agreeing.join()
+
+        assertTrue(
+            "${controller.snapshots.value}",
+            controller.snapshots.value is ModerationConsentController.UiState.Consented,
         )
     }
 

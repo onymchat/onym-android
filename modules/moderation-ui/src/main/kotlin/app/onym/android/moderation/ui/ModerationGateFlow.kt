@@ -109,6 +109,11 @@ class ModerationGateFlow(
             // the previous RootGate simply keeps rendering — the
             // "checking renders the app" softening.
             gate.snapshots.collectLatest { status ->
+                // Unknown decides nothing: the first check hasn't
+                // landed, and the initial Operational keeps rendering
+                // — never a consent surface for a user whose mandate
+                // simply hasn't been read yet.
+                if (!status.decidesAnything()) return@collectLatest
                 if (dependsOnDirectory(status) && !directoryNonEmpty) {
                     probeDirectory()
                 }
@@ -177,8 +182,11 @@ class ModerationGateFlow(
         else -> false
     }
 
+    private fun GateStatus.decidesAnything(): Boolean = this != GateStatus.Unknown
+
     private fun recomputeFrom(status: GateStatus) {
         state.value = when (status) {
+            GateStatus.Unknown -> return
             GateStatus.NotMandated -> when {
                 consentDeferred -> RootGate.Operational()
                 directoryNonEmpty -> RootGate.NeedsConsent(canDefer = true)

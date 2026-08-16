@@ -32,6 +32,18 @@ data class GateCheckPolicy(
  * [GateCheckRequired] block it. */
 sealed interface GateStatus {
     /**
+     * No check has landed yet this process. Distinct from
+     * [NotMandated] deliberately: on a cold start for an
+     * already-mandated user, mapping the pre-first-check state to
+     * "no mandate" rendered the full-screen consent surface — with a
+     * live Agree that would mint a second enrollment — for the
+     * window between the (fast) directory probe and the (slow)
+     * challenge → Play Integrity → gate-check round trip. Unknown
+     * renders the app and decides nothing.
+     */
+    data object Unknown : GateStatus
+
+    /**
      * No active mandate yet — the consent gate applies, not this one.
      * NOT an operational state and never an escape hatch: losing the
      * mandate routes to re-consent, after which a fresh gate check
@@ -95,7 +107,7 @@ class GateCheckRepository(
     }
 
     private val mutex = Mutex()
-    private val state = MutableStateFlow<GateStatus>(GateStatus.NotMandated)
+    private val state = MutableStateFlow<GateStatus>(GateStatus.Unknown)
     private var loopJob: Job? = null
 
     /**
@@ -188,22 +200,39 @@ class GateCheckRepository(
 
     private suspend fun runCheck() {
         val taken = mutex.withLock { ++generation }
-
-        val record = moderation.activeMandateRecord()
-        if (record == null) {
-            mutex.withLock {
-                if (taken == generation) state.value = GateStatus.NotMandated
+        try {
+            val record = moderation.activeMandateRecord()
+            if (record == null) {
+                mutex.withLock {
+                    if (taken == generation) state.value = GateStatus.NotMandated
+                }
+                return
             }
-            return
-        }
 
-        val attempt = performAttempt(record)
+            val attempt = performAttempt(record)
 
-        mutex.withLock {
-            if (taken != generation) return
-            val (status, persisted) = derive(store.load(), attempt, clock(), policy)
-            store.save(persisted)
-            state.value = status
+            mutex.withLock {
+                if (taken != generation) return
+                val (status, persisted) = derive(store.load(), attempt, clock(), policy)
+                store.save(persisted)
+                state.value = status
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The paths outside performAttempt's own try — the mandate
+            // and gate-state stores. An escaped exception here is an
+            // uncaught crash in a SupervisorJob child; a swallowed one
+            // that leaves the last state standing is unmoderated
+            // operation on a store fault. Degrade toward blocking.
+            // (No logger: this module is log-free like the repo's
+            // other library modules; the blocked gate IS the signal.)
+            mutex.withLock {
+                if (taken == generation) {
+                    state.value =
+                        GateStatus.GateCheckRequired(CheckRequiredReason.NEVER_CHECKED)
+                }
+            }
         }
     }
 

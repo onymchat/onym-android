@@ -3,7 +3,10 @@ package app.onym.android.moderation
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import java.io.IOException
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -43,7 +46,14 @@ class DataStorePreferencesGateStateStore(
     private val dataStore: DataStore<Preferences>,
 ) : GateStateStore {
     override suspend fun load(): PersistedGateState? {
-        val raw = dataStore.data.first()[KEY] ?: return null
+        // A corrupt/unreadable preferences file reads as empty rather
+        // than throwing: no persisted state means the gate blocks on
+        // neverChecked when unreachable — degraded toward blocking —
+        // while a thrown IOException would escape the boot sequence
+        // and leave the process unmoderated (the gate never starting).
+        val raw = dataStore.data
+            .catch { failure -> if (failure is IOException) emit(emptyPreferences()) else throw failure }
+            .first()[KEY] ?: return null
         return runCatching {
             ModerationJson.json.decodeFromString(PersistedGateState.serializer(), raw)
         }.getOrNull()
@@ -121,7 +131,13 @@ class DataStorePreferencesMandateStore(
     private val dataStore: DataStore<Preferences>,
 ) : MandateStore {
     override suspend fun load(): List<MandateRecord> {
-        val raw = dataStore.data.first()[KEY] ?: return emptyList()
+        // Same posture as the gate-state store: a corrupt file reads
+        // as "no records", which routes to the consent gate (mandate
+        // lost -> re-consent) — never an exception that aborts boot
+        // into unmoderated operation.
+        val raw = dataStore.data
+            .catch { failure -> if (failure is IOException) emit(emptyPreferences()) else throw failure }
+            .first()[KEY] ?: return emptyList()
         return runCatching {
             ModerationJson.json.decodeFromString(ListSerializer(MandateRecord.serializer()), raw)
         }.getOrDefault(emptyList())

@@ -160,6 +160,44 @@ class ModerationGateFlowTest {
     }
 
     /**
+     * The cold-start double-enrollment defect: an already-mandated
+     * user's first check is slower (challenge + Play Integrity + POST)
+     * than the directory probe, and mapping the pre-first-check state
+     * to NotMandated rendered the consent surface — with a live Agree
+     * — over their app. The gate's initial status is Unknown, which
+     * decides nothing: the flow renders the app until the check lands.
+     */
+    @Test
+    fun `a mandated cold start never flashes the consent surface`() = runTest {
+        consent()
+        directoryAvailable = true
+        backend.gateResults.addLast(app.onym.android.moderation.GateCheckResult.Clear)
+        val holdTheWire = kotlinx.coroutines.CompletableDeferred<Unit>()
+        backend.gateDelay = holdTheWire
+
+        val (flow, gate) = harness()
+        val seen = mutableListOf<RootGate>()
+        val watcher = launch { flow.snapshots.collect { seen += it } }
+        flow.start()
+        val check = launch { gate.checkNow() }
+        testScheduler.runCurrent()
+
+        // The check is on the wire; the app renders, no consent gate.
+        assertEquals(RootGate.Operational(), flow.snapshots.value)
+
+        holdTheWire.complete(Unit)
+        check.join()
+        advanceUntilIdle()
+        assertEquals(RootGate.Operational(), flow.snapshots.value)
+        assertTrue(
+            "no consent surface at any point: $seen",
+            seen.none { it is RootGate.NeedsConsent },
+        )
+        watcher.cancel()
+        flow.stop()
+    }
+
+    /**
      * The reidentification screen is the one blocked state with no
      * retry and no ban notice: without a contact it is the silent
      * brick the profile forbids, so the flow resolves one from the

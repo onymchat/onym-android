@@ -1333,12 +1333,25 @@ class OnymApplication : Application() {
                 scope = applicationScope,
             )
             applicationScope.launch {
-                moderationRepository.start()
+                // Each start is guarded independently: sequential
+                // unguarded calls meant one store failure in
+                // moderationRepository.start() skipped the gate and
+                // flow starts entirely, leaving RootGate Operational
+                // — the process running UNMODERATED for its lifetime,
+                // the exact inversion of "never toward unmoderated
+                // operation". (The DataStore-backed stores also
+                // degrade instead of throwing now; this is the second
+                // wall.) The gate re-runs the repository load lazily,
+                // so a failed eager start self-heals at first check.
+                runCatching { moderationRepository.start() }
+                    .onFailure { android.util.Log.e("OnymApplication", "moderation start", it) }
                 // Launch check + the P1D cadence loop. Without a
                 // mandate checkNow answers NotMandated and sends
                 // nothing, so starting unconditionally is free.
-                gateCheckRepository.start()
-                moderationGateFlow.start()
+                runCatching { gateCheckRepository.start() }
+                    .onFailure { android.util.Log.e("OnymApplication", "gate start", it) }
+                runCatching { moderationGateFlow.start() }
+                    .onFailure { android.util.Log.e("OnymApplication", "gate flow start", it) }
             }
             moderationUi = ModerationUiDependencies(
                 gate = moderationGateFlow,

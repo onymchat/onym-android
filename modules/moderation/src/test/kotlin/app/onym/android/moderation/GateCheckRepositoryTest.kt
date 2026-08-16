@@ -253,6 +253,43 @@ class GateCheckRepositoryTest {
         assertEquals(GateStatus.Operational(), repository.snapshots.value)
     }
 
+    /** A failing gate-state store must degrade toward blocking, not
+     * escape runCheck as an uncaught crash in a SupervisorJob child —
+     * and not leave the previous state standing (unmoderated
+     * operation on a store fault). */
+    @Test
+    fun `a store failure degrades to neverChecked instead of crashing`() = runTest {
+        consent()
+        backend.gateResults.addLast(GateCheckResult.Clear)
+        val throwingStore = object : GateStateStore {
+            override suspend fun load(): PersistedGateState? =
+                throw RuntimeException("disk full")
+            override suspend fun save(state: PersistedGateState?) =
+                throw RuntimeException("disk full")
+        }
+        val moderation = ModerationRepository(
+            backend = backend,
+            attestation = attestation,
+            signer = signer,
+            mandateStore = mandateStore,
+            clock = { now },
+        )
+        val repository = GateCheckRepository(
+            attestation = attestation,
+            backend = backend,
+            moderation = moderation,
+            signer = signer,
+            store = throwingStore,
+            scope = this,
+            clock = { now },
+        )
+        repository.checkNow()
+        assertEquals(
+            GateStatus.GateCheckRequired(CheckRequiredReason.NEVER_CHECKED),
+            repository.snapshots.value,
+        )
+    }
+
     /** A 200 body smuggling `enrollmentLost` is normalized onto the
      * refusal path — it must not persist as a successful check. */
     @Test
