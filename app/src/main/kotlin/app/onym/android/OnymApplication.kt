@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.fragment.app.FragmentActivity
 import androidx.room.Room
 import app.onym.android.chain.BearerAuthInterceptor
+import app.onym.android.moderation.authorityContactLine
 import app.onym.android.chain.ContractsRepository
 import app.onym.android.chain.DataStoreNetworkPreferenceProvider
 import app.onym.android.chain.OkHttpSepContractTransport
@@ -1325,6 +1326,9 @@ class OnymApplication : Application() {
                 authoritiesAvailable = {
                     runCatching { authoritiesFetcher.fetchLatest().isNotEmpty() }
                         .getOrDefault(false)
+                },
+                reidentificationContact = {
+                    moderationRepository.activeMandateRecord()?.authorityContactLine()
                 },
                 scope = applicationScope,
             )

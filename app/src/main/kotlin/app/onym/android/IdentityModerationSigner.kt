@@ -18,6 +18,13 @@ class IdentityModerationSigner(
     override suspend fun userKeyId(): String =
         keyReference(repository.bootstrap().stellarPublicKey)
 
-    override suspend fun sign(message: ByteArray): ByteArray =
-        repository.signWithStellarKey(message)
+    override suspend fun sign(message: ByteArray): ByteArray {
+        // Await the (idempotent) bootstrap first: the gate's launch
+        // check can outrun the async identity bootstrap on a cold
+        // start, and signWithStellarKey alone would then throw
+        // IdentityNotLoaded — classified as an unreachable attempt,
+        // landing a spurious NEVER_CHECKED block on first boot.
+        repository.bootstrap()
+        return repository.signWithStellarKey(message)
+    }
 }

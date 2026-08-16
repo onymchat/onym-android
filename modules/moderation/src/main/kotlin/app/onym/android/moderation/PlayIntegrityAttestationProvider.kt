@@ -92,6 +92,9 @@ class PlayIntegrityAttestationProvider(
                                 .setRequestHash(requestHash)
                                 .build(),
                         ).await()
+                        // Success resets the backoff on this path too,
+                        // matching the primary request path.
+                        backoff = INITIAL_BACKOFF
                         AttestationToken.Token(token.token())
                     } catch (retry: StandardIntegrityException) {
                         classify(retry)

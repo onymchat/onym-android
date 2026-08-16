@@ -69,6 +69,17 @@ android {
         // `PLAY_CLOUD_PROJECT_NUMBER` → local.properties
         // `play.cloudProjectNumber` → 0 (unusable, kept dark).
         buildConfigField("long", "PLAY_CLOUD_PROJECT_NUMBER", "${playCloudProjectNumber()}L")
+
+        // Half-configured moderation is worse than dark: a base URL
+        // with no cloud project number makes the Play provider latch
+        // CLOUD_PROJECT_NUMBER_IS_INVALID as "unsupported" for the
+        // process, so every session goes token-less and every user
+        // blocks at the gate. Refuse the build instead.
+        check(moderationBaseUrl().isBlank() || playCloudProjectNumber() != 0L) {
+            "MODERATION_BASE_URL is set but PLAY_CLOUD_PROJECT_NUMBER is not — the moderation " +
+                "seat needs both (or neither, to stay dark). Set play.cloudProjectNumber in " +
+                "local.properties or the PLAY_CLOUD_PROJECT_NUMBER env var."
+        }
     }
 
     buildTypes {

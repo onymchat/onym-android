@@ -160,16 +160,28 @@ class GateCheckRepository(
     }
 
     /**
-     * Run one gate check now (launch, foreground, retry button,
-     * post-consent). Coalescing: a call arriving while a check is on
-     * the wire joins that flight instead of spending a second
-     * challenge and Play Integrity request — the answer is at most
-     * one flight old either way.
+     * Run one gate check now (launch, foreground, retry button).
+     * Coalescing: a call arriving while a check is on the wire joins
+     * that flight instead of spending a second challenge and Play
+     * Integrity request — the answer is at most one flight old either
+     * way.
+     *
+     * [force] is for callers whose *state changed* — post-consent
+     * ([ModerationRepository.consent] just landed a new mandate). A
+     * flight already on the wire read `activeMandateRecord()` before
+     * the change, so joining it would adopt a pre-consent answer
+     * (`no_mandate` → back to the consent surface the user just
+     * completed). Forcing starts a fresh run; the generation guard
+     * discards the stale flight's result whenever it lands.
      */
-    suspend fun checkNow() {
+    suspend fun checkNow(force: Boolean = false) {
         val flight = mutex.withLock {
-            inFlight?.takeIf { it.isActive }
-                ?: scope.launch { runCheck() }.also { inFlight = it }
+            val active = inFlight?.takeIf { it.isActive }
+            if (active != null && !force) {
+                active
+            } else {
+                scope.launch { runCheck() }.also { inFlight = it }
+            }
         }
         flight.join()
     }

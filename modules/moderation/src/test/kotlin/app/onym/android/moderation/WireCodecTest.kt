@@ -102,6 +102,34 @@ class WireCodecTest {
         }
     }
 
+    /** The reidentification screen's contact line resolves from the
+     * retained manifest bytes: the new-holder procedure when declared,
+     * else the authority's name + componentId — never empty, because
+     * a contactless blocked screen is the silent brick the profile
+     * forbids. */
+    @Test
+    fun `authority contact line prefers the manifest's new-holder procedure`() {
+        val record = app.onym.android.moderation.support.fixtureMandateRecord()
+        assertEquals(
+            "Test Authority (onym:component:test-authority)",
+            record.authorityContactLine(),
+        )
+
+        val manifest = app.onym.android.moderation.support.ModerationFixtures
+            .manifest()
+            .copy(newHolderAppeal = "Write to appeals@test-authority.example")
+        val raw = json.encodeToString(AuthorityManifest.serializer(), manifest)
+        val withProcedure = record.copy(
+            manifestBytesBase64 = java.util.Base64.getEncoder()
+                .encodeToString(raw.encodeToByteArray()),
+        )
+        assertEquals(
+            "Test Authority (onym:component:test-authority) — " +
+                "Write to appeals@test-authority.example",
+            withProcedure.authorityContactLine(),
+        )
+    }
+
     /** Unknown extra fields must not brick the client. */
     @Test
     fun `decoding tolerates unknown fields`() {

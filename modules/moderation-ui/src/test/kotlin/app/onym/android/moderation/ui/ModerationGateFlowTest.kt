@@ -26,6 +26,9 @@ class ModerationGateFlowTest {
     /** Scripted directory answer, flippable mid-test. */
     private var directoryAvailable = false
 
+    /** Scripted contact line for the reidentification screen. */
+    private var contactLine: String? = null
+
     private fun kotlinx.coroutines.test.TestScope.harness(): Pair<ModerationGateFlow, GateCheckRepository> {
         val moderation = ModerationRepository(
             backend = backend,
@@ -46,6 +49,7 @@ class ModerationGateFlowTest {
         val flow = ModerationGateFlow(
             gate = gate,
             authoritiesAvailable = { directoryAvailable },
+            reidentificationContact = { contactLine },
             scope = this,
         )
         return flow to gate
@@ -84,11 +88,13 @@ class ModerationGateFlowTest {
             flow.snapshots.value,
         )
 
-        // The launch-time blip clears; the user taps Retry.
+        // The launch-time blip clears; the user taps Retry. The
+        // consent surface for a mandated-but-unenrolled user offers
+        // no deferral — the gate refused them.
         directoryAvailable = true
         flow.tappedRetry()
         advanceUntilIdle()
-        assertEquals(RootGate.NeedsConsent, flow.snapshots.value)
+        assertEquals(RootGate.NeedsConsent(canDefer = false), flow.snapshots.value)
         flow.stop()
     }
 
@@ -114,7 +120,36 @@ class ModerationGateFlowTest {
         flow.start()
         gate.checkNow()
         advanceUntilIdle()
-        assertEquals(RootGate.NeedsConsent, flow.snapshots.value)
+        assertEquals(RootGate.NeedsConsent(canDefer = true), flow.snapshots.value)
+        flow.stop()
+    }
+
+    /**
+     * The reidentification screen is the one blocked state with no
+     * retry and no ban notice: without a contact it is the silent
+     * brick the profile forbids, so the flow resolves one from the
+     * active mandate and rides it on the RootGate.
+     */
+    @Test
+    fun `reidentification carries the authority contact`() = runTest {
+        consent()
+        contactLine = "Test Authority (onym:component:test-authority)"
+        backend.gateResults.addLast(
+            app.onym.android.moderation.GateCheckResult.CheckRequired(
+                CheckRequiredReason.REIDENTIFICATION_REQUIRED,
+            ),
+        )
+        val (flow, gate) = harness()
+        flow.start()
+        gate.checkNow()
+        advanceUntilIdle()
+        assertEquals(
+            RootGate.CheckRequired(
+                CheckRequiredReason.REIDENTIFICATION_REQUIRED,
+                authorityContact = "Test Authority (onym:component:test-authority)",
+            ),
+            flow.snapshots.value,
+        )
         flow.stop()
     }
 
@@ -131,7 +166,7 @@ class ModerationGateFlowTest {
         flow.start()
         gate.checkNow()
         advanceUntilIdle()
-        assertEquals(RootGate.NeedsConsent, flow.snapshots.value)
+        assertEquals(RootGate.NeedsConsent(canDefer = true), flow.snapshots.value)
 
         flow.deferConsent()
         assertEquals(RootGate.Operational(), flow.snapshots.value)

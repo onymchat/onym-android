@@ -168,10 +168,11 @@ fun RootScreen(
                 app.onym.android.moderation.ui.GateCheckRequiredScreen(
                     reason = gate.reason,
                     onRetry = { moderation.gate.tappedRetry() },
+                    authorityContact = gate.authorityContact,
                 )
                 return
             }
-            app.onym.android.moderation.ui.RootGate.NeedsConsent -> {
+            is app.onym.android.moderation.ui.RootGate.NeedsConsent -> {
                 BackHandler(enabled = true) {}
                 val controller = remember { moderation.makeConsentController() }
                 app.onym.android.moderation.ui.ModerationConsentContent(
@@ -179,13 +180,20 @@ fun RootScreen(
                     onConsented = { moderation.gate.consentCompleted() },
                     // An unreachable authority (directory up, manifest
                     // fetch or signature verify down) must not lock a
-                    // previously-unmandated user out of the app for
-                    // the outage's duration: Continue defers consent
-                    // for this process, mirroring the empty-directory
-                    // softening, and the next launch asks again. A
-                    // mandated user never reaches this surface — the
-                    // gate's own reasons govern them.
-                    onUnavailableContinue = { moderation.gate.deferConsent() },
+                    // never-mandated user out of the app for the
+                    // outage's duration: Continue defers consent for
+                    // this process, mirroring the empty-directory
+                    // softening, and the next launch asks again. An
+                    // ENROLLMENT-LOST user also lands here (re-consent
+                    // is their route back), but deferring past a gate
+                    // that refused them is not on offer — canDefer is
+                    // false and no Continue renders, because a dead
+                    // button is worse than none.
+                    onUnavailableContinue = if (gate.canDefer) {
+                        { moderation.gate.deferConsent() }
+                    } else {
+                        null
+                    },
                 )
                 return
             }

@@ -217,6 +217,42 @@ class GateCheckRepositoryTest {
         assertEquals(challengesAfterConsent + 2, backend.challengeCounter)
     }
 
+    /**
+     * The post-consent path must not adopt a pre-consent answer: a
+     * flight already on the wire (stale `no_mandate` coming) is
+     * outrun by a forced check, and the stale result — landing later
+     * — is discarded by the generation guard.
+     */
+    @Test
+    fun `a forced check starts fresh and the stale flight is discarded`() = runTest {
+        consent()
+        backend.failWith(400, "no_mandate")
+        val holdTheWire = kotlinx.coroutines.CompletableDeferred<Unit>()
+        backend.gateDelay = holdTheWire
+
+        val repository = repository()
+        val staleFlight = launch { repository.checkNow() }
+        testScheduler.runCurrent() // the stale check is on the wire
+
+        // Consent just landed (re-arm the backend as the fresh
+        // enrollment would); the forced check must not join the
+        // stale flight.
+        backend.gateDelay = null
+        backend.gateFailure = null
+        backend.gateResults.addLast(GateCheckResult.Clear)
+        repository.checkNow(force = true)
+        assertEquals(GateStatus.Operational(), repository.snapshots.value)
+
+        // The stale flight resumes into the pre-consent refusal and
+        // lands it AFTER the forced check — the generation guard must
+        // discard it, or the user bounces back to the consent surface
+        // they just completed.
+        backend.failWith(400, "no_mandate")
+        holdTheWire.complete(Unit)
+        staleFlight.join()
+        assertEquals(GateStatus.Operational(), repository.snapshots.value)
+    }
+
     /** A 200 body smuggling `enrollmentLost` is normalized onto the
      * refusal path — it must not persist as a successful check. */
     @Test

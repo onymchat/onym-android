@@ -80,6 +80,27 @@ data class MandateRecord(
     val createdAt: String,
 )
 
+/**
+ * The best human route this record can offer a holder whose marked
+ * device the backend cannot resolve: the consented manifest's
+ * new-holder procedure when it declares one, else the authority's
+ * name and componentId. Derived from the retained exact bytes — the
+ * gate's `checkRequired(reidentificationRequired)` answer carries no
+ * routes of its own, and a back-blocked screen with no contact is the
+ * silent brick the profile forbids (§5.2 item 3).
+ */
+fun MandateRecord.authorityContactLine(): String {
+    val manifest = runCatching {
+        ModerationJson.json.decodeFromString(
+            AuthorityManifest.serializer(),
+            java.util.Base64.getDecoder().decode(manifestBytesBase64).decodeToString(),
+        )
+    }.getOrNull()
+    val newHolder = manifest?.newHolderAppeal?.takeIf { it.isNotBlank() }
+    val identity = "$authorityName (${mandate.authority})"
+    return if (newHolder != null) "$identity — $newHolder" else identity
+}
+
 interface MandateStore {
     suspend fun load(): List<MandateRecord>
     suspend fun save(records: List<MandateRecord>)

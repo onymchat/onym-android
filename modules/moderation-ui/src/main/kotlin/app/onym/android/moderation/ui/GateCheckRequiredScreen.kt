@@ -29,6 +29,10 @@ import app.onym.android.moderation.CheckRequiredReason
 fun GateCheckRequiredScreen(
     reason: CheckRequiredReason,
     onRetry: () -> Unit,
+    /** The authority's human route, rendered for
+     * `REIDENTIFICATION_REQUIRED` — the one reason with no retry and
+     * no ban notice to point at. */
+    authorityContact: String? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxSize()) {
@@ -48,6 +52,16 @@ fun GateCheckRequiredScreen(
                 text = stringResource(reasonBody(reason)),
                 style = MaterialTheme.typography.bodyLarge,
             )
+            if (reason == CheckRequiredReason.REIDENTIFICATION_REQUIRED &&
+                authorityContact != null
+            ) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.moderation_banned_contact, authorityContact),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag("moderation.gateRequired.contact"),
+                )
+            }
             if (canRetry(reason)) {
                 Spacer(Modifier.height(24.dp))
                 Button(

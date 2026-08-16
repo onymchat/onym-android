@@ -606,7 +606,16 @@ private fun ModerationStepContent(
     dependencies: AppDependencies,
     flow: OnboardingFlow,
 ) {
-    val moderation = dependencies.moderation ?: return
+    // The step only enters the walk when the seat is wired (both read
+    // the same moderationUi), but if that invariant ever breaks, a
+    // silent `?: return` renders an EMPTY outcome-gated, unskippable,
+    // back-blocked step — the bricked wizard the old tripwire
+    // existed to prevent. Fail fast and name the missing piece.
+    val moderation = checkNotNull(dependencies.moderation) {
+        "OnboardingStep.Moderation is in the walk but AppDependencies.moderation is null — " +
+            "OnymApplication must construct the moderation dependencies whenever it enables " +
+            "the step (moderationEnabled = moderationUi != null)"
+    }
     val controller = remember { moderation.makeConsentController() }
     app.onym.android.moderation.ui.ModerationConsentContent(
         controller = controller,

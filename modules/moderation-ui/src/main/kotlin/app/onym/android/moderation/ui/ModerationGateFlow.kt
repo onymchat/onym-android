@@ -7,6 +7,7 @@ import app.onym.android.moderation.GateCheckRepository
 import app.onym.android.moderation.GateStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -19,14 +20,26 @@ sealed interface RootGate {
      * service. */
     data class Operational(val openCases: List<CaseNotice> = emptyList()) : RootGate
 
-    /** No active mandate and at least one authority to consent to:
-     * the full-screen consent surface (post-onboarding path — the
-     * onboarding step covers first launch). */
-    data object NeedsConsent : RootGate
+    /**
+     * The full-screen consent surface (post-onboarding path — the
+     * onboarding step covers first launch). [canDefer] is true only
+     * for the never-mandated: they may soften an unreachable
+     * authority into the app for this process. An enrollment-lost
+     * user is *mandated* — the gate refused them — so their consent
+     * surface offers no Continue; a dead button is worse than none.
+     */
+    data class NeedsConsent(val canDefer: Boolean) : RootGate
 
     data class Banned(val state: BanState) : RootGate
 
-    data class CheckRequired(val reason: CheckRequiredReason) : RootGate
+    /** [authorityContact] rides along for
+     * `REIDENTIFICATION_REQUIRED`, whose screen has no retry and no
+     * ban notice to point at — without a contact it would be the
+     * silent brick the profile forbids. */
+    data class CheckRequired(
+        val reason: CheckRequiredReason,
+        val authorityContact: String? = null,
+    ) : RootGate
 }
 
 /**
@@ -47,6 +60,10 @@ sealed interface RootGate {
 class ModerationGateFlow(
     private val gate: GateCheckRepository,
     private val authoritiesAvailable: suspend () -> Boolean,
+    /** The active mandate's human contact line (see
+     * `MandateRecord.authorityContactLine`), for the
+     * reidentification screen. Null when nothing is on file. */
+    private val reidentificationContact: suspend () -> String? = { null },
     private val scope: CoroutineScope,
 ) {
     private val state = MutableStateFlow<RootGate>(RootGate.Operational())
@@ -80,12 +97,36 @@ class ModerationGateFlow(
     fun start() {
         if (collectJob != null) return
         collectJob = scope.launch {
-            gate.snapshots.collect { status ->
-                if (dependsOnDirectory(status) && !directoryNonEmpty) probeDirectory()
+            // collectLatest + recompute-first: a status is applied with
+            // the cached answers immediately, THEN refined once the
+            // probes land — and a newer status (a `Banned` arriving
+            // behind a `NotMandated`) cancels a hung probe instead of
+            // queueing behind its network timeout.
+            gate.snapshots.collectLatest { status ->
                 recomputeFrom(status)
+                var refined = false
+                if (dependsOnDirectory(status) && !directoryNonEmpty) {
+                    probeDirectory()
+                    refined = true
+                }
+                if (needsContact(status) && contactLine == null) {
+                    contactLine = swallowingFailures { reidentificationContact() }
+                    refined = true
+                }
+                if (refined) recomputeFrom(status)
             }
         }
     }
+
+    /** Cached contact for the reidentification screen; re-read only
+     * while absent (the active mandate cannot change underneath a
+     * blocked gate). */
+    @Volatile
+    private var contactLine: String? = null
+
+    private fun needsContact(status: GateStatus): Boolean =
+        status is GateStatus.GateCheckRequired &&
+            status.reason == CheckRequiredReason.REIDENTIFICATION_REQUIRED
 
     fun stop() {
         collectJob?.cancel()
@@ -107,7 +148,25 @@ class ModerationGateFlow(
     }
 
     private suspend fun probeDirectory() {
-        directoryNonEmpty = runCatching { authoritiesAvailable() }.getOrDefault(false)
+        directoryNonEmpty = swallowingFailures { authoritiesAvailable() } ?: false
+    }
+
+    /**
+     * Failure tolerance that stays CANCELLATION-TRANSPARENT. A bare
+     * `runCatching` here swallowed the CancellationException
+     * `collectLatest` uses to retire a block when a newer status
+     * lands — the "cancelled" block then ran to completion as a
+     * zombie and its final recompute stomped the newer status with a
+     * stale one (observed as the consent surface never appearing when
+     * `ENROLLMENT_LOST` arrived while `NotMandated`'s probe was
+     * in flight).
+     */
+    private suspend fun <T> swallowingFailures(block: suspend () -> T): T? = try {
+        block()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
     }
 
     private fun dependsOnDirectory(status: GateStatus): Boolean = when (status) {
@@ -120,7 +179,7 @@ class ModerationGateFlow(
         state.value = when (status) {
             GateStatus.NotMandated -> when {
                 consentDeferred -> RootGate.Operational()
-                directoryNonEmpty -> RootGate.NeedsConsent
+                directoryNonEmpty -> RootGate.NeedsConsent(canDefer = true)
                 else -> RootGate.Operational()
             }
             is GateStatus.Operational -> RootGate.Operational(status.openCases)
@@ -128,20 +187,28 @@ class ModerationGateFlow(
             is GateStatus.GateCheckRequired -> when (status.reason) {
                 CheckRequiredReason.ENROLLMENT_LOST ->
                     if (directoryNonEmpty) {
-                        RootGate.NeedsConsent
+                        // Mandated but unenrolled: re-consent is the
+                        // route, deferring past the gate is not.
+                        RootGate.NeedsConsent(canDefer = false)
                     } else {
                         RootGate.CheckRequired(status.reason)
                     }
+                CheckRequiredReason.REIDENTIFICATION_REQUIRED ->
+                    RootGate.CheckRequired(status.reason, authorityContact = contactLine)
                 else -> RootGate.CheckRequired(status.reason)
             }
         }
     }
 
     /** Post-consent invariant (iOS `consentCompleted`): a fresh check
-     * immediately, so the gate reflects the new mandate. */
+     * immediately, so the gate reflects the new mandate. Forced past
+     * the coalesced flight — a check already on the wire read the
+     * pre-consent record, and joining it would land `no_mandate` and
+     * bounce the user back to the consent surface they just
+     * completed. */
     fun consentCompleted() {
         consentDeferred = false
-        scope.launch { gate.checkNow() }
+        scope.launch { gate.checkNow(force = true) }
     }
 
     fun appForegrounded() {
