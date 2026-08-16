@@ -7,6 +7,7 @@ import app.onym.android.moderation.support.InMemoryMandateStore
 import app.onym.android.moderation.support.ModerationFixtures
 import app.onym.android.moderation.support.ScriptedEnforcementBackendClient
 import java.time.Instant
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -183,6 +184,37 @@ class GateCheckRepositoryTest {
         repository.checkNow()
         val second = backend.lastGateRequest!!.timestamp
         assertTrue("$first vs $second", second > first)
+    }
+
+    /** Concurrent triggers (cold start's launch check + onStart's
+     * foreground check, or foreground thrash) must share one flight:
+     * every extra check spends a challenge and a Play Integrity
+     * standard request against quota. */
+    @Test
+    fun `concurrent checks coalesce into one flight`() = runTest {
+        consent()
+        backend.gateResults.addLast(GateCheckResult.Clear)
+        val challengesAfterConsent = backend.challengeCounter
+        val holdTheWire = kotlinx.coroutines.CompletableDeferred<Unit>()
+        backend.gateDelay = holdTheWire
+
+        val repository = repository()
+        val first = launch { repository.checkNow() }
+        val second = launch { repository.checkNow() }
+        testScheduler.runCurrent()
+        // Both callers are waiting; only one check reached the wire.
+        assertEquals(challengesAfterConsent + 1, backend.challengeCounter)
+
+        holdTheWire.complete(Unit)
+        first.join()
+        second.join()
+        assertEquals(challengesAfterConsent + 1, backend.challengeCounter)
+        assertEquals(GateStatus.Operational(), repository.snapshots.value)
+
+        // A call AFTER the flight landed is a fresh check.
+        backend.gateDelay = null
+        repository.checkNow()
+        assertEquals(challengesAfterConsent + 2, backend.challengeCounter)
     }
 
     /** A 200 body smuggling `enrollmentLost` is normalized onto the

@@ -87,10 +87,14 @@ class SignedManifest internal constructor(
 
     companion object {
         /**
-         * Test-fixture entry point only — production instances come
-         * from [AuthorityManifestFetcher], which verified the bytes.
+         * Test-fixture entry point — production instances come from
+         * [AuthorityManifestFetcher], which verified the bytes.
+         * `internal` is what keeps [ReviewedManifest]'s invariant
+         * true: application code cannot pair decoded fields with
+         * different raw bytes. The module's testFixtures compilation
+         * is a friend of main, so the shared fakes still reach it.
          */
-        fun forFixtures(manifest: AuthorityManifest, rawBytes: ByteArray): SignedManifest =
+        internal fun forFixtures(manifest: AuthorityManifest, rawBytes: ByteArray): SignedManifest =
             SignedManifest(manifest, rawBytes)
     }
 }

@@ -1262,6 +1262,10 @@ class OnymApplication : Application() {
                 app.onym.android.moderation.OkHttpEnforcementBackendClient(
                     httpClient = httpClient,
                     baseUrl = BuildConfig.MODERATION_BASE_URL,
+                    // Emulator loopback (http://10.0.2.2 / localhost)
+                    // is a debug-build convenience only; a release
+                    // binary refuses any non-https base URL.
+                    allowInsecureLoopback = BuildConfig.DEBUG,
                 )
             else -> null
         }
@@ -1317,7 +1321,6 @@ class OnymApplication : Application() {
                 clock = moderationClock,
             )
             val moderationGateFlow = app.onym.android.moderation.ui.ModerationGateFlow(
-                moderation = moderationRepository,
                 gate = gateCheckRepository,
                 authoritiesAvailable = {
                     runCatching { authoritiesFetcher.fetchLatest().isNotEmpty() }

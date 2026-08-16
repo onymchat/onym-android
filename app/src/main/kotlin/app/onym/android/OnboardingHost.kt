@@ -592,19 +592,6 @@ private fun IdentityChecklistRow(phase: IdentityPhase, title: String, subtitle: 
 // ── Services ──────────────────────────────────────────────────────
 
 /**
- * "Your services" — one screen instead of the old four wizard steps.
- * The recommended setup is preselected (and the flow SEEDS the
- * services outcome as an accepted recommendation at construction, so
- * the "Selected" chip and the recorded outcome tell the same story
- * from the first frame); "Choose services myself" opens the hub
- * overlay, whose per-seat screens reuse the Settings surfaces.
- *
- * The recommended card's promised lines name the FIXED recommended
- * set (the seeded defaults plus the published lists installed on
- * completion) — they are a promise, not live state; the Done step's
- * summary is the live, checkable view.
- */
-/**
  * The moderation consent step: the reviewed manifest snapshot with
  * Agree wired to `ModerationRepository.consent`. Outcome-gated like
  * every core step — Consented on success; Unavailable when the
@@ -640,6 +627,19 @@ private fun ModerationStepContent(
     )
 }
 
+/**
+ * "Your services" — one screen instead of the old four wizard steps.
+ * The recommended setup is preselected (and the flow SEEDS the
+ * services outcome as an accepted recommendation at construction, so
+ * the "Selected" chip and the recorded outcome tell the same story
+ * from the first frame); "Choose services myself" opens the hub
+ * overlay, whose per-seat screens reuse the Settings surfaces.
+ *
+ * The recommended card's promised lines name the FIXED recommended
+ * set (the seeded defaults plus the published lists installed on
+ * completion) — they are a promise, not live state; the Done step's
+ * summary is the live, checkable view.
+ */
 @Composable
 private fun ServicesStepContent(
     flow: OnboardingFlow,

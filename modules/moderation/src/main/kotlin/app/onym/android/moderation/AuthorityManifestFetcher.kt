@@ -18,6 +18,18 @@ class ModerationConsentException(message: String, cause: Throwable? = null) :
 /**
  * Fetches the interface's published authority directory. Lossy per
  * entry: one malformed listing is skipped, not the whole directory.
+ *
+ * TRUST ASYMMETRY, disclosed deliberately: the directory itself
+ * travels over plain TLS with no signature, yet it carries the
+ * operator-key pins every manifest check downstream roots in — so the
+ * whole pin chain currently bottoms out in a GitHub release URL,
+ * where the discovery seat's equivalent (`DiscoveryTrust`) verifies a
+ * signed provider manifest. Before the moderation seat goes live this
+ * needs a signed directory or an app-pinned root key; what the
+ * signature-verified manifest fetch below DOES guarantee meanwhile is
+ * that a tampered directory can only substitute a *whole* authority
+ * (key + manifest together), never pair a genuine authority's name
+ * with different terms.
  */
 interface KnownAuthoritiesFetcher {
     /** Throws on network failure, non-2xx, or a directory with no

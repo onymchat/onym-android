@@ -5,7 +5,6 @@ import app.onym.android.moderation.CaseNotice
 import app.onym.android.moderation.CheckRequiredReason
 import app.onym.android.moderation.GateCheckRepository
 import app.onym.android.moderation.GateStatus
-import app.onym.android.moderation.ModerationRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +45,6 @@ sealed interface RootGate {
  * [RootGate.CheckRequired].
  */
 class ModerationGateFlow(
-    private val moderation: ModerationRepository,
     private val gate: GateCheckRepository,
     private val authoritiesAvailable: suspend () -> Boolean,
     private val scope: CoroutineScope,
@@ -54,30 +52,77 @@ class ModerationGateFlow(
     private val state = MutableStateFlow<RootGate>(RootGate.Operational())
     val snapshots: StateFlow<RootGate> = state.asStateFlow()
 
-    /** Sampled at start and on demand; sampling failure means "not
-     * available", which softens toward operational, never blocks. */
+    /**
+     * Last directory answer. Never trusted while stale in the
+     * blocking direction: any status whose RootGate depends on it
+     * ([GateStatus.NotMandated], `ENROLLMENT_LOST`) re-probes before
+     * recomputing when the cached answer is `false` — a launch-time
+     * network blip must not pin re-consent unreachable for the
+     * process lifetime. Sampling failure still means "not available",
+     * which softens toward operational for the unmandated and keeps
+     * `ENROLLMENT_LOST` a retryable block for the mandated.
+     */
     @Volatile
     private var directoryNonEmpty = false
 
+    /**
+     * The user declined to wait out an unreachable authority at the
+     * consent surface ("Continue"). Process-lifetime only — the next
+     * launch asks again — and scoped to [GateStatus.NotMandated]: a
+     * mandated user whose enrollment the backend lost cannot defer
+     * their way past the gate.
+     */
+    @Volatile
+    private var consentDeferred = false
+
+    private var collectJob: kotlinx.coroutines.Job? = null
+
     fun start() {
-        scope.launch {
-            directoryNonEmpty = runCatching { authoritiesAvailable() }.getOrDefault(false)
-            recomputeFrom(gate.snapshots.value)
-            gate.snapshots.collect { recomputeFrom(it) }
+        if (collectJob != null) return
+        collectJob = scope.launch {
+            gate.snapshots.collect { status ->
+                if (dependsOnDirectory(status) && !directoryNonEmpty) probeDirectory()
+                recomputeFrom(status)
+            }
         }
     }
 
-    /** Re-sample the directory (e.g. after onboarding installs
-     * sources) and recompute. */
+    fun stop() {
+        collectJob?.cancel()
+        collectJob = null
+    }
+
+    /** Re-sample the directory (retry buttons, post-onboarding source
+     * installs) and recompute. */
     suspend fun refreshDirectory() {
-        directoryNonEmpty = runCatching { authoritiesAvailable() }.getOrDefault(false)
+        probeDirectory()
         recomputeFrom(gate.snapshots.value)
+    }
+
+    /** Soften an unreachable-authority consent surface into the app,
+     * for this process only. */
+    fun deferConsent() {
+        consentDeferred = true
+        recomputeFrom(gate.snapshots.value)
+    }
+
+    private suspend fun probeDirectory() {
+        directoryNonEmpty = runCatching { authoritiesAvailable() }.getOrDefault(false)
+    }
+
+    private fun dependsOnDirectory(status: GateStatus): Boolean = when (status) {
+        GateStatus.NotMandated -> true
+        is GateStatus.GateCheckRequired -> status.reason == CheckRequiredReason.ENROLLMENT_LOST
+        else -> false
     }
 
     private fun recomputeFrom(status: GateStatus) {
         state.value = when (status) {
-            GateStatus.NotMandated ->
-                if (directoryNonEmpty) RootGate.NeedsConsent else RootGate.Operational()
+            GateStatus.NotMandated -> when {
+                consentDeferred -> RootGate.Operational()
+                directoryNonEmpty -> RootGate.NeedsConsent
+                else -> RootGate.Operational()
+            }
             is GateStatus.Operational -> RootGate.Operational(status.openCases)
             is GateStatus.Banned -> RootGate.Banned(status.state)
             is GateStatus.GateCheckRequired -> when (status.reason) {
@@ -95,6 +140,7 @@ class ModerationGateFlow(
     /** Post-consent invariant (iOS `consentCompleted`): a fresh check
      * immediately, so the gate reflects the new mandate. */
     fun consentCompleted() {
+        consentDeferred = false
         scope.launch { gate.checkNow() }
     }
 
@@ -102,10 +148,17 @@ class ModerationGateFlow(
         scope.launch { gate.checkNow() }
     }
 
+    /**
+     * Retry re-probes the directory before re-checking: for
+     * `ENROLLMENT_LOST` the directory answer IS what the retry can
+     * change (re-consent becomes reachable), and `GateStatus` is a
+     * value — an identical re-derivation would not re-emit through
+     * the collect, so the refresh cannot ride on it.
+     */
     fun tappedRetry() {
-        scope.launch { gate.checkNow() }
+        scope.launch {
+            refreshDirectory()
+            gate.checkNow()
+        }
     }
-
-    /** Exposed for the consent flow's post-consent hook. */
-    val moderationRepository: ModerationRepository get() = moderation
 }

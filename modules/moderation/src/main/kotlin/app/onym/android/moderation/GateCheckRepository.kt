@@ -98,9 +98,22 @@ class GateCheckRepository(
     private val state = MutableStateFlow<GateStatus>(GateStatus.NotMandated)
     private var loopJob: Job? = null
 
-    /** Monotonic tag for in-flight checks; a completion whose
-     * generation is no longer the newest is discarded — otherwise a
-     * slow `clear` could land after a fast `banned` and reopen the
+    /**
+     * The check currently on the wire, if any — real in-flight
+     * coalescing, not just stale-result discarding. Launch, the
+     * interval loop, foreground, and retry all funnel through
+     * [checkNow]; without sharing the flight, a cold start fires two
+     * concurrent checks (loop + `onStart`) and foreground thrash
+     * multiplies Play Integrity standard requests 1:1 against quota
+     * (profile §5.2's "one scheduler" requirement). Guarded by
+     * [mutex].
+     */
+    private var inFlight: Job? = null
+
+    /** Monotonic tag for check runs; a completion whose generation is
+     * no longer the newest is discarded — a retry can legitimately
+     * start after a slow run finished its network hop, and the slow
+     * `clear` must not land after a fast `banned` and reopen the
      * app. */
     private var generation: Long = 0L
 
@@ -109,11 +122,14 @@ class GateCheckRepository(
      * payload is second-precision; two checks in the same second with
      * identical fields would self-inflict a replay refusal. Bumping
      * into the next second stays inside the server's freshness window.
-     * (The challenge already varies per session, so collisions need
-     * both a same-second call and a reused challenge — this keeps the
-     * iOS behavior anyway, cheaply.)
+     * Guarded by [timestampMutex]: the bump is a read-modify-write,
+     * and even with coalesced checks a retry can overlap a finishing
+     * run. (The challenge already varies per session, so collisions
+     * need both a same-second call and a reused challenge — this keeps
+     * the iOS behavior anyway, cheaply.)
      */
     private var lastSessionTimestamp: Instant = Instant.EPOCH
+    private val timestampMutex = Mutex()
 
     val snapshots: StateFlow<GateStatus> = state.asStateFlow()
 
@@ -143,9 +159,22 @@ class GateCheckRepository(
         loopJob = null
     }
 
-    /** Run one gate check now (launch, foreground, retry button,
-     * post-consent). */
+    /**
+     * Run one gate check now (launch, foreground, retry button,
+     * post-consent). Coalescing: a call arriving while a check is on
+     * the wire joins that flight instead of spending a second
+     * challenge and Play Integrity request — the answer is at most
+     * one flight old either way.
+     */
     suspend fun checkNow() {
+        val flight = mutex.withLock {
+            inFlight?.takeIf { it.isActive }
+                ?: scope.launch { runCheck() }.also { inFlight = it }
+        }
+        flight.join()
+    }
+
+    private suspend fun runCheck() {
         val taken = mutex.withLock { ++generation }
 
         val record = moderation.activeMandateRecord()
@@ -170,7 +199,7 @@ class GateCheckRepository(
         return try {
             val challenge = backend.fetchChallenge(purpose = "gate")
             val challengeBytes = Base64.getDecoder().decode(challenge.challenge)
-            val timestamp = run {
+            val timestamp = timestampMutex.withLock {
                 val now = clock()
                 val bumped = lastSessionTimestamp.plusSeconds(1)
                 val chosen = if (now.isAfter(bumped)) now else bumped

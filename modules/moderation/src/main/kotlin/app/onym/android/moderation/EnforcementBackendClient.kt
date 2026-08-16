@@ -51,16 +51,34 @@ interface EnforcementBackendClient {
 class OkHttpEnforcementBackendClient(
     private val httpClient: OkHttpClient,
     baseUrl: String,
+    /**
+     * Accept `http://localhost` / `http://10.0.2.2` — the emulator's
+     * loopback names for a dev backend. The app passes
+     * `BuildConfig.DEBUG`, so a release binary refuses them; this
+     * module has no build-type knowledge of its own.
+     */
+    private val allowInsecureLoopback: Boolean = false,
 ) : EnforcementBackendClient {
     private val baseUrl: String = baseUrl.trimEnd('/')
 
-    init {
-        require(this.baseUrl.startsWith("https://") || this.baseUrl.startsWith("http://localhost") ||
-            this.baseUrl.startsWith("http://10.0.2.2")) {
-            // The two http exceptions are the emulator's loopback names
-            // for a dev backend; production configuration is https-only.
-            "enforcement backend base URL must be https (or emulator loopback): $baseUrl"
+    /**
+     * Validated per request rather than thrown from `init`: this
+     * client is constructed at dependency build (Application
+     * onCreate), and a typo'd `MODERATION_BASE_URL` must degrade like
+     * any unreachable backend — into the gate's grace arithmetic —
+     * not crash-loop the whole app at boot.
+     */
+    private fun validatedBaseUrl(): String {
+        val secure = baseUrl.startsWith("https://")
+        val loopback = allowInsecureLoopback &&
+            (baseUrl.startsWith("http://localhost") || baseUrl.startsWith("http://10.0.2.2"))
+        if (!secure && !loopback) {
+            throw BackendUnreachableException(
+                "enforcement backend base URL must be https (or emulator loopback under a " +
+                    "debug build): $baseUrl",
+            )
         }
+        return baseUrl
     }
 
     override suspend fun fetchChallenge(purpose: String): IssuedChallenge = post(
@@ -100,7 +118,7 @@ class OkHttpEnforcementBackendClient(
         deserialize: (String) -> T,
     ): T = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url(baseUrl + path)
+            .url(validatedBaseUrl() + path)
             .post(body.toRequestBody(JSON_MEDIA_TYPE))
             .header("Accept", "application/json")
             .build()

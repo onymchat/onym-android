@@ -177,10 +177,15 @@ fun RootScreen(
                 app.onym.android.moderation.ui.ModerationConsentContent(
                     controller = controller,
                     onConsented = { moderation.gate.consentCompleted() },
-                    // Post-onboarding there is no walk to continue:
-                    // an empty directory resolves through the gate
-                    // flow's own softening, so no Continue escape.
-                    onUnavailableContinue = null,
+                    // An unreachable authority (directory up, manifest
+                    // fetch or signature verify down) must not lock a
+                    // previously-unmandated user out of the app for
+                    // the outage's duration: Continue defers consent
+                    // for this process, mirroring the empty-directory
+                    // softening, and the next launch asks again. A
+                    // mandated user never reaches this surface — the
+                    // gate's own reasons govern them.
+                    onUnavailableContinue = { moderation.gate.deferConsent() },
                 )
                 return
             }

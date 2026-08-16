@@ -80,9 +80,14 @@ private fun canRetry(reason: CheckRequiredReason): Boolean = when (reason) {
     CheckRequiredReason.TOKEN_INVALID,
     CheckRequiredReason.CLOCK_ROLLBACK,
     CheckRequiredReason.BACKEND_REFUSED,
+    // Retryable: the gate flow's retry re-probes the authority
+    // directory, and re-consent becoming reachable is exactly what a
+    // retry can change here. Without it this reason is a buttonless,
+    // back-blocked brick whenever the launch-time directory probe
+    // happened to fail.
+    CheckRequiredReason.ENROLLMENT_LOST,
     CheckRequiredReason.ATTESTATION_UNAVAILABLE,
     -> true
     CheckRequiredReason.REIDENTIFICATION_REQUIRED,
-    CheckRequiredReason.ENROLLMENT_LOST,
     -> false
 }

@@ -59,6 +59,10 @@ class FakeModerationSigner(
  */
 class ScriptedEnforcementBackendClient : EnforcementBackendClient {
     var challengeCounter = 0
+
+    /** When set, gateCheck suspends on it — lets concurrency tests
+     * hold a check "on the wire" and observe coalescing. */
+    var gateDelay: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     var deviceBinding: String = "enrollment:fixture"
     var countersignature: String = Base64.getEncoder().encodeToString(ByteArray(64) { 9 })
     val gateResults = ArrayDeque<GateCheckResult>()
@@ -91,6 +95,7 @@ class ScriptedEnforcementBackendClient : EnforcementBackendClient {
 
     override suspend fun gateCheck(request: GateCheckRequest): GateCheckResult {
         lastGateRequest = request
+        gateDelay?.await()
         gateFailure?.let { throw it }
         return when (gateResults.size) {
             0 -> GateCheckResult.Clear

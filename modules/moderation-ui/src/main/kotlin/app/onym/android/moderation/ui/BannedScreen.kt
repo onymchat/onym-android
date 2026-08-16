@@ -48,7 +48,7 @@ fun BannedScreen(
             Spacer(Modifier.height(12.dp))
             Text(
                 text = state.banExpires?.let {
-                    stringResource(R.string.moderation_banned_expires, it)
+                    stringResource(R.string.moderation_banned_expires, formatExpiry(it))
                 } ?: stringResource(R.string.moderation_banned_permanent),
                 style = MaterialTheme.typography.bodyLarge,
             )
@@ -85,4 +85,20 @@ fun BannedScreen(
             }
         }
     }
+}
+
+/**
+ * The verdict's RFC 3339 expiry, rendered for the reader's locale and
+ * zone — `2026-09-08T00:00:00Z` is wire format, not user copy. An
+ * unparseable value falls back to the raw string: showing the wire
+ * form beats hiding when the ban ends.
+ */
+private fun formatExpiry(rfc3339: String): String = try {
+    java.time.format.DateTimeFormatter
+        .ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM)
+        .withLocale(java.util.Locale.getDefault())
+        .withZone(java.time.ZoneId.systemDefault())
+        .format(java.time.Instant.parse(rfc3339))
+} catch (_: Exception) {
+    rfc3339
 }
