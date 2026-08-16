@@ -96,6 +96,13 @@ data class PersistedMessage(
      *  discriminator lives on a column rather than inside the encrypted
      *  body where SQL cannot see it. */
     val encryptedSystemEventJson: ByteArray? = null,
+    /** AES-GCM-encrypted moderation authenticity proof (the sender's
+     *  base64 Ed25519 signature over the canonical proof preimage);
+     *  `null` for messages sent without one. Encrypted at rest like
+     *  the body — it is disclosure material tied to the message
+     *  content. Same non-destructive `ALTER TABLE ADD COLUMN` shape
+     *  as the columns above. */
+    val encryptedModerationProof: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -119,7 +126,9 @@ data class PersistedMessage(
             (encryptedVoiceAttachmentJson?.contentEquals(other.encryptedVoiceAttachmentJson)
                 ?: (other.encryptedVoiceAttachmentJson == null)) &&
             (encryptedSystemEventJson?.contentEquals(other.encryptedSystemEventJson)
-                ?: (other.encryptedSystemEventJson == null))
+                ?: (other.encryptedSystemEventJson == null)) &&
+            (encryptedModerationProof?.contentEquals(other.encryptedModerationProof)
+                ?: (other.encryptedModerationProof == null))
     }
 
     override fun hashCode(): Int {
@@ -138,6 +147,7 @@ data class PersistedMessage(
         h = 31 * h + (encryptedAlbumJson?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedVoiceAttachmentJson?.contentHashCode() ?: 0)
         h = 31 * h + (encryptedSystemEventJson?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedModerationProof?.contentHashCode() ?: 0)
         return h
     }
 }

@@ -535,6 +535,7 @@ class OnymApplication : Application() {
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_5_6,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_6_7,
                     app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_7_8,
+                    app.onym.android.chats.MessageDatabaseMigrations.MIGRATION_8_9,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -1610,6 +1611,7 @@ class OnymApplication : Application() {
                     encodeVideo = encodeVideo,
                     outbox = chatOutbox,
                     imageLoader = imageLoader,
+                    messageSigner = identityRepository,
                 )
                 app.onym.android.chats.ChatThreadViewModel(
                     groupId = groupId,

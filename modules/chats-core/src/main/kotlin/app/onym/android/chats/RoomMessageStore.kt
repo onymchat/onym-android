@@ -137,6 +137,10 @@ class RoomMessageStore(
         encryptedSystemEventJson = message.systemEvent?.let {
             encryption.encrypt(attachmentJson.encodeToString(ChatSystemEvent.serializer(), it))
         },
+        // Moderation proof, encrypted at rest like the body it attests.
+        encryptedModerationProof = message.moderationAuthenticityProof?.let {
+            encryption.encrypt(it)
+        },
     )
 
     /** Tolerant decode: a row whose encrypted columns fail to
@@ -199,6 +203,9 @@ class RoomMessageStore(
                 attachmentJson.decodeFromString(ChatSystemEvent.serializer(), json)
             }.getOrNull() ?: return null
         }
+        // Advisory like the attachments: a proof that fails to decrypt
+        // degrades to an unreportable message, never a dropped row.
+        val moderationProof = row.encryptedModerationProof?.let { tryDecryptString(it) }
         return ChatMessage(
             id = id,
             groupId = row.groupId,
@@ -215,6 +222,7 @@ class RoomMessageStore(
             albumAttachments = albumAttachments,
             voiceAttachment = voiceAttachment,
             systemEvent = systemEvent,
+            moderationAuthenticityProof = moderationProof,
         )
     }
 

@@ -64,7 +64,7 @@ import javax.crypto.spec.SecretKeySpec
 class IdentityRepository(
     private val store: IdentitySecretStore,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : InvitationEnvelopeDecrypter, InvitationEnvelopeSealer, ActiveIdentityProvider {
+) : InvitationEnvelopeDecrypter, InvitationEnvelopeSealer, ActiveIdentityProvider, IdentityMessageSigner {
     private val mutex = Mutex()
     private val _snapshots = MutableStateFlow<Identity?>(null)
     private val _identities = MutableStateFlow<List<IdentitySummary>>(emptyList())
@@ -151,7 +151,7 @@ class IdentityRepository(
      *
      * @throws IdentityError.IdentityNotLoaded before [bootstrap].
      */
-    suspend fun signWithStellarKey(message: ByteArray): ByteArray = withContext(ioDispatcher) {
+    override suspend fun signWithStellarKey(message: ByteArray): ByteArray = withContext(ioDispatcher) {
         val id = store.loadCurrent() ?: throw IdentityError.IdentityNotLoaded
         val snapshot = store.load(id) ?: throw IdentityError.IdentityNotLoaded
         val signingKey = stellarSigningPrivateKey(snapshot.nostrSecretKey)

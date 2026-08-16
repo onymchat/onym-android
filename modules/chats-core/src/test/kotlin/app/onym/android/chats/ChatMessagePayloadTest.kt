@@ -296,6 +296,48 @@ class ChatMessagePayloadTest {
         assertEquals("x", (decoded.variant as ChatMessageVariant.Tyranny).body)
     }
 
+    // ─── moderation authenticity proof ────────────────────────────
+
+    @Test
+    fun wireFormat_moderationProofKeyIsSnakeCase() {
+        val encoded = strictJson.encodeToString(
+            ChatMessagePayload.serializer(),
+            samplePayload(body = "hi").copy(moderationAuthenticityProof = "c2ln"),
+        )
+        val root = strictJson.parseToJsonElement(encoded).jsonObject
+        assertEquals(
+            "proof wires under snake_case key as the base64 signature string",
+            "c2ln",
+            root["moderation_authenticity_proof"]!!.jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun roundtrip_moderationProof_preserved() {
+        val original = samplePayload(body = "hi").copy(moderationAuthenticityProof = "c2ln")
+        val encoded = strictJson.encodeToString(ChatMessagePayload.serializer(), original)
+        val decoded = strictJson.decodeFromString(ChatMessagePayload.serializer(), encoded)
+        assertEquals(original, decoded)
+    }
+
+    @Test
+    fun decode_missingModerationProofKey_isNull() {
+        // Backward compat: a payload from a sender that predates proofs
+        // must decode to null (an unreportable message), not throw.
+        val json = """
+            {
+              "version": 1,
+              "message_id": "11111111-1111-1111-1111-111111111111",
+              "group_id": "${b64ZeroBytes(32)}",
+              "sender_bls_pubkey_hex": "${"ab".repeat(48)}",
+              "sent_at_millis": 0,
+              "variant": { "kind": "tyranny", "body": "hi" }
+            }
+        """.trimIndent()
+        val decoded = strictJson.decodeFromString(ChatMessagePayload.serializer(), json)
+        assertNull(decoded.moderationAuthenticityProof)
+    }
+
     // ─── helpers ──────────────────────────────────────────────────
 
     private fun samplePayload(

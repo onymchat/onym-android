@@ -81,6 +81,14 @@ data class ChatMessage(
      *  from its verified invitation). A wire field here would let any
      *  peer forge "X joined" history. */
     val systemEvent: ChatSystemEvent? = null,
+    /** Detached Ed25519 signature (standard base64) over the message's
+     *  canonical [ChatModerationProof] preimage. Mirrors
+     *  [ChatMessagePayload.moderationAuthenticityProof]. Stored on
+     *  incoming rows so a recipient can later disclose the message to
+     *  a moderation Authority, and on outgoing rows so [retry] re-ships
+     *  the identical proof (Ed25519 is deterministic, but re-signing a
+     *  drifted preimage would break the receivers' stored copy). */
+    val moderationAuthenticityProof: String? = null,
 ) {
     /** True for locally-minted system notices. Reads better than
      *  `systemEvent != null` at the several call sites that only care

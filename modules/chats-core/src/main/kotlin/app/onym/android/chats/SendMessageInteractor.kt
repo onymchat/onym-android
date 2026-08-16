@@ -3,6 +3,7 @@ package app.onym.android.chats
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.GroupRepository
 import app.onym.android.identity.ActiveIdentityProvider
+import app.onym.android.identity.IdentityMessageSigner
 import app.onym.android.identity.IdentityRepository
 import app.onym.android.identity.IdentitySummary
 import app.onym.android.identity.InvitationEnvelopeSealer
@@ -84,6 +85,13 @@ class SendMessageInteractor(
      *  sees the media immediately — the optimistic bubble is inserted
      *  before the upload, so the blob isn't on Blossom yet. */
     private val imageLoader: ChatImageLoader? = null,
+    /** Signs the canonical [ChatModerationProof] preimage so receivers
+     *  can later disclose this message to a moderation Authority.
+     *  Nullable + best-effort: absent (or throwing) means the message
+     *  ships without a proof and is simply unreportable — signing must
+     *  never block a send. Mirrors iOS, where a signing throw is
+     *  logged and the proof dropped. */
+    private val messageSigner: IdentityMessageSigner? = null,
 ) {
 
     /**
@@ -123,6 +131,7 @@ class SendMessageInteractor(
 
         val messageId = idFactory()
         val sentAtMillis = clock()
+        val proof = moderationProof(group, messageId, sentAtMillis, body)
         val payload = ChatMessagePayload(
             version = 1,
             messageId = messageId,
@@ -131,6 +140,7 @@ class SendMessageInteractor(
             sentAtMillis = sentAtMillis,
             replyToMessageId = replyToMessageId,
             variant = variant,
+            moderationAuthenticityProof = proof,
         )
 
         // Optimistic insert — UI shows the bubble immediately.
@@ -145,6 +155,7 @@ class SendMessageInteractor(
             status = MessageStatus.PENDING,
             replyToMessageId = replyToMessageId,
             groupType = group.groupType,
+            moderationAuthenticityProof = proof,
         )
         messageRepository.append(pending)
 
@@ -214,6 +225,19 @@ class SendMessageInteractor(
 
         val messageId = idFactory()
         val sentAtMillis = clock()
+        val proof = moderationProof(
+            group, messageId, sentAtMillis, caption,
+            media = listOf(
+                ChatModerationProof.MediaCommitment(
+                    blobSha256 = sealed.sha256Hex,
+                    mimeType = "image/jpeg",
+                    plaintextSha256 = ChatImageCrypto.sha256Hex(encoded.jpeg),
+                    plaintextByteLength = encoded.jpeg.size,
+                    width = encoded.width,
+                    height = encoded.height,
+                ),
+            ),
+        )
         val payload = ChatMessagePayload(
             version = 1,
             messageId = messageId,
@@ -223,6 +247,7 @@ class SendMessageInteractor(
             replyToMessageId = null,
             variant = variant,
             attachment = attachment,
+            moderationAuthenticityProof = proof,
         )
         val pending = ChatMessage(
             id = messageId,
@@ -236,6 +261,7 @@ class SendMessageInteractor(
             replyToMessageId = null,
             groupType = group.groupType,
             imageAttachment = attachment,
+            moderationAuthenticityProof = proof,
         )
         // Optimistic insert BEFORE upload — the bubble appears at once
         // with a loading indicator.
@@ -327,6 +353,29 @@ class SendMessageInteractor(
 
         val messageId = idFactory()
         val sentAtMillis = clock()
+        // Poster first, then the clip — the same order the blobs
+        // upload and iOS signs, so both platforms' preimages agree.
+        val proof = moderationProof(
+            group, messageId, sentAtMillis, caption,
+            media = listOf(
+                ChatModerationProof.MediaCommitment(
+                    blobSha256 = posterSealed.sha256Hex,
+                    mimeType = "image/jpeg",
+                    plaintextSha256 = ChatImageCrypto.sha256Hex(encoded.poster.jpeg),
+                    plaintextByteLength = encoded.poster.jpeg.size,
+                    width = encoded.poster.width,
+                    height = encoded.poster.height,
+                ),
+                ChatModerationProof.MediaCommitment(
+                    blobSha256 = videoSealed.sha256Hex,
+                    mimeType = "video/mp4",
+                    plaintextSha256 = ChatImageCrypto.sha256Hex(encoded.mp4),
+                    plaintextByteLength = encoded.mp4.size,
+                    width = encoded.width,
+                    height = encoded.height,
+                ),
+            ),
+        )
         val payload = ChatMessagePayload(
             version = 1,
             messageId = messageId,
@@ -336,6 +385,7 @@ class SendMessageInteractor(
             replyToMessageId = null,
             variant = variant,
             videoAttachment = videoAttachment,
+            moderationAuthenticityProof = proof,
         )
         val pending = ChatMessage(
             id = messageId,
@@ -349,6 +399,7 @@ class SendMessageInteractor(
             replyToMessageId = null,
             groupType = group.groupType,
             videoAttachment = videoAttachment,
+            moderationAuthenticityProof = proof,
         )
         messageRepository.append(pending)
 
@@ -401,6 +452,9 @@ class SendMessageInteractor(
         val items = mutableListOf<ChatMediaAttachment>()
         val uploads = mutableListOf<Pair<ByteArray, String>>()
         val shas = mutableListOf<String>()
+        // Accumulated in album order — the order is part of the signed
+        // proof preimage, so a reporter can't present item 2 as item 1.
+        val commitments = mutableListOf<ChatModerationProof.MediaCommitment>()
         for (source in sources) {
             when (source) {
                 is ChatMediaSource.Image -> {
@@ -416,6 +470,16 @@ class SendMessageInteractor(
                     items.add(ChatMediaAttachment.image(attachment))
                     uploads.add(sealed.blob to "image/jpeg")
                     shas.add(sealed.sha256Hex)
+                    commitments.add(
+                        ChatModerationProof.MediaCommitment(
+                            blobSha256 = sealed.sha256Hex,
+                            mimeType = "image/jpeg",
+                            plaintextSha256 = ChatImageCrypto.sha256Hex(encoded.jpeg),
+                            plaintextByteLength = encoded.jpeg.size,
+                            width = encoded.width,
+                            height = encoded.height,
+                        ),
+                    )
                 }
                 is ChatMediaSource.Video -> {
                     val encoded = encodeVideo(source.uri) ?: continue
@@ -446,6 +510,26 @@ class SendMessageInteractor(
                     uploads.add(videoSealed.blob to "video/mp4")
                     shas.add(posterSealed.sha256Hex)
                     shas.add(videoSealed.sha256Hex)
+                    commitments.add(
+                        ChatModerationProof.MediaCommitment(
+                            blobSha256 = posterSealed.sha256Hex,
+                            mimeType = "image/jpeg",
+                            plaintextSha256 = ChatImageCrypto.sha256Hex(encoded.poster.jpeg),
+                            plaintextByteLength = encoded.poster.jpeg.size,
+                            width = encoded.poster.width,
+                            height = encoded.poster.height,
+                        ),
+                    )
+                    commitments.add(
+                        ChatModerationProof.MediaCommitment(
+                            blobSha256 = videoSealed.sha256Hex,
+                            mimeType = "video/mp4",
+                            plaintextSha256 = ChatImageCrypto.sha256Hex(encoded.mp4),
+                            plaintextByteLength = encoded.mp4.size,
+                            width = encoded.width,
+                            height = encoded.height,
+                        ),
+                    )
                 }
             }
         }
@@ -457,6 +541,7 @@ class SendMessageInteractor(
         val singleImage = if (items.size == 1) items[0].image else null
         val singleVideo = if (items.size == 1) items[0].video else null
         val album = if (items.size > 1) items.toList() else null
+        val proof = moderationProof(group, messageId, sentAtMillis, caption, media = commitments)
         val payload = ChatMessagePayload(
             version = 1,
             messageId = messageId,
@@ -468,6 +553,7 @@ class SendMessageInteractor(
             attachment = singleImage,
             videoAttachment = singleVideo,
             attachments = album,
+            moderationAuthenticityProof = proof,
         )
         val pending = ChatMessage(
             id = messageId,
@@ -483,6 +569,7 @@ class SendMessageInteractor(
             imageAttachment = singleImage,
             videoAttachment = singleVideo,
             albumAttachments = album,
+            moderationAuthenticityProof = proof,
         )
         messageRepository.append(pending)
 
@@ -553,6 +640,19 @@ class SendMessageInteractor(
 
         val messageId = idFactory()
         val sentAtMillis = clock()
+        // A voice commitment carries no width/height — the keys are
+        // absent from the preimage, not zeroed.
+        val proof = moderationProof(
+            group, messageId, sentAtMillis, body = "",
+            media = listOf(
+                ChatModerationProof.MediaCommitment(
+                    blobSha256 = sealed.sha256Hex,
+                    mimeType = "audio/mp4",
+                    plaintextSha256 = ChatImageCrypto.sha256Hex(audioBytes),
+                    plaintextByteLength = audioBytes.size,
+                ),
+            ),
+        )
         val payload = ChatMessagePayload(
             version = 1,
             messageId = messageId,
@@ -562,6 +662,7 @@ class SendMessageInteractor(
             replyToMessageId = null,
             variant = variant,
             voiceAttachment = voiceAttachment,
+            moderationAuthenticityProof = proof,
         )
         val pending = ChatMessage(
             id = messageId,
@@ -575,6 +676,7 @@ class SendMessageInteractor(
             replyToMessageId = null,
             groupType = group.groupType,
             voiceAttachment = voiceAttachment,
+            moderationAuthenticityProof = proof,
         )
         messageRepository.append(pending)
 
@@ -656,6 +758,11 @@ class SendMessageInteractor(
             videoAttachment = message.videoAttachment,
             attachments = message.albumAttachments,
             voiceAttachment = message.voiceAttachment,
+            // Reuse the persisted proof verbatim — never re-sign on
+            // retry. The receivers that already hold this message hold
+            // this exact signature; a drifted re-derivation would fork
+            // the evidence. Mirrors iOS `retry`.
+            moderationAuthenticityProof = message.moderationAuthenticityProof,
         )
         // Re-uploads go to the server already STAMPED into the message's
         // attachments (the descriptor recipients will read), not the
@@ -772,6 +879,38 @@ class SendMessageInteractor(
     }
 
     private data class BlobEntry(val sha: String, val blob: ByteArray, val mimeType: String)
+
+    /**
+     * Best-effort moderation authenticity proof: the canonical
+     * preimage for exactly this send, signed with the identity key
+     * and base64-encoded for the wire. Returns `null` — an
+     * unreportable but otherwise normal message — when no signer is
+     * wired or signing throws; a proof failure must never fail a
+     * send.
+     */
+    private suspend fun moderationProof(
+        group: app.onym.android.group.ChatGroup,
+        messageId: UUID,
+        sentAtMillis: Long,
+        body: String,
+        media: List<ChatModerationProof.MediaCommitment> = emptyList(),
+    ): String? {
+        val signer = messageSigner ?: return null
+        return try {
+            val preimage = ChatModerationProof.signedContent(
+                messageId = messageId,
+                groupId = group.id,
+                groupSecret = group.groupSecret,
+                sentAtMillis = sentAtMillis,
+                body = body,
+                media = media,
+            )
+            java.util.Base64.getEncoder()
+                .encodeToString(signer.signWithStellarKey(preimage.toByteArray(Charsets.UTF_8)))
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     /**
      * Encode the payload once and seal+ship per recipient. Returns

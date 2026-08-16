@@ -98,6 +98,35 @@ class IncomingMessageDispatcherChatMessageTest {
         )
     }
 
+    @Test
+    fun chatMessage_withModerationProof_persistsItUnverified() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(ownerIdentity, withSenderProfile = true)
+
+        val payload = chatPayload(UUID.randomUUID(), body = "hello")
+            .copy(moderationAuthenticityProof = "c2lnbmF0dXJl")
+        fixture.dispatch(ownerIdentity, payload, signer = senderSendingKey)
+
+        val stored = fixture.messageStore.listForGroup(ownerIdentity.value, groupIdHex).single()
+        assertEquals(
+            "the proof is stored verbatim for a later report; the report " +
+                "path verifies it, not the receive path",
+            "c2lnbmF0dXJl",
+            stored.moderationAuthenticityProof,
+        )
+    }
+
+    @Test
+    fun chatMessage_withoutModerationProof_persistsNull() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(ownerIdentity, withSenderProfile = true)
+
+        fixture.dispatch(ownerIdentity, chatPayload(UUID.randomUUID(), body = "hi"), signer = senderSendingKey)
+
+        val stored = fixture.messageStore.listForGroup(ownerIdentity.value, groupIdHex).single()
+        assertNull(stored.moderationAuthenticityProof)
+    }
+
     // ─── trust-chain failures all drop without falling through ───
 
     @Test
