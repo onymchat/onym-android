@@ -14,6 +14,7 @@ import app.onym.android.identity.IdentitySecretStore
 import app.onym.android.moderation.BanState
 import app.onym.android.moderation.CheckRequiredReason
 import app.onym.android.moderation.GateCheckResult
+import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeAuthorityManifestFetcher
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
 import app.onym.android.moderation.support.FakeKnownAuthoritiesFetcher
@@ -151,6 +152,7 @@ class ModerationGateUITest {
             }
 
             UITestRegistry.moderationBackend = backend
+            UITestRegistry.moderationAuthorityClient = FakeAuthorityClient()
             UITestRegistry.moderationAttestation = attestation
             UITestRegistry.moderationMandateStore = mandateStore
             UITestRegistry.moderationGateStateStore = gateStateStore

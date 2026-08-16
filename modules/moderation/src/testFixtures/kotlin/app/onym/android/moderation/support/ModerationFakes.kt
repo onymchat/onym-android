@@ -15,7 +15,9 @@ import app.onym.android.moderation.GateStateStore
 import app.onym.android.moderation.InterfaceCountersignature
 import app.onym.android.moderation.IssuedChallenge
 import app.onym.android.moderation.MandateRecord
+import app.onym.android.moderation.MandateRegistrationReceipt
 import app.onym.android.moderation.MandateStore
+import app.onym.android.moderation.ModerationMandate
 import app.onym.android.moderation.ModerationJson
 import app.onym.android.moderation.ModerationSigner
 import app.onym.android.moderation.PersistedGateState
@@ -124,6 +126,30 @@ class ScriptedEnforcementBackendClient : EnforcementBackendClient {
     }
 }
 
+/**
+ * Programmable authority. Accepts registrations by default, echoing
+ * the mandate's own reference; [failure] scripts a rejection or
+ * outage, [receiptOverride] a receipt the repository must refuse.
+ */
+class FakeAuthorityClient : app.onym.android.moderation.AuthorityClient {
+    val registrations = mutableListOf<Pair<AuthorityListing, ModerationMandate>>()
+    var failure: Exception? = null
+    var receiptOverride: MandateRegistrationReceipt? = null
+
+    /** Answer the CORRECT reference with `accepted: false`. */
+    var accept: Boolean = true
+
+    override suspend fun registerMandate(
+        listing: AuthorityListing,
+        mandate: ModerationMandate,
+    ): MandateRegistrationReceipt {
+        registrations += listing to mandate
+        failure?.let { throw it }
+        return receiptOverride
+            ?: MandateRegistrationReceipt(mandateRef = mandate.mandateHash(), accepted = accept)
+    }
+}
+
 class InMemoryGateStateStore(private var state: PersistedGateState? = null) : GateStateStore {
     override suspend fun load(): PersistedGateState? = state
     override suspend fun save(state: PersistedGateState?) {
@@ -212,6 +238,9 @@ object ModerationFixtures {
 fun fixtureMandateRecord(
     userKey: String = "onym:key:aabb",
     deviceBinding: String = "enrollment:fixture",
+    /** Registered by default: a seeded record must not send the
+     * app's boot-time registration retry to the network. */
+    authorityRegistered: Boolean = true,
 ): MandateRecord {
     val signed = ModerationFixtures.signedManifest()
     val mandate = app.onym.android.moderation.ModerationMandate(
@@ -232,7 +261,7 @@ fun fixtureMandateRecord(
         manifestBytesBase64 = Base64.getEncoder().encodeToString(signed.rawBytes),
         authorityName = "Test Authority",
         countersigned = true,
-        authorityRegistered = false,
+        authorityRegistered = authorityRegistered,
         isActive = true,
         createdAt = "2026-08-08T00:00:00Z",
     )

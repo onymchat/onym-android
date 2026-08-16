@@ -3,6 +3,7 @@ package app.onym.android.moderation.ui
 import app.onym.android.moderation.BackendUnreachableException
 import app.onym.android.moderation.ModerationRepository
 import app.onym.android.moderation.support.FakeAuthorityManifestFetcher
+import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
 import app.onym.android.moderation.support.FakeKnownAuthoritiesFetcher
 import app.onym.android.moderation.support.FakeModerationSigner
@@ -22,11 +23,13 @@ class ModerationConsentControllerTest {
 
     private val mandateStore = InMemoryMandateStore()
     private val attestation = FakeDeviceAttestationProvider()
+    private val authority = FakeAuthorityClient()
     private val moderation = ModerationRepository(
         backend = backend,
         attestation = attestation,
         signer = FakeModerationSigner(),
         mandateStore = mandateStore,
+        authority = authority,
         clock = { Instant.parse("2026-08-08T12:00:00Z") },
     )
 
@@ -208,6 +211,46 @@ class ModerationConsentControllerTest {
         )
         // And agreeing again runs a fresh transaction.
         assertNotNull(reconsent.agree())
+    }
+
+    /** Registration is delivery, not consent: an unreachable authority
+     * must not fail the consent surface — the artifact is persisted
+     * and delivery retries on a later session ([ModerationRepository.
+     * registerPending]). */
+    @Test
+    fun `an unreachable authority still consents`() = runTest {
+        authority.failure =
+            app.onym.android.moderation.AuthorityUnreachableException("authority down")
+        val controller = controller()
+        controller.load()
+        assertNotNull(controller.agree())
+        assertTrue(
+            "${controller.snapshots.value}",
+            controller.snapshots.value is ModerationConsentController.UiState.Consented,
+        )
+    }
+
+    /** A deterministic authority rejection is a judged "no" (the
+     * repository only lets those escape): like the backend-refusal
+     * case above, it must never escalate to the deferrable
+     * Unavailable — Review + the reason, retry only. */
+    @Test
+    fun `a refusing authority never routes to the deferral state`() = runTest {
+        authority.failure = app.onym.android.moderation.AuthorityRejectedException(
+            statusCode = 400,
+            rawCode = "bad_request",
+            message = "mandate pins a different manifest than the one this authority publishes",
+        )
+        val controller = controller()
+        controller.load()
+        repeat(4) {
+            assertEquals(null, controller.agree())
+            val state = controller.snapshots.value
+            assertTrue(
+                "$state",
+                state is ModerationConsentController.UiState.Review && state.error != null,
+            )
+        }
     }
 
     /** Retry (reload) resets the failure count — a recovered backend

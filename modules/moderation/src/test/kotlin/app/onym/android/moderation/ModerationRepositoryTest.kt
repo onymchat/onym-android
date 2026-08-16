@@ -1,5 +1,6 @@
 package app.onym.android.moderation
 
+import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
 import app.onym.android.moderation.support.FakeModerationSigner
 import app.onym.android.moderation.support.InMemoryMandateStore
@@ -19,6 +20,7 @@ class ModerationRepositoryTest {
     private val attestation = FakeDeviceAttestationProvider()
     private val signer = FakeModerationSigner()
     private val store = InMemoryMandateStore()
+    private val authority = FakeAuthorityClient()
     private var now: Instant = Instant.parse("2026-08-08T12:00:00Z")
 
     private fun repository() = ModerationRepository(
@@ -26,6 +28,7 @@ class ModerationRepositoryTest {
         attestation = attestation,
         signer = signer,
         mandateStore = store,
+        authority = authority,
         clock = { now },
     )
 
@@ -238,5 +241,176 @@ class ModerationRepositoryTest {
             Base64.getEncoder().encodeToString(ByteArray(64) { 7 }),
             record.mandate.signatures.first(),
         )
+    }
+
+    // ─── Authority registration ──────────────────────────────────────
+
+    @Test
+    fun `consent registers the finalized mandate with the authority`() = runTest {
+        val record = repository().consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+
+        assertEquals(1, authority.registrations.size)
+        val (listing, registered) = authority.registrations.single()
+        assertEquals(ModerationFixtures.listing(), listing)
+        // The FINALIZED mandate — both signatures present — is what
+        // the authority verifies (user consent + interface witness).
+        assertEquals(2, registered.signatures.size)
+        assertEquals(record.mandate, registered)
+
+        assertTrue(record.authorityRegistered)
+        assertTrue(repository().activeMandateRecord()!!.authorityRegistered)
+        // Nothing left to retry.
+        assertEquals(null, repository().pendingRegistration())
+    }
+
+    /** Registration is delivery, not consent: an unreachable authority
+     * leaves the signed, countersigned artifact active and pending —
+     * never a failed consent, never a lost mandate. */
+    @Test
+    fun `an unreachable authority keeps the consent and leaves delivery pending`() = runTest {
+        authority.failure = AuthorityUnreachableException("fixture offline")
+        val record = repository().consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+
+        assertTrue(record.isActive)
+        assertTrue(!record.authorityRegistered)
+        assertEquals(record, repository().pendingRegistration())
+    }
+
+    /** 5xx / 408 / 429 may follow a server-side commit or become an
+     * acceptance on exact replay — same keep-and-retry posture as
+     * unreachable. */
+    @Test
+    fun `a transient authority rejection keeps the consent`() = runTest {
+        for (status in listOf(500, 503, 408, 429)) {
+            authority.failure = AuthorityRejectedException(status, null, "transient $status")
+            val record = repository().consent(
+                ModerationFixtures.listing(),
+                ModerationFixtures.reviewedManifest(),
+            )
+            assertTrue("HTTP $status must keep the record active", record.isActive)
+            assertTrue(!record.authorityRegistered)
+            now = now.plusSeconds(60)
+        }
+    }
+
+    /** A deterministic 4xx (e.g. the authority rotated its manifest
+     * after the review snapshot) can never become an acceptance by
+     * replaying the same bytes: the record is deactivated — an active
+     * mandate its authority never accepted would be unfixable — and
+     * the refusal surfaces for a fresh review. */
+    @Test
+    fun `a deterministic authority rejection deactivates the record and surfaces`() = runTest {
+        authority.failure =
+            AuthorityRejectedException(400, "bad_request", "mandate pins a different manifest")
+        try {
+            repository().consent(
+                ModerationFixtures.listing(),
+                ModerationFixtures.reviewedManifest(),
+            )
+            fail("the deterministic rejection must surface")
+        } catch (e: AuthorityRejectedException) {
+            assertEquals(400, e.statusCode)
+        }
+        assertEquals(null, repository().activeMandateRecord())
+        assertEquals(null, repository().pendingRegistration())
+    }
+
+    /** A receipt for different bytes is not registration of THIS
+     * consent, wherever it came from. */
+    @Test
+    fun `a receipt naming a different mandateRef is refused`() = runTest {
+        authority.receiptOverride =
+            MandateRegistrationReceipt(mandateRef = "somebody-elses-ref", accepted = true)
+        try {
+            repository().consent(
+                ModerationFixtures.listing(),
+                ModerationFixtures.reviewedManifest(),
+            )
+            fail("a mismatched receipt must refuse")
+        } catch (e: ModerationConsentException) {
+            assertTrue(e.message!!.contains("different mandate reference"))
+        }
+        assertEquals(null, repository().activeMandateRecord())
+    }
+
+    /** `accepted: false` with the right reference is still not a
+     * registration. */
+    @Test
+    fun `an unaccepted receipt is refused`() = runTest {
+        authority.accept = false
+        try {
+            repository().consent(
+                ModerationFixtures.listing(),
+                ModerationFixtures.reviewedManifest(),
+            )
+            fail("an unaccepted receipt must refuse")
+        } catch (e: ModerationConsentException) {
+            assertTrue(e.message!!.contains("did not accept"))
+        }
+        assertEquals(null, repository().activeMandateRecord())
+    }
+
+    @Test
+    fun `registerPending completes a deferred delivery`() = runTest {
+        authority.failure = AuthorityUnreachableException("fixture offline")
+        val repository = repository()
+        repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        assertNotNull(repository.pendingRegistration())
+
+        // The authority comes back; the retry delivers the EXACT
+        // persisted artifact and flips the flag.
+        authority.failure = null
+        repository.registerPending(ModerationFixtures.listing())
+
+        assertEquals(2, authority.registrations.size)
+        assertEquals(
+            authority.registrations[0].second,
+            authority.registrations[1].second,
+        )
+        assertTrue(repository.activeMandateRecord()!!.authorityRegistered)
+        assertEquals(null, repository.pendingRegistration())
+    }
+
+    @Test
+    fun `registerPending is a no-op without a pending record`() = runTest {
+        val repository = repository()
+        repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        authority.registrations.clear()
+
+        repository.registerPending(ModerationFixtures.listing())
+        assertEquals(0, authority.registrations.size)
+    }
+
+    /** A listing for some other authority must never receive this
+     * mandate — the mandate names its authority, and delivery follows
+     * the mandate, not the directory's first entry. */
+    @Test
+    fun `registerPending refuses a listing for a different authority`() = runTest {
+        authority.failure = AuthorityUnreachableException("fixture offline")
+        val repository = repository()
+        repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        authority.failure = null
+        authority.registrations.clear()
+
+        repository.registerPending(
+            ModerationFixtures.listing().copy(componentId = "onym:component:other-authority"),
+        )
+        assertEquals(0, authority.registrations.size)
+        assertNotNull(repository.pendingRegistration())
     }
 }

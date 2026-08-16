@@ -158,7 +158,13 @@ class ModerationConsentController(
             state.value = UiState.Unavailable(e.message)
             null
         } catch (e: Exception) {
-            val deterministicRefusal = e is BackendRejectedException
+            // The repository only lets DETERMINISTIC authority
+            // rejections escape consent (transient registration
+            // failures keep the artifact and succeed), so any
+            // AuthorityRejectedException here is a judged "no".
+            val deterministicRefusal =
+                e is BackendRejectedException ||
+                    e is app.onym.android.moderation.AuthorityRejectedException
             if (!deterministicRefusal) agreeFailures += 1
             state.value = if (!deterministicRefusal && agreeFailures >= MAX_AGREE_FAILURES) {
                 UiState.Unavailable(e.message)
