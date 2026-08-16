@@ -83,6 +83,20 @@ class ChatBodyLinksTest {
     fun `non-web schemes are not linked`() {
         assertTrue(ChatBodyLinks.detect("call tel:123 or ftp://x.example/f").isEmpty())
         assertTrue(ChatBodyLinks.detect("intent://evil#Intent;end").isEmpty())
+        // The review's escape: a `www.` INSIDE a non-web scheme's
+        // authority must not become a link of its own.
+        assertTrue(ChatBodyLinks.detect("intent://www.evil.com/x#Intent;end").isEmpty())
+    }
+
+    @Test
+    fun `www inside an email stays prose`() {
+        assertTrue(ChatBodyLinks.detect("mail bob@www.example.com today").isEmpty())
+    }
+
+    @Test
+    fun `mixed-case schemes strip cleanly`() {
+        val link = ChatBodyLinks.detect("see HtTpS://Onym.App/Doc now").single()
+        assertEquals("HtTpS://Onym.App/Doc", link.url)
     }
 
     @Test

@@ -29,8 +29,12 @@ object ChatBodyLinks {
      * when the URL body contains its opener (Wikipedia-style paths). */
     private const val TRAILING = ".,;:!?…'\"»”’"
 
+    // Negative lookbehind instead of \b: a word boundary let `www.`
+    // link from inside an email (`bob@www.example.com`) and from
+    // inside a non-web scheme's authority (`intent://www.evil.com`) —
+    // the guards the tests promise. No preceding @, /, or word char.
     private val CANDIDATE = Regex(
-        """(?i)\b((?:https?://|www\.)[^\s<>«»“”]+)""",
+        """(?i)(?<![@/\w])((?:https?://|www\.)[^\s<>«»“”]+)""",
     )
 
     fun detect(body: String): List<BodyLink> =
@@ -50,9 +54,9 @@ object ChatBodyLinks {
                 }
             }
             // A bare marker with no host left is prose, not a link.
-            val hostPart = text
-                .removePrefix("https://").removePrefix("HTTPS://")
-                .removePrefix("http://").removePrefix("HTTP://")
+            // substringAfter, not removePrefix: the match is (?i), so
+            // MiXeD-case schemes must strip too.
+            val hostPart = text.substringAfter("://", text)
             if (hostPart.isEmpty() || !hostPart.contains('.') ||
                 hostPart.startsWith("www.") && hostPart.length <= 4
             ) {

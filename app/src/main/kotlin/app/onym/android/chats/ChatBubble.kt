@@ -37,6 +37,8 @@ import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,6 +50,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,13 +66,22 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import app.onym.android.strings.R
-import androidx.compose.ui.text.withLink
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -352,139 +364,167 @@ private fun BubbleBody(
     val baseModifier = Modifier
         .clip(RoundedCornerShape(BUBBLE_RADIUS))
         .background(animatedFill)
-    val clickableModifier = if (onClick != null) {
-        baseModifier.clickable(onClick = onClick)
-    } else {
-        baseModifier
-    }
-    // Long-press → Copy, on any bubble with text. detectTapGestures
-    // rather than combinedClickable: no ripple appears on the many
-    // bubbles that have no tap action, retry taps keep flowing
-    // through the existing clickable above, and link taps are consumed
-    // by the Text's own LinkAnnotation handling before reaching here.
+
+    // Long-press → Copy, on any bubble with text; retry taps on
+    // failed text bubbles share the SAME gesture detector. One
+    // detector, not clickable + pointerInput: detectTapGestures
+    // consumes the down unconditionally, so a clickable layered
+    // outside it never saw the retry tap (review finding) — and a
+    // single detector also keeps the no-ripple property on the many
+    // bubbles with no tap action. TalkBack reaches both through
+    // explicit semantics (a raw pointerInput contributes none).
     var copyMenuOpen by remember { mutableStateOf(false) }
+    var copyMenuOffset by remember { mutableStateOf(DpOffset.Zero) }
     val copyHaptic = LocalHapticFeedback.current
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-    val copyModifier = if (body.isNotEmpty()) {
-        Modifier.pointerInput(body) {
-            detectTapGestures(
-                onLongPress = {
-                    copyHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    copyMenuOpen = true
-                },
-            )
-        }
+    val clipboard = LocalClipboardManager.current
+    val density = LocalDensity.current
+    val latestOnClick by rememberUpdatedState(onClick)
+    val openCopyMenu: (Offset) -> Unit = { position ->
+        copyHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        // Anchor the menu at the finger, not the bubble's top-start —
+        // on a trailing-aligned outgoing bubble those are far apart.
+        copyMenuOffset = with(density) { DpOffset(position.x.toDp(), position.y.toDp()) }
+        copyMenuOpen = true
+    }
+    val interactionModifier = if (body.isNotEmpty()) {
+        Modifier
+            .pointerInput(body) {
+                detectTapGestures(
+                    onTap = { latestOnClick?.invoke() },
+                    onLongPress = openCopyMenu,
+                )
+            }
+            .semantics {
+                onLongClick(label = null) {
+                    openCopyMenu(Offset.Zero)
+                    true
+                }
+                if (latestOnClick != null) {
+                    onClick(label = null) {
+                        latestOnClick?.invoke()
+                        true
+                    }
+                }
+            }
+    } else if (onClick != null) {
+        // Media/voice-only failed bubbles: no text to copy, the plain
+        // clickable (with its own semantics) is all that is needed.
+        Modifier.clickable(onClick = onClick)
     } else {
         Modifier
     }
+
     Box {
-        androidx.compose.material3.DropdownMenu(
+        DropdownMenu(
             expanded = copyMenuOpen,
             onDismissRequest = { copyMenuOpen = false },
+            offset = copyMenuOffset,
         ) {
-            androidx.compose.material3.DropdownMenuItem(
+            DropdownMenuItem(
                 text = { Text(stringResource(R.string.copy)) },
                 onClick = {
                     // The system clipboard overlay (Android 13+) is
                     // the confirmation; no toast of our own.
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(body))
+                    clipboard.setText(AnnotatedString(body))
                     copyMenuOpen = false
                 },
                 modifier = Modifier.testTag("chat_thread.copy.$messageId"),
             )
         }
-    Column(
-        modifier = clickableModifier
-            .then(copyModifier)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .testTag("chat_thread.bubble.$messageId"),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        if (reply != null) {
-            ReplyQuoteInset(
-                reply = reply,
-                replyAccentColor = replyAccentColor,
-                isOutgoing = isOutgoing,
-                onAccentColor = textColor,
-                messageId = messageId,
-                // Only an available target is worth jumping to.
-                onTap = if (!reply.isUnavailable) onQuoteTap else null,
-            )
-        }
-        if (voice != null) {
-            VoiceMessageBubble(
-                voice = voice,
-                voiceLoader = voiceLoader,
-                messageId = messageId,
-                tint = textColor,
-                status = status,
-                isOutgoing = isOutgoing,
-                onFailedTap = onFailedMediaTap,
-            )
-        }
-        if (media.isNotEmpty()) {
-            // Pending → dimmed with a spinner; failed → dimmed with an
-            // error glyph, tap opens the Resend/Delete menu. Only sent
-            // media is tappable-to-view. Mirrors iOS
-            // `ChatBubbleCell.applyAttachmentSendState`.
-            val sending = isOutgoing && status == MessageStatus.PENDING
-            val failed = isOutgoing && status == MessageStatus.FAILED
-            Box(
-                modifier = Modifier.testTag("chat_thread.media.$messageId"),
-            ) {
-                if (media.size == 1) {
-                    val item = media[0]
-                    val videoItem = item.video
-                    val imageItem = item.image
-                    if (item.isVideo && videoItem != null) {
-                        AttachmentVideo(
-                            video = videoItem,
+        Column(
+            modifier = baseModifier
+                .then(interactionModifier)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .testTag("chat_thread.bubble.$messageId"),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (reply != null) {
+                ReplyQuoteInset(
+                    reply = reply,
+                    replyAccentColor = replyAccentColor,
+                    isOutgoing = isOutgoing,
+                    onAccentColor = textColor,
+                    messageId = messageId,
+                    // Only an available target is worth jumping to.
+                    onTap = if (!reply.isUnavailable) onQuoteTap else null,
+                )
+            }
+            if (voice != null) {
+                VoiceMessageBubble(
+                    voice = voice,
+                    voiceLoader = voiceLoader,
+                    messageId = messageId,
+                    tint = textColor,
+                    status = status,
+                    isOutgoing = isOutgoing,
+                    onFailedTap = onFailedMediaTap,
+                )
+            }
+            if (media.isNotEmpty()) {
+                // Pending → dimmed with a spinner; failed → dimmed with an
+                // error glyph, tap opens the Resend/Delete menu. Only sent
+                // media is tappable-to-view. Mirrors iOS
+                // `ChatBubbleCell.applyAttachmentSendState`.
+                val sending = isOutgoing && status == MessageStatus.PENDING
+                val failed = isOutgoing && status == MessageStatus.FAILED
+                Box(
+                    modifier = Modifier.testTag("chat_thread.media.$messageId"),
+                ) {
+                    if (media.size == 1) {
+                        val item = media[0]
+                        val videoItem = item.video
+                        val imageItem = item.image
+                        if (item.isVideo && videoItem != null) {
+                            AttachmentVideo(
+                                video = videoItem,
+                                imageLoader = imageLoader,
+                                messageId = messageId,
+                                onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
+                                    onVideoTapped?.invoke(videoItem)
+                                },
+                            )
+                        } else if (imageItem != null) {
+                            AttachmentImage(
+                                attachment = imageItem,
+                                imageLoader = imageLoader,
+                                messageId = messageId,
+                                onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
+                                    onImageTapped?.invoke(imageItem)
+                                },
+                            )
+                        }
+                    } else {
+                        AlbumGrid(
+                            media = media,
                             imageLoader = imageLoader,
                             messageId = messageId,
-                            onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
-                                onVideoTapped?.invoke(videoItem)
-                            },
-                        )
-                    } else if (imageItem != null) {
-                        AttachmentImage(
-                            attachment = imageItem,
-                            imageLoader = imageLoader,
-                            messageId = messageId,
-                            onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
-                                onImageTapped?.invoke(imageItem)
+                            onTileTap = if (sending) null else { index ->
+                                if (failed) onFailedMediaTap?.invoke()
+                                else onAlbumItemTapped?.invoke(index)
                             },
                         )
                     }
-                } else {
-                    AlbumGrid(
-                        media = media,
-                        imageLoader = imageLoader,
-                        messageId = messageId,
-                        onTileTap = if (sending) null else { index ->
-                            if (failed) onFailedMediaTap?.invoke()
-                            else onAlbumItemTapped?.invoke(index)
-                        },
-                    )
-                }
-                if (sending || failed) {
-                    MediaSendOverlay(
-                        sending = sending,
-                        messageId = messageId,
-                        modifier = Modifier.matchParentSize(),
-                    )
+                    if (sending || failed) {
+                        MediaSendOverlay(
+                            sending = sending,
+                            messageId = messageId,
+                            modifier = Modifier.matchParentSize(),
+                        )
+                    }
                 }
             }
+            // Image messages may carry an empty caption — skip the text row
+            // entirely so the bubble hugs the image with no blank line.
+            if (body.isNotEmpty()) {
+                LinkifiedBody(
+                    body = body,
+                    textColor = textColor,
+                    messageId = messageId,
+                    onLongPress = openCopyMenu,
+                    onTap = onClick,
+                )
+            }
         }
-        // Image messages may carry an empty caption — skip the text row
-        // entirely so the bubble hugs the image with no blank line.
-        if (body.isNotEmpty()) {
-            LinkifiedBody(
-                body = body,
-                textColor = textColor,
-                messageId = messageId,
-            )
-        }
-    }
     }
 }
 
@@ -501,6 +541,15 @@ private fun LinkifiedBody(
     body: String,
     textColor: Color,
     messageId: java.util.UUID,
+    /** The bubble's long-press → Copy, owned HERE for the text area:
+     *  link handling and the copy long-press must share one gesture
+     *  detector — LinkAnnotation's internal handling also fired the
+     *  link on a long-press RELEASE, so holding a URL to copy it
+     *  opened the browser on the way out. */
+    onLongPress: (Offset) -> Unit,
+    /** Tap on non-link text — the failed-bubble retry, so a text-and-
+     *  link bubble keeps its tap action outside the link spans. */
+    onTap: (() -> Unit)?,
 ) {
     val links = remember(body) { ChatBodyLinks.detect(body) }
     if (links.isEmpty()) {
@@ -511,40 +560,55 @@ private fun LinkifiedBody(
         )
         return
     }
-    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val uriHandler = LocalUriHandler.current
+    // Styling only — no LinkAnnotation: pointer handling lives in the
+    // single detector below, which is what lets a long-press over a
+    // link open Copy WITHOUT also following the link. Underline-only
+    // marking: on an accent-filled outgoing bubble every "link blue"
+    // clashes with some accent, while an underline reads as a link on
+    // any fill.
     val annotated = remember(body, textColor) {
-        androidx.compose.ui.text.buildAnnotatedString {
-            var cursor = 0
+        buildAnnotatedString {
+            append(body)
             for (link in links) {
-                if (link.range.first > cursor) {
-                    append(body.substring(cursor, link.range.first))
-                }
-                withLink(
-                    androidx.compose.ui.text.LinkAnnotation.Clickable(
-                        tag = link.url,
-                        styles = androidx.compose.ui.text.TextLinkStyles(
-                            style = androidx.compose.ui.text.SpanStyle(
-                                color = textColor,
-                                textDecoration =
-                                    androidx.compose.ui.text.style.TextDecoration.Underline,
-                            ),
-                        ),
-                    ) {
-                        // A dead browser (no handler) must not crash a
-                        // chat over a pasted URL.
-                        runCatching { uriHandler.openUri(link.url) }
-                    },
-                ) { append(body.substring(link.range)) }
-                cursor = link.range.last + 1
+                addStyle(
+                    SpanStyle(
+                        color = textColor,
+                        textDecoration = TextDecoration.Underline,
+                    ),
+                    link.range.first,
+                    link.range.last + 1,
+                )
             }
-            if (cursor < body.length) append(body.substring(cursor))
         }
     }
+    var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    val latestOnTap by rememberUpdatedState(onTap)
     Text(
         text = annotated,
         color = textColor,
         style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier.testTag("chat_thread.body_links.$messageId"),
+        onTextLayout = { layout = it },
+        modifier = Modifier
+            .pointerInput(body) {
+                detectTapGestures(
+                    onLongPress = onLongPress,
+                    onTap = { position ->
+                        val characterOffset = layout?.getOffsetForPosition(position)
+                        val url = characterOffset?.let { offset ->
+                            links.firstOrNull { offset in it.range }?.url
+                        }
+                        if (url != null) {
+                            // A dead browser (no handler) must not
+                            // crash a chat over a pasted URL.
+                            runCatching { uriHandler.openUri(url) }
+                        } else {
+                            latestOnTap?.invoke()
+                        }
+                    },
+                )
+            }
+            .testTag("chat_thread.body_links.$messageId"),
     )
 }
 
