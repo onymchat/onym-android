@@ -200,6 +200,10 @@ fun RootScreen(
                     } else {
                         null
                     },
+                    // Same debug-only escape as the onboarding step;
+                    // inert when canDefer is false (no deferral
+                    // callback to take).
+                    debugSkipAllowed = BuildConfig.DEBUG,
                 )
                 return
             }

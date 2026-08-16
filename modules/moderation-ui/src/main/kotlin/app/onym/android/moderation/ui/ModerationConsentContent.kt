@@ -53,6 +53,21 @@ fun ModerationConsentContent(
      * scroll does not measure.
      */
     standalone: Boolean = true,
+    /**
+     * DEBUG-BUILD escape hatch: renders a "Skip (debug build)" action
+     * on the Review surface that takes the same deferral path as
+     * Unavailable's Continue. A sideloaded debug/emulator build can
+     * NEVER pass the backend's classifier (not Play-installed, debug
+     * signing key), so its deterministic refusal — correctly
+     * retry-only for release users — would otherwise hard-block every
+     * local run at this step. This module has no build-type knowledge
+     * (same posture as OkHttpEnforcementBackendClient's loopback
+     * carve-out): the app passes BuildConfig.DEBUG, so a release
+     * binary never renders the affordance, and it is inert anyway
+     * wherever the host offers no deferral (onUnavailableContinue
+     * null — the enrollment-lost re-consent gate).
+     */
+    debugSkipAllowed: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val state by controller.snapshots.collectAsState()
@@ -206,6 +221,15 @@ fun ModerationConsentContent(
                             .fillMaxWidth()
                             .testTag("moderation.consent.pickAnother"),
                     ) { Text(stringResource(R.string.moderation_consent_pick_another)) }
+                }
+                if (debugSkipAllowed && onUnavailableContinue != null) {
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = onUnavailableContinue,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("moderation.consent.debugSkip"),
+                    ) { Text(stringResource(R.string.moderation_consent_debug_skip)) }
                 }
             }
 

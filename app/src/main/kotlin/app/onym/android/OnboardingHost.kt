@@ -622,6 +622,11 @@ private fun ModerationStepContent(
         // The step scaffold already scrolls; the surface must not
         // nest its own unbounded scroll inside it.
         standalone = false,
+        // Debug/emulator builds can never pass the backend's
+        // classifier; without this the deterministic refusal
+        // hard-blocks every local run at this step. Release binaries
+        // pass false and keep the strict retry-only surface.
+        debugSkipAllowed = app.onym.android.BuildConfig.DEBUG,
         onConsented = { record ->
             if (flow.state.value.step == OnboardingStep.Moderation) {
                 flow.recordOutcome(StepOutcome.Consented(record.mandate.authority))
