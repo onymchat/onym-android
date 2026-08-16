@@ -41,6 +41,14 @@ class ModerationRepository(
     private val authority: AuthorityClient,
     private val interfaceComponentId: String = INTERFACE_COMPONENT_ID,
     private val clock: () -> Instant = Instant::now,
+    /** Ledger of filed reports; null leaves the report vertical dark
+     * ([fileReport] refuses) without touching consent/gate callers. */
+    private val reportStore: ReportFilingStore? = null,
+    /** Resolves the active mandate's authority to its current
+     * directory listing (the listing designates the API base URL a
+     * report is delivered to). Null = not listed right now. */
+    private val resolveAuthorityListing: suspend (componentId: String) -> AuthorityListing? =
+        { null },
 ) {
     private val mutex = Mutex()
 
@@ -390,9 +398,291 @@ class ModerationRepository(
         result
     }
 
+    // ─── report filing ───────────────────────────────────────────────
+
+    /** Serializes filings so two taps on Submit can't mint two signed
+     * artifacts for one message. */
+    private val reportMutex = Mutex()
+
+    /**
+     * The classes the current identity can report under: the consented
+     * manifest's published classes intersected with the mandate's own
+     * class list. Decoded from the retained exact bytes the mandate
+     * pinned — never a refetch, so the picker can only offer terms the
+     * user actually consented to.
+     */
+    suspend fun availableReportClasses(): List<ViolationClass> {
+        val record = activeReportingMandate() ?: throw ReportFilingException.ReportingUnavailable()
+        val manifest = consentedManifest(record) ?: throw ReportFilingException.ReportingUnavailable()
+        return manifest.violationClasses.filter { it.classId in record.mandate.classes }
+    }
+
+    /**
+     * File a report with the mandate's authority (Moderation.md §5.4).
+     *
+     * Ordering is load-bearing:
+     *  1. Verify the evidence locally (the accused's signature over
+     *     the disclosed bytes) — never deliver what can only be
+     *     refused.
+     *  2. Persist the signed artifact BEFORE any network call, so an
+     *     ambiguous failure replays the exact bytes on the next
+     *     Submit (a filed report is immutable; only byte-identical
+     *     retries are accepted).
+     *  3. Upload image blobs, then the report that names them — a
+     *     report naming an un-uploaded digest is refused.
+     *
+     * Filing the same message + class again returns the stored
+     * receipt (or [ReportFilingException.AlreadyFiled]) without a
+     * second network delivery.
+     */
+    suspend fun fileReport(
+        evidence: ReportableEvidence,
+        classId: String,
+    ): ReportReceipt = reportMutex.withLock {
+        val reports = reportStore ?: throw ReportFilingException.ReportingUnavailable()
+        val record = activeReportingMandate() ?: throw ReportFilingException.ReportingUnavailable()
+        val reporter = signer.userKeyId()
+        if (reporter != record.mandate.user) throw ReportFilingException.ReportingUnavailable()
+        val manifest = consentedManifest(record) ?: throw ReportFilingException.ReportingUnavailable()
+        if (classId !in record.mandate.classes ||
+            manifest.violationClasses.none { it.classId == classId }
+        ) {
+            throw ReportFilingException.ClassOutsideMandate()
+        }
+        verifyAuthenticity(evidence)
+
+        val listing = resolveAuthorityListing(record.mandate.authority)
+            ?: throw ReportFilingException.AuthorityUnavailable()
+        val mandateRef = record.mandate.mandateHash()
+
+        // Idempotency: one signed artifact per (message, reporter,
+        // mandate, accused, class, evidence). A hit replays or
+        // short-circuits; it never re-signs.
+        val existing = reports.load().firstOrNull {
+            it.sourceMessageId == evidence.sourceMessageId &&
+                it.report.reporter == reporter &&
+                it.report.reporterMandate == mandateRef &&
+                it.report.accused == evidence.accused &&
+                it.report.classId == classId &&
+                it.report.evidence.map(ReportEvidenceItem::disclosedContent) ==
+                listOf(evidence.disclosedContent)
+        }
+        if (existing != null) {
+            existing.receipt?.let { return@withLock it }
+            if (existing.resolvedWithoutReceipt) {
+                throw ReportFilingException.AlreadyFiled(existing.report.reportId)
+            }
+            return@withLock submitReport(existing, listing, evidence.images)
+        }
+
+        val report = ModerationReport(
+            reportId = "report-" + java.util.UUID.randomUUID().toString().lowercase(),
+            reporter = reporter,
+            reporterMandate = mandateRef,
+            accused = evidence.accused,
+            classId = classId,
+            evidence = listOf(
+                ReportEvidenceItem(
+                    disclosedContent = evidence.disclosedContent,
+                    authenticityProof = evidence.authenticityProofBase64,
+                ),
+            ),
+            filedAt = Rfc3339InstantSerializer.format(clock()),
+        )
+        val signed = report.copy(
+            signature = Base64.getEncoder().encodeToString(signer.sign(report.signingBytes())),
+        )
+        val filing = ReportFilingRecord(
+            sourceMessageId = evidence.sourceMessageId,
+            report = signed,
+            authorityName = record.authorityName,
+        )
+        // Persist before delivering: an artifact that can't be
+        // persisted is never sent (a crash after delivery would lose
+        // the only copy of what was disclosed).
+        saveReports(listOf(filing) + reports.load())
+        submitReport(filing, listing, evidence.images)
+    }
+
+    /** Deliver blobs-first, then the report; classify the outcome the
+     * way the artifact's lifecycle demands. */
+    private suspend fun submitReport(
+        filing: ReportFilingRecord,
+        listing: AuthorityListing,
+        images: List<ReportableImage>,
+    ): ReportReceipt {
+        val reports = checkNotNull(reportStore)
+        for (image in images) {
+            try {
+                val timestamp = Rfc3339InstantSerializer.format(clock())
+                val credential = "evidence-blob:${image.sha256}:$timestamp"
+                    .toByteArray(Charsets.UTF_8)
+                authority.uploadEvidenceImage(
+                    listing = listing,
+                    sha256 = image.sha256,
+                    bytes = image.bytes,
+                    userKey = signer.userKeyId(),
+                    timestamp = timestamp,
+                    signatureBase64 = Base64.getEncoder().encodeToString(signer.sign(credential)),
+                )
+            } catch (e: AuthorityRejectedException) {
+                // 409 = the bytes are already on file: agreement, the
+                // filing proceeds. Everything else fails the filing —
+                // deterministic upload refusals discard the artifact
+                // (its media can never be accepted), transient ones
+                // keep it for replay.
+                if (e.statusCode == 409) continue
+                if (e.isDeterministic) discardReport(filing)
+                throw e
+            }
+        }
+        val receipt = try {
+            authority.fileReport(listing, filing.report.wireBytes())
+        } catch (e: AuthorityRejectedException) {
+            if (e.statusCode == 409) {
+                // This (reporter, reportId) is already on a case —
+                // terminal success without a receipt of our own.
+                updateReport(filing) { it.copy(resolvedWithoutReceipt = true) }
+                throw ReportFilingException.AlreadyFiled(filing.report.reportId)
+            }
+            if (e.isDeterministic) discardReport(filing)
+            throw e
+        }
+        if (receipt.reportId != filing.report.reportId) {
+            // Acknowledged something else — keep the artifact and
+            // classify retryable, like an unparseable 2xx.
+            throw AuthorityUnreachableException(
+                "authority acknowledged reportId ${receipt.reportId} for " +
+                    filing.report.reportId,
+            )
+        }
+        updateReport(filing) { it.copy(receipt = receipt) }
+        return receipt
+    }
+
+    /** Active + countersigned + registered — the only mandate a report
+     * may cite: an unregistered one has no standing at the authority. */
+    private suspend fun activeReportingMandate(): MandateRecord? =
+        activeMandateRecord()?.takeIf { it.countersigned && it.authorityRegistered }
+
+    private fun consentedManifest(record: MandateRecord): AuthorityManifest? = runCatching {
+        ModerationJson.json.decodeFromString(
+            AuthorityManifest.serializer(),
+            Base64.getDecoder().decode(record.manifestBytesBase64).decodeToString(),
+        )
+    }.getOrNull()
+
+    /** The same check the authority runs, run first: the accused's key
+     * must verify the proof over the disclosed bytes. Refusing locally
+     * keeps garbage evidence off the wire entirely. */
+    private fun verifyAuthenticity(evidence: ReportableEvidence) {
+        val accusedKey = keyBytesFromReference(evidence.accused)?.takeIf { it.size == 32 }
+            ?: throw ReportFilingException.AuthenticityUnverified()
+        val signature = runCatching {
+            Base64.getDecoder().decode(evidence.authenticityProofBase64)
+        }.getOrNull()?.takeIf { it.size == 64 }
+            ?: throw ReportFilingException.AuthenticityUnverified()
+        if (evidence.disclosedContent.isEmpty()) {
+            throw ReportFilingException.AuthenticityUnverified()
+        }
+        val message = evidence.disclosedContent.toByteArray(Charsets.UTF_8)
+        val verifier = org.bouncycastle.crypto.signers.Ed25519Signer().apply {
+            init(false, org.bouncycastle.crypto.params.Ed25519PublicKeyParameters(accusedKey, 0))
+            update(message, 0, message.size)
+        }
+        if (!verifier.verifySignature(signature)) {
+            throw ReportFilingException.AuthenticityUnverified()
+        }
+    }
+
+    private suspend fun discardReport(filing: ReportFilingRecord) {
+        val reports = checkNotNull(reportStore)
+        saveReports(reports.load().filterNot { it.report.reportId == filing.report.reportId })
+    }
+
+    private suspend fun updateReport(
+        filing: ReportFilingRecord,
+        transform: (ReportFilingRecord) -> ReportFilingRecord,
+    ) {
+        val reports = checkNotNull(reportStore)
+        saveReports(
+            reports.load().map {
+                if (it.report.reportId == filing.report.reportId) transform(it) else it
+            },
+        )
+    }
+
+    /** Bound the ledger: resolved rows beyond the cap fall off oldest
+     * first; unresolved rows (signed but undelivered artifacts) are
+     * always kept — dropping one would orphan a delivery still owed. */
+    private suspend fun saveReports(records: List<ReportFilingRecord>) {
+        val reports = checkNotNull(reportStore)
+        var resolvedSeen = 0
+        val bounded = records.filter { record ->
+            if (!record.isResolved) true else (resolvedSeen++ < MAX_RESOLVED_REPORT_RECORDS)
+        }
+        reports.save(bounded)
+    }
+
     companion object {
         /** This interface's componentId, carried in mandates and
          * matched by the backend's countersign endpoint. */
         const val INTERFACE_COMPONENT_ID: String = "onym:component:onym-android"
+
+        /** Resolved-ledger bound, oldest-first pruning (iOS parity). */
+        const val MAX_RESOLVED_REPORT_RECORDS: Int = 128
     }
+}
+
+/**
+ * Recipient-held evidence ready to disclose: the exact proof preimage
+ * (`disclosedContent`), the sender's signature over it, and — for a
+ * photo message — the decrypted image bytes carried here rather than
+ * re-fetched at submit time, so exactly what the user agreed to
+ * disclose is what uploads.
+ */
+data class ReportableEvidence(
+    /** Lowercase UUID of the reported chat message. */
+    val sourceMessageId: String,
+    /** `onym:key:<hex>` — the accused sender. */
+    val accused: String,
+    val disclosedContent: String,
+    val authenticityProofBase64: String,
+    val images: List<ReportableImage> = emptyList(),
+)
+
+/** A disclosed photo: [sha256] is the PLAINTEXT digest the sender
+ * committed to — both the upload's address and its authenticity
+ * binding. */
+class ReportableImage(
+    val sha256: String,
+    val bytes: ByteArray,
+)
+
+/**
+ * Failure modes of [ModerationRepository.fileReport], sealed so the
+ * report UI can `when`-exhaust into precise copy.
+ */
+sealed class ReportFilingException(message: String) : Exception(message) {
+    /** No active, countersigned, authority-registered mandate (or the
+     * report vertical isn't wired). */
+    class ReportingUnavailable :
+        ReportFilingException("reporting requires an active registered mandate")
+
+    /** The class isn't in both the mandate and the consented manifest. */
+    class ClassOutsideMandate :
+        ReportFilingException("class is outside the consented mandate")
+
+    /** The evidence does not verify against the accused's key. */
+    class AuthenticityUnverified :
+        ReportFilingException("evidence does not verify against the accused's key")
+
+    /** The mandate's authority has no current directory listing. */
+    class AuthorityUnavailable :
+        ReportFilingException("the authority is not in the directory right now")
+
+    /** The authority already holds this filing on a case — success in
+     * every way that matters to the reporter. */
+    class AlreadyFiled(val reportId: String) :
+        ReportFilingException("report $reportId is already on file")
 }

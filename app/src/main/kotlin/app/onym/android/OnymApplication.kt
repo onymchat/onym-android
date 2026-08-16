@@ -1338,6 +1338,20 @@ class OnymApplication : Application() {
                 mandateStore = moderationMandateStore,
                 authority = moderationAuthority,
                 clock = moderationClock,
+                // Report vertical: the filed-report ledger rides the
+                // same moderation DataStore as the mandate blob, and
+                // the mandate's authority resolves against the live
+                // directory (a report goes to the API base URL the
+                // directory designates today, like registration).
+                reportStore = app.onym.android.moderation.DataStorePreferencesReportFilingStore(
+                    applicationContext.moderationDataStore,
+                ),
+                resolveAuthorityListing = { componentId ->
+                    runCatching {
+                        authoritiesFetcher.fetchLatest()
+                            .firstOrNull { it.componentId == componentId }
+                    }.getOrNull()
+                },
             )
             val gateCheckRepository = app.onym.android.moderation.GateCheckRepository(
                 attestation = attestation,
@@ -1628,6 +1642,12 @@ class OnymApplication : Application() {
                     },
                     retryMessage = sender::retry,
                     deleteMessage = { gid, id -> sender.delete(gid, id) },
+                    reporting = moderationUi?.let {
+                        app.onym.android.chats.ChatReporting.production(
+                            repository = it.repository,
+                            imageLoader = imageLoader,
+                        )
+                    },
                     markRead = { gid, lastReadAtMillis ->
                         val ownerId = identityRepository.currentIdentityId.value?.value
                         if (ownerId != null) {

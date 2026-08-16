@@ -114,6 +114,7 @@ fun ChatThreadScreen(
     val joinRequests by viewModel.joinRequests.collectAsStateWithLifecycle()
     val replyingTo by viewModel.replyingTo.collectAsStateWithLifecycle()
     val pendingMedia by viewModel.pendingMedia.collectAsStateWithLifecycle()
+    val reportState by viewModel.reportState.collectAsStateWithLifecycle()
 
     // The video attachment currently shown in the full-screen player, if any.
     var playingVideo by remember { mutableStateOf<ChatVideoAttachment?>(null) }
@@ -241,6 +242,8 @@ fun ChatThreadScreen(
                 replyingTo = replyingTo,
                 onArmReply = viewModel::armReply,
                 onCancelReply = viewModel::cancelReply,
+                canReport = viewModel::canReport,
+                onReportRequested = viewModel::beginReport,
             )
         }
     }
@@ -275,6 +278,16 @@ fun ChatThreadScreen(
             imageLoader = viewModel.imageLoader,
             videoLoader = viewModel.videoLoader,
             onDismiss = { galleryContext = null },
+        )
+    }
+
+    // Report-to-authority sheet, driven by the ViewModel's state.
+    reportState?.let { state ->
+        ReportMessageDialog(
+            state = state,
+            onSelectClass = viewModel::selectReportClass,
+            onSubmit = viewModel::submitReport,
+            onDismiss = viewModel::dismissReport,
         )
     }
 
@@ -330,6 +343,10 @@ private fun ChatThreadBody(
     joinRequests: List<ChatJoinRequestDisplay> = emptyList(),
     onAcceptJoinRequest: (String) -> Unit = {},
     onDeclineJoinRequest: (String) -> Unit = {},
+    /** Cheap eligibility gate for the long-press Report entry; null
+     *  when the moderation seat is dark. */
+    canReport: ((ChatMessage) -> Boolean)? = null,
+    onReportRequested: ((ChatMessage) -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
     // Defensive sort. The repository's contract is ascending by
@@ -543,6 +560,13 @@ private fun ChatThreadBody(
                         },
                         isHighlighted = message.id == highlightedId,
                         onSwipeReply = { onArmReply(message.id) },
+                        onReport = if (
+                            canReport?.invoke(message) == true && onReportRequested != null
+                        ) {
+                            { onReportRequested(message) }
+                        } else {
+                            null
+                        },
                     )
                 }
                 // Requests pin below the messages: they are the live

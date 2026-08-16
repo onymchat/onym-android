@@ -87,11 +87,14 @@ class ChatImageLoader(
      * is removed from [inflight] before its waiters observe it, so the
      * next request for the same sha retries fresh.
      *
-     * `internal` so JVM unit tests can exercise the dedup +
-     * stamp-policy behavior without the Android [BitmapFactory]
-     * dependency [load] adds on top.
+     * Public for two callers beyond [load]: JVM unit tests (dedup +
+     * stamp-policy without the Android [BitmapFactory] dependency),
+     * and the report flow — a disclosed photo must be the EXACT
+     * plaintext bytes the recipient holds, never a re-encoded
+     * `Bitmap`, because the sender's media commitment hashes these
+     * bytes and anything re-encoded would fail verification.
      */
-    internal suspend fun fetchPlaintext(attachment: ChatImageAttachment): ByteArray? {
+    suspend fun fetchPlaintext(attachment: ChatImageAttachment): ByteArray? {
         val key = attachment.sha256
         // Atomic check-and-insert: the first caller installs a download
         // running on the loader's own scope; the rest await it.
