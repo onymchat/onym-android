@@ -8,7 +8,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +38,8 @@ import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -47,6 +51,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,14 +65,27 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import app.onym.android.strings.R
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -350,102 +368,369 @@ private fun BubbleBody(
     val baseModifier = Modifier
         .clip(RoundedCornerShape(BUBBLE_RADIUS))
         .background(animatedFill)
-    val clickableModifier = if (onClick != null) {
-        baseModifier.clickable(onClick = onClick)
-    } else {
-        baseModifier
+
+    // Long-press → Copy, on any bubble with text; retry taps on
+    // failed text bubbles share the SAME gesture detector. One
+    // detector, not clickable + pointerInput: detectTapGestures
+    // consumes the down unconditionally, so a clickable layered
+    // outside it never saw the retry tap (review finding) — and a
+    // single detector also keeps the no-ripple property on the many
+    // bubbles with no tap action. TalkBack reaches both through
+    // explicit semantics (a raw pointerInput contributes none).
+    var copyMenuOpen by remember { mutableStateOf(false) }
+    var copyMenuOffset by remember { mutableStateOf(DpOffset.Zero) }
+    val copyHaptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val latestOnClick by rememberUpdatedState(onClick)
+    // The menu's anchor Box: long-press positions from NESTED nodes
+    // (the body Text sits below padding, reply inset and media) are
+    // mapped into this space before use — a caption long-press on an
+    // image bubble otherwise anchored the menu an image-height above
+    // the finger.
+    var bubbleCoordinates by remember {
+        mutableStateOf<LayoutCoordinates?>(null)
     }
-    Column(
-        modifier = clickableModifier
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .testTag("chat_thread.bubble.$messageId"),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+    val openCopyMenu: (Offset) -> Unit = { position ->
+        copyHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        // Anchor the menu at the finger, not the bubble's top-start —
+        // on a trailing-aligned outgoing bubble those are far apart.
+        copyMenuOffset = with(density) { DpOffset(position.x.toDp(), position.y.toDp()) }
+        copyMenuOpen = true
+    }
+    // Ripple for the retry tap without clickable: dropping clickable
+    // removed press feedback on exactly the bubbles where the user is
+    // unsure the tap registered, so the detector drives an
+    // InteractionSource by hand (press on down, release/cancel with
+    // the gesture's outcome).
+    val pressInteractions = remember {
+        androidx.compose.foundation.interaction.MutableInteractionSource()
+    }
+    val copyLabel = stringResource(R.string.copy)
+    val retryLabel = stringResource(R.string.retry)
+    val interactionModifier = if (body.isNotEmpty()) {
+        Modifier
+            .indication(
+                pressInteractions,
+                androidx.compose.material3.ripple(),
+            )
+            .pointerInput(body) {
+                detectTapGestures(
+                    onPress = { position ->
+                        // Feedback only for bubbles with a tap action.
+                        if (latestOnClick != null) {
+                            val press =
+                                androidx.compose.foundation.interaction.PressInteraction
+                                    .Press(position)
+                            pressInteractions.emit(press)
+                            if (tryAwaitRelease()) {
+                                pressInteractions.emit(
+                                    androidx.compose.foundation.interaction.PressInteraction
+                                        .Release(press),
+                                )
+                            } else {
+                                pressInteractions.emit(
+                                    androidx.compose.foundation.interaction.PressInteraction
+                                        .Cancel(press),
+                                )
+                            }
+                        }
+                    },
+                    onTap = { latestOnClick?.invoke() },
+                    onLongPress = openCopyMenu,
+                )
+            }
+            // mergeDescendants: the Text child is its own focusable
+            // node carrying the per-link custom actions — without the
+            // merge, TalkBack focuses the Text and the container's
+            // Copy long-click is on a node it never lands on. Merged,
+            // Copy, retry, and the link actions share one focus
+            // target. Labels, not null: "double tap and hold" with no
+            // idea what it does is not an affordance.
+            .semantics(mergeDescendants = true) {
+                onLongClick(label = copyLabel) {
+                    openCopyMenu(Offset.Zero)
+                    true
+                }
+                if (latestOnClick != null) {
+                    onClick(label = retryLabel) {
+                        latestOnClick?.invoke()
+                        true
+                    }
+                }
+            }
+    } else if (onClick != null) {
+        // Media/voice-only failed bubbles: no text to copy, the plain
+        // clickable (with its own semantics) is all that is needed.
+        Modifier.clickable(onClick = onClick)
+    } else {
+        Modifier
+    }
+
+    Box(
+        modifier = Modifier.onGloballyPositioned { bubbleCoordinates = it },
     ) {
-        if (reply != null) {
-            ReplyQuoteInset(
-                reply = reply,
-                replyAccentColor = replyAccentColor,
-                isOutgoing = isOutgoing,
-                onAccentColor = textColor,
-                messageId = messageId,
-                // Only an available target is worth jumping to.
-                onTap = if (!reply.isUnavailable) onQuoteTap else null,
+        DropdownMenu(
+            expanded = copyMenuOpen,
+            onDismissRequest = { copyMenuOpen = false },
+            offset = copyMenuOffset,
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.copy)) },
+                onClick = {
+                    // Deliberate E2EE decision: the clip is flagged
+                    // SENSITIVE, so the Android 13+ overlay confirms
+                    // the copy WITHOUT rendering message content on
+                    // screen, and clipboard history/sync surfaces
+                    // treat it as redactable. The trade-off is a
+                    // "content hidden" preview instead of the text —
+                    // for an E2EE messenger the screen is the leak.
+                    copySensitive(context, body)
+                    copyMenuOpen = false
+                },
+                modifier = Modifier.testTag("chat_thread.copy.$messageId"),
             )
         }
-        if (voice != null) {
-            VoiceMessageBubble(
-                voice = voice,
-                voiceLoader = voiceLoader,
-                messageId = messageId,
-                tint = textColor,
-                status = status,
-                isOutgoing = isOutgoing,
-                onFailedTap = onFailedMediaTap,
-            )
-        }
-        if (media.isNotEmpty()) {
-            // Pending → dimmed with a spinner; failed → dimmed with an
-            // error glyph, tap opens the Resend/Delete menu. Only sent
-            // media is tappable-to-view. Mirrors iOS
-            // `ChatBubbleCell.applyAttachmentSendState`.
-            val sending = isOutgoing && status == MessageStatus.PENDING
-            val failed = isOutgoing && status == MessageStatus.FAILED
-            Box(
-                modifier = Modifier.testTag("chat_thread.media.$messageId"),
-            ) {
-                if (media.size == 1) {
-                    val item = media[0]
-                    val videoItem = item.video
-                    val imageItem = item.image
-                    if (item.isVideo && videoItem != null) {
-                        AttachmentVideo(
-                            video = videoItem,
+        Column(
+            modifier = baseModifier
+                .then(interactionModifier)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .testTag("chat_thread.bubble.$messageId"),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (reply != null) {
+                ReplyQuoteInset(
+                    reply = reply,
+                    replyAccentColor = replyAccentColor,
+                    isOutgoing = isOutgoing,
+                    onAccentColor = textColor,
+                    messageId = messageId,
+                    // Only an available target is worth jumping to.
+                    onTap = if (!reply.isUnavailable) onQuoteTap else null,
+                )
+            }
+            if (voice != null) {
+                VoiceMessageBubble(
+                    voice = voice,
+                    voiceLoader = voiceLoader,
+                    messageId = messageId,
+                    tint = textColor,
+                    status = status,
+                    isOutgoing = isOutgoing,
+                    onFailedTap = onFailedMediaTap,
+                )
+            }
+            if (media.isNotEmpty()) {
+                // Pending → dimmed with a spinner; failed → dimmed with an
+                // error glyph, tap opens the Resend/Delete menu. Only sent
+                // media is tappable-to-view. Mirrors iOS
+                // `ChatBubbleCell.applyAttachmentSendState`.
+                val sending = isOutgoing && status == MessageStatus.PENDING
+                val failed = isOutgoing && status == MessageStatus.FAILED
+                Box(
+                    modifier = Modifier.testTag("chat_thread.media.$messageId"),
+                ) {
+                    if (media.size == 1) {
+                        val item = media[0]
+                        val videoItem = item.video
+                        val imageItem = item.image
+                        if (item.isVideo && videoItem != null) {
+                            AttachmentVideo(
+                                video = videoItem,
+                                imageLoader = imageLoader,
+                                messageId = messageId,
+                                onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
+                                    onVideoTapped?.invoke(videoItem)
+                                },
+                            )
+                        } else if (imageItem != null) {
+                            AttachmentImage(
+                                attachment = imageItem,
+                                imageLoader = imageLoader,
+                                messageId = messageId,
+                                onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
+                                    onImageTapped?.invoke(imageItem)
+                                },
+                            )
+                        }
+                    } else {
+                        AlbumGrid(
+                            media = media,
                             imageLoader = imageLoader,
                             messageId = messageId,
-                            onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
-                                onVideoTapped?.invoke(videoItem)
-                            },
-                        )
-                    } else if (imageItem != null) {
-                        AttachmentImage(
-                            attachment = imageItem,
-                            imageLoader = imageLoader,
-                            messageId = messageId,
-                            onTap = mediaViewTap(sending, failed, onFailedMediaTap) {
-                                onImageTapped?.invoke(imageItem)
+                            onTileTap = if (sending) null else { index ->
+                                if (failed) onFailedMediaTap?.invoke()
+                                else onAlbumItemTapped?.invoke(index)
                             },
                         )
                     }
-                } else {
-                    AlbumGrid(
-                        media = media,
-                        imageLoader = imageLoader,
-                        messageId = messageId,
-                        onTileTap = if (sending) null else { index ->
-                            if (failed) onFailedMediaTap?.invoke()
-                            else onAlbumItemTapped?.invoke(index)
-                        },
-                    )
-                }
-                if (sending || failed) {
-                    MediaSendOverlay(
-                        sending = sending,
-                        messageId = messageId,
-                        modifier = Modifier.matchParentSize(),
-                    )
+                    if (sending || failed) {
+                        MediaSendOverlay(
+                            sending = sending,
+                            messageId = messageId,
+                            modifier = Modifier.matchParentSize(),
+                        )
+                    }
                 }
             }
-        }
-        // Image messages may carry an empty caption — skip the text row
-        // entirely so the bubble hugs the image with no blank line.
-        if (body.isNotEmpty()) {
-            Text(
-                text = body,
-                color = textColor,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            // Image messages may carry an empty caption — skip the text row
+            // entirely so the bubble hugs the image with no blank line.
+            if (body.isNotEmpty()) {
+                LinkifiedBody(
+                    body = body,
+                    textColor = textColor,
+                    messageId = messageId,
+                    // Map the Text-local press into the bubble Box's
+                    // space so the menu anchors at the finger.
+                    onLongPress = { textCoordinates, position ->
+                        val mapped = bubbleCoordinates
+                            ?.localPositionOf(textCoordinates, position)
+                            ?: position
+                        openCopyMenu(mapped)
+                    },
+                    // The raw parameter, not latestOnClick:
+                    // LinkifiedBody re-wraps it in its own
+                    // rememberUpdatedState, so freshness is preserved
+                    // where it is consumed.
+                    onTap = onClick,
+                )
+            }
         }
     }
+}
+
+/**
+ * The bubble's text row with web links tappable. Links keep the
+ * bubble's text color and mark themselves by underline alone: on an
+ * accent-filled outgoing bubble every "link blue" clashes with some
+ * accent, while an underline reads as a link on any fill. Detection
+ * is [ChatBodyLinks] (https/http/www only — a chat message must not
+ * become an intent launcher); taps open the system browser.
+ */
+@Composable
+private fun LinkifiedBody(
+    body: String,
+    textColor: Color,
+    messageId: java.util.UUID,
+    /** The bubble's long-press → Copy, owned HERE for the text area:
+     *  link handling and the copy long-press must share one gesture
+     *  detector — LinkAnnotation's internal handling also fired the
+     *  link on a long-press RELEASE, so holding a URL to copy it
+     *  opened the browser on the way out. Reports the Text's own
+     *  [LayoutCoordinates] with the press
+     *  so the caller can map into ITS space (the Text sits below
+     *  padding/reply/media — a raw offset anchored the menu an
+     *  image-height above the finger). */
+    onLongPress: (LayoutCoordinates, Offset) -> Unit,
+    /** Tap on non-link text — the failed-bubble retry, so a text-and-
+     *  link bubble keeps its tap action outside the link spans. */
+    onTap: (() -> Unit)?,
+) {
+    val links = remember(body) { ChatBodyLinks.detect(body) }
+    if (links.isEmpty()) {
+        Text(
+            text = body,
+            color = textColor,
+            style = MaterialTheme.typography.bodyMedium,
+            // Same tag as the linkified branch: its presence must not
+            // silently depend on whether detection found anything.
+            modifier = Modifier.testTag("chat_thread.body_links.$messageId"),
+        )
+        return
+    }
+    val uriHandler = LocalUriHandler.current
+    // Styling only — no LinkAnnotation: pointer handling lives in the
+    // single detector below, which is what lets a long-press over a
+    // link open Copy WITHOUT also following the link. Underline-only
+    // marking: on an accent-filled outgoing bubble every "link blue"
+    // clashes with some accent, while an underline reads as a link on
+    // any fill.
+    val annotated = remember(body, textColor) {
+        buildAnnotatedString {
+            append(body)
+            for (link in links) {
+                addStyle(
+                    SpanStyle(
+                        color = textColor,
+                        textDecoration = TextDecoration.Underline,
+                    ),
+                    link.range.first,
+                    link.range.last + 1,
+                )
+            }
+        }
+    }
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var textCoordinates by remember {
+        mutableStateOf<LayoutCoordinates?>(null)
+    }
+    val latestOnTap by rememberUpdatedState(onTap)
+    // Hand-rolled links lose LinkAnnotation's free link semantics, so
+    // give TalkBack an explicit route to each: one custom action per
+    // link — the same reason the bubble's Copy has its semantics
+    // long-click.
+    val openActionLabel = stringResource(R.string.chat_open_link)
+    val linkActions = remember(links, openActionLabel) {
+        links.map { link ->
+            CustomAccessibilityAction(
+                "$openActionLabel ${link.url}",
+            ) {
+                runCatching { uriHandler.openUri(link.url) }
+                true
+            }
+        }
+    }
+    Text(
+        text = annotated,
+        color = textColor,
+        style = MaterialTheme.typography.bodyMedium,
+        onTextLayout = { layout = it },
+        modifier = Modifier
+            .onGloballyPositioned { textCoordinates = it }
+            .semantics {
+                customActions = linkActions
+            }
+            .pointerInput(body) {
+                detectTapGestures(
+                    onLongPress = { position ->
+                        textCoordinates?.let { onLongPress(it, position) }
+                    },
+                    onTap = { position ->
+                        // getOffsetForPosition answers the nearest
+                        // CURSOR offset, not the glyph index: a press
+                        // on the right half of character i answers
+                        // i+1, whose bounding box starts where i's
+                        // ends — so the bounding-box guard alone
+                        // rejected half of all real link taps. Try
+                        // the cursor's own box, then the glyph to its
+                        // left; a hit outside both (empty space right
+                        // of a link-ending line, below the last line)
+                        // is not a link tap.
+                        val currentLayout = layout
+                        val glyphIndex = currentLayout?.getOffsetForPosition(position)?.let { cursor ->
+                            cursor.takeIf {
+                                it < annotated.length &&
+                                    currentLayout.getBoundingBox(it).contains(position)
+                            } ?: (cursor - 1).takeIf {
+                                it >= 0 &&
+                                    currentLayout.getBoundingBox(it).contains(position)
+                            }
+                        }
+                        val url = glyphIndex?.let { index ->
+                            links.firstOrNull { index in it.range }?.url
+                        }
+                        if (url != null) {
+                            // A dead browser (no handler) must not
+                            // crash a chat over a pasted URL.
+                            runCatching { uriHandler.openUri(url) }
+                        } else {
+                            latestOnTap?.invoke()
+                        }
+                    },
+                )
+            }
+            .testTag("chat_thread.body_links.$messageId"),
+    )
 }
 
 /**
@@ -1105,6 +1390,21 @@ private val IMAGE_RADIUS = 12.dp
 private const val HIGHLIGHT_BLEND = 0.25f
 
 /** Drag distance past which releasing arms a reply. */
+/** Copy [body] flagged sensitive (API 33+; a plain copy below):
+ * the system overlay confirms without rendering the message, and
+ * clipboard history treats it as redactable. */
+private fun copySensitive(context: android.content.Context, body: String) {
+    val manager = context.getSystemService(android.content.ClipboardManager::class.java)
+        ?: return
+    val clip = android.content.ClipData.newPlainText(null, body)
+    if (android.os.Build.VERSION.SDK_INT >= 33) {
+        clip.description.extras = android.os.PersistableBundle().apply {
+            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+    }
+    manager.setPrimaryClip(clip)
+}
+
 private val SWIPE_REPLY_THRESHOLD = 56.dp
 
 /** How far the row can travel — past the threshold it resists so the
