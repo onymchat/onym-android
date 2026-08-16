@@ -759,4 +759,5 @@
   <string name="moderation_settings_previous_footnote">Старые мандаты остаются связаны с теми условиями, на которые было дано согласие. Смена инстанции их не переписывает.</string>
   <string name="moderation_settings_registration_still_pending">Пока не доставлено — инстанция недоступна. Подписанный мандат сохранён; попробуйте позже.</string>
   <string name="moderation_settings_terms_unavailable">Не удаётся показать принятые условия — сохранённая запись отсутствует или нечитаема. Сам мандат не затронут.</string>
+  <string name="chat_open_link">Открыть ссылку</string>
 </resources>

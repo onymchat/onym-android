@@ -41,34 +41,54 @@ object ChatBodyLinks {
         CANDIDATE.findAll(body).mapNotNull { match ->
             var text = match.value
             // Trim sentence punctuation, then unbalanced closers, and
-            // repeat: "see https://x.y/z)." sheds both.
+            // repeat: "see https://x.y/z)." sheds both. Bracket
+            // balances are counted ONCE and decremented — recounting
+            // inside the loop made trimming O(n²) on a pathological
+            // tail of closers.
+            var openParens = text.count { it == '(' }
+            var closeParens = text.count { it == ')' }
+            var openBrackets = text.count { it == '[' }
+            var closeBrackets = text.count { it == ']' }
             while (text.isNotEmpty()) {
                 val last = text.last()
-                text = when {
-                    last in TRAILING -> text.dropLast(1)
-                    last == ')' && text.count { it == '(' } < text.count { it == ')' } ->
-                        text.dropLast(1)
-                    last == ']' && text.count { it == '[' } < text.count { it == ']' } ->
-                        text.dropLast(1)
+                when {
+                    last in TRAILING -> text = text.dropLast(1)
+                    last == ')' && openParens < closeParens -> {
+                        text = text.dropLast(1)
+                        closeParens -= 1
+                    }
+                    last == ']' && openBrackets < closeBrackets -> {
+                        text = text.dropLast(1)
+                        closeBrackets -= 1
+                    }
                     else -> break
                 }
             }
             // A bare marker with no host left is prose, not a link.
             // substringAfter, not removePrefix: the match is (?i), so
-            // MiXeD-case schemes must strip too.
+            // MiXeD-case schemes must strip too — and the www guard
+            // must be ignoreCase for the same reason (a lone "WWW."
+            // escaped the case-sensitive check as a dead link).
             val hostPart = text.substringAfter("://", text)
             if (hostPart.isEmpty() || !hostPart.contains('.') ||
-                hostPart.startsWith("www.") && hostPart.length <= 4
+                hostPart.startsWith("www.", ignoreCase = true) && hostPart.length <= 4
             ) {
                 return@mapNotNull null
             }
             val start = match.range.first
             BodyLink(
                 range = start until start + text.length,
-                url = if (text.startsWith("www.", ignoreCase = true)) {
-                    "https://$text"
-                } else {
-                    text
+                // The DISPLAY range keeps the author's spelling; the
+                // URL normalizes the scheme to lowercase — Android
+                // resolves intent filters case-sensitively against
+                // lowercase schemes, so "HtTpS://…" would be a
+                // tappable link that opens nothing.
+                url = when {
+                    text.startsWith("www.", ignoreCase = true) -> "https://$text"
+                    else -> {
+                        val scheme = text.substringBefore("://")
+                        scheme.lowercase() + "://" + text.substringAfter("://")
+                    }
                 },
             )
         }.toList()

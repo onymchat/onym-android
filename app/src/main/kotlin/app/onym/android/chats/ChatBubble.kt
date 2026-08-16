@@ -64,6 +64,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -74,6 +76,8 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import app.onym.android.strings.R
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
@@ -82,9 +86,9 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -380,6 +384,14 @@ private fun BubbleBody(
     val clipboard = LocalClipboardManager.current
     val density = LocalDensity.current
     val latestOnClick by rememberUpdatedState(onClick)
+    // The menu's anchor Box: long-press positions from NESTED nodes
+    // (the body Text sits below padding, reply inset and media) are
+    // mapped into this space before use — a caption long-press on an
+    // image bubble otherwise anchored the menu an image-height above
+    // the finger.
+    var bubbleCoordinates by remember {
+        mutableStateOf<LayoutCoordinates?>(null)
+    }
     val openCopyMenu: (Offset) -> Unit = { position ->
         copyHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
         // Anchor the menu at the finger, not the bubble's top-start —
@@ -415,7 +427,9 @@ private fun BubbleBody(
         Modifier
     }
 
-    Box {
+    Box(
+        modifier = Modifier.onGloballyPositioned { bubbleCoordinates = it },
+    ) {
         DropdownMenu(
             expanded = copyMenuOpen,
             onDismissRequest = { copyMenuOpen = false },
@@ -521,7 +535,14 @@ private fun BubbleBody(
                     body = body,
                     textColor = textColor,
                     messageId = messageId,
-                    onLongPress = openCopyMenu,
+                    // Map the Text-local press into the bubble Box's
+                    // space so the menu anchors at the finger.
+                    onLongPress = { textCoordinates, position ->
+                        val mapped = bubbleCoordinates
+                            ?.localPositionOf(textCoordinates, position)
+                            ?: position
+                        openCopyMenu(mapped)
+                    },
                     onTap = onClick,
                 )
             }
@@ -536,13 +557,6 @@ private fun BubbleBody(
  * accent, while an underline reads as a link on any fill. Detection
  * is [ChatBodyLinks] (https/http/www only — a chat message must not
  * become an intent launcher); taps open the system browser.
- *
- * Accessibility trade-off, stated rather than silently dropped: the
- * `LinkAnnotation` this replaced contributed per-link TalkBack link
- * semantics, and a hand-rolled span cannot. The bubble-level semantics
- * ([BubbleBody]'s `onLongClick` / `onClick`) still cover Copy and
- * retry; per-link a11y activation — a semantics node per link range,
- * each with its own `onClick` — is a follow-up, not part of this PR.
  */
 @Composable
 private fun LinkifiedBody(
@@ -553,8 +567,12 @@ private fun LinkifiedBody(
      *  link handling and the copy long-press must share one gesture
      *  detector — LinkAnnotation's internal handling also fired the
      *  link on a long-press RELEASE, so holding a URL to copy it
-     *  opened the browser on the way out. */
-    onLongPress: (Offset) -> Unit,
+     *  opened the browser on the way out. Reports the Text's own
+     *  [LayoutCoordinates] with the press
+     *  so the caller can map into ITS space (the Text sits below
+     *  padding/reply/media — a raw offset anchored the menu an
+     *  image-height above the finger). */
+    onLongPress: (LayoutCoordinates, Offset) -> Unit,
     /** Tap on non-link text — the failed-bubble retry, so a text-and-
      *  link bubble keeps its tap action outside the link spans. */
     onTap: (() -> Unit)?,
@@ -565,6 +583,9 @@ private fun LinkifiedBody(
             text = body,
             color = textColor,
             style = MaterialTheme.typography.bodyMedium,
+            // Same tag as the linkified branch: its presence must not
+            // silently depend on whether detection found anything.
+            modifier = Modifier.testTag("chat_thread.body_links.$messageId"),
         )
         return
     }
@@ -591,20 +612,57 @@ private fun LinkifiedBody(
         }
     }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var textCoordinates by remember {
+        mutableStateOf<LayoutCoordinates?>(null)
+    }
     val latestOnTap by rememberUpdatedState(onTap)
+    // Hand-rolled links lose LinkAnnotation's free link semantics, so
+    // give TalkBack an explicit route to each: one custom action per
+    // link — the same reason the bubble's Copy has its semantics
+    // long-click.
+    val openActionLabel = stringResource(R.string.chat_open_link)
+    val linkActions = remember(links, openActionLabel) {
+        links.map { link ->
+            CustomAccessibilityAction(
+                "$openActionLabel ${link.url}",
+            ) {
+                runCatching { uriHandler.openUri(link.url) }
+                true
+            }
+        }
+    }
     Text(
         text = annotated,
         color = textColor,
         style = MaterialTheme.typography.bodyMedium,
         onTextLayout = { layout = it },
         modifier = Modifier
+            .onGloballyPositioned { textCoordinates = it }
+            .semantics {
+                customActions = linkActions
+            }
             .pointerInput(body) {
                 detectTapGestures(
-                    onLongPress = onLongPress,
+                    onLongPress = { position ->
+                        textCoordinates?.let { onLongPress(it, position) }
+                    },
                     onTap = { position ->
-                        val characterOffset = layout?.getOffsetForPosition(position)
-                        val url = characterOffset?.let { offset ->
-                            links.firstOrNull { offset in it.range }?.url
+                        // getOffsetForPosition CLAMPS to the nearest
+                        // character, so empty space right of a
+                        // link-ending line (or below the last line)
+                        // resolves to a link offset — require the
+                        // press to be inside the glyph's box before
+                        // treating it as a link hit.
+                        val currentLayout = layout
+                        val characterOffset = currentLayout?.getOffsetForPosition(position)
+                        val onGlyph = currentLayout != null &&
+                            characterOffset != null &&
+                            characterOffset < annotated.length &&
+                            currentLayout.getBoundingBox(characterOffset).contains(position)
+                        val url = if (onGlyph) {
+                            links.firstOrNull { characterOffset!! in it.range }?.url
+                        } else {
+                            null
                         }
                         if (url != null) {
                             // A dead browser (no handler) must not

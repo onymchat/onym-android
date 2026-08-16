@@ -93,15 +93,25 @@ class ChatBodyLinksTest {
         assertTrue(ChatBodyLinks.detect("mail bob@www.example.com today").isEmpty())
     }
 
+    /** Display keeps the author's spelling; the URL lowercases the
+     * SCHEME only — Android resolves intent filters case-sensitively
+     * against lowercase schemes, so an upper-case scheme is a
+     * tappable link that opens nothing. Host case survives (hosts
+     * are case-insensitive; paths are not, so nothing else moves). */
     @Test
-    fun `mixed-case schemes strip cleanly`() {
-        val link = ChatBodyLinks.detect("see HtTpS://Onym.App/Doc now").single()
-        assertEquals("HtTpS://Onym.App/Doc", link.url)
+    fun `mixed-case schemes normalize to a launchable url`() {
+        val body = "see HtTpS://Onym.App/Doc now"
+        val link = ChatBodyLinks.detect(body).single()
+        assertEquals("HtTpS://Onym.App/Doc", body.substring(link.range))
+        assertEquals("https://Onym.App/Doc", link.url)
     }
 
     @Test
     fun `a bare marker with no host is prose`() {
         assertTrue(ChatBodyLinks.detect("https:// is a prefix and www. a habit").isEmpty())
         assertTrue(ChatBodyLinks.detect("http://nohostdot").isEmpty())
+        // The guard is ignoreCase like the pattern: a lone "WWW."
+        // must not linkify to a dead https://WWW.
+        assertTrue(ChatBodyLinks.detect("shouting WWW. at clouds").isEmpty())
     }
 }

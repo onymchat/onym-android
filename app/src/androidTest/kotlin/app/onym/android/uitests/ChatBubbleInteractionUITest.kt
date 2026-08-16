@@ -41,6 +41,18 @@ class ChatBubbleInteractionUITest {
     @get:Rule
     val composeRule = createAndroidComposeRule<ComponentActivity>()
 
+    private fun message(body: String, status: MessageStatus) = ChatMessage(
+        id = UUID.randomUUID(),
+        groupId = "aa".repeat(32),
+        ownerIdentityId = "owner",
+        senderBlsPubkeyHex = "cc".repeat(48),
+        body = body,
+        sentAtMillis = 0L,
+        direction = MessageDirection.OUTGOING,
+        status = status,
+        groupType = SepGroupType.TYRANNY,
+    )
+
     private fun failedMessage(body: String) = ChatMessage(
         id = UUID.randomUUID(),
         groupId = "aa".repeat(32),
@@ -53,10 +65,18 @@ class ChatBubbleInteractionUITest {
         groupType = SepGroupType.TYRANNY,
     )
 
-    private fun show(message: ChatMessage, onRetry: (() -> Unit)? = null) {
+    private fun show(
+        message: ChatMessage,
+        onRetry: (() -> Unit)? = null,
+        onSwipeReply: (() -> Unit)? = null,
+    ) {
         composeRule.activity.runOnUiThread {
             composeRule.activity.setContent {
-                ChatBubble(message = message, onRetry = onRetry)
+                ChatBubble(
+                    message = message,
+                    onRetry = onRetry,
+                    onSwipeReply = onSwipeReply,
+                )
             }
         }
         composeRule.waitForIdle()
@@ -66,7 +86,7 @@ class ChatBubbleInteractionUITest {
     fun failedTextBubbleTapStillFiresRetry() {
         val retries = AtomicInteger(0)
         val message = failedMessage("this one failed to send")
-        show(message) { retries.incrementAndGet() }
+        show(message, onRetry = { retries.incrementAndGet() })
 
         composeRule.onNodeWithTag("chat_thread.bubble.${message.id}", useUnmergedTree = true)
             .performClick()
@@ -96,6 +116,27 @@ class ChatBubbleInteractionUITest {
             .performTouchInput { longClick() }
         composeRule.onNodeWithTag("chat_thread.copy.${message.id}", useUnmergedTree = true)
             .assertIsDisplayed()
+    }
+
+    /** The riskiest coexistence claim (review): every TEXT bubble now
+     * installs a tap detector that consumes the down — the row's
+     * drag-to-reply must still win a horizontal drag on a normal,
+     * non-failed bubble. Dragged well past SWIPE_REPLY_THRESHOLD
+     * (56dp) and released. */
+    @Test
+    fun swipeToReplyStillFiresOnANormalTextBubble() {
+        val replies = AtomicInteger(0)
+        val sent = message("just a normal sent message", MessageStatus.SENT)
+        show(sent, onSwipeReply = { replies.incrementAndGet() })
+
+        composeRule.onNodeWithTag("chat_thread.bubble.${sent.id}", useUnmergedTree = true)
+            .performTouchInput {
+                down(center)
+                repeat(12) { moveBy(androidx.compose.ui.geometry.Offset(-40f, 0f)) }
+                up()
+            }
+        composeRule.waitForIdle()
+        assertEquals(1, replies.get())
     }
 
     @Test
