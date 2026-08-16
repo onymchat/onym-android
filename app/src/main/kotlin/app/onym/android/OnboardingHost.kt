@@ -139,18 +139,6 @@ internal fun OnboardingHost(
     )
     val flow = hostViewModel.flow
 
-    // MODERATION TRIPWIRE: the reserved slot has NO Android surface
-    // yet. If the flag ever flips without one, the walk would render
-    // the module's inert placeholder on an outcome-gated,
-    // unskippable, back-blocked step — a bricked wizard. Fail fast
-    // and name the missing piece instead of shipping the dead end.
-    require(OnboardingStep.Moderation !in flow.steps) {
-        "OnboardingFlow was constructed with moderationEnabled = true, but " +
-            "OnboardingHost provides no OnboardingStep.Moderation surface — the " +
-            "step is outcome-gated and unskippable, so the walk would dead-end. " +
-            "Wire the moderation step content before enabling the reserved slot."
-    }
-
     val state by flow.state.collectAsState()
 
     // Full-screen and back-blocked: the only exits are Done's primary
@@ -273,10 +261,12 @@ internal fun OnboardingHost(
                                 flow = flow,
                             )
                         })
-                        // Moderation stays reserved — no Android
-                        // surface yet; the module placeholder renders
-                        // if the flag ever flips without content.
-                        OnboardingStep.Moderation -> null
+                        OnboardingStep.Moderation -> ({
+                            ModerationStepContent(
+                                dependencies = dependencies,
+                                flow = flow,
+                            )
+                        })
                     }
                 },
             )
@@ -614,6 +604,42 @@ private fun IdentityChecklistRow(phase: IdentityPhase, title: String, subtitle: 
  * completion) — they are a promise, not live state; the Done step's
  * summary is the live, checkable view.
  */
+/**
+ * The moderation consent step: the reviewed manifest snapshot with
+ * Agree wired to `ModerationRepository.consent`. Outcome-gated like
+ * every core step — Consented on success; Unavailable when the
+ * directory offers nothing (Continue acknowledges, per the flow's
+ * mandatory/Unavailable arithmetic — opting out of moderation is not
+ * a thing, but an empty directory cannot demand consent). A null
+ * `dependencies.moderation` under an enabled step is unreachable:
+ * the flow only enters the step when the seat is wired.
+ */
+@Composable
+private fun ModerationStepContent(
+    dependencies: AppDependencies,
+    flow: OnboardingFlow,
+) {
+    val moderation = dependencies.moderation ?: return
+    val controller = remember { moderation.makeConsentController() }
+    app.onym.android.moderation.ui.ModerationConsentContent(
+        controller = controller,
+        onConsented = { record ->
+            if (flow.state.value.step == OnboardingStep.Moderation) {
+                flow.recordOutcome(StepOutcome.Consented(record.mandate.authority))
+            }
+            // The iOS `consentCompleted` invariant: a fresh gate
+            // check immediately, so the gate reflects the mandate.
+            moderation.gate.consentCompleted()
+        },
+        onUnavailableContinue = {
+            if (flow.state.value.step == OnboardingStep.Moderation) {
+                flow.recordOutcome(StepOutcome.Unavailable)
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
 @Composable
 private fun ServicesStepContent(
     flow: OnboardingFlow,

@@ -13,6 +13,15 @@ import app.onym.android.discovery.DiscoverySource
 import app.onym.android.discovery.DiscoverySourcesConfiguration
 import app.onym.android.identity.IdentitySecretStore
 import app.onym.android.onboarding.OnboardingStep
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import app.onym.android.moderation.support.FakeAuthorityManifestFetcher
+import app.onym.android.moderation.support.FakeDeviceAttestationProvider
+import app.onym.android.moderation.support.FakeKnownAuthoritiesFetcher
+import app.onym.android.moderation.support.InMemoryGateStateStore
+import app.onym.android.moderation.support.InMemoryMandateStore
+import app.onym.android.moderation.support.ScriptedEnforcementBackendClient
 import app.onym.android.support.FakeDiscoveryFetcher
 import app.onym.android.support.InMemoryDiscoveryStore
 import app.onym.android.support.InMemoryOnboardingStore
@@ -96,7 +105,17 @@ class OnboardingWalkUITest {
     @Target(AnnotationTarget.FUNCTION)
     annotation class AlreadyCompleted
 
+    /** Boot with the moderation seat's registry fakes, so the walk
+     *  includes the (otherwise dark) Moderation step. */
+    @Retention(AnnotationRetention.RUNTIME)
+    @Target(AnnotationTarget.FUNCTION)
+    annotation class ModerationEnabled
+
     private val onboardingStore = InMemoryOnboardingStore()
+
+    /** Scripted enforcement backend for the @ModerationEnabled walk:
+     *  every gate check after consent answers `clear`. */
+    private val moderationBackend = ScriptedEnforcementBackendClient()
 
     private lateinit var identityStore: IdentitySecretStore
 
@@ -165,6 +184,14 @@ class OnboardingWalkUITest {
                         ),
                     ),
                 )
+            }
+            if (description.getAnnotation(ModerationEnabled::class.java) != null) {
+                UITestRegistry.moderationBackend = moderationBackend
+                UITestRegistry.moderationAttestation = FakeDeviceAttestationProvider()
+                UITestRegistry.moderationMandateStore = InMemoryMandateStore()
+                UITestRegistry.moderationGateStateStore = InMemoryGateStateStore()
+                UITestRegistry.moderationAuthoritiesFetcher = FakeKnownAuthoritiesFetcher()
+                UITestRegistry.moderationManifestFetcher = FakeAuthorityManifestFetcher()
             }
             if (description.getAnnotation(NoOnboardingSlot::class.java) == null) {
                 if (description.getAnnotation(AlreadyCompleted::class.java) != null) {
@@ -282,6 +309,58 @@ class OnboardingWalkUITest {
         onboarding.awaitTabShell()
         onboarding.assertNotShown()
         assertEquals("re-resolution must not re-write the flag", 1, onboardingStore.markCount)
+    }
+
+    // ─── (1b) the walk WITH the moderation step ────────────────────
+
+    /**
+     * With the moderation seat's fakes registered the reserved step
+     * enters the sequence between services and recoveryPhrase, its
+     * consent surface consents through the scripted backend
+     * (challenge → enroll → mandate → countersign), and the recorded
+     * outcome unlocks the step's Continue. The walk then completes
+     * and the tab shell mounts — the gate's post-consent check
+     * answers the scripted `clear`.
+     */
+    @Test
+    @ModerationEnabled
+    fun moderationStepConsentsThroughTheWalk() {
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
+        onboarding.tapPrimary(OnboardingStep.Identity)
+        onboarding.awaitStep(OnboardingStep.Services)
+        onboarding.awaitRecommendedCard()
+        onboarding.tapPrimary(OnboardingStep.Services)
+
+        // The moderation step presents; its primary stays locked
+        // until the consent surface records an outcome.
+        onboarding.awaitStep(OnboardingStep.Moderation)
+        onboarding.assertPrimaryDisabled(OnboardingStep.Moderation)
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.onAllNodes(
+                hasTestTag("moderation.consent.agree"),
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("moderation.consent.agree", useUnmergedTree = true)
+            .performClick()
+        // Consent ran the full scripted path and unlocked Continue.
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Moderation)
+        assertTrue(moderationBackend.lastEnrollment != null)
+        assertTrue(moderationBackend.lastCountersignedBytes != null)
+        onboarding.tapPrimary(OnboardingStep.Moderation)
+
+        // The rest of the walk is the smoke path's shape.
+        onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
+        onboarding.tapSkip(OnboardingStep.RecoveryPhrase)
+        onboarding.awaitStep(OnboardingStep.Done)
+        onboarding.awaitDoneSummary()
+        onboarding.tapPrimary(OnboardingStep.Done)
+        onboarding.awaitTabShell()
     }
 
     // ─── (2) the custom-services hub walk ─────────────────────────

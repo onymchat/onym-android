@@ -1,0 +1,88 @@
+package app.onym.android.moderation.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import app.onym.android.moderation.BanState
+
+/**
+ * The full-screen ban gate. A silent brick is nonconforming (profile
+ * §5.2 item 3): at least one route out — the appeal URL, the
+ * new-holder claim, or the authority's contact — always renders.
+ */
+@Composable
+fun BannedScreen(
+    state: BanState,
+    onOpenUrl: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp)
+                .testTag("moderation.banned"),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = stringResource(R.string.moderation_banned_title),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = state.banExpires?.let {
+                    stringResource(R.string.moderation_banned_expires, it)
+                } ?: stringResource(R.string.moderation_banned_permanent),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.moderation_banned_verdict_ref, state.verdictRef),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(
+                    R.string.moderation_banned_contact,
+                    state.authorityContact,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(24.dp))
+            state.appealUrl?.let { url ->
+                Button(
+                    onClick = { onOpenUrl(url) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("moderation.banned.appeal"),
+                ) { Text(stringResource(R.string.moderation_banned_appeal)) }
+                Spacer(Modifier.height(8.dp))
+            }
+            state.newHolderUrl?.let { url ->
+                OutlinedButton(
+                    onClick = { onOpenUrl(url) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("moderation.banned.newHolder"),
+                ) { Text(stringResource(R.string.moderation_banned_new_holder)) }
+            }
+        }
+    }
+}

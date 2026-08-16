@@ -1,0 +1,88 @@
+package app.onym.android.moderation.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import app.onym.android.moderation.CheckRequiredReason
+
+/**
+ * The blocking "Verification required" gate: no trustworthy gate
+ * answer (and grace exhausted). Retry re-runs the check for the
+ * reasons where retrying can help; `REIDENTIFICATION_REQUIRED` names
+ * the authority path instead (device recovery is a deferred vertical —
+ * the copy routes to a human, not to a dead button).
+ */
+@Composable
+fun GateCheckRequiredScreen(
+    reason: CheckRequiredReason,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .testTag("moderation.gateRequired"),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = stringResource(R.string.moderation_gate_required_title),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource(reasonBody(reason)),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            if (canRetry(reason)) {
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("moderation.gateRequired.retry"),
+                ) { Text(stringResource(R.string.moderation_gate_required_retry)) }
+            }
+        }
+    }
+}
+
+private fun reasonBody(reason: CheckRequiredReason): Int = when (reason) {
+    CheckRequiredReason.TOKEN_INVALID -> R.string.moderation_gate_required_token_invalid
+    CheckRequiredReason.ATTESTATION_UNAVAILABLE ->
+        R.string.moderation_gate_required_attestation_unavailable
+    CheckRequiredReason.REIDENTIFICATION_REQUIRED ->
+        R.string.moderation_gate_required_reidentification
+    CheckRequiredReason.OFFLINE_GRACE_EXPIRED -> R.string.moderation_gate_required_grace_expired
+    CheckRequiredReason.NEVER_CHECKED -> R.string.moderation_gate_required_never_checked
+    CheckRequiredReason.CLOCK_ROLLBACK -> R.string.moderation_gate_required_clock_rollback
+    CheckRequiredReason.BACKEND_REFUSED -> R.string.moderation_gate_required_backend_refused
+    CheckRequiredReason.ENROLLMENT_LOST -> R.string.moderation_gate_required_enrollment_lost
+}
+
+private fun canRetry(reason: CheckRequiredReason): Boolean = when (reason) {
+    CheckRequiredReason.OFFLINE_GRACE_EXPIRED,
+    CheckRequiredReason.NEVER_CHECKED,
+    CheckRequiredReason.TOKEN_INVALID,
+    CheckRequiredReason.CLOCK_ROLLBACK,
+    CheckRequiredReason.BACKEND_REFUSED,
+    CheckRequiredReason.ATTESTATION_UNAVAILABLE,
+    -> true
+    CheckRequiredReason.REIDENTIFICATION_REQUIRED,
+    CheckRequiredReason.ENROLLMENT_LOST,
+    -> false
+}

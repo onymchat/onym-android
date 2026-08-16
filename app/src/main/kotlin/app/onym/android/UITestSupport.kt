@@ -158,6 +158,41 @@ object UITestRegistry {
      */
     var biometricAuthenticator: app.onym.android.recovery.BiometricAuthenticator? = null
 
+    /**
+     * Fake enforcement-backend client for the moderation seat. Gated
+     * on [debugActive], not [enabled]: swapping the backend bypasses
+     * device attestation, which is a security property, not an I/O
+     * detail. Non-null (under a debug build) is ALSO the activation
+     * switch: production activation needs BuildConfig.MODERATION_BASE_URL,
+     * so pre-moderation tests that leave this null run with the whole
+     * moderation surface absent, exactly as before it existed.
+     */
+    var moderationBackend: app.onym.android.moderation.EnforcementBackendClient? = null
+
+    /** Fake Play Integrity provider. [debugActive]-gated for the same
+     *  reason as [moderationBackend]. */
+    var moderationAttestation: app.onym.android.moderation.DeviceAttestationProvider? = null
+
+    /** In-memory mandate store (I/O swap; [enabled]). */
+    var moderationMandateStore: app.onym.android.moderation.MandateStore? = null
+
+    /** In-memory gate-state store (I/O swap; [enabled]). */
+    var moderationGateStateStore: app.onym.android.moderation.GateStateStore? = null
+
+    /** Fake authority directory (I/O swap; [enabled]). */
+    var moderationAuthoritiesFetcher: app.onym.android.moderation.KnownAuthoritiesFetcher? = null
+
+    /** Fake manifest fetcher (I/O swap; [enabled]). */
+    var moderationManifestFetcher: app.onym.android.moderation.AuthorityManifestFetcher? = null
+
+    /**
+     * Fixture-era clock for the moderation gate's grace arithmetic.
+     * [debugActive]-gated: the clock decides signature freshness and
+     * grace expiry, both security properties (same class as
+     * [discoveryClock]'s trust-layer cousin).
+     */
+    var moderationClock: (() -> java.time.Instant)? = null
+
     /** Reset between tests. Called from `@Before`. */
     fun reset() {
         enabled = false
@@ -176,5 +211,12 @@ object UITestRegistry {
         onboardingStore = null
         discoveryClock = null
         biometricAuthenticator = null
+        moderationBackend = null
+        moderationAttestation = null
+        moderationMandateStore = null
+        moderationGateStateStore = null
+        moderationAuthoritiesFetcher = null
+        moderationManifestFetcher = null
+        moderationClock = null
     }
 }

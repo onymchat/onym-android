@@ -54,6 +54,21 @@ android {
         // See `OnymApplication.buildDependencies` for the OkHttp
         // interceptor that consumes this.
         buildConfigField("String", "RELAYER_AUTH_TOKEN", "\"${relayerAuthToken()}\"")
+
+        // Moderation enforcement backend (the `android/` service in
+        // onym-moderation). Sourced like RELAYER_AUTH_TOKEN: ENV
+        // `MODERATION_BASE_URL` → local.properties `moderation.baseUrl`
+        // → empty. EMPTY IS THE DARK-LAUNCH SWITCH: with no base URL
+        // (and no UI-test fakes) OnymApplication builds no moderation
+        // dependencies at all — no gate, no onboarding step, no Play
+        // Integrity calls. Flip only when the backend and the Play
+        // Console device-recall opt-in are live.
+        buildConfigField("String", "MODERATION_BASE_URL", "\"${moderationBaseUrl()}\"")
+        // The Google Cloud project number linked in the Play Console —
+        // StandardIntegrityManager.prepare needs it. ENV
+        // `PLAY_CLOUD_PROJECT_NUMBER` → local.properties
+        // `play.cloudProjectNumber` → 0 (unusable, kept dark).
+        buildConfigField("long", "PLAY_CLOUD_PROJECT_NUMBER", "${playCloudProjectNumber()}L")
     }
 
     buildTypes {
@@ -139,6 +154,8 @@ dependencies {
     implementation(project(":inbox"))
     implementation(project(":search"))
     implementation(project(":onboarding"))
+    implementation(project(":moderation"))
+    implementation(project(":moderation-ui"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -282,6 +299,7 @@ dependencies {
     // InMemoryOnboardingStore — drives the onboarding gate in the
     // walk-through UI test (PR 4).
     androidTestImplementation(testFixtures(project(":onboarding")))
+    androidTestImplementation(testFixtures(project(":moderation")))
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.kotlinx.coroutines.test)
@@ -324,6 +342,24 @@ dependencies {
  * different storage primitives (UserDefaults / Info.plist over there;
  * `BuildConfig` here) but same precedence + fallback story.
  */
+fun moderationBaseUrl(): String {
+    System.getenv("MODERATION_BASE_URL")?.takeIf { it.isNotBlank() }?.let { return it }
+    val props = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    return props.getProperty("moderation.baseUrl").orEmpty()
+}
+
+fun playCloudProjectNumber(): Long {
+    System.getenv("PLAY_CLOUD_PROJECT_NUMBER")?.toLongOrNull()?.let { return it }
+    val props = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    return props.getProperty("play.cloudProjectNumber")?.toLongOrNull() ?: 0L
+}
+
 fun relayerAuthToken(): String {
     System.getenv("RELAYER_AUTH_TOKEN")?.takeIf { it.isNotBlank() }?.let { return it }
     val props = Properties().apply {
