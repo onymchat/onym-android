@@ -22,6 +22,15 @@ data class GateCheckPolicy(
     val interval: Duration = Duration.ofDays(1),
     /** Default `P3D`. */
     val offlineGrace: Duration = Duration.ofDays(3),
+    /**
+     * Serial (non-forced) checks completing within this window skip
+     * the network: coalescing only shares *concurrent* flights, so
+     * back-to-back foreground cycles each spent a challenge and a
+     * Play Integrity standard request against quota (profile §5.2's
+     * one-scheduler requirement). Forced checks (retry,
+     * post-consent) always run.
+     */
+    val minRecheckInterval: Duration = Duration.ofMinutes(1),
 ) {
     companion object {
         val DEFAULT = GateCheckPolicy()
@@ -189,22 +198,49 @@ class GateCheckRepository(
     suspend fun checkNow(force: Boolean = false) {
         val flight = mutex.withLock {
             val active = inFlight?.takeIf { it.isActive }
-            if (active != null && !force) {
-                active
-            } else {
-                scope.launch { runCheck() }.also { inFlight = it }
+            val recentEnough = lastRunCompletedAt?.let { completed ->
+                Duration.between(completed, clock()) < policy.minRecheckInterval
+            } == true
+            when {
+                active != null && !force -> active
+                // A run just completed: the current state is at most
+                // minRecheckInterval old, and serial foreground thrash
+                // must not spend quota re-deriving it.
+                recentEnough && !force -> null
+                else -> scope.launch { runCheck() }.also { inFlight = it }
             }
         }
-        flight.join()
+        flight?.join()
     }
+
+    /** When the last run finished, whatever its outcome — the
+     * min-interval guard's memory. Guarded by [mutex]. */
+    private var lastRunCompletedAt: Instant? = null
 
     private suspend fun runCheck() {
         val taken = mutex.withLock { ++generation }
         try {
             val record = moderation.activeMandateRecord()
             if (record == null) {
+                // No mandate on file — but the PERSISTED gate state
+                // may still carry a ban or a sticky refusal, and a
+                // cleared/corrupt mandate store must not walk around
+                // the laundering wall: Settings -> Clear data ->
+                // offline used to land Operational through the
+                // consent softening. Platform-state-first: a cached
+                // ban keeps blocking, a sticky refusal keeps
+                // blocking; only a genuinely clean history answers
+                // NotMandated (-> the consent gate).
+                val persisted = store.load()
+                val lastResult = persisted?.lastResult
+                val fallback = when {
+                    persisted?.refusalReason != null ->
+                        GateStatus.GateCheckRequired(persisted.refusalReason)
+                    lastResult is GateCheckResult.Banned -> GateStatus.Banned(lastResult.ban)
+                    else -> GateStatus.NotMandated
+                }
                 mutex.withLock {
-                    if (taken == generation) state.value = GateStatus.NotMandated
+                    if (taken == generation) state.value = fallback
                 }
                 return
             }
@@ -233,6 +269,8 @@ class GateCheckRepository(
                         GateStatus.GateCheckRequired(CheckRequiredReason.NEVER_CHECKED)
                 }
             }
+        } finally {
+            mutex.withLock { lastRunCompletedAt = clock() }
         }
     }
 

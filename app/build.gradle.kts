@@ -87,8 +87,15 @@ android {
         // with no cloud project number makes the Play provider latch
         // CLOUD_PROJECT_NUMBER_IS_INVALID as "unsupported" for the
         // process, so every session goes token-less and every user
-        // blocks at the gate. Refuse the build instead.
-        check(moderationBaseUrl().isBlank() || playCloudProjectNumber() != 0L) {
+        // blocks at the gate. Refuse the build instead — except for a
+        // loopback dev backend (the emulator loop against a local
+        // service has no Play Console pairing to demand, and the
+        // runtime client only honors loopback under a debug build).
+        check(
+            moderationBaseUrl().isBlank() ||
+                moderationUrlIsLoopback() ||
+                playCloudProjectNumber() != 0L
+        ) {
             "MODERATION_BASE_URL is set but PLAY_CLOUD_PROJECT_NUMBER is not — the moderation " +
                 "seat needs both (or neither, to stay dark). Set play.cloudProjectNumber in " +
                 "local.properties or the PLAY_CLOUD_PROJECT_NUMBER env var."
@@ -373,6 +380,13 @@ fun moderationBaseUrl(): String {
         if (f.exists()) f.inputStream().use { load(it) }
     }
     return props.getProperty("moderation.baseUrl").orEmpty()
+}
+
+fun moderationUrlIsLoopback(): Boolean {
+    val rest = moderationBaseUrl().removePrefix("http://")
+    if (rest == moderationBaseUrl()) return false
+    val host = rest.takeWhile { it != ':' && it != '/' }
+    return host == "localhost" || host == "10.0.2.2"
 }
 
 fun playCloudProjectNumber(): Long {

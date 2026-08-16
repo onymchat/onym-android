@@ -74,6 +74,34 @@ class ModerationConsentControllerTest {
     }
 
     /**
+     * A DETERMINISTIC refusal is not unavailability: routing it to
+     * Unavailable would hand its Continue to exactly the caller a
+     * production backend refuses (a de-Googled device's token-less
+     * enrollment, a blocked host presenting garbage) — a mandatory
+     * step bypassed into unmoderated operation. However many times it
+     * repeats, the surface stays Review + retry with the backend's
+     * reason.
+     */
+    @Test
+    fun `a refusing backend never routes to the deferral state`() = runTest {
+        backend.enrollFailure = app.onym.android.moderation.BackendRejectedException(
+            statusCode = 400,
+            rawCode = "signature_invalid",
+            message = "Google did not validate this integrity token",
+        )
+        val controller = controller()
+        controller.load()
+        repeat(4) {
+            assertEquals(null, controller.agree())
+            val state = controller.snapshots.value
+            assertTrue(
+                "$state",
+                state is ModerationConsentController.UiState.Review && state.error != null,
+            )
+        }
+    }
+
+    /**
      * The orphaned-enrollment defect: `agree` runs on the surface's
      * composition scope, and the surface can leave composition
      * mid-transaction (a gate flip). Cancellation between enroll and

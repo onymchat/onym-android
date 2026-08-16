@@ -1,6 +1,7 @@
 package app.onym.android.moderation.ui
 
 import app.onym.android.moderation.AuthorityListing
+import app.onym.android.moderation.BackendRejectedException
 import app.onym.android.moderation.AuthorityManifestFetcher
 import app.onym.android.moderation.KnownAuthoritiesFetcher
 import app.onym.android.moderation.MandateRecord
@@ -55,15 +56,20 @@ class ModerationConsentController(
     private var reviewed: Pair<AuthorityListing, SignedManifest>? = null
 
     /**
-     * Consecutive failed consent transactions. One failure keeps the
+     * Consecutive failed consent transactions that were TRANSIENT
+     * (the backend unreachable, the network down). One keeps the
      * Review surface (a blip — retry Agree in place); reaching
      * [MAX_AGREE_FAILURES] routes to [UiState.Unavailable], the one
-     * state whose host offers Continue. The moderation step is
-     * unskippable and outcome-gated, so a down or refusing
-     * enforcement backend (or a de-Googled device whose token-less
-     * enrollment a production backend refuses) must land on a state
-     * with a way forward — an error string with only Agree is an
-     * unpassable wizard for a new user.
+     * state whose host offers Continue — moderation genuinely could
+     * not be reached, so consent is deferred, not dodged.
+     *
+     * A DETERMINISTIC refusal ([BackendRejectedException] — the
+     * backend answered "no", e.g. a token-less enrollment from a
+     * de-Googled device against a production backend) never routes
+     * there: `Unavailable`'s Continue would let a refusing backend be
+     * bypassed into unmoderated operation, when the honest state is
+     * "moderation is offered and refuses this device" — Review with
+     * the reason, retry only.
      */
     private var agreeFailures = 0
 
@@ -116,8 +122,9 @@ class ModerationConsentController(
             state.value = UiState.Consented(record)
             record
         } catch (e: Exception) {
-            agreeFailures += 1
-            state.value = if (agreeFailures >= MAX_AGREE_FAILURES) {
+            val deterministicRefusal = e is BackendRejectedException
+            if (!deterministicRefusal) agreeFailures += 1
+            state.value = if (!deterministicRefusal && agreeFailures >= MAX_AGREE_FAILURES) {
                 UiState.Unavailable(e.message)
             } else {
                 UiState.Review(

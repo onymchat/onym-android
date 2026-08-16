@@ -235,7 +235,10 @@ class ModerationGateFlow(
     fun tappedRetry() {
         scope.launch {
             refreshDirectory()
-            gate.checkNow()
+            // Forced: an explicit retry must reach the network even
+            // inside the min-recheck window the passive triggers
+            // (launch, foreground) are throttled by.
+            gate.checkNow(force = true)
         }
     }
 }

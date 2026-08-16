@@ -145,16 +145,23 @@ class PlayIntegrityAttestationProvider(
         if (unsupported) AttestationToken.Unsupported else AttestationToken.Throttled
 
     private fun classify(e: StandardIntegrityException): AttestationToken = when (e.errorCode) {
-        StandardIntegrityErrorCode.API_NOT_AVAILABLE,
+        // Latched: these do not repair themselves while the process
+        // lives (no Play at all; a build-time misconfiguration).
         StandardIntegrityErrorCode.PLAY_STORE_NOT_FOUND,
         StandardIntegrityErrorCode.PLAY_SERVICES_NOT_FOUND,
-        StandardIntegrityErrorCode.PLAY_STORE_VERSION_OUTDATED,
-        StandardIntegrityErrorCode.PLAY_SERVICES_VERSION_OUTDATED,
         StandardIntegrityErrorCode.CLOUD_PROJECT_NUMBER_IS_INVALID,
         -> {
             unsupported = true
             AttestationToken.Unsupported
         }
+        // NOT latched: the user can update Play Store / Play services
+        // (or the API can become available) without restarting this
+        // process, and a latch would pin every later session
+        // token-less. Answer honestly this time, ask Play again next.
+        StandardIntegrityErrorCode.API_NOT_AVAILABLE,
+        StandardIntegrityErrorCode.PLAY_STORE_VERSION_OUTDATED,
+        StandardIntegrityErrorCode.PLAY_SERVICES_VERSION_OUTDATED,
+        -> AttestationToken.Unsupported
         StandardIntegrityErrorCode.TOO_MANY_REQUESTS -> {
             backoffUntil = clock().plus(backoff)
             backoff = minOf(backoff.multipliedBy(2), MAX_BACKOFF)

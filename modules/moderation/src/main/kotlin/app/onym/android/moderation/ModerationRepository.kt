@@ -36,6 +36,12 @@ class ModerationRepository(
     private val clock: () -> Instant = Instant::now,
 ) {
     private val mutex = Mutex()
+
+    /** Serializes whole consent transactions WITHOUT blocking the
+     * cheap readers: [mutex] guards only load/save/state, so
+     * [activeMandateRecord] — on every gate check — no longer queues
+     * behind a consent's enroll → countersign network round trips. */
+    private val consentMutex = Mutex()
     private val state = MutableStateFlow(ModerationState())
 
     val snapshots: StateFlow<ModerationState> = state.asStateFlow()
@@ -68,8 +74,8 @@ class ModerationRepository(
     suspend fun consent(
         listing: AuthorityListing,
         reviewedManifest: ReviewedManifest,
-    ): MandateRecord = mutex.withLock {
-        ensureLoadedLocked()
+    ): MandateRecord = consentMutex.withLock {
+        start()
         val signedManifest = reviewedManifest.signedManifest
         if (signedManifest.manifest.componentId != listing.componentId) {
             throw ModerationConsentException(
@@ -149,10 +155,13 @@ class ModerationRepository(
         )
 
         // Mandates are immutable: the previous active record is
-        // deactivated, never edited beyond that flag.
-        val records = listOf(record) + state.value.records.map { it.copy(isActive = false) }
-        mandateStore.save(records)
-        state.value = ModerationState(loaded = true, records = records)
+        // deactivated, never edited beyond that flag. Only this final
+        // read-modify-write needs the state lock.
+        mutex.withLock {
+            val records = listOf(record) + state.value.records.map { it.copy(isActive = false) }
+            mandateStore.save(records)
+            state.value = ModerationState(loaded = true, records = records)
+        }
         record
     }
 

@@ -103,6 +103,7 @@ class GateCheckRepositoryTest {
         assertEquals(GateStatus.Operational(), repository.snapshots.value)
 
         backend.failWith(403, null)
+        now = now.plusSeconds(3600)
         repository.checkNow()
         assertEquals(
             GateStatus.GateCheckRequired(CheckRequiredReason.BACKEND_REFUSED),
@@ -181,7 +182,9 @@ class GateCheckRepositoryTest {
         val repository = repository()
         repository.checkNow()
         val first = backend.lastGateRequest!!.timestamp
-        repository.checkNow()
+        // Forced: the same-second collision is exactly what the
+        // min-recheck guard would otherwise skip.
+        repository.checkNow(force = true)
         val second = backend.lastGateRequest!!.timestamp
         assertTrue("$first vs $second", second > first)
     }
@@ -211,8 +214,10 @@ class GateCheckRepositoryTest {
         assertEquals(challengesAfterConsent + 1, backend.challengeCounter)
         assertEquals(GateStatus.Operational(), repository.snapshots.value)
 
-        // A call AFTER the flight landed is a fresh check.
+        // A call AFTER the flight landed (and past the min-recheck
+        // window) is a fresh check.
         backend.gateDelay = null
+        now = now.plusSeconds(61)
         repository.checkNow()
         assertEquals(challengesAfterConsent + 2, backend.challengeCounter)
     }
@@ -251,6 +256,73 @@ class GateCheckRepositoryTest {
         holdTheWire.complete(Unit)
         staleFlight.join()
         assertEquals(GateStatus.Operational(), repository.snapshots.value)
+    }
+
+    /** Serial passive triggers inside the min-recheck window skip the
+     * network (coalescing only shares CONCURRENT flights; foreground
+     * cycles are serial); an explicit force always runs. */
+    @Test
+    fun `serial checks inside the min-recheck window spend no quota`() = runTest {
+        consent()
+        backend.gateResults.addLast(GateCheckResult.Clear)
+        val repository = repository()
+        repository.checkNow()
+        val afterFirst = backend.challengeCounter
+
+        now = now.plusSeconds(10)
+        repository.checkNow()
+        assertEquals("a serial re-check 10s later is served from state", afterFirst, backend.challengeCounter)
+
+        repository.checkNow(force = true)
+        assertEquals("an explicit retry always runs", afterFirst + 1, backend.challengeCounter)
+
+        now = now.plusSeconds(61)
+        repository.checkNow()
+        assertEquals("past the window the passive trigger runs", afterFirst + 2, backend.challengeCounter)
+    }
+
+    /**
+     * The cleared-mandate laundering hole: with no mandate record the
+     * gate used to answer NotMandated unconditionally, so Settings →
+     * Clear data (or a corrupt store, which reads as empty) walked
+     * around the persisted ban and the sticky refusal. Platform-state-
+     * first: the persisted gate state keeps blocking.
+     */
+    @Test
+    fun `a missing mandate does not discard a persisted ban or refusal`() = runTest {
+        val ban = BanState(verdictRef = "v1", authorityContact = "appeals@a.org")
+        gateStore.save(
+            PersistedGateState(
+                lastResult = GateCheckResult.Banned(ban),
+                lastSuccessAt = "2026-08-08T11:00:00Z",
+            ),
+        )
+        // No consent: the mandate store is empty.
+        val repository = repository()
+        repository.checkNow()
+        assertEquals(GateStatus.Banned(ban), repository.snapshots.value)
+
+        // Same for a sticky refusal.
+        gateStore.save(
+            PersistedGateState(
+                lastResult = GateCheckResult.Clear,
+                lastSuccessAt = "2026-08-08T11:00:00Z",
+                refusalReason = CheckRequiredReason.BACKEND_REFUSED,
+                refusedAt = "2026-08-08T11:30:00Z",
+            ),
+        )
+        now = now.plusSeconds(61)
+        repository.checkNow()
+        assertEquals(
+            GateStatus.GateCheckRequired(CheckRequiredReason.BACKEND_REFUSED),
+            repository.snapshots.value,
+        )
+
+        // A genuinely clean history answers NotMandated -> consent.
+        gateStore.save(null)
+        now = now.plusSeconds(61)
+        repository.checkNow()
+        assertEquals(GateStatus.NotMandated, repository.snapshots.value)
     }
 
     /** A failing gate-state store must degrade toward blocking, not
