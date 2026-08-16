@@ -100,6 +100,16 @@ data class MandateRecord(
     val authorityRegistered: Boolean = false,
     val isActive: Boolean,
     val createdAt: String,
+    /**
+     * Why the authority PERMANENTLY refused this mandate's
+     * registration, set when the refusal deactivates the record.
+     * Persisted so the reason survives to the next consent surface:
+     * the boot-time registration retry swallows its exceptions (there
+     * is no screen to show them on), and without this the user lands
+     * on the consent gate with no explanation of why their consent
+     * needs redoing. Null on active records and ordinary history.
+     */
+    val registrationRefusal: String? = null,
 )
 
 /**

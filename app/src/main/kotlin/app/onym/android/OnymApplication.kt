@@ -1374,7 +1374,12 @@ class OnymApplication : Application() {
                 // (registration is retried, never re-consented — the
                 // user already signed those exact bytes). Guarded by
                 // the pending check so the common every-boot path
-                // fetches no directory. Failures wait for next boot.
+                // fetches no directory. Transient failures wait for
+                // next boot; a PERMANENT refusal deactivates the
+                // record with its reason persisted
+                // (MandateRecord.registrationRefusal), which the next
+                // consent surface renders — the log below is for
+                // operators, not the user's only explanation.
                 runCatching {
                     val pending = moderationRepository.pendingRegistration()
                     if (pending != null) {

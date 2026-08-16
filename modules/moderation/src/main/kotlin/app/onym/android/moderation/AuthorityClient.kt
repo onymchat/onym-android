@@ -46,6 +46,18 @@ class AuthorityUnreachableException(message: String, cause: Throwable? = null) :
     IOException(message, cause)
 
 /**
+ * Registration failed PERMANENTLY on receipt verification: the
+ * Authority acknowledged a different `mandateRef`, or answered
+ * `accepted: false`. Deterministic by definition — the same bytes get
+ * the same receipt — so consent surfaces must classify this with
+ * [AuthorityRejectedException]'s deterministic case (Review + reason,
+ * retry only), never as the deferrable unavailability a transient
+ * failure earns. Thrown by the repository, not the transport: the
+ * checks hold for every [AuthorityClient] implementation.
+ */
+class AuthorityRegistrationRefusedException(override val message: String) : Exception(message)
+
+/**
  * Client seam for a moderation Authority's mandate-registration
  * operation — the minimal Android slice of iOS's
  * `ModerationAuthorityClient` (reports, case responses, appeals and
@@ -78,7 +90,10 @@ class OkHttpAuthorityClient(
         mandate: ModerationMandate,
     ): MandateRegistrationReceipt = withContext(Dispatchers.IO) {
         val baseUrl = listing.apiBaseURL.trimEnd('/')
-        val secure = baseUrl.startsWith("https://")
+        // ignoreCase: URL schemes are case-insensitive (RFC 3986 §3.1)
+        // and OkHttp normalizes them — an `HTTPS://` directory entry
+        // must not degrade into a permanently-retried "unreachable".
+        val secure = baseUrl.startsWith("https://", ignoreCase = true)
         val loopback = allowInsecureLoopback &&
             OkHttpEnforcementBackendClient.isLoopbackHost(baseUrl)
         if (!secure && !loopback) {

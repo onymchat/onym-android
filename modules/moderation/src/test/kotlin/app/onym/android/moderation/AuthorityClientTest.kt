@@ -96,6 +96,21 @@ class AuthorityClientTest {
         }
     }
 
+    /** Schemes are case-insensitive (RFC 3986 §3.1): an `HTTPS://`
+     * directory entry is secure and must post, not degrade into a
+     * permanently-retried "unreachable". */
+    @Test
+    fun `an uppercase https scheme is accepted`() = runTest {
+        val receipt = client(
+            200,
+            """{"mandateRef":"${mandate.mandateHash()}","accepted":true}""",
+        ).registerMandate(
+            ModerationFixtures.listing().copy(apiBaseURL = "HTTPS://authority.example"),
+            mandate,
+        )
+        assertTrue(receipt.accepted)
+    }
+
     /** The signed consent artifact never travels plaintext: a non-https
      * directory entry degrades like an outage (retried later), it does
      * not post. */

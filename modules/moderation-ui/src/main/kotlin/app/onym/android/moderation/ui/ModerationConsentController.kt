@@ -119,7 +119,14 @@ class ModerationConsentController(
         try {
             val signed = manifestFetcher.fetch(listing)
             reviewed = listing to signed
-            state.value = UiState.Review(listing, signed.displayJson())
+            // A persisted permanent-refusal reason (the boot-time
+            // registration retry deactivated the mandate with no
+            // screen to explain on) renders as the Review error: the
+            // user should see WHY their consent needs redoing, not
+            // just that it does. Null in the ordinary first-consent
+            // case, and quiet again once a consent activates.
+            val priorRefusal = runCatching { moderation.registrationRefusal() }.getOrNull()
+            state.value = UiState.Review(listing, signed.displayJson(), error = priorRefusal)
         } catch (e: Exception) {
             state.value = UiState.Unavailable(e.message)
             reviewed = null
@@ -161,10 +168,13 @@ class ModerationConsentController(
             // The repository only lets DETERMINISTIC authority
             // rejections escape consent (transient registration
             // failures keep the artifact and succeed), so any
-            // AuthorityRejectedException here is a judged "no".
+            // AuthorityRejectedException here is a judged "no" — and
+            // the receipt refusals (wrong mandateRef, accepted:false)
+            // are the same permanence under their own type.
             val deterministicRefusal =
                 e is BackendRejectedException ||
-                    e is app.onym.android.moderation.AuthorityRejectedException
+                    e is app.onym.android.moderation.AuthorityRejectedException ||
+                    e is app.onym.android.moderation.AuthorityRegistrationRefusedException
             if (!deterministicRefusal) agreeFailures += 1
             state.value = if (!deterministicRefusal && agreeFailures >= MAX_AGREE_FAILURES) {
                 UiState.Unavailable(e.message)

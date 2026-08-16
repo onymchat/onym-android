@@ -322,9 +322,11 @@ class ModerationRepositoryTest {
     }
 
     /** A receipt for different bytes is not registration of THIS
-     * consent, wherever it came from. */
+     * consent, wherever it came from — and the refusal is TYPED as
+     * permanent, so consent surfaces classify it with the
+     * deterministic 4xx rather than escalating to deferral. */
     @Test
-    fun `a receipt naming a different mandateRef is refused`() = runTest {
+    fun `a receipt naming a different mandateRef is refused permanently`() = runTest {
         authority.receiptOverride =
             MandateRegistrationReceipt(mandateRef = "somebody-elses-ref", accepted = true)
         try {
@@ -333,16 +335,16 @@ class ModerationRepositoryTest {
                 ModerationFixtures.reviewedManifest(),
             )
             fail("a mismatched receipt must refuse")
-        } catch (e: ModerationConsentException) {
-            assertTrue(e.message!!.contains("different mandate reference"))
+        } catch (e: AuthorityRegistrationRefusedException) {
+            assertTrue(e.message.contains("different mandate reference"))
         }
         assertEquals(null, repository().activeMandateRecord())
     }
 
     /** `accepted: false` with the right reference is still not a
-     * registration. */
+     * registration — same permanent type as the mismatch. */
     @Test
-    fun `an unaccepted receipt is refused`() = runTest {
+    fun `an unaccepted receipt is refused permanently`() = runTest {
         authority.accept = false
         try {
             repository().consent(
@@ -350,10 +352,120 @@ class ModerationRepositoryTest {
                 ModerationFixtures.reviewedManifest(),
             )
             fail("an unaccepted receipt must refuse")
-        } catch (e: ModerationConsentException) {
-            assertTrue(e.message!!.contains("did not accept"))
+        } catch (e: AuthorityRegistrationRefusedException) {
+            assertTrue(e.message.contains("did not accept"))
         }
         assertEquals(null, repository().activeMandateRecord())
+    }
+
+    /** The re-consent regression: the save deactivates the identity's
+     * previous record before registration runs, so a permanent
+     * refusal of the NEW mandate must roll that back — otherwise an
+     * identity that held a registered, authority-accepted mandate
+     * ends with zero active mandates, and re-consenting was strictly
+     * worse than not trying. */
+    @Test
+    fun `a refused re-consent restores the previous accepted mandate`() = runTest {
+        val repository = repository()
+        val first = repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        assertTrue(first.authorityRegistered)
+
+        // The authority rotated its manifest: the fresh mandate is
+        // permanently refused.
+        now = now.plusSeconds(3600)
+        authority.failure =
+            AuthorityRejectedException(400, "bad_request", "mandate pins a different manifest")
+        try {
+            repository.consent(
+                ModerationFixtures.listing(),
+                ModerationFixtures.reviewedManifest(),
+            )
+            fail("the refusal must surface")
+        } catch (_: AuthorityRejectedException) {
+        }
+
+        // The previous accepted mandate is active again; the refused
+        // one is history, not the identity's state.
+        val active = repository.activeMandateRecord()
+        assertNotNull(active)
+        assertEquals(first.mandate, active!!.mandate)
+        assertTrue(active.authorityRegistered)
+    }
+
+    /** Same rollback for the receipt refusals. */
+    @Test
+    fun `a receipt-refused re-consent restores the previous accepted mandate`() = runTest {
+        val repository = repository()
+        val first = repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        now = now.plusSeconds(3600)
+        authority.accept = false
+        try {
+            repository.consent(
+                ModerationFixtures.listing(),
+                ModerationFixtures.reviewedManifest(),
+            )
+            fail("the refusal must surface")
+        } catch (_: AuthorityRegistrationRefusedException) {
+        }
+        assertEquals(first.mandate, repository.activeMandateRecord()?.mandate)
+    }
+
+    /** A TRANSIENT failure during re-consent keeps the NEW record (it
+     * is valid and pending delivery) — no rollback: the fresh consent
+     * stands, the old record stays deactivated. */
+    @Test
+    fun `a transient re-consent failure keeps the new pending record`() = runTest {
+        val repository = repository()
+        repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        now = now.plusSeconds(3600)
+        authority.failure = AuthorityUnreachableException("fixture offline")
+        val second = repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        assertEquals(second.mandate, repository.activeMandateRecord()?.mandate)
+        assertEquals(second, repository.pendingRegistration())
+    }
+
+    /** The refusal reason survives to the next consent surface: the
+     * boot-time retry swallows its exceptions, and this is how the
+     * user still learns WHY consent needs redoing. Quiet while a
+     * mandate is active, quiet again after a fresh consent. */
+    @Test
+    fun `a permanent refusal is persisted and cleared by the next consent`() = runTest {
+        val repository = repository()
+        assertEquals(null, repository.registrationRefusal())
+
+        authority.failure =
+            AuthorityRejectedException(400, "bad_request", "mandate pins a different manifest")
+        try {
+            repository.consent(
+                ModerationFixtures.listing(),
+                ModerationFixtures.reviewedManifest(),
+            )
+            fail("the refusal must surface")
+        } catch (_: AuthorityRejectedException) {
+        }
+        assertTrue(repository.registrationRefusal()!!.contains("different manifest"))
+
+        // A fresh consent activates a record; the stale reason goes
+        // quiet without any explicit clearing.
+        authority.failure = null
+        now = now.plusSeconds(3600)
+        repository.consent(
+            ModerationFixtures.listing(),
+            ModerationFixtures.reviewedManifest(),
+        )
+        assertEquals(null, repository.registrationRefusal())
     }
 
     @Test
