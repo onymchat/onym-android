@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,7 +25,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.onym.android.moderation.MandateRecord
 import kotlinx.coroutines.launch
@@ -170,24 +168,16 @@ fun ModerationConsentContent(
                     text = stringResource(R.string.moderation_consent_body),
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = current.termsDisplay,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    // Bounded, not weighted: the onboarding step hosts
-                    // this inside a scrolling Column, where a weighted
-                    // child measures against an unbounded max and
-                    // collapses to ZERO height — the terms invisibly
-                    // "reviewed" while Agree still rendered and
-                    // clicked, contradicting the consent copy. A fixed
-                    // window with its own scroll renders identically
-                    // in both the walk and the full-screen host.
-                    modifier = Modifier
-                        .heightIn(min = 160.dp, max = 320.dp)
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .testTag("moderation.consent.terms"),
+                Spacer(Modifier.height(4.dp))
+                // Structured cards from the DECODED manifest (iOS
+                // parity), laid out in the host's own scroll — no
+                // nested fixed-height JSON window. What the mandate
+                // pins stays the exact retained bytes; the hash card
+                // at the bottom shows what the signature binds.
+                ModerationTermsDisplay(
+                    manifest = current.manifest,
+                    manifestHash = current.manifestHash,
+                    modifier = Modifier.testTag("moderation.consent.terms"),
                 )
                 current.error?.let { error ->
                     Spacer(Modifier.height(8.dp))

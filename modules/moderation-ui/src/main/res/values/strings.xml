@@ -35,4 +35,26 @@
   <string name="moderation_consent_retry">Retry</string>
   <string name="moderation_consent_continue">Continue</string>
   <string name="moderation_consent_done">Moderation consent recorded.</string>
+  <string name="moderation_terms_procedure">Procedure</string>
+  <string name="moderation_terms_signing">What you\'re signing</string>
+  <string name="moderation_terms_hash_footnote">Your consent binds to this hash of these exact terms. The authority cannot edit them under your mandate — changed terms bind only new consents.</string>
+  <string name="moderation_term_response_window">Response window</string>
+  <string name="moderation_term_decision_deadline">Decision deadline</string>
+  <string name="moderation_term_ban">Ban term</string>
+  <string name="moderation_term_ban_permanent">Permanent (appealable at the external appellate for as long as it is in force)</string>
+  <string name="moderation_term_appeal_window">Appeal window</string>
+  <string name="moderation_term_appeal_effect">Appeal effect</string>
+  <string name="moderation_term_appeal_suspensive">Suspensive — no ban until the appeal window passes unused</string>
+  <string name="moderation_term_appeal_nonsuspensive">Non-suspensive — the ban executes at once; an appeal can reverse it</string>
+  <string name="moderation_term_lawful_reporting">Lawful reporting</string>
+  <string name="moderation_term_definition">Definition</string>
+  <string name="moderation_term_appellate">Appeals heard by</string>
+  <string name="moderation_term_new_holder">New device owner</string>
+  <string name="moderation_term_valid_until">Terms valid until</string>
+  <string name="moderation_term_operator">Operated by</string>
+  <string name="moderation_term_manifest_hash">Manifest hash</string>
+  <plurals name="moderation_term_days">
+    <item quantity="one">%d day</item>
+    <item quantity="other">%d days</item>
+  </plurals>
 </resources>

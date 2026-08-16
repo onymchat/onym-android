@@ -9,7 +9,6 @@ import app.onym.android.moderation.ModerationConsentException
 import app.onym.android.moderation.ModerationRepository
 import app.onym.android.moderation.ReviewedManifest
 import app.onym.android.moderation.SignedManifest
-import app.onym.android.moderation.displayJson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,11 +60,18 @@ class ModerationConsentController(
             val error: String? = null,
         ) : UiState
 
-        /** The reviewed snapshot on screen. [termsDisplay] is rendered
-         * from the exact retained bytes. */
+        /**
+         * The reviewed snapshot on screen, DECODED for structured
+         * rendering (class cards, procedure, hash — iOS parity with
+         * `ModerationConsentView`). What the mandate pins stays the
+         * retained exact bytes in the controller's snapshot;
+         * [manifestHash] is the hash of those bytes, shown so the
+         * user can see what their signature binds.
+         */
         data class Review(
             val listing: AuthorityListing,
-            val termsDisplay: String,
+            val manifest: app.onym.android.moderation.AuthorityManifest,
+            val manifestHash: String,
             val error: String? = null,
             /** True when the directory offers alternatives — renders
              *  the back-to-picker affordance. */
@@ -183,7 +189,8 @@ class ModerationConsentController(
             val priorRefusal = runCatching { moderation.registrationRefusal() }.getOrNull()
             state.value = UiState.Review(
                 listing,
-                signed.displayJson(),
+                signed.manifest,
+                signed.manifestHash,
                 error = priorRefusal,
                 canPickAnother = directory.size > 1,
             )
@@ -241,7 +248,8 @@ class ModerationConsentController(
             } else {
                 UiState.Review(
                     listing,
-                    signed.displayJson(),
+                    signed.manifest,
+                    signed.manifestHash,
                     error = e.message ?: "consent failed",
                     canPickAnother = directory.size > 1,
                 )

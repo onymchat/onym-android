@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.onym.android.MainActivity
@@ -238,6 +239,10 @@ class ModerationGateUITest {
 
         awaitTag("moderation.consent.agree")
         composeRule.onNodeWithTag("moderation.consent.agree", useUnmergedTree = true)
+            // The structured terms cards put Agree below the fold;
+            // scroll to it as a user would before tapping — a click
+            // on an off-viewport node injects outside the window.
+            .performScrollTo()
             .performClick()
         awaitTag("nav.tab.chats")
         assertNotNull("consent re-enrolled through the backend", backend.lastEnrollment)
