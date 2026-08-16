@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,6 +69,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import app.onym.android.strings.R
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -355,8 +357,45 @@ private fun BubbleBody(
     } else {
         baseModifier
     }
+    // Long-press → Copy, on any bubble with text. detectTapGestures
+    // rather than combinedClickable: no ripple appears on the many
+    // bubbles that have no tap action, retry taps keep flowing
+    // through the existing clickable above, and link taps are consumed
+    // by the Text's own LinkAnnotation handling before reaching here.
+    var copyMenuOpen by remember { mutableStateOf(false) }
+    val copyHaptic = LocalHapticFeedback.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val copyModifier = if (body.isNotEmpty()) {
+        Modifier.pointerInput(body) {
+            detectTapGestures(
+                onLongPress = {
+                    copyHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    copyMenuOpen = true
+                },
+            )
+        }
+    } else {
+        Modifier
+    }
+    Box {
+        androidx.compose.material3.DropdownMenu(
+            expanded = copyMenuOpen,
+            onDismissRequest = { copyMenuOpen = false },
+        ) {
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text(stringResource(R.string.copy)) },
+                onClick = {
+                    // The system clipboard overlay (Android 13+) is
+                    // the confirmation; no toast of our own.
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(body))
+                    copyMenuOpen = false
+                },
+                modifier = Modifier.testTag("chat_thread.copy.$messageId"),
+            )
+        }
     Column(
         modifier = clickableModifier
+            .then(copyModifier)
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .testTag("chat_thread.bubble.$messageId"),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -439,13 +478,74 @@ private fun BubbleBody(
         // Image messages may carry an empty caption — skip the text row
         // entirely so the bubble hugs the image with no blank line.
         if (body.isNotEmpty()) {
-            Text(
-                text = body,
-                color = textColor,
-                style = MaterialTheme.typography.bodyMedium,
+            LinkifiedBody(
+                body = body,
+                textColor = textColor,
+                messageId = messageId,
             )
         }
     }
+    }
+}
+
+/**
+ * The bubble's text row with web links tappable. Links keep the
+ * bubble's text color and mark themselves by underline alone: on an
+ * accent-filled outgoing bubble every "link blue" clashes with some
+ * accent, while an underline reads as a link on any fill. Detection
+ * is [ChatBodyLinks] (https/http/www only — a chat message must not
+ * become an intent launcher); taps open the system browser.
+ */
+@Composable
+private fun LinkifiedBody(
+    body: String,
+    textColor: Color,
+    messageId: java.util.UUID,
+) {
+    val links = remember(body) { ChatBodyLinks.detect(body) }
+    if (links.isEmpty()) {
+        Text(
+            text = body,
+            color = textColor,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        return
+    }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val annotated = remember(body, textColor) {
+        androidx.compose.ui.text.buildAnnotatedString {
+            var cursor = 0
+            for (link in links) {
+                if (link.range.first > cursor) {
+                    append(body.substring(cursor, link.range.first))
+                }
+                withLink(
+                    androidx.compose.ui.text.LinkAnnotation.Clickable(
+                        tag = link.url,
+                        styles = androidx.compose.ui.text.TextLinkStyles(
+                            style = androidx.compose.ui.text.SpanStyle(
+                                color = textColor,
+                                textDecoration =
+                                    androidx.compose.ui.text.style.TextDecoration.Underline,
+                            ),
+                        ),
+                    ) {
+                        // A dead browser (no handler) must not crash a
+                        // chat over a pasted URL.
+                        runCatching { uriHandler.openUri(link.url) }
+                    },
+                ) { append(body.substring(link.range)) }
+                cursor = link.range.last + 1
+            }
+            if (cursor < body.length) append(body.substring(cursor))
+        }
+    }
+    Text(
+        text = annotated,
+        color = textColor,
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.testTag("chat_thread.body_links.$messageId"),
+    )
 }
 
 /**
