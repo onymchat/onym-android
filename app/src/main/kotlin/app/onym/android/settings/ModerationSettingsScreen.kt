@@ -67,21 +67,26 @@ fun ModerationSettingsScreen(
     /** Launch the switch/first-choice consent surface (a fresh
      *  one-snapshot review). */
     onSwitchAuthority: () -> Unit,
-    /** Show the consented terms rendered from the retained exact
-     *  bytes (the same structured display consent used). */
-    onViewTerms: (MandateRecord) -> Unit,
+    /** Show the consented terms (the host re-resolves the active
+     *  record; the terms screen renders the retained exact bytes). */
+    onViewTerms: () -> Unit,
     onBack: () -> Unit,
 ) {
     val snapshots by repository.snapshots.collectAsState()
-    // Per-identity resolution is suspend (it reads the signer's
-    // current key) — recompute whenever the record set changes.
-    val active by produceState<MandateRecord?>(initialValue = null, snapshots) {
-        value = runCatching { repository.activeMandateRecord() }.getOrNull()
+    // TRI-STATE per-identity resolution: identityConsentState() is
+    // suspend (it reads the signer's current key) and can throw —
+    // and until it answers, this screen KNOWS NOTHING. Null here is
+    // "unresolved", rendered as nothing: treating it as "no mandate"
+    // put a live 'Choose a moderation authority' in front of a user
+    // who already has one, and "Delivered" in front of a mandate
+    // still pending. The whole read is one call so active/previous/
+    // pending can never disagree about whose identity they describe.
+    val consent by produceState<ModerationRepository.IdentityConsentState?>(
+        initialValue = null,
+        snapshots,
+    ) {
+        value = runCatching { repository.identityConsentState() }.getOrNull()
     }
-    val pending by produceState<MandateRecord?>(initialValue = null, snapshots) {
-        value = runCatching { repository.pendingRegistration() }.getOrNull()
-    }
-    val previous = snapshots.records.filter { !it.isActive }
     val scope = rememberCoroutineScope()
     var retrying by remember { mutableStateOf(false) }
     var retryError by remember { mutableStateOf<String?>(null) }
@@ -104,8 +109,11 @@ fun ModerationSettingsScreen(
                 .padding(padding)
                 .testTag("moderation.settings"),
         ) {
+            // Unresolved window: render nothing below the title —
+            // never the wrong answer (see the tri-state note above).
+            val resolved = consent ?: return@LazyColumn
             item { SettingsSectionLabel(stringResource(R.string.moderation_settings_current_authority)) }
-            val record = active
+            val record = resolved.active
             if (record != null) {
                 item {
                     SettingsCard {
@@ -117,7 +125,7 @@ fun ModerationSettingsScreen(
                             },
                             title = stringResource(R.string.moderation_settings_view_terms),
                             showChevron = true,
-                            onClick = { onViewTerms(record) },
+                            onClick = onViewTerms,
                             modifier = Modifier.testTag("moderation.settings.terms"),
                         )
                         SettingsRow(
@@ -159,7 +167,7 @@ fun ModerationSettingsScreen(
                 item { SettingsSectionLabel(stringResource(R.string.moderation_settings_registration)) }
                 item {
                     SettingsCard {
-                        if (pending == null) {
+                        if (!resolved.registrationPending) {
                             SettingsRow(
                                 leading = {
                                     SettingsTileBox(Icons.Filled.GppGood, SettingsTile.Green)
@@ -201,6 +209,7 @@ fun ModerationSettingsScreen(
                 }
             }
 
+            val previous = resolved.previous
             if (previous.isNotEmpty()) {
                 item { SettingsSectionLabel(stringResource(R.string.moderation_settings_previous)) }
                 item {
@@ -313,11 +322,21 @@ internal fun MandateRecord.decodedManifest(): AuthorityManifest? = runCatching {
 @Composable
 fun ConsentedTermsScreen(
     repository: ModerationRepository,
+    /** In-app markdown viewer for definition links — the same
+     *  fetcher the consent surface uses. */
+    documents: app.onym.android.moderation.PolicyDocumentFetcher?,
     onBack: () -> Unit,
 ) {
     val snapshots by repository.snapshots.collectAsState()
-    val record by produceState<MandateRecord?>(initialValue = null, snapshots) {
-        value = runCatching { repository.activeMandateRecord() }.getOrNull()
+    // Same tri-state contract as the settings screen: null =
+    // unresolved (render nothing yet), resolved-without-active or an
+    // undecodable record = the explanatory fallback, never a silent
+    // empty body under a title.
+    val consent by produceState<ModerationRepository.IdentityConsentState?>(
+        initialValue = null,
+        snapshots,
+    ) {
+        value = runCatching { repository.identityConsentState() }.getOrNull()
     }
     Scaffold(
         topBar = {
@@ -331,7 +350,8 @@ fun ConsentedTermsScreen(
             )
         },
     ) { padding ->
-        val current = record
+        val resolved = consent ?: return@Scaffold
+        val current = resolved.active
         val manifest = current?.decodedManifest()
         if (current != null && manifest != null) {
             Column(
@@ -346,6 +366,21 @@ fun ConsentedTermsScreen(
                 app.onym.android.moderation.ui.ModerationTermsDisplay(
                     manifest = manifest,
                     manifestHash = current.mandate.manifestHash,
+                    documents = documents,
+                )
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(24.dp)
+                    .testTag("moderation.settings.termsUnavailable"),
+            ) {
+                Text(
+                    text = stringResource(R.string.moderation_settings_terms_unavailable),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

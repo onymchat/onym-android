@@ -233,6 +233,38 @@ class ModerationRepository(
     }
 
     /**
+     * Everything a Settings surface shows for the CURRENT identity,
+     * resolved in one suspend read so no caller re-derives "active"
+     * or "previous" from the raw records and silently drops the
+     * per-identity rule ([ModerationState.activeMandate]'s whole
+     * point): [active] and [previous] are THIS identity's records
+     * only, and [registrationPending] is meaningful only when
+     * [active] is non-null.
+     */
+    data class IdentityConsentState(
+        val active: MandateRecord?,
+        val previous: List<MandateRecord>,
+        val registrationPending: Boolean,
+    )
+
+    /** See [IdentityConsentState]. Throws when the identity key
+     * cannot be read — callers must treat that as UNRESOLVED, never
+     * as "no mandate" (a screen that answers "choose an authority"
+     * to a mandated user invites a duplicate consent). */
+    suspend fun identityConsentState(): IdentityConsentState {
+        start()
+        val userKey = signer.userKeyId()
+        val records = state.value.records.filter { it.mandate.user == userKey }
+        val active = records.firstOrNull { it.isActive }
+        return IdentityConsentState(
+            active = active,
+            previous = records.filter { !it.isActive },
+            registrationPending = active != null &&
+                active.countersigned && !active.authorityRegistered,
+        )
+    }
+
+    /**
      * The current identity's active record still awaiting authority
      * registration, or null. The retry hook: a caller holding a
      * directory listing for its authority completes delivery with

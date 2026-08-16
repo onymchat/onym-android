@@ -442,8 +442,21 @@ fun RootScreen(
                     onModerationClick = dependencies.moderation?.let {
                         { navController.navigate(ROUTE_MODERATION_SETTINGS) }
                     },
-                    moderationState = dependencies.moderation?.repository?.snapshots
-                        ?.collectAsStateWithLifecycle()?.value,
+                    // Resolved PER IDENTITY (never a raw records
+                    // scan — ModerationState.activeMandate's rule);
+                    // null while unresolved renders no subtitle
+                    // rather than a wrong one.
+                    moderationConsent = dependencies.moderation?.let { moderation ->
+                        val snapshots =
+                            moderation.repository.snapshots.collectAsStateWithLifecycle()
+                        androidx.compose.runtime.produceState<
+                            app.onym.android.moderation.ModerationRepository.IdentityConsentState?,
+                        >(initialValue = null, snapshots.value) {
+                            value = runCatching {
+                                moderation.repository.identityConsentState()
+                            }.getOrNull()
+                        }.value
+                    },
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -662,6 +675,7 @@ fun RootScreen(
                 val moderation = dependencies.moderation ?: return@composable
                 app.onym.android.settings.ConsentedTermsScreen(
                     repository = moderation.repository,
+                    documents = moderation.documents,
                     onBack = { navController.popBackStack() },
                 )
             }

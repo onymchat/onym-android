@@ -148,6 +148,10 @@ class ModerationUiDependencies(
      *  + registerPending); answers a human-readable failure or null
      *  on success / nothing pending. */
     val retryRegistration: suspend () -> String?,
+    /** In-app markdown viewer fetch for policy documents — the same
+     *  one the consent surface uses, so definition links behave
+     *  identically on the Settings terms view. */
+    val documents: app.onym.android.moderation.PolicyDocumentFetcher,
 )
 
 /**

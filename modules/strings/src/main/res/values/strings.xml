@@ -757,4 +757,6 @@
   <string name="moderation_settings_previous_row">Consented %1$s · %2$s…</string>
   <string name="moderation_settings_footnote">Your consent is the authority\'s entire jurisdiction: it can only decide cases against you under the classes and terms you signed, and its verdicts must be reasoned, expiring, and appealable.</string>
   <string name="moderation_settings_previous_footnote">Old mandates stay bound to the exact terms they consented to. Switching authorities never rewrites them.</string>
+  <string name="moderation_settings_registration_still_pending">Still not delivered — the authority could not be reached. The signed mandate is kept; try again later.</string>
+  <string name="moderation_settings_terms_unavailable">The consented terms can\'t be displayed — the stored record is missing or unreadable. The mandate itself is unaffected.</string>
 </resources>

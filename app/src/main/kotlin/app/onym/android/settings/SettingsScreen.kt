@@ -127,9 +127,11 @@ fun SettingsScreen(
     /** Settings → Moderation entry. Null when the moderation seat is
      *  dark — the section is omitted entirely. */
     onModerationClick: (() -> Unit)? = null,
-    /** Consent snapshot driving the Moderation row's subtitle (the
-     *  consented authority's name, or "none yet"). */
-    moderationState: app.onym.android.moderation.ModerationState? = null,
+    /** The CURRENT IDENTITY's resolved consent state, driving the
+     *  Moderation row's subtitle. Null = unresolved (or seat dark):
+     *  no subtitle is shown rather than another identity's answer. */
+    moderationConsent:
+        app.onym.android.moderation.ModerationRepository.IdentityConsentState? = null,
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -240,21 +242,20 @@ fun SettingsScreen(
                 item { SettingsSectionLabel(stringResource(R.string.settings_section_moderation)) }
                 item {
                     SettingsCard {
-                        val consentedName = moderationState?.records
-                            ?.firstOrNull { it.isActive }?.authorityName
                         SettingsRow(
                             leading = {
                                 SettingsTileBox(Icons.Filled.VerifiedUser, SettingsTile.Indigo)
                             },
                             title = stringResource(R.string.settings_moderation_row_title),
-                            subtitle = consentedName
-                                ?.let {
-                                    stringResource(
-                                        R.string.settings_moderation_row_consented,
-                                        it,
-                                    )
-                                }
-                                ?: stringResource(R.string.settings_moderation_row_none),
+                            subtitle = when {
+                                moderationConsent == null -> null
+                                moderationConsent.active != null -> stringResource(
+                                    R.string.settings_moderation_row_consented,
+                                    moderationConsent.active!!.authorityName,
+                                )
+                                else ->
+                                    stringResource(R.string.settings_moderation_row_none)
+                            },
                             onClick = onModerationClick,
                             isLast = true,
                             modifier = Modifier.testTag("settings.moderation_row"),
