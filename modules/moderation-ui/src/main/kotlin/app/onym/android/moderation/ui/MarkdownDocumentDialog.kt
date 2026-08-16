@@ -105,14 +105,23 @@ fun MarkdownDocumentDialog(
                         modifier = Modifier.testTag("moderation.document.done"),
                     ) { Text(stringResource(R.string.moderation_document_done)) }
                 }
-                MarkdownDocumentBody(
-                    url = currentUrl,
-                    rootUrl = url,
-                    documents = documents,
-                    onFollowLink = { destination ->
-                        stack = stack + (MarkdownBlocks.impliedTitle(destination) to destination)
-                    },
-                )
+                // weight, NOT fillMaxSize: a fillMaxSize child under
+                // the title row measures to the FULL dialog height,
+                // gets pushed down by the header, and is clipped —
+                // the last header-height of the document becomes
+                // unreachable by scroll. The weighted slot hands the
+                // body exactly the remaining height.
+                Box(modifier = Modifier.weight(1f)) {
+                    MarkdownDocumentBody(
+                        url = currentUrl,
+                        rootUrl = url,
+                        documents = documents,
+                        onFollowLink = { destination ->
+                            stack = stack +
+                                (MarkdownBlocks.impliedTitle(destination) to destination)
+                        },
+                    )
+                }
             }
         }
     }
