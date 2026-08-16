@@ -360,7 +360,11 @@ class GateCheckRepositoryTest {
         repository.checkNow()
         assertEquals(GateStatus.Banned(ban), repository.snapshots.value)
 
-        // Same for a sticky refusal.
+        // A sticky refusal with no mandate keeps blocking — but as
+        // ENROLLMENT_LOST, not its original reason: the local mandate
+        // is gone, so re-consent IS the route back. The original
+        // BACKEND_REFUSED here was terminal — Retry short-circuited
+        // to the same answer without touching the network, forever.
         gateStore.save(
             PersistedGateState(
                 lastResult = GateCheckResult.Clear,
@@ -372,15 +376,64 @@ class GateCheckRepositoryTest {
         now = now.plusSeconds(61)
         repository.checkNow()
         assertEquals(
-            GateStatus.GateCheckRequired(CheckRequiredReason.BACKEND_REFUSED),
+            GateStatus.GateCheckRequired(CheckRequiredReason.ENROLLMENT_LOST),
             repository.snapshots.value,
         )
+
+        // A ban outranks a later refusal: the refusal is the weaker
+        // signal, and BannedScreen's appeal/new-holder routes are the
+        // only ways out that state has.
+        gateStore.save(
+            PersistedGateState(
+                lastResult = GateCheckResult.Banned(ban),
+                lastSuccessAt = "2026-08-08T11:00:00Z",
+                refusalReason = CheckRequiredReason.BACKEND_REFUSED,
+                refusedAt = "2026-08-08T11:30:00Z",
+            ),
+        )
+        now = now.plusSeconds(61)
+        repository.checkNow()
+        assertEquals(GateStatus.Banned(ban), repository.snapshots.value)
 
         // A genuinely clean history answers NotMandated -> consent.
         gateStore.save(null)
         now = now.plusSeconds(61)
         repository.checkNow()
         assertEquals(GateStatus.NotMandated, repository.snapshots.value)
+    }
+
+    /**
+     * The cold-start window: nothing read the persisted state until
+     * the live round trip finished, so a BANNED device got the full
+     * shell for challenge -> Play Integrity -> gate-check — tens of
+     * seconds on a blackholed network, repeatable per launch. The
+     * store's blocking answer publishes provisionally, and only a
+     * live answer upgrades it.
+     */
+    @Test
+    fun `a persisted ban blocks provisionally while the first check is on the wire`() = runTest {
+        consent()
+        val ban = BanState(verdictRef = "v1", authorityContact = "appeals@a.org")
+        gateStore.save(
+            PersistedGateState(
+                lastResult = GateCheckResult.Banned(ban),
+                lastSuccessAt = "2026-08-08T11:00:00Z",
+            ),
+        )
+        backend.gateResults.addLast(GateCheckResult.Clear)
+        val holdTheWire = kotlinx.coroutines.CompletableDeferred<Unit>()
+        backend.gateDelay = holdTheWire
+
+        val repository = repository()
+        val check = launch { repository.checkNow() }
+        testScheduler.runCurrent()
+        // The live check is on the wire; the cached ban already blocks.
+        assertEquals(GateStatus.Banned(ban), repository.snapshots.value)
+
+        // The live answer (an authority reversal, say) upgrades it.
+        holdTheWire.complete(Unit)
+        check.join()
+        assertEquals(GateStatus.Operational(), repository.snapshots.value)
     }
 
     /** A failing gate-state store must degrade toward blocking, not

@@ -32,8 +32,15 @@ class ModerationConsentException(message: String, cause: Throwable? = null) :
  * with different terms.
  */
 interface KnownAuthoritiesFetcher {
-    /** Throws on network failure, non-2xx, or a directory with no
-     * valid entries; callers fall back to any cached list. */
+    /**
+     * Throws on network failure, non-2xx, or a directory with no
+     * valid entries. There is NO cache layer today: each caller (the
+     * gate flow's probe, the onboarding probe, the consent
+     * controller's load) fetches independently — up to a few GETs of
+     * a tiny document per launch, deliberately tolerated over
+     * coupling those components; add a shared cache here if that
+     * budget ever matters.
+     */
     suspend fun fetchLatest(): List<AuthorityListing>
 }
 

@@ -173,10 +173,14 @@ object UITestRegistry {
      *  reason as [moderationBackend]. */
     var moderationAttestation: app.onym.android.moderation.DeviceAttestationProvider? = null
 
-    /** In-memory mandate store (I/O swap; [enabled]). */
+    /** In-memory mandate store. [debugActive]-gated: it decides which
+     *  identity counts as mandated, and substituting it in a release
+     *  process would bypass the consent gate. */
     var moderationMandateStore: app.onym.android.moderation.MandateStore? = null
 
-    /** In-memory gate-state store (I/O swap; [enabled]). */
+    /** In-memory gate-state store. [debugActive]-gated: it holds the
+     *  sticky refusal and the cached ban — swapping it is exactly the
+     *  laundering the persistence wall exists to prevent. */
     var moderationGateStateStore: app.onym.android.moderation.GateStateStore? = null
 
     /** Fake authority directory (I/O swap; [enabled]). */

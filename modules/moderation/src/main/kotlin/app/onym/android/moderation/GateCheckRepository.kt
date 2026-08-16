@@ -221,7 +221,17 @@ class GateCheckRepository(
                 // minRecheckInterval old, and serial foreground thrash
                 // must not spend quota re-deriving it.
                 recentEnough && !force -> null
-                else -> scope.launch { runCheck() }.also { inFlight = it }
+                else -> {
+                    // The generation is taken HERE, synchronously,
+                    // while the mutex is held — not inside the
+                    // launched job. On a multi-threaded scope a
+                    // forced post-consent job could otherwise grab a
+                    // LOWER generation than the stale flight it
+                    // supersedes, and the fresh result — not the
+                    // stale one — would be discarded.
+                    val taken = ++generation
+                    scope.launch { runCheck(taken) }.also { inFlight = it }
+                }
             }
         }
         flight?.join()
@@ -231,29 +241,73 @@ class GateCheckRepository(
      * min-interval guard's memory. Guarded by [mutex]. */
     private var lastRunCompletedAt: Instant? = null
 
-    private suspend fun runCheck() {
-        val taken = mutex.withLock { ++generation }
+    /** The blocking part of the persisted answer, for the cold-start
+     * provisional. Never a provisional `Operational` — granting the
+     * shell early is grace's job, and grace runs through derive. */
+    private fun provisionalBlock(persisted: PersistedGateState?): GateStatus? {
+        val lastResult = persisted?.lastResult
+        return when {
+            lastResult is GateCheckResult.Banned -> GateStatus.Banned(lastResult.ban)
+            persisted?.refusalReason != null ->
+                GateStatus.GateCheckRequired(persisted.refusalReason)
+            else -> null
+        }
+    }
+
+    private suspend fun runCheck(taken: Long) {
         try {
+            // Provisional cold-start block: until the first live
+            // answer, the shell would otherwise render for the whole
+            // challenge -> Play Integrity -> gate-check round trip —
+            // tens of seconds of unrestricted operation for a BANNED
+            // device on a blackholed network, repeatable per launch.
+            // The store already holds the answer; publish the
+            // blocking part of it immediately, and let the live
+            // answer upgrade it.
+            if (state.value == GateStatus.Unknown) {
+                provisionalBlock(store.load())?.let { blocking ->
+                    mutex.withLock {
+                        if (taken == generation && state.value == GateStatus.Unknown) {
+                            state.value = blocking
+                        }
+                    }
+                }
+            }
+
             val record = moderation.activeMandateRecord()
             if (record == null) {
                 // No mandate on file — but the PERSISTED gate state
                 // may still carry a ban or a sticky refusal.
-                // Platform-state-first: a cached ban keeps blocking, a
-                // sticky refusal keeps blocking; only a genuinely
-                // clean history answers NotMandated (-> the consent
-                // gate). Scope honestly: this defends a corrupt or
+                // Platform-state-first; only a genuinely clean
+                // history answers NotMandated (-> the consent gate).
+                // Scope honestly: this defends a corrupt or
                 // partially-lost MANDATE blob (which reads as empty)
                 // and any future selective clearing — a full system
                 // "Clear data" wipes both stores' shared file (and
                 // the identity with it), which no local wall can
                 // survive; the durable ban for that case is the
                 // recall value at Google, re-read at next enrollment.
+                //
+                // Ordering and routing both matter here:
+                // - The BAN outranks a refusal: a refusal is the
+                //   weaker signal, and BannedScreen's appeal /
+                //   new-holder routes are the only ways out that
+                //   state has.
+                // - A sticky refusal with NO mandate resolves as
+                //   ENROLLMENT_LOST, not its original reason: the
+                //   local mandate is gone, so re-consent (a fresh
+                //   enrollment the backend adjudicates — a banned
+                //   device is refused there anyway) IS the route
+                //   back. Keeping BACKEND_REFUSED here was a
+                //   back-blocked screen whose only button, Retry,
+                //   short-circuited to the same answer without ever
+                //   touching the network — provably unwinnable.
                 val persisted = store.load()
                 val lastResult = persisted?.lastResult
                 val fallback = when {
-                    persisted?.refusalReason != null ->
-                        GateStatus.GateCheckRequired(persisted.refusalReason)
                     lastResult is GateCheckResult.Banned -> GateStatus.Banned(lastResult.ban)
+                    persisted?.refusalReason != null ->
+                        GateStatus.GateCheckRequired(CheckRequiredReason.ENROLLMENT_LOST)
                     else -> GateStatus.NotMandated
                 }
                 mutex.withLock {

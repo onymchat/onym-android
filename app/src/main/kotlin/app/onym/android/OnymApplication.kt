@@ -1257,8 +1257,11 @@ class OnymApplication : Application() {
                 UITestRegistry.moderationBackend
             // Harness without moderation fakes: the whole seat stays
             // absent, keeping pre-moderation instrumented tests
-            // offline and unchanged.
-            UITestRegistry.enabled -> null
+            // offline and unchanged. debugActive, not enabled:
+            // darkening the seat IS disabling moderation, and a
+            // release process flipping the plain static must not get
+            // that for free (same defense-in-depth as FLAG_SECURE).
+            UITestRegistry.debugActive -> null
             BuildConfig.MODERATION_BASE_URL.isNotBlank() ->
                 app.onym.android.moderation.OkHttpEnforcementBackendClient(
                     httpClient = httpClient,
@@ -1285,13 +1288,18 @@ class OnymApplication : Application() {
                 )
             }
             val moderationSigner = IdentityModerationSigner(identityRepository)
+            // debugActive, not enabled: these stores hold the sticky
+            // refusal and the cached ban — substituting them is
+            // exactly the laundering the persistence wall prevents,
+            // which puts them in moderationClock's class, not the
+            // I/O-swap class.
             val moderationMandateStore =
-                (if (UITestRegistry.enabled) UITestRegistry.moderationMandateStore else null)
+                (if (UITestRegistry.debugActive) UITestRegistry.moderationMandateStore else null)
                     ?: app.onym.android.moderation.DataStorePreferencesMandateStore(
                         applicationContext.moderationDataStore,
                     )
             val moderationGateStateStore =
-                (if (UITestRegistry.enabled) UITestRegistry.moderationGateStateStore else null)
+                (if (UITestRegistry.debugActive) UITestRegistry.moderationGateStateStore else null)
                     ?: app.onym.android.moderation.DataStorePreferencesGateStateStore(
                         applicationContext.moderationDataStore,
                     )

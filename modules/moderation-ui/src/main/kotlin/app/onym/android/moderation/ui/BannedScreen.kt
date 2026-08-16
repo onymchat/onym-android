@@ -64,7 +64,13 @@ fun BannedScreen(
                 style = MaterialTheme.typography.bodySmall,
             )
             Spacer(Modifier.height(24.dp))
-            state.appealUrl?.let { url ->
+            // Backend-supplied URLs pass the same scheme allowlist as
+            // the contact: this screen is otherwise fully locked down,
+            // and handing a non-http scheme to ACTION_VIEW would turn
+            // a served field into an arbitrary implicit intent.
+            val appealUri = state.appealUrl?.let(::safeActionUri)
+            val newHolderUri = state.newHolderUrl?.let(::safeActionUri)
+            appealUri?.let { url ->
                 Button(
                     onClick = { onOpenUrl(url) },
                     modifier = Modifier
@@ -73,7 +79,7 @@ fun BannedScreen(
                 ) { Text(stringResource(R.string.moderation_banned_appeal)) }
                 Spacer(Modifier.height(8.dp))
             }
-            state.newHolderUrl?.let { url ->
+            newHolderUri?.let { url ->
                 OutlinedButton(
                     onClick = { onOpenUrl(url) },
                     modifier = Modifier
@@ -81,12 +87,12 @@ fun BannedScreen(
                         .testTag("moderation.banned.newHolder"),
                 ) { Text(stringResource(R.string.moderation_banned_new_holder)) }
             }
-            if (state.appealUrl == null && state.newHolderUrl == null) {
+            if (appealUri == null && newHolderUri == null) {
                 // With no declared routes, the contact itself becomes
                 // the tappable route out when it parses as one — a
                 // screen with only untappable text is a step away from
                 // the silent brick §5.2 forbids.
-                contactActionUri(state.authorityContact)?.let { uri ->
+                safeActionUri(state.authorityContact)?.let { uri ->
                     OutlinedButton(
                         onClick = { onOpenUrl(uri) },
                         modifier = Modifier
@@ -99,12 +105,17 @@ fun BannedScreen(
     }
 }
 
-/** The authority contact as an openable URI: a URL verbatim, an
- * email as `mailto:`, anything else null (text-only). */
-private fun contactActionUri(contact: String): String? {
-    val trimmed = contact.trim()
+/**
+ * A served value as an openable URI, scheme-allowlisted: http(s) and
+ * `mailto:` verbatim, a bare email as `mailto:`, anything else null.
+ * Applied to EVERY backend-supplied field this screen can hand to
+ * ACTION_VIEW — appeal, new-holder, and the contact alike.
+ */
+internal fun safeActionUri(raw: String): String? {
+    val trimmed = raw.trim()
     return when {
         trimmed.startsWith("https://") || trimmed.startsWith("http://") -> trimmed
+        trimmed.startsWith("mailto:") -> trimmed
         Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$").matches(trimmed) -> "mailto:$trimmed"
         else -> null
     }
