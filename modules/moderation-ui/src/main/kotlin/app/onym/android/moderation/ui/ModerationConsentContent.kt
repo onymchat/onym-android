@@ -43,6 +43,15 @@ fun ModerationConsentContent(
     controller: ModerationConsentController,
     onConsented: (MandateRecord) -> Unit,
     onUnavailableContinue: (() -> Unit)?,
+    /**
+     * True when this surface IS the screen (RootScreen's NeedsConsent
+     * host): it wraps itself in a Surface and its own vertical scroll
+     * so Agree stays reachable on small viewports / large fonts.
+     * False when a scrolling host (the onboarding step scaffold)
+     * already provides both — nesting an unbounded scroll inside a
+     * scroll does not measure.
+     */
+    standalone: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val state by controller.snapshots.collectAsState()
@@ -52,20 +61,30 @@ fun ModerationConsentContent(
         if (state is ModerationConsentController.UiState.Loading) controller.load()
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp)
-            .testTag("moderation.consent"),
-    ) {
+    // The caller's follow-up rides on the STATE, not on the click's
+    // coroutine: agree() is NonCancellable, so a surface torn down
+    // mid-transaction (rotation, a gate flip) still lands Consented —
+    // and the recreated surface (whose controller re-emits Consented
+    // from the persisted record) fires the follow-up here instead of
+    // losing it with the cancelled click handler.
+    LaunchedEffect(state) {
+        (state as? ModerationConsentController.UiState.Consented)
+            ?.let { onConsented(it.record) }
+    }
+
+    val body: @Composable (Modifier) -> Unit = { columnModifier ->
+        Column(
+            modifier = columnModifier
+                .padding(24.dp)
+                .testTag("moderation.consent"),
+        ) {
         when (val current = state) {
             is ModerationConsentController.UiState.Loading,
             is ModerationConsentController.UiState.Consenting,
             -> {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Center,
-                ) {
+                // fillMaxWidth, not fillMaxSize/Center: these branches
+                // must lay out under an unbounded scroll host too.
+                Column(modifier = Modifier.fillMaxWidth()) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(12.dp))
                     Text(stringResource(R.string.moderation_consent_loading))
@@ -73,10 +92,7 @@ fun ModerationConsentContent(
             }
 
             is ModerationConsentController.UiState.Unavailable -> {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Center,
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = stringResource(R.string.moderation_consent_unavailable),
                         style = MaterialTheme.typography.bodyLarge,
@@ -137,7 +153,7 @@ fun ModerationConsentContent(
                 Spacer(Modifier.height(16.dp))
                 Button(
                     onClick = {
-                        scope.launch { controller.agree()?.let(onConsented) }
+                        scope.launch { controller.agree() }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -147,13 +163,23 @@ fun ModerationConsentContent(
 
             is ModerationConsentController.UiState.Consented -> {
                 // Terminal; the host navigated on [onConsented].
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Center,
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.moderation_consent_done))
                 }
             }
         }
+        }
+    }
+
+    if (standalone) {
+        androidx.compose.material3.Surface(modifier = modifier.fillMaxSize()) {
+            body(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+            )
+        }
+    } else {
+        body(modifier.fillMaxWidth())
     }
 }

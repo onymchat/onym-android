@@ -1,9 +1,10 @@
 package app.onym.android.moderation.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -36,12 +37,16 @@ fun GateCheckRequiredScreen(
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxSize()) {
+        // Scrollable: this gate is full-screen and back-blocked, so on
+        // a small viewport / large font scale the Retry button being
+        // measured off the bottom would be the silent brick §5.2
+        // forbids, arrived at from the layout side.
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp)
                 .testTag("moderation.gateRequired"),
-            verticalArrangement = Arrangement.Center,
         ) {
             Text(
                 text = stringResource(R.string.moderation_gate_required_title),

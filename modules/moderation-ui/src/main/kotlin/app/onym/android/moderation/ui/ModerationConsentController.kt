@@ -27,6 +27,20 @@ class ModerationConsentController(
     private val authoritiesFetcher: KnownAuthoritiesFetcher,
     private val manifestFetcher: AuthorityManifestFetcher,
     private val moderation: ModerationRepository,
+    /**
+     * Whether an already-active mandate for the current identity
+     * satisfies this surface ([UiState.Consented] without a fresh
+     * review). TRUE for first-consent hosts (the onboarding step, the
+     * never-mandated NeedsConsent) — a rotation right after a
+     * NonCancellable agree() must re-emit Consented, not hand the
+     * user a second live Agree that mints a second enrollment. FALSE
+     * for the enrollment-lost re-consent host: a local record exists
+     * there by definition, but the backend has lost the enrollment
+     * and only a FRESH consent transaction repairs it — a
+     * short-circuit would pin that surface on "consent recorded"
+     * forever.
+     */
+    private val resumeExistingMandate: Boolean = true,
 ) {
     sealed interface UiState {
         data object Loading : UiState
@@ -77,6 +91,21 @@ class ModerationConsentController(
      * safe to call again to retry. */
     suspend fun load() = mutex.withLock {
         agreeFailures = 0
+        // A controller is composition-scoped, and the surface can be
+        // recreated (rotation) right after a NonCancellable agree()
+        // persisted the mandate but before the caller's follow-up
+        // ran. A fresh first-consent controller must re-emit
+        // Consented for the already-active mandate — reloading to
+        // Review here handed the user a second live Agree that minted
+        // a SECOND backend enrollment and mandate record. (See
+        // [resumeExistingMandate] for why re-consent hosts opt out.)
+        if (resumeExistingMandate) {
+            runCatching { moderation.activeMandateRecord() }.getOrNull()?.let { record ->
+                reviewed = null
+                state.value = UiState.Consented(record)
+                return
+            }
+        }
         state.value = UiState.Loading
         val listing = try {
             // The reference deployment designates one authority; a

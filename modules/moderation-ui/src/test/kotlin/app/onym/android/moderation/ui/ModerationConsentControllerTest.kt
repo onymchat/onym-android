@@ -20,16 +20,22 @@ import org.junit.Test
 class ModerationConsentControllerTest {
     private val backend = ScriptedEnforcementBackendClient()
 
-    private fun controller(): ModerationConsentController = ModerationConsentController(
+    private val mandateStore = InMemoryMandateStore()
+    private val moderation = ModerationRepository(
+        backend = backend,
+        attestation = FakeDeviceAttestationProvider(),
+        signer = FakeModerationSigner(),
+        mandateStore = mandateStore,
+        clock = { Instant.parse("2026-08-08T12:00:00Z") },
+    )
+
+    private fun controller(
+        resumeExistingMandate: Boolean = true,
+    ): ModerationConsentController = ModerationConsentController(
         authoritiesFetcher = FakeKnownAuthoritiesFetcher(),
         manifestFetcher = FakeAuthorityManifestFetcher(),
-        moderation = ModerationRepository(
-            backend = backend,
-            attestation = FakeDeviceAttestationProvider(),
-            signer = FakeModerationSigner(),
-            mandateStore = InMemoryMandateStore(),
-            clock = { Instant.parse("2026-08-08T12:00:00Z") },
-        ),
+        moderation = moderation,
+        resumeExistingMandate = resumeExistingMandate,
     )
 
     @Test
@@ -133,6 +139,49 @@ class ModerationConsentControllerTest {
             "${controller.snapshots.value}",
             controller.snapshots.value is ModerationConsentController.UiState.Consented,
         )
+    }
+
+    /**
+     * The rotation double-enrollment defect: a NonCancellable agree()
+     * persists the mandate, the rotation kills the surface before its
+     * follow-up, and the RECREATED controller reloaded to Review —
+     * a second live Agree, a second backend enrollment. A fresh
+     * first-consent controller re-emits Consented from the persisted
+     * record instead.
+     */
+    @Test
+    fun `a recreated controller resumes a persisted consent`() = runTest {
+        val first = controller()
+        first.load()
+        assertNotNull(first.agree())
+
+        // Rotation: a brand-new controller over the same repository.
+        val recreated = controller()
+        recreated.load()
+        assertTrue(
+            "${recreated.snapshots.value}",
+            recreated.snapshots.value is ModerationConsentController.UiState.Consented,
+        )
+    }
+
+    /** The enrollment-lost re-consent host must NOT resume: a local
+     * record exists there by definition, but the backend lost the
+     * enrollment and only a fresh transaction repairs it — resuming
+     * would pin that surface on "consent recorded" forever. */
+    @Test
+    fun `a re-consent controller reviews despite the existing record`() = runTest {
+        val first = controller()
+        first.load()
+        assertNotNull(first.agree())
+
+        val reconsent = controller(resumeExistingMandate = false)
+        reconsent.load()
+        assertTrue(
+            "${reconsent.snapshots.value}",
+            reconsent.snapshots.value is ModerationConsentController.UiState.Review,
+        )
+        // And agreeing again runs a fresh transaction.
+        assertNotNull(reconsent.agree())
     }
 
     /** Retry (reload) resets the failure count — a recovered backend

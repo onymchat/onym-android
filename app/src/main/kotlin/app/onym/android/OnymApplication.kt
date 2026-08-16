@@ -1355,11 +1355,12 @@ class OnymApplication : Application() {
             }
             moderationUi = ModerationUiDependencies(
                 gate = moderationGateFlow,
-                makeConsentController = {
+                makeConsentController = { resumeExistingMandate ->
                     app.onym.android.moderation.ui.ModerationConsentController(
                         authoritiesFetcher = authoritiesFetcher,
                         manifestFetcher = manifestFetcher,
                         moderation = moderationRepository,
+                        resumeExistingMandate = resumeExistingMandate,
                     )
                 },
                 directoryNonEmpty = {

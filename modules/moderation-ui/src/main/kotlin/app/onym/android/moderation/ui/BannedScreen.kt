@@ -1,6 +1,5 @@
 package app.onym.android.moderation.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,7 +38,6 @@ fun BannedScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp)
                 .testTag("moderation.banned"),
-            verticalArrangement = Arrangement.Center,
         ) {
             Text(
                 text = stringResource(R.string.moderation_banned_title),

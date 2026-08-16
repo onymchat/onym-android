@@ -302,6 +302,44 @@ class GateCheckRepositoryTest {
     }
 
     /**
+     * The scheduler-level rollback hole: derive knew CLOCK_ROLLBACK,
+     * but the min-recheck guard read a negative age as "recently
+     * enough" and skipped every passive check until process restart —
+     * a backend-issued ban unenforced for the app's lifetime. A
+     * rollback must force the check through, and the check must
+     * block.
+     */
+    @Test
+    fun `a clock rollback forces a passive check and blocks`() = runTest {
+        consent()
+        backend.gateResults.addLast(GateCheckResult.Clear)
+        val repository = repository()
+        repository.checkNow()
+        assertEquals(GateStatus.Operational(), repository.snapshots.value)
+        val requestsBefore = backend.challengeCounter
+
+        // The user winds the clock back an hour with the backend
+        // unreachable. The passive check (foreground/loop, NOT
+        // forced) must still run...
+        backend.failUnreachable()
+        now = now.minusSeconds(3600)
+        repository.checkNow()
+        assertEquals(
+            "the rollback must not suppress the check",
+            requestsBefore + 1,
+            backend.challengeCounter,
+        )
+        // ...and derive sees now behind the persisted lastSuccessAt:
+        // the gate BLOCKS on the rollback instead of serving the
+        // cached Clear (or, before the guard fix, instead of silently
+        // skipping the check and staying Operational forever).
+        assertEquals(
+            GateStatus.GateCheckRequired(CheckRequiredReason.CLOCK_ROLLBACK),
+            repository.snapshots.value,
+        )
+    }
+
+    /**
      * The cleared-mandate laundering hole: with no mandate record the
      * gate used to answer NotMandated unconditionally, so Settings →
      * Clear data (or a corrupt store, which reads as empty) walked

@@ -400,6 +400,10 @@ fun moderationBaseUrl(): String {
     return props.getProperty("moderation.baseUrl").orEmpty()
 }
 
+// Keep in lockstep with OkHttpEnforcementBackendClient.isLoopbackHost
+// (modules/moderation/.../EnforcementBackendClient.kt), which is the
+// tested twin (WireCodecTest): drift between the two re-opens the
+// half-configured case this build check exists to catch.
 fun moderationUrlIsLoopback(): Boolean {
     val rest = moderationBaseUrl().removePrefix("http://")
     if (rest == moderationBaseUrl()) return false

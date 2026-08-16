@@ -174,7 +174,13 @@ fun RootScreen(
             }
             is app.onym.android.moderation.ui.RootGate.NeedsConsent -> {
                 BackHandler(enabled = true) {}
-                val controller = remember { moderation.makeConsentController() }
+                // resumeExistingMandate = canDefer: the never-mandated
+                // host resumes a just-persisted consent after rotation;
+                // the enrollment-lost host (canDefer=false) must run a
+                // FRESH transaction despite the local record.
+                val controller = remember(gate.canDefer) {
+                    moderation.makeConsentController(gate.canDefer)
+                }
                 app.onym.android.moderation.ui.ModerationConsentContent(
                     controller = controller,
                     onConsented = { moderation.gate.consentCompleted() },

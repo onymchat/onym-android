@@ -129,8 +129,12 @@ class ModerationUiDependencies(
     val gate: app.onym.android.moderation.ui.ModerationGateFlow,
     /** Fresh consent controller per surface (onboarding step or the
      *  full-screen NeedsConsent host) — each runs its own
-     *  one-snapshot review. */
-    val makeConsentController: () -> app.onym.android.moderation.ui.ModerationConsentController,
+     *  one-snapshot review. `resumeExistingMandate`: true for
+     *  first-consent hosts (a rotation after a persisted consent
+     *  re-emits Consented); false for the enrollment-lost re-consent
+     *  host, which needs a FRESH transaction despite the local
+     *  record. */
+    val makeConsentController: (resumeExistingMandate: Boolean) -> app.onym.android.moderation.ui.ModerationConsentController,
     /** Whether the authority directory currently offers anything to
      *  consent to — the onboarding step's mandatory/Unavailable
      *  arithmetic reads this. Failure answers false (softening toward

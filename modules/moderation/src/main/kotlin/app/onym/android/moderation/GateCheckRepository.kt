@@ -165,11 +165,20 @@ class GateCheckRepository(
             while (true) {
                 checkNow()
                 due = due.plus(policy.interval)
-                val delayMillis = Duration.between(clock(), due).toMillis()
-                if (delayMillis > 0) {
-                    delay(delayMillis)
-                } else {
-                    due = clock()
+                val untilDue = Duration.between(clock(), due)
+                when {
+                    // Overdue (the app slept across the deadline):
+                    // check immediately and re-anchor.
+                    untilDue.isNegative -> due = clock()
+                    // Farther out than one interval can honestly be:
+                    // the clock was wound BACK. Waiting `untilDue`
+                    // would suspend the cadence for the rollback
+                    // amount (days, arbitrarily); re-anchor and check
+                    // now — derive answers CLOCK_ROLLBACK from the
+                    // persisted lastSuccessAt, so the gate blocks
+                    // rather than sleeps.
+                    untilDue > policy.interval -> due = clock()
+                    else -> delay(untilDue.toMillis())
                 }
             }
         }
@@ -199,7 +208,12 @@ class GateCheckRepository(
         val flight = mutex.withLock {
             val active = inFlight?.takeIf { it.isActive }
             val recentEnough = lastRunCompletedAt?.let { completed ->
-                Duration.between(completed, clock()) < policy.minRecheckInterval
+                val sinceLast = Duration.between(completed, clock())
+                // A NEGATIVE age means the clock rolled back — that
+                // must FORCE a check (derive answers CLOCK_ROLLBACK),
+                // not read as "recently enough" and silently suspend
+                // every passive check until process restart.
+                !sinceLast.isNegative && sinceLast < policy.minRecheckInterval
             } == true
             when {
                 active != null && !force -> active

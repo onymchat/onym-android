@@ -164,7 +164,10 @@ class OkHttpEnforcementBackendClient(
          * `http://localhost.attacker.example` and
          * `http://10.0.2.2.evil.test`. The host ends at the first
          * `:`/`/` (or end of string) and must equal a loopback name
-         * exactly.
+         * exactly. Keep in lockstep with `moderationUrlIsLoopback` in
+         * app/build.gradle.kts — the build-script twin cannot import
+         * this one and drift silently re-opens the half-configured
+         * build case.
          */
         internal fun isLoopbackHost(url: String): Boolean {
             val rest = url.removePrefix("http://")

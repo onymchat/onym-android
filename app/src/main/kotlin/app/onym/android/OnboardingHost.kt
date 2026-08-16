@@ -616,9 +616,12 @@ private fun ModerationStepContent(
             "OnymApplication must construct the moderation dependencies whenever it enables " +
             "the step (moderationEnabled = moderationUi != null)"
     }
-    val controller = remember { moderation.makeConsentController() }
+    val controller = remember { moderation.makeConsentController(true) }
     app.onym.android.moderation.ui.ModerationConsentContent(
         controller = controller,
+        // The step scaffold already scrolls; the surface must not
+        // nest its own unbounded scroll inside it.
+        standalone = false,
         onConsented = { record ->
             if (flow.state.value.step == OnboardingStep.Moderation) {
                 flow.recordOutcome(StepOutcome.Consented(record.mandate.authority))
