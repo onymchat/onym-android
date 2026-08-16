@@ -33,17 +33,18 @@ class ModerationUnsupportedDeviceException(message: String, cause: Throwable? = 
  * Fetches the interface's published authority directory. Lossy per
  * entry: one malformed listing is skipped, not the whole directory.
  *
- * TRUST ASYMMETRY, disclosed deliberately: the directory itself
- * travels over plain TLS with no signature, yet it carries the
- * operator-key pins every manifest check downstream roots in — so the
- * whole pin chain currently bottoms out in a GitHub release URL,
- * where the discovery seat's equivalent (`DiscoveryTrust`) verifies a
- * signed provider manifest. Before the moderation seat goes live this
- * needs a signed directory or an app-pinned root key; what the
- * signature-verified manifest fetch below DOES guarantee meanwhile is
- * that a tampered directory can only substitute a *whole* authority
- * (key + manifest together), never pair a genuine authority's name
- * with different terms.
+ * Trust chain, end to end: the directory's exact bytes are verified
+ * against a detached Ed25519 signature at `<url>.sig`, made by the
+ * directory root key whose PUBLIC half ships in this app
+ * ([OkHttpKnownAuthoritiesFetcher.DIRECTORY_ROOT_KEY_BASE64] — pinned,
+ * never fetched; the private half is held offline by the release
+ * manager, see onym-authorities/sign.sh). The verified directory pins
+ * each authority's operator key; the manifest fetch below verifies the
+ * manifest's own signature against that pinned key. So a compromised
+ * host or release account can no longer substitute an authority: it
+ * would need the offline root key. Hard-enforced — an unsigned or
+ * tampered directory yields no authorities, and therefore no consent
+ * (onym-android#219).
  */
 interface KnownAuthoritiesFetcher {
     /**
@@ -61,9 +62,23 @@ interface KnownAuthoritiesFetcher {
 class OkHttpKnownAuthoritiesFetcher(
     private val httpClient: OkHttpClient,
     private val url: String = DEFAULT_URL,
+    /** Test seam only — production callers keep the shipped pin. */
+    private val rootKeyBase64: String = DIRECTORY_ROOT_KEY_BASE64,
 ) : KnownAuthoritiesFetcher {
     override suspend fun fetchLatest(): List<AuthorityListing> = withContext(Dispatchers.IO) {
         val bytes = fetchBytes(httpClient, url, what = "authority directory")
+
+        // Signature BEFORE parsing: unverified bytes get no further
+        // interpretation. The pinned key decode is checked every call
+        // rather than trusted at init so a corrupted constant fails
+        // loudly, never as "no signature checking".
+        val rootKey = runCatching { Base64.getDecoder().decode(rootKeyBase64) }
+            .getOrNull()
+            ?.takeIf { it.size == 32 }
+            ?: throw ModerationConsentException("directory root key pin is not a 32-byte Ed25519 key")
+        val signature = fetchBytes(httpClient, "$url.sig", what = "authority directory signature")
+        verifyDetachedEd25519Signature(bytes, signature, rootKey, what = "authority directory")
+
         val document = runCatching {
             ModerationJson.json.decodeFromString(
                 AuthorityDirectoryDocument.serializer(),
@@ -88,6 +103,17 @@ class OkHttpKnownAuthoritiesFetcher(
         /** Same publication shape as the relayer/authority lists. */
         const val DEFAULT_URL: String =
             "https://github.com/onymchat/onym-authorities/releases/latest/download/authorities.json"
+
+        /**
+         * The directory root key's PUBLIC half — the app-shipped trust
+         * anchor the whole moderation pin chain roots in. Mirrors
+         * `directory-root-pubkey.txt` in onym-authorities, whose
+         * releases carry the matching detached signature; the private
+         * half is offline with the release manager (never in a repo,
+         * never in CI). Rotating it is an app update by design.
+         */
+        const val DIRECTORY_ROOT_KEY_BASE64: String =
+            "mD9k/2Xa1D1DGI0IlczLTea9N8Kefe/IWLOO4OF8Fjw="
     }
 }
 
@@ -127,7 +153,7 @@ class OkHttpAuthorityManifestFetcher(
                 "${listing.manifestURL}.sig",
                 what = "authority manifest signature",
             )
-            verifyDetachedSignature(rawBytes, signature, pinnedKey)
+            verifyDetachedEd25519Signature(rawBytes, signature, pinnedKey, what = "authority manifest")
 
             SignedManifest(manifest, rawBytes)
         }
@@ -153,22 +179,31 @@ class OkHttpAuthorityManifestFetcher(
         return pinned
     }
 
-    private fun verifyDetachedSignature(
-        rawBytes: ByteArray,
-        signatureFile: ByteArray,
-        publicKey: ByteArray,
-    ) {
-        val signature = runCatching {
-            Base64.getMimeDecoder().decode(signatureFile.decodeToString().trim())
-        }.getOrNull()?.takeIf { it.size == 64 }
-            ?: throw ModerationConsentException("manifest signature file is not a base64 Ed25519 signature")
-        val verifier = Ed25519Signer().apply {
-            init(false, Ed25519PublicKeyParameters(publicKey, 0))
-            update(rawBytes, 0, rawBytes.size)
-        }
-        if (!verifier.verifySignature(signature)) {
-            throw ModerationConsentException("manifest signature did not verify against the pinned key")
-        }
+}
+
+/**
+ * Verify a detached Ed25519 signature file (base64 of the 64 raw
+ * bytes, whitespace-tolerant) over [rawBytes]. Shared by the directory
+ * fetch (against the app-pinned root key) and the manifest fetch
+ * (against the directory-pinned operator key) — one wire contract,
+ * one verifier.
+ */
+internal fun verifyDetachedEd25519Signature(
+    rawBytes: ByteArray,
+    signatureFile: ByteArray,
+    publicKey: ByteArray,
+    what: String,
+) {
+    val signature = runCatching {
+        Base64.getMimeDecoder().decode(signatureFile.decodeToString().trim())
+    }.getOrNull()?.takeIf { it.size == 64 }
+        ?: throw ModerationConsentException("$what signature file is not a base64 Ed25519 signature")
+    val verifier = Ed25519Signer().apply {
+        init(false, Ed25519PublicKeyParameters(publicKey, 0))
+        update(rawBytes, 0, rawBytes.size)
+    }
+    if (!verifier.verifySignature(signature)) {
+        throw ModerationConsentException("$what signature did not verify against the pinned key")
     }
 }
 
