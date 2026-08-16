@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
@@ -65,18 +66,39 @@ class ChatBubbleInteractionUITest {
         groupType = SepGroupType.TYRANNY,
     )
 
+    /** Records openUri calls instead of launching a browser — a real
+     *  launch backgrounds the test activity and kills the hierarchy
+     *  (how the long-press-follows-link bug was caught). */
+    private class RecordingUriHandler : androidx.compose.ui.platform.UriHandler {
+        val opened = mutableListOf<String>()
+        override fun openUri(uri: String) {
+            opened.add(uri)
+        }
+    }
+
     private fun show(
         message: ChatMessage,
         onRetry: (() -> Unit)? = null,
         onSwipeReply: (() -> Unit)? = null,
+        uriHandler: RecordingUriHandler? = null,
     ) {
         composeRule.activity.runOnUiThread {
             composeRule.activity.setContent {
-                ChatBubble(
-                    message = message,
-                    onRetry = onRetry,
-                    onSwipeReply = onSwipeReply,
-                )
+                val content: @androidx.compose.runtime.Composable () -> Unit = {
+                    ChatBubble(
+                        message = message,
+                        onRetry = onRetry,
+                        onSwipeReply = onSwipeReply,
+                    )
+                }
+                if (uriHandler != null) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalUriHandler provides uriHandler,
+                        content = content,
+                    )
+                } else {
+                    content()
+                }
             }
         }
         composeRule.waitForIdle()
@@ -137,6 +159,50 @@ class ChatBubbleInteractionUITest {
             }
         composeRule.waitForIdle()
         assertEquals(1, replies.get())
+    }
+
+    /** The headline feature, at the two positions the hit test gets
+     * wrong when it conflates cursor offsets with glyph indices: the
+     * MIDDLE of a glyph and the RIGHT half of the last glyph (whose
+     * nearest cursor is one past it). Both must open; the empty
+     * space just OUTSIDE the text must not. */
+    @Test
+    fun linkTapsOpenAtGlyphMiddleAndRightHalf() {
+        val handler = RecordingUriHandler()
+        val url = "https://onym.app/very/important/path"
+        val sent = message(url, MessageStatus.SENT)
+        show(sent, uriHandler = handler)
+
+        val textNode = composeRule
+            .onNodeWithTag("chat_thread.body_links.${sent.id}", useUnmergedTree = true)
+        // Middle of the text = middle of some glyph.
+        textNode.performTouchInput { click(center) }
+        // Right half of the LAST glyph: just inside the trailing edge.
+        textNode.performTouchInput {
+            click(androidx.compose.ui.geometry.Offset(right - 2f, centerY))
+        }
+        composeRule.waitForIdle()
+        assertEquals(listOf(url, url), handler.opened)
+    }
+
+    /** A tap on the bubble padding beside the text falls through to
+     * the bubble action, never a clamped link hit. */
+    @Test
+    fun tapBesideTheLinkDoesNotOpenIt() {
+        val handler = RecordingUriHandler()
+        val retries = AtomicInteger(0)
+        val failed = failedMessage("https://onym.app/x")
+        show(failed, onRetry = { retries.incrementAndGet() }, uriHandler = handler)
+
+        // The bubble is wider than the text (padding): tap inside the
+        // bubble but right of the text's trailing edge.
+        composeRule.onNodeWithTag("chat_thread.bubble.${failed.id}", useUnmergedTree = true)
+            .performTouchInput {
+                click(androidx.compose.ui.geometry.Offset(right - 2f, centerY))
+            }
+        composeRule.waitForIdle()
+        assertEquals(0, handler.opened.size)
+        assertEquals(1, retries.get())
     }
 
     @Test

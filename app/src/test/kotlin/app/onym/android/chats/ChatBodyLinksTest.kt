@@ -110,6 +110,9 @@ class ChatBodyLinksTest {
     fun `a bare marker with no host is prose`() {
         assertTrue(ChatBodyLinks.detect("https:// is a prefix and www. a habit").isEmpty())
         assertTrue(ChatBodyLinks.detect("http://nohostdot").isEmpty())
+        // The dot must be in the HOST: a dotless intranet host with a
+        // dotted path is not a public link.
+        assertTrue(ChatBodyLinks.detect("grab http://intranet/report.pdf now").isEmpty())
         // The guard is ignoreCase like the pattern: a lone "WWW."
         // must not linkify to a dead https://WWW.
         assertTrue(ChatBodyLinks.detect("shouting WWW. at clouds").isEmpty())

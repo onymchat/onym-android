@@ -70,7 +70,11 @@ object ChatBodyLinks {
             // must be ignoreCase for the same reason (a lone "WWW."
             // escaped the case-sensitive check as a dead link).
             val hostPart = text.substringAfter("://", text)
-            if (hostPart.isEmpty() || !hostPart.contains('.') ||
+            // The dot must be in the HOST, not the path — otherwise a
+            // dotless intranet host with a dotted path
+            // (http://intranet/report.pdf) linkifies.
+            val host = hostPart.substringBefore('/')
+            if (hostPart.isEmpty() || !host.contains('.') ||
                 hostPart.startsWith("www.", ignoreCase = true) && hostPart.length <= 4
             ) {
                 return@mapNotNull null
