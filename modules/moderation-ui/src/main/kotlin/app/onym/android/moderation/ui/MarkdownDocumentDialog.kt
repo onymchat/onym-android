@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -73,11 +74,42 @@ fun MarkdownDocumentDialog(
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        // decorFitsSystemWindows = false: with the default, the
+        // wrap-content dialog window maxes out at display height but
+        // is POSITIONED below the top inset — its bottom hangs
+        // off-screen by a status-bar height, and the last sliver of
+        // every document is composed yet unreachable by scroll. Laid
+        // edge-to-edge (plus the explicit MATCH_PARENT below) the
+        // window covers exactly the display and the safeDrawing
+        // padding inside takes over the inset job.
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
     ) {
+        // The dialog WINDOW cannot be trusted to sit at (0,0): the
+        // window manager positions it below the display cutout (and
+        // on enforced-edge-to-edge SDKs ignores the cutout-mode
+        // attributes), so a full-height layout hangs off the display
+        // bottom by exactly the offset — measured +142px on a Pixel
+        // 9a — leaving the document's tail composed but unreachable.
+        // Instead of fighting per-SDK window flags, MEASURE the
+        // overhang after layout and pad the content by exactly that:
+        // self-correcting on any device, any API, any future WM
+        // behavior. Zero when the window really is full-screen.
+        val dialogView = androidx.compose.ui.platform.LocalView.current
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        var overhangPx by remember { mutableStateOf(0) }
         Surface(
             modifier = Modifier
                 .fillMaxSize()
+                .onGloballyPositioned {
+                    val location = IntArray(2)
+                    dialogView.getLocationOnScreen(location)
+                    val displayHeight = dialogView.resources.displayMetrics.heightPixels
+                    overhangPx =
+                        (location[1] + dialogView.height - displayHeight).coerceAtLeast(0)
+                }
                 .testTag("moderation.document"),
         ) {
             val (currentTitle, currentUrl) = stack.last()
@@ -85,7 +117,11 @@ fun MarkdownDocumentDialog(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing),
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    // The measured off-display overhang (see above):
+                    // shrinks the layout to the VISIBLE region so the
+                    // scroll range covers the whole document.
+                    .padding(bottom = with(density) { overhangPx.toDp() }),
             ) {
                 Row(
                     modifier = Modifier
@@ -161,7 +197,8 @@ private fun MarkdownDocumentBody(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp)
-                    .padding(bottom = 20.dp),
+                    .padding(bottom = 20.dp)
+                    .testTag("moderation.document.scroll"),
             ) {
                 current.blocks.forEach { block ->
                     MarkdownBlockView(block) { href ->
