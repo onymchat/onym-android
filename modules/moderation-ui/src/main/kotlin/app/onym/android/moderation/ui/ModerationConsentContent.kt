@@ -115,6 +115,51 @@ fun ModerationConsentContent(
                 }
             }
 
+            is ModerationConsentController.UiState.Picking -> {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = stringResource(R.string.moderation_consent_pick_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.moderation_consent_pick_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    current.error?.let { error ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.testTag("moderation.consent.error"),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    current.listings.forEach { listing ->
+                        OutlinedButton(
+                            onClick = { scope.launch { controller.select(listing) } },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("moderation.consent.pick.${listing.componentId}"),
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = listing.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = listing.componentId,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+            }
+
             is ModerationConsentController.UiState.Review -> {
                 Text(
                     text = stringResource(R.string.moderation_consent_title, current.listing.name),
@@ -162,6 +207,15 @@ fun ModerationConsentContent(
                         .fillMaxWidth()
                         .testTag("moderation.consent.agree"),
                 ) { Text(stringResource(R.string.moderation_consent_agree)) }
+                if (current.canPickAnother) {
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = { scope.launch { controller.backToAuthorities() } },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("moderation.consent.pickAnother"),
+                    ) { Text(stringResource(R.string.moderation_consent_pick_another)) }
+                }
             }
 
             is ModerationConsentController.UiState.Consented -> {

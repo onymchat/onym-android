@@ -49,12 +49,27 @@ class ModerationConsentController(
          * the step reports Unavailable, never a silent skip. */
         data class Unavailable(val message: String?) : UiState
 
+        /**
+         * More than one authority in the directory: the user picks
+         * WHO may judge them before reviewing WHAT they'd be agreeing
+         * to (iOS `ModerationConsentFlow.pickingAuthority`). A
+         * single-entry directory skips this state — the pick is
+         * forced, so the review is the decision.
+         */
+        data class Picking(
+            val listings: List<AuthorityListing>,
+            val error: String? = null,
+        ) : UiState
+
         /** The reviewed snapshot on screen. [termsDisplay] is rendered
          * from the exact retained bytes. */
         data class Review(
             val listing: AuthorityListing,
             val termsDisplay: String,
             val error: String? = null,
+            /** True when the directory offers alternatives — renders
+             *  the back-to-picker affordance. */
+            val canPickAnother: Boolean = false,
         ) : UiState
 
         data object Consenting : UiState
@@ -68,6 +83,10 @@ class ModerationConsentController(
 
     /** The retained review snapshot `agree` consents with. */
     private var reviewed: Pair<AuthorityListing, SignedManifest>? = null
+
+    /** The last fetched directory — what the picker offers and what
+     *  [backToAuthorities] returns to. */
+    private var directory: List<AuthorityListing> = emptyList()
 
     /**
      * Consecutive failed consent transactions that were TRANSIENT
@@ -107,15 +126,51 @@ class ModerationConsentController(
             }
         }
         state.value = UiState.Loading
-        val listing = try {
-            // The reference deployment designates one authority; a
-            // picker becomes worthwhile when the directory grows.
-            authoritiesFetcher.fetchLatest().first()
+        val listings = try {
+            authoritiesFetcher.fetchLatest()
         } catch (e: Exception) {
             state.value = UiState.Unavailable(e.message)
             reviewed = null
             return
         }
+        directory = listings
+        if (listings.size == 1) {
+            // A single-entry directory forces the pick, so the review
+            // IS the decision — no picker interlude, and a manifest
+            // failure is the step's unavailability.
+            reviewListingLocked(listings.single(), onFailure = { e ->
+                state.value = UiState.Unavailable(e.message)
+            })
+        } else {
+            state.value = UiState.Picking(listings)
+        }
+    }
+
+    /**
+     * Row tap in the authority picker: fetch and stage that
+     * authority's manifest for review. A fetch failure returns to the
+     * picker with the reason — the OTHER authorities are still
+     * offerable, so one unreachable manifest must not declare the
+     * whole step unavailable.
+     */
+    suspend fun select(listing: AuthorityListing) = mutex.withLock {
+        state.value = UiState.Loading
+        reviewListingLocked(listing, onFailure = { e ->
+            state.value = UiState.Picking(directory, error = e.message)
+        })
+    }
+
+    /** Back from the review surface to the picker. */
+    suspend fun backToAuthorities() = mutex.withLock {
+        if (directory.size <= 1) return@withLock
+        reviewed = null
+        state.value = UiState.Picking(directory)
+    }
+
+    private suspend fun reviewListingLocked(
+        listing: AuthorityListing,
+        onFailure: (Exception) -> Unit,
+    ) {
         try {
             val signed = manifestFetcher.fetch(listing)
             reviewed = listing to signed
@@ -126,10 +181,15 @@ class ModerationConsentController(
             // just that it does. Null in the ordinary first-consent
             // case, and quiet again once a consent activates.
             val priorRefusal = runCatching { moderation.registrationRefusal() }.getOrNull()
-            state.value = UiState.Review(listing, signed.displayJson(), error = priorRefusal)
+            state.value = UiState.Review(
+                listing,
+                signed.displayJson(),
+                error = priorRefusal,
+                canPickAnother = directory.size > 1,
+            )
         } catch (e: Exception) {
-            state.value = UiState.Unavailable(e.message)
             reviewed = null
+            onFailure(e)
         }
     }
 
@@ -183,6 +243,7 @@ class ModerationConsentController(
                     listing,
                     signed.displayJson(),
                     error = e.message ?: "consent failed",
+                    canPickAnother = directory.size > 1,
                 )
             }
             null

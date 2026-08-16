@@ -184,6 +184,189 @@ class DiscoverySeatAdaptersTest {
         }
     }
 
+    // ─── Moderation seat (authorities) ────────────────────────────
+
+    private fun legacyAuthority(
+        componentId: String = "onym:component:legacy-authority",
+    ) = app.onym.android.moderation.AuthorityListing(
+        componentId = componentId,
+        name = "Legacy Authority",
+        manifestURL = "https://legacy-authority.example.com/manifest.json",
+        apiBaseURL = "https://legacy-authority.example.com",
+        operatorPublicKeyBase64 = Base64.getEncoder().encodeToString(ByteArray(32) { 9 }),
+    )
+
+    private fun authoritiesFallback(
+        listings: List<app.onym.android.moderation.AuthorityListing> = listOf(legacyAuthority()),
+        failure: Exception? = null,
+    ) = app.onym.android.moderation.support.FakeKnownAuthoritiesFetcher(
+        listings = listings,
+        failure = failure,
+    )
+
+    private fun moderationEntry(
+        componentId: String = "onym:component:disco-authority",
+        digest: String,
+        status: app.onym.android.discovery.EntryStatus? = null,
+    ): AttributedCatalogEntry {
+        val base = attributedEntry(
+            componentId = componentId,
+            seatType = DiscoveryBackedKnownAuthoritiesFetcher.SEAT_TYPE,
+            manifestUri = "https://disco-authority.example.com/manifest.json",
+            digest = digest,
+        )
+        return if (status == null) {
+            base
+        } else {
+            AttributedCatalogEntry(
+                entry = base.entry.copy(status = status),
+                attribution = base.attribution,
+            )
+        }
+    }
+
+    private fun moderationManifest(
+        componentId: String = "onym:component:disco-authority",
+        endpointUris: List<String> = listOf("https://disco-authority.example.com"),
+    ): JsonObject = destinationManifest(
+        componentId = componentId,
+        seat = "moderation",
+        name = "Disco Authority",
+        endpointUris = endpointUris,
+    )
+
+    @Test
+    fun authorities_mapsReviewedEntryToListing() = runTest {
+        val bytes = signedManifestBytes(moderationManifest())
+        val entry = moderationEntry(digest = sha256Digest(bytes))
+        val fetcher = DiscoveryBackedKnownAuthoritiesFetcher(
+            catalog = catalogOf(
+                listOf(entry),
+                FakeDiscoveryFetcher().apply { respond(entry.entry.manifest.uri, bytes) },
+            ),
+            fallback = authoritiesFallback(),
+        )
+
+        val listings = fetcher.fetchLatest()
+
+        assertEquals(2, listings.size)
+        val discovered = listings.first { it.componentId == "onym:component:disco-authority" }
+        assertEquals("Disco Authority", discovered.name)
+        assertEquals(entry.entry.manifest.uri, discovered.manifestURL)
+        assertEquals("https://disco-authority.example.com", discovered.apiBaseURL)
+        // The operator key travels from the VERIFIED catalog entry
+        // (onym:key hex) into the listing's base64 spelling.
+        assertEquals(
+            Base64.getEncoder()
+                .encodeToString(operatorPrivateKey.generatePublicKey().encoded),
+            discovered.operatorPublicKeyBase64,
+        )
+        assertTrue(listings.any { it.componentId == "onym:component:legacy-authority" })
+    }
+
+    /** The trust-carrying merge rule: a catalog entry reusing a
+     * published authority's componentId must never replace that
+     * authority's endpoint or key. */
+    @Test
+    fun authorities_legacyWinsOnComponentIdCollision() = runTest {
+        val bytes = signedManifestBytes(
+            moderationManifest(componentId = "onym:component:legacy-authority"),
+        )
+        val entry = moderationEntry(
+            componentId = "onym:component:legacy-authority",
+            digest = sha256Digest(bytes),
+        )
+        val fetcher = DiscoveryBackedKnownAuthoritiesFetcher(
+            catalog = catalogOf(
+                listOf(entry),
+                FakeDiscoveryFetcher().apply { respond(entry.entry.manifest.uri, bytes) },
+            ),
+            fallback = authoritiesFallback(),
+        )
+
+        val listings = fetcher.fetchLatest()
+
+        assertEquals(1, listings.size)
+        // The LEGACY row's endpoint and key survived, not discovery's.
+        assertEquals("https://legacy-authority.example.com", listings.single().apiBaseURL)
+        assertEquals(legacyAuthority().operatorPublicKeyBase64, listings.single().operatorPublicKeyBase64)
+    }
+
+    /** §4.2: the provider itself flagged the row suspect; it must not
+     * reach a consent picker. */
+    @Test
+    fun authorities_warningFlaggedEntryIsExcluded() = runTest {
+        val bytes = signedManifestBytes(moderationManifest())
+        val entry = moderationEntry(
+            digest = sha256Digest(bytes),
+            status = app.onym.android.discovery.EntryStatus(state = "warning"),
+        )
+        val fetcher = DiscoveryBackedKnownAuthoritiesFetcher(
+            catalog = catalogOf(
+                listOf(entry),
+                FakeDiscoveryFetcher().apply { respond(entry.entry.manifest.uri, bytes) },
+            ),
+            fallback = authoritiesFallback(),
+        )
+
+        assertEquals(listOf("onym:component:legacy-authority"), fetcher.fetchLatest().map { it.componentId })
+    }
+
+    /** Add, never subtract — but in BOTH directions: an unreachable
+     * legacy directory is survivable exactly when discovery yields
+     * something. */
+    @Test
+    fun authorities_legacyFailureSurvivesWhenDiscoveryYields() = runTest {
+        val bytes = signedManifestBytes(moderationManifest())
+        val entry = moderationEntry(digest = sha256Digest(bytes))
+        val fetcher = DiscoveryBackedKnownAuthoritiesFetcher(
+            catalog = catalogOf(
+                listOf(entry),
+                FakeDiscoveryFetcher().apply { respond(entry.entry.manifest.uri, bytes) },
+            ),
+            fallback = authoritiesFallback(failure = IllegalStateException("legacy down")),
+        )
+        assertEquals(
+            listOf("onym:component:disco-authority"),
+            fetcher.fetchLatest().map { it.componentId },
+        )
+    }
+
+    @Test
+    fun authorities_bothSourcesEmptyThrowsTheLegacyFailure() = runTest {
+        val fetcher = DiscoveryBackedKnownAuthoritiesFetcher(
+            catalog = catalogOf(emptyList(), FakeDiscoveryFetcher()),
+            fallback = authoritiesFallback(failure = IllegalStateException("legacy down")),
+        )
+        try {
+            fetcher.fetchLatest()
+            org.junit.Assert.fail("no source must throw")
+        } catch (e: IllegalStateException) {
+            assertEquals("legacy down", e.message)
+        }
+    }
+
+    /** A manifest with no https endpoint cannot carry the row: the
+     * apiBaseURL is where the user's signed mandate is sent. */
+    @Test
+    fun authorities_manifestWithoutHttpsEndpointSkipsToLegacy() = runTest {
+        val bytes = signedManifestBytes(
+            moderationManifest(endpointUris = listOf("wss://not-an-api.example.com")),
+        )
+        val entry = moderationEntry(digest = sha256Digest(bytes))
+        val fetcher = DiscoveryBackedKnownAuthoritiesFetcher(
+            catalog = catalogOf(
+                listOf(entry),
+                FakeDiscoveryFetcher().apply { respond(entry.entry.manifest.uri, bytes) },
+            ),
+            fallback = authoritiesFallback(),
+        )
+        assertEquals(
+            listOf("onym:component:legacy-authority"),
+            fetcher.fetchLatest().map { it.componentId },
+        )
+    }
+
     // ─── Notary seat (chain relayers) ─────────────────────────────
 
     @Test

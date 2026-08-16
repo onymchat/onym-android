@@ -247,10 +247,16 @@ private fun fetchBytes(httpClient: OkHttpClient, url: String, what: String): Byt
  * invalid manifest can never end up pinned by a signed mandate.
  */
 object AuthorityManifestValidator {
-    /** The profile this client implements; a conforming manifest names
-     * exactly this. Empty (fixture manifests predating the field) is
-     * tolerated until authorities republish. */
-    const val PROFILE_ID: String = "onym:moderation-enforcement-profile:google-device-recall-v1"
+    /**
+     * The MODERATION profiles this client can consent under —
+     * `moderationProfileId` names the authority's process contract
+     * (Moderation.md), NOT the per-platform enforcement profile (that
+     * is this client's own implementation detail; the live authority
+     * manifest declares `consent-bound-v1` and iOS validates against
+     * the same set). Empty (fixture manifests predating the field) is
+     * tolerated until authorities republish.
+     */
+    val SUPPORTED_PROFILE_IDS: Set<String> = setOf("onym:moderation-profile:consent-bound-v1")
 
     fun validateForConsent(signed: SignedManifest, now: Instant) {
         val manifest = signed.manifest
@@ -263,10 +269,11 @@ object AuthorityManifestValidator {
             throw ModerationConsentException("manifest validity has lapsed; ask the authority to republish")
         }
         if (manifest.moderationProfileId.isNotEmpty() &&
-            manifest.moderationProfileId != PROFILE_ID
+            manifest.moderationProfileId !in SUPPORTED_PROFILE_IDS
         ) {
             throw ModerationConsentException(
-                "manifest names profile ${manifest.moderationProfileId}; this client implements $PROFILE_ID",
+                "manifest names profile ${manifest.moderationProfileId}; " +
+                    "this client supports $SUPPORTED_PROFILE_IDS",
             )
         }
         // A permanent class requires an external appellate authority

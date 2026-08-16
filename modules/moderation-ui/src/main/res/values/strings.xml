@@ -24,6 +24,9 @@
   <string name="moderation_gate_required_contact_fallback">Contact the moderation authority whose terms you accepted — its contact details are published in the terms you reviewed at setup.</string>
 
   <!-- Consent -->
+  <string name="moderation_consent_pick_title">Choose who handles reports</string>
+  <string name="moderation_consent_pick_body">More than one moderation authority is available. Pick one to review its terms — you agree only to the terms you review next, and only for the authority you pick.</string>
+  <string name="moderation_consent_pick_another">Choose a different authority</string>
   <string name="moderation_consent_title">Moderation by %1$s</string>
   <string name="moderation_consent_body">Onym requires consenting to independent moderation. Review the authority\'s terms below — exactly these terms, and nothing else, are what you agree to.</string>
   <string name="moderation_consent_agree">Agree and continue</string>

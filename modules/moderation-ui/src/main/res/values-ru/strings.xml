@@ -24,6 +24,9 @@
   <string name="moderation_gate_required_contact_fallback">Свяжитесь с органом модерации, чьи условия вы приняли — его контакты указаны в условиях, которые вы просматривали при настройке.</string>
 
   <!-- Consent -->
+  <string name="moderation_consent_pick_title">Выберите, кто рассматривает жалобы</string>
+  <string name="moderation_consent_pick_body">Доступно несколько модерационных инстанций. Выберите одну, чтобы изучить её условия — вы соглашаетесь только с условиями, которые увидите далее, и только для выбранной инстанции.</string>
+  <string name="moderation_consent_pick_another">Выбрать другую инстанцию</string>
   <string name="moderation_consent_title">Модерация: %1$s</string>
   <string name="moderation_consent_body">Для работы Onym требуется согласие на независимую модерацию. Ознакомьтесь с условиями ниже — вы соглашаетесь именно с этими условиями и ни с чем другим.</string>
   <string name="moderation_consent_agree">Принять и продолжить</string>
