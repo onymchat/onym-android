@@ -76,4 +76,12 @@
   <string name="moderation_appeal_done">Done</string>
   <string name="moderation_appeal_terminal_hint">Filing this again would get the same answer. Contact the authority directly if you think this is wrong.</string>
   <string name="moderation_appeal_already_filed">You have already filed an appeal on this case. Sending another statement files a second appeal rather than replacing the first.</string>
+  <string name="moderation_banned_appeal_in_app">Review case and appeal</string>
+  <string name="moderation_banned_appeal_external">Appeal on the authority\'s website</string>
+  <string name="moderation_banned_reasoning">Grounds given by the authority: %1$s</string>
+  <string name="moderation_banned_appeal_deadline">Appeal by %1$s</string>
+  <plurals name="moderation_case_banner">
+    <item quantity="one">A moderation case is open against you. Tap to review or appeal.</item>
+    <item quantity="other">%d moderation cases are open against you. Tap to review or appeal.</item>
+  </plurals>
 </resources>

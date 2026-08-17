@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.testTag
@@ -146,8 +147,39 @@ fun RootScreen(
         val rootGate by moderation.gate.snapshots.collectAsStateWithLifecycle()
         when (val gate = rootGate) {
             is app.onym.android.moderation.ui.RootGate.Banned -> {
-                BackHandler(enabled = true) {}
                 val context = LocalContext.current
+                // The appeal surface is hosted HERE, not in the NavHost
+                // below: this branch returns before the shell exists, so
+                // a banned user could not reach a nav destination at all
+                // — which is why the in-app appeal shipped unreachable
+                // for the one person who needs it. Local state, and Back
+                // closes it rather than escaping the gate.
+                // Saveable, not remembered: this host is hand-rolled
+                // rather than a NavHost destination, so nothing else
+                // restores it across activity recreation. With plain
+                // `remember`, a rotation mid-appeal dropped the banned
+                // user back to the ban screen AND discarded the typed
+                // statement — CaseAppealScreen's own `rememberSaveable`
+                // never restores, because the screen left composition.
+                var appealingCaseId by androidx.compose.runtime.saveable.rememberSaveable {
+                    androidx.compose.runtime.mutableStateOf<String?>(null)
+                }
+                BackHandler(enabled = true) { appealingCaseId = null }
+                val caseId = appealingCaseId
+                if (caseId != null) {
+                    val controller = remember(caseId) {
+                        moderation.makeCaseAppealController(caseId)
+                    }
+                    app.onym.android.moderation.ui.CaseAppealScreen(
+                        controller = controller,
+                        // No gate notice while banned — the case is
+                        // closed enough to have produced a verdict — so
+                        // the screen renders from the case id alone.
+                        notice = null,
+                        onBack = { appealingCaseId = null },
+                    )
+                    return
+                }
                 app.onym.android.moderation.ui.BannedScreen(
                     state = gate.state,
                     onOpenUrl = { url ->
@@ -160,6 +192,7 @@ fun RootScreen(
                             )
                         }
                     },
+                    onAppealCase = { id -> appealingCaseId = id },
                 )
                 return
             }
@@ -398,6 +431,12 @@ fun RootScreen(
                 val blossomServers by dependencies.blossomServersFlow.collectAsStateWithLifecycle()
                 val discoveryState = dependencies.discovery?.stateFlow
                     ?.collectAsStateWithLifecycle()
+                // Notices ride on an otherwise-operational gate answer.
+                val moderationOpenCases =
+                    (dependencies.moderation?.gate?.snapshots?.collectAsStateWithLifecycle()
+                        ?.value as? app.onym.android.moderation.ui.RootGate.Operational)
+                        ?.openCases
+                        .orEmpty()
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
@@ -460,6 +499,22 @@ fun RootScreen(
                                 moderation.repository.identityConsentState()
                             }.getOrNull()
                         }.value
+                    },
+                    openCases = moderationOpenCases,
+                    // One case goes straight to its appeal. Several go
+                    // to Settings → Moderation, whose Open cases section
+                    // lists every one with its own Appeal row — the
+                    // banner used to say "N cases" and then open only
+                    // the first, leaving the rest unreachable from here.
+                    onReviewCases = {
+                        val single = moderationOpenCases.singleOrNull()
+                        if (single != null) {
+                            navController.navigate(
+                                "moderation_case_appeal/${android.net.Uri.encode(single.caseId)}",
+                            )
+                        } else {
+                            navController.navigate(ROUTE_MODERATION_SETTINGS)
+                        }
                     },
                 )
             }
