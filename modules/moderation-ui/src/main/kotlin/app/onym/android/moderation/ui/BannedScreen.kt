@@ -114,10 +114,13 @@ fun BannedScreen(
             // the filing is retained locally so an ambiguous delivery is
             // retried rather than silently lost. Matches iOS, which
             // demotes the URL to a secondary "appeal externally".
-            val appealableCaseId = verdict?.caseId?.takeIf { onAppealCase != null }
-            if (appealableCaseId != null) {
+            // Bound together so the button cannot outlive either half:
+            // a case id without a handler is not an in-app route.
+            val inAppAppeal: (() -> Unit)? = verdict?.caseId
+                ?.let { id -> onAppealCase?.let { handler -> { handler(id) } } }
+            if (inAppAppeal != null) {
                 Button(
-                    onClick = { onAppealCase!!(appealableCaseId) },
+                    onClick = inAppAppeal,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("moderation.banned.appeal"),
@@ -151,7 +154,7 @@ fun BannedScreen(
                         .testTag("moderation.banned.newHolder"),
                 ) { Text(stringResource(R.string.moderation_banned_new_holder)) }
             }
-            if (appealableCaseId == null && appealUri == null && newHolderUri == null) {
+            if (inAppAppeal == null && appealUri == null && newHolderUri == null) {
                 // With no declared routes, the contact itself becomes
                 // the tappable route out when it parses as one — a
                 // screen with only untappable text is a step away from

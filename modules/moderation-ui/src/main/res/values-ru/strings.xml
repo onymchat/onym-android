@@ -83,7 +83,7 @@
   <string name="moderation_banned_reasoning">Основания, изложенные инстанцией: %1$s</string>
   <string name="moderation_banned_appeal_deadline">Обжаловать до %1$s</string>
   <plurals name="moderation_case_banner">
-    <item quantity="one">Против вас открыто дело. Нажмите, чтобы изучить или обжаловать.</item>
+    <item quantity="one">Против вас открыто %d дело. Нажмите, чтобы изучить или обжаловать.</item>
     <item quantity="few">Против вас открыто %d дела. Нажмите, чтобы изучить или обжаловать.</item>
     <item quantity="many">Против вас открыто %d дел. Нажмите, чтобы изучить или обжаловать.</item>
     <item quantity="other">Против вас открыто %d дела. Нажмите, чтобы изучить или обжаловать.</item>

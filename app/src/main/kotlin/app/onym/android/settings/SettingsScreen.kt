@@ -138,8 +138,9 @@ fun SettingsScreen(
      *  they cannot answer, and the first they'd otherwise know is the
      *  ban at the end of it. Empty is the normal state. */
     openCases: List<app.onym.android.moderation.CaseNotice> = emptyList(),
-    /** Open the appeal surface for one case id. */
-    onAppealCase: (String) -> Unit = {},
+    /** Review the open cases: the single case's appeal when there is
+     *  one, otherwise the Moderation screen that lists them all. */
+    onReviewCases: () -> Unit = {},
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -173,7 +174,7 @@ fun SettingsScreen(
                 item {
                     app.onym.android.moderation.ui.OpenCaseBanner(
                         notices = openCases,
-                        onClick = { onAppealCase(openCases.first().caseId) },
+                        onClick = onReviewCases,
                     )
                 }
             }

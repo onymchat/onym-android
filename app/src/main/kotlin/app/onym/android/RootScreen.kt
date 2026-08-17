@@ -154,7 +154,14 @@ fun RootScreen(
                 // — which is why the in-app appeal shipped unreachable
                 // for the one person who needs it. Local state, and Back
                 // closes it rather than escaping the gate.
-                var appealingCaseId by remember {
+                // Saveable, not remembered: this host is hand-rolled
+                // rather than a NavHost destination, so nothing else
+                // restores it across activity recreation. With plain
+                // `remember`, a rotation mid-appeal dropped the banned
+                // user back to the ban screen AND discarded the typed
+                // statement — CaseAppealScreen's own `rememberSaveable`
+                // never restores, because the screen left composition.
+                var appealingCaseId by androidx.compose.runtime.saveable.rememberSaveable {
                     androidx.compose.runtime.mutableStateOf<String?>(null)
                 }
                 BackHandler(enabled = true) { appealingCaseId = null }
@@ -494,10 +501,20 @@ fun RootScreen(
                         }.value
                     },
                     openCases = moderationOpenCases,
-                    onAppealCase = { caseId ->
-                        navController.navigate(
-                            "moderation_case_appeal/${android.net.Uri.encode(caseId)}",
-                        )
+                    // One case goes straight to its appeal. Several go
+                    // to Settings → Moderation, whose Open cases section
+                    // lists every one with its own Appeal row — the
+                    // banner used to say "N cases" and then open only
+                    // the first, leaving the rest unreachable from here.
+                    onReviewCases = {
+                        val single = moderationOpenCases.singleOrNull()
+                        if (single != null) {
+                            navController.navigate(
+                                "moderation_case_appeal/${android.net.Uri.encode(single.caseId)}",
+                            )
+                        } else {
+                            navController.navigate(ROUTE_MODERATION_SETTINGS)
+                        }
                     },
                 )
             }
