@@ -132,6 +132,14 @@ fun SettingsScreen(
      *  no subtitle is shown rather than another identity's answer. */
     moderationConsent:
         app.onym.android.moderation.ModerationRepository.IdentityConsentState? = null,
+    /** Cases the gate reports open against this identity. Surfaced as a
+     *  banner at the top of Settings rather than only inside
+     *  Settings → Moderation: a case the user never learns about is one
+     *  they cannot answer, and the first they'd otherwise know is the
+     *  ban at the end of it. Empty is the normal state. */
+    openCases: List<app.onym.android.moderation.CaseNotice> = emptyList(),
+    /** Open the appeal surface for one case id. */
+    onAppealCase: (String) -> Unit = {},
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -157,6 +165,19 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .testTag("settings.list"),
         ) {
+            // Above everything: an open case is time-bounded (the
+            // response window runs whether or not the user has noticed)
+            // and it never blocks the app, so the banner is the only
+            // thing that tells them.
+            if (openCases.isNotEmpty()) {
+                item {
+                    app.onym.android.moderation.ui.OpenCaseBanner(
+                        notices = openCases,
+                        onClick = { onAppealCase(openCases.first().caseId) },
+                    )
+                }
+            }
+
             // ─── Identity carousel ─────────────────────────────────
             // One swipeable QR carousel replaces the old Active-identity
             // hero + Invite-QR hero + Identities row: swipe to switch

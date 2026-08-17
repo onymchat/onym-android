@@ -17,11 +17,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.onym.android.moderation.BanState
+import app.onym.android.moderation.Verdict
 
 /**
  * The full-screen ban gate. A silent brick is nonconforming (profile
@@ -32,8 +34,17 @@ import app.onym.android.moderation.BanState
 fun BannedScreen(
     state: BanState,
     onOpenUrl: (String) -> Unit,
+    /** Open the in-app appeal for this case. Null leaves the screen as
+     *  it was before the case reference existed — URLs only — which is
+     *  also what a gate that attaches no verdict degrades to. */
+    onAppealCase: ((caseId: String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // The case id lives in the attached verdict, not in BanState. The
+    // whole appeal vertical was unreachable while banned without it:
+    // the ban gate replaces the shell and blocks Back, so Settings —
+    // where the appeal surface lives — cannot be opened at all.
+    val verdict = remember(state) { Verdict.from(state.verdict) }
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -70,6 +81,26 @@ fun BannedScreen(
                 ),
                 style = MaterialTheme.typography.bodySmall,
             )
+            verdict?.reasoning?.takeIf { it.isNotBlank() }?.let { reasoning ->
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    // The authority's words, labelled as theirs — this
+                    // screen does not paraphrase an accusation.
+                    text = stringResource(R.string.moderation_banned_reasoning, reasoning),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("moderation.banned.reasoning"),
+                )
+            }
+            verdict?.appealDeadline?.takeIf { it.isNotBlank() }?.let { deadline ->
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(
+                        R.string.moderation_banned_appeal_deadline,
+                        formatExpiry(deadline),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Spacer(Modifier.height(24.dp))
             // Backend-supplied URLs pass the same scheme allowlist as
             // the contact: this screen is otherwise fully locked down,
@@ -77,7 +108,33 @@ fun BannedScreen(
             // a served field into an arbitrary implicit intent.
             val appealUri = state.appealUrl?.let(::safeActionUri)
             val newHolderUri = state.newHolderUrl?.let(::safeActionUri)
-            appealUri?.let { url ->
+            // In-app appeal is PRIMARY when a case reference exists:
+            // the statement is signed by the accused's identity key, so
+            // the authority can attribute it without a web session, and
+            // the filing is retained locally so an ambiguous delivery is
+            // retried rather than silently lost. Matches iOS, which
+            // demotes the URL to a secondary "appeal externally".
+            val appealableCaseId = verdict?.caseId?.takeIf { onAppealCase != null }
+            if (appealableCaseId != null) {
+                Button(
+                    onClick = { onAppealCase!!(appealableCaseId) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("moderation.banned.appeal"),
+                ) { Text(stringResource(R.string.moderation_banned_appeal_in_app)) }
+                Spacer(Modifier.height(8.dp))
+                appealUri?.let { url ->
+                    OutlinedButton(
+                        onClick = { onOpenUrl(url) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("moderation.banned.appeal_external"),
+                    ) { Text(stringResource(R.string.moderation_banned_appeal_external)) }
+                    Spacer(Modifier.height(8.dp))
+                }
+            } else appealUri?.let { url ->
+                // No case reference: the authority's own link is the
+                // only route, exactly as before.
                 Button(
                     onClick = { onOpenUrl(url) },
                     modifier = Modifier
@@ -94,7 +151,7 @@ fun BannedScreen(
                         .testTag("moderation.banned.newHolder"),
                 ) { Text(stringResource(R.string.moderation_banned_new_holder)) }
             }
-            if (appealUri == null && newHolderUri == null) {
+            if (appealableCaseId == null && appealUri == null && newHolderUri == null) {
                 // With no declared routes, the contact itself becomes
                 // the tappable route out when it parses as one — a
                 // screen with only untappable text is a step away from

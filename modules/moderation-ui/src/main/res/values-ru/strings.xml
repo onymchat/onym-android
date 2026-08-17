@@ -78,4 +78,14 @@
   <string name="moderation_appeal_done">Готово</string>
   <string name="moderation_appeal_terminal_hint">Повторная подача даст тот же ответ. Если это ошибка, свяжитесь с инстанцией напрямую.</string>
   <string name="moderation_appeal_already_filed">Вы уже подавали апелляцию по этому делу. Новый текст будет подан как вторая апелляция, а не заменит первую.</string>
+  <string name="moderation_banned_appeal_in_app">Изучить дело и обжаловать</string>
+  <string name="moderation_banned_appeal_external">Обжаловать на сайте инстанции</string>
+  <string name="moderation_banned_reasoning">Основания, изложенные инстанцией: %1$s</string>
+  <string name="moderation_banned_appeal_deadline">Обжаловать до %1$s</string>
+  <plurals name="moderation_case_banner">
+    <item quantity="one">Против вас открыто дело. Нажмите, чтобы изучить или обжаловать.</item>
+    <item quantity="few">Против вас открыто %d дела. Нажмите, чтобы изучить или обжаловать.</item>
+    <item quantity="many">Против вас открыто %d дел. Нажмите, чтобы изучить или обжаловать.</item>
+    <item quantity="other">Против вас открыто %d дела. Нажмите, чтобы изучить или обжаловать.</item>
+  </plurals>
 </resources>
