@@ -157,6 +157,12 @@ fun ChatBubble(
     onQuoteTap: (() -> Unit)? = null,
     isHighlighted: Boolean = false,
     onSwipeReply: (() -> Unit)? = null,
+    /** Report this message to the moderation authority. Non-null only
+     *  for incoming messages that pass the cheap eligibility gate
+     *  ([ReportableMessageFactory.isReportable]) while the moderation
+     *  seat is live — absent otherwise, like every moderation
+     *  surface. Rides the same long-press menu as Copy. */
+    onReport: (() -> Unit)? = null,
 ) {
     val isOutgoing = message.direction == MessageDirection.OUTGOING
     // The Chats tab is Material-themed (no OnymTheme provider), so we
@@ -314,6 +320,7 @@ fun ChatBubble(
                     isOutgoing = isOutgoing,
                     isHighlighted = isHighlighted,
                     onQuoteTap = onQuoteTap,
+                    onReport = onReport,
                 )
                 if (isOutgoing) {
                     val visual = statusVisualFor(message.status)
@@ -350,6 +357,7 @@ private fun BubbleBody(
     isOutgoing: Boolean,
     isHighlighted: Boolean,
     onQuoteTap: (() -> Unit)?,
+    onReport: (() -> Unit)?,
 ) {
     // Brief background pulse when the host scrolls here from a tapped
     // quote — blends the fill toward the surface tint and animates
@@ -408,7 +416,10 @@ private fun BubbleBody(
     }
     val copyLabel = stringResource(R.string.copy)
     val retryLabel = stringResource(R.string.retry)
-    val interactionModifier = if (body.isNotEmpty()) {
+    val reportLabel = stringResource(R.string.chat_report)
+    // The long-press menu mounts for any bubble with text to copy OR a
+    // report action — a captionless photo must still be reportable.
+    val interactionModifier = if (body.isNotEmpty() || onReport != null) {
         Modifier
             .indication(
                 pressInteractions,
@@ -448,7 +459,7 @@ private fun BubbleBody(
             // target. Labels, not null: "double tap and hold" with no
             // idea what it does is not an affordance.
             .semantics(mergeDescendants = true) {
-                onLongClick(label = copyLabel) {
+                onLongClick(label = if (body.isNotEmpty()) copyLabel else reportLabel) {
                     openCopyMenu(Offset.Zero)
                     true
                 }
@@ -475,21 +486,33 @@ private fun BubbleBody(
             onDismissRequest = { copyMenuOpen = false },
             offset = copyMenuOffset,
         ) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.copy)) },
-                onClick = {
-                    // Deliberate E2EE decision: the clip is flagged
-                    // SENSITIVE, so the Android 13+ overlay confirms
-                    // the copy WITHOUT rendering message content on
-                    // screen, and clipboard history/sync surfaces
-                    // treat it as redactable. The trade-off is a
-                    // "content hidden" preview instead of the text —
-                    // for an E2EE messenger the screen is the leak.
-                    copySensitive(context, body)
-                    copyMenuOpen = false
-                },
-                modifier = Modifier.testTag("chat_thread.copy.$messageId"),
-            )
+            if (body.isNotEmpty()) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.copy)) },
+                    onClick = {
+                        // Deliberate E2EE decision: the clip is flagged
+                        // SENSITIVE, so the Android 13+ overlay confirms
+                        // the copy WITHOUT rendering message content on
+                        // screen, and clipboard history/sync surfaces
+                        // treat it as redactable. The trade-off is a
+                        // "content hidden" preview instead of the text —
+                        // for an E2EE messenger the screen is the leak.
+                        copySensitive(context, body)
+                        copyMenuOpen = false
+                    },
+                    modifier = Modifier.testTag("chat_thread.copy.$messageId"),
+                )
+            }
+            if (onReport != null) {
+                DropdownMenuItem(
+                    text = { Text(reportLabel) },
+                    onClick = {
+                        onReport()
+                        copyMenuOpen = false
+                    },
+                    modifier = Modifier.testTag("chat_thread.report.$messageId"),
+                )
+            }
         }
         Column(
             modifier = baseModifier

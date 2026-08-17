@@ -81,6 +81,7 @@ class ChatBubbleInteractionUITest {
         onRetry: (() -> Unit)? = null,
         onSwipeReply: (() -> Unit)? = null,
         uriHandler: RecordingUriHandler? = null,
+        onReport: (() -> Unit)? = null,
     ) {
         composeRule.activity.runOnUiThread {
             composeRule.activity.setContent {
@@ -89,6 +90,7 @@ class ChatBubbleInteractionUITest {
                         message = message,
                         onRetry = onRetry,
                         onSwipeReply = onSwipeReply,
+                        onReport = onReport,
                     )
                 }
                 if (uriHandler != null) {
@@ -102,6 +104,94 @@ class ChatBubbleInteractionUITest {
             }
         }
         composeRule.waitForIdle()
+    }
+
+    /** An incoming photo with no caption — the case the report menu
+     *  added, and the one the gesture wiring gets wrong: with an empty
+     *  body this bubble used to take the plain `Modifier` path (no
+     *  detector at all), so the long press had nothing to open. It now
+     *  installs the same detector text bubbles use, over an image that
+     *  brings its own tap handling. */
+    private fun incomingPhoto(caption: String) = ChatMessage(
+        id = UUID.randomUUID(),
+        groupId = "aa".repeat(32),
+        ownerIdentityId = "owner",
+        senderBlsPubkeyHex = "cc".repeat(48),
+        body = caption,
+        sentAtMillis = 0L,
+        direction = MessageDirection.INCOMING,
+        status = MessageStatus.RECEIVED,
+        groupType = SepGroupType.TYRANNY,
+        imageAttachment = app.onym.android.chats.ChatImageAttachment(
+            sha256 = "0f".repeat(32),
+            mimeType = "image/jpeg",
+            byteSize = 1024,
+            width = 800,
+            height = 600,
+            encKey = ByteArray(32),
+            blurhash = "LEHV6nWB2yk8",
+            server = "https://blossom.test",
+        ),
+    )
+
+    @Test
+    fun longPressOpensReportOnACaptionlessPhoto() {
+        val reports = AtomicInteger(0)
+        val message = incomingPhoto(caption = "")
+        show(message, onReport = { reports.incrementAndGet() })
+
+        composeRule.onNodeWithTag("chat_thread.bubble.${message.id}", useUnmergedTree = true)
+            .performTouchInput { longClick() }
+        composeRule.onNodeWithTag("chat_thread.report.${message.id}", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .performClick()
+        composeRule.waitForIdle()
+        assertEquals(1, reports.get())
+    }
+
+    /** Copy has no meaning with no text, so it must not be offered —
+     *  the menu is Report-only here. */
+    @Test
+    fun captionlessPhotoMenuOffersReportWithoutCopy() {
+        val message = incomingPhoto(caption = "")
+        show(message, onReport = {})
+
+        composeRule.onNodeWithTag("chat_thread.bubble.${message.id}", useUnmergedTree = true)
+            .performTouchInput { longClick() }
+        composeRule.onNodeWithTag("chat_thread.report.${message.id}", useUnmergedTree = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_thread.copy.${message.id}", useUnmergedTree = true)
+            .assertDoesNotExist()
+    }
+
+    /** A captioned photo keeps both, and Copy must still work — the
+     *  report entry is additive, not a replacement. */
+    @Test
+    fun captionedPhotoMenuOffersBothCopyAndReport() {
+        val message = incomingPhoto(caption = "look at this")
+        show(message, onReport = {})
+
+        composeRule.onNodeWithTag("chat_thread.bubble.${message.id}", useUnmergedTree = true)
+            .performTouchInput { longClick() }
+        composeRule.onNodeWithTag("chat_thread.copy.${message.id}", useUnmergedTree = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_thread.report.${message.id}", useUnmergedTree = true)
+            .assertIsDisplayed()
+    }
+
+    /** Without the moderation seat the entry is absent entirely, and a
+     *  text bubble's Copy is unaffected. */
+    @Test
+    fun noReportEntryWhenModerationIsDark() {
+        val message = failedMessage("copy me")
+        show(message, onReport = null)
+
+        composeRule.onNodeWithTag("chat_thread.bubble.${message.id}", useUnmergedTree = true)
+            .performTouchInput { longClick() }
+        composeRule.onNodeWithTag("chat_thread.copy.${message.id}", useUnmergedTree = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag("chat_thread.report.${message.id}", useUnmergedTree = true)
+            .assertDoesNotExist()
     }
 
     @Test

@@ -99,6 +99,10 @@ class ChatThreadViewModel(
      *  Injected because this module builds no strings of its own — the
      *  app passes `R.string.chat_join_request_unnamed`. */
     private val unnamedJoinerLabel: String = "(unnamed)",
+    /** The moderation report hooks, `null` exactly when the moderation
+     *  seat is dark — the Report menu entry then never renders,
+     *  matching every other moderation surface. */
+    private val reporting: ChatReporting? = null,
 ) : ViewModel() {
 
     /** Incoming message ids we've already emitted a read receipt for,
@@ -363,6 +367,146 @@ class ChatThreadViewModel(
     /** Delete a message (the failed-media Delete action). */
     fun deleteMessage(messageId: java.util.UUID) {
         viewModelScope.launch { runCatching { deleteMessage(groupId, messageId) } }
+    }
+
+    // ─── report to moderation authority ──────────────────────────────
+
+    private val _reportState = MutableStateFlow<ReportUiState?>(null)
+
+    /** Report-sheet state; `null` = closed. */
+    val reportState: StateFlow<ReportUiState?> = _reportState.asStateFlow()
+
+    /**
+     * Context-menu gate: cheap, synchronous, may over-offer for
+     * photos (the full check runs in [beginReport]).
+     *
+     * Takes the [group] rather than reading `group.value`: this is
+     * called from composition, where a bare `StateFlow.value` read
+     * subscribes to nothing — the Report entry would then appear or
+     * not by the luck of an unrelated recomposition when the group
+     * loads after the messages. The caller passes the state it
+     * already collects.
+     */
+    fun canReport(message: ChatMessage, group: ChatGroup): Boolean {
+        val hooks = reporting ?: return false
+        return hooks.isReportable(message, group)
+    }
+
+    /** The in-flight prepare, cancelled when the user backs out — a
+     *  blob download nobody is waiting for is pure cost. */
+    private var prepareJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Monotonic id of the newest prepare. Every state write from a
+     * prepare is gated on still being the current generation.
+     *
+     * A counter, not the state object: [ReportUiState.Preparing] is a
+     * `data object`, so two prepares are the *same instance* and an
+     * identity check can't tell them apart — a cancelled prepare A
+     * would then happily write its result over prepare B's
+     * `Preparing`, and B would in turn see a state it doesn't
+     * recognise and give up, leaving "this message can't be reported"
+     * on a message that is perfectly reportable.
+     */
+    private var prepareGeneration: Int = 0
+
+    /** Prepare disclosure: verify the proof, fetch photo bytes, load
+     *  the class list. Re-entrancy-guarded by the state itself. */
+    fun beginReport(message: ChatMessage) {
+        val hooks = reporting ?: return
+        val currentGroup = group.value ?: return
+        if (_reportState.value != null) return
+        val generation = ++prepareGeneration
+        _reportState.value = ReportUiState.Preparing
+        prepareJob = viewModelScope.launch {
+            // Cancellation must not be swallowed here: a `runCatching`
+            // would turn "the user dismissed" into `evidence == null`
+            // and report the message as unreportable.
+            val evidence = try {
+                hooks.prepare(message, currentGroup)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            if (generation != prepareGeneration) return@launch
+            if (evidence == null) {
+                _reportState.value = ReportUiState.Unavailable()
+                return@launch
+            }
+            val outcome = hooks.classes()
+            if (generation != prepareGeneration) return@launch
+            val classes = when (outcome) {
+                is ReportClassesOutcome.Available -> outcome.classes
+                // Actionable: say so, instead of the flat "can't be
+                // reported" that hides a fixable consent problem.
+                ReportClassesOutcome.MandateRequired -> {
+                    _reportState.value = ReportUiState.Unavailable(ReportError.MandateRequired)
+                    return@launch
+                }
+                ReportClassesOutcome.NoClasses -> {
+                    _reportState.value = ReportUiState.Unavailable(ReportError.NoReportableClasses)
+                    return@launch
+                }
+                // Retryable, so it must not read as a dead end.
+                ReportClassesOutcome.TransientFailure -> {
+                    _reportState.value = ReportUiState.Unavailable(ReportError.Transient)
+                    return@launch
+                }
+            }
+            _reportState.value = ReportUiState.Form(
+                evidence = evidence,
+                displayBody = message.body,
+                hasPhoto = evidence.images.isNotEmpty(),
+                classes = classes,
+                // No preselection, ever: the first manifest class is
+                // often the gravest, and a default there invites
+                // mis-filings a moderator then has to read.
+                selectedClassId = null,
+            )
+        }
+    }
+
+    fun selectReportClass(classId: String) {
+        val form = _reportState.value as? ReportUiState.Form ?: return
+        if (form.classes.none { it.classId == classId }) return
+        _reportState.value = form.copy(selectedClassId = classId, error = null)
+    }
+
+    fun submitReport() {
+        val hooks = reporting ?: return
+        val form = _reportState.value as? ReportUiState.Form ?: return
+        val classId = form.selectedClassId ?: return
+        if (form.submitting) return
+        val submitting = form.copy(submitting = true, error = null)
+        _reportState.value = submitting
+        // Deliberately NOT cancelled by dismissReport: the artifact is
+        // signed and persisted, and letting the delivery land is what
+        // records the receipt. Only the state write is guarded.
+        viewModelScope.launch {
+            val outcome = hooks.submit(form.evidence, classId)
+            if (_reportState.value !== submitting) return@launch
+            _reportState.value = when (outcome) {
+                ReportSubmitOutcome.Filed -> ReportUiState.Done(alreadyFiled = false)
+                ReportSubmitOutcome.AlreadyFiled -> ReportUiState.Done(alreadyFiled = true)
+                is ReportSubmitOutcome.Failed ->
+                    submitting.copy(submitting = false, error = outcome.error)
+            }
+        }
+    }
+
+    fun dismissReport() {
+        // Mid-submit dismissal keeps the persisted artifact (the
+        // delivery runs on); the next attempt replays the same bytes,
+        // which the authority accepts idempotently. A prepare, by
+        // contrast, has no side effects worth finishing.
+        //
+        // The generation bump is what actually retires the in-flight
+        // prepare's writes; the cancel just stops the work early.
+        prepareGeneration++
+        prepareJob?.cancel()
+        prepareJob = null
+        _reportState.value = null
     }
 
     fun clearError() { _lastSendError.value = null }

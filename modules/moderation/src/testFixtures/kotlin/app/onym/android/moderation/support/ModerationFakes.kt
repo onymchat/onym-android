@@ -19,8 +19,12 @@ import app.onym.android.moderation.MandateRegistrationReceipt
 import app.onym.android.moderation.MandateStore
 import app.onym.android.moderation.ModerationMandate
 import app.onym.android.moderation.ModerationJson
+import app.onym.android.moderation.ModerationReport
 import app.onym.android.moderation.ModerationSigner
 import app.onym.android.moderation.PersistedGateState
+import app.onym.android.moderation.ReportFilingRecord
+import app.onym.android.moderation.ReportFilingStore
+import app.onym.android.moderation.ReportReceipt
 import app.onym.android.moderation.ReviewedManifest
 import app.onym.android.moderation.SignedManifest
 import app.onym.android.moderation.ViolationClass
@@ -148,6 +152,52 @@ class FakeAuthorityClient : app.onym.android.moderation.AuthorityClient {
         return receiptOverride
             ?: MandateRegistrationReceipt(mandateRef = mandate.mandateHash(), accepted = accept)
     }
+
+    // ─── report vertical ─────────────────────────────────────────
+
+    /** Raw bodies delivered to `POST /v1/reports`, in order. */
+    val filedReports = mutableListOf<ByteArray>()
+
+    /** `(sha256, byteCount)` of every evidence-blob upload, in order —
+     * enough to assert blobs-before-report ordering and content. */
+    val uploadedBlobs = mutableListOf<Pair<String, Int>>()
+
+    var reportFailure: Exception? = null
+    var uploadFailure: Exception? = null
+
+    /** Overrides the echoed receipt (e.g. a mismatched reportId). */
+    var reportReceiptOverride: ReportReceipt? = null
+
+    override suspend fun fileReport(
+        listing: AuthorityListing,
+        reportWireBytes: ByteArray,
+    ): ReportReceipt {
+        filedReports += reportWireBytes
+        reportFailure?.let { throw it }
+        reportReceiptOverride?.let { return it }
+        val report = ModerationJson.json.decodeFromString(
+            ModerationReport.serializer(),
+            reportWireBytes.decodeToString(),
+        )
+        return ReportReceipt(
+            reportId = report.reportId,
+            receivedAt = "2026-08-16T00:00:00Z",
+            caseId = "case-fixture",
+            intakeWeight = 1.0,
+        )
+    }
+
+    override suspend fun uploadEvidenceImage(
+        listing: AuthorityListing,
+        sha256: String,
+        bytes: ByteArray,
+        userKey: String,
+        timestamp: String,
+        signatureBase64: String,
+    ) {
+        uploadedBlobs += sha256 to bytes.size
+        uploadFailure?.let { throw it }
+    }
 }
 
 class InMemoryGateStateStore(private var state: PersistedGateState? = null) : GateStateStore {
@@ -160,6 +210,15 @@ class InMemoryGateStateStore(private var state: PersistedGateState? = null) : Ga
 class InMemoryMandateStore(private var records: List<MandateRecord> = emptyList()) : MandateStore {
     override suspend fun load(): List<MandateRecord> = records
     override suspend fun save(records: List<MandateRecord>) {
+        this.records = records
+    }
+}
+
+class InMemoryReportFilingStore(
+    var records: List<ReportFilingRecord> = emptyList(),
+) : ReportFilingStore {
+    override suspend fun load(): List<ReportFilingRecord> = records
+    override suspend fun save(records: List<ReportFilingRecord>) {
         this.records = records
     }
 }

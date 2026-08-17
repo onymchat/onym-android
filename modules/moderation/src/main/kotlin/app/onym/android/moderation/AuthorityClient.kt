@@ -58,11 +58,10 @@ class AuthorityUnreachableException(message: String, cause: Throwable? = null) :
 class AuthorityRegistrationRefusedException(override val message: String) : Exception(message)
 
 /**
- * Client seam for a moderation Authority's mandate-registration
- * operation — the minimal Android slice of iOS's
- * `ModerationAuthorityClient` (reports, case responses, appeals and
- * recovery claims are deferred verticals; they extend this interface
- * when they land).
+ * Client seam for a moderation Authority's user-facing operations —
+ * the Android slice of iOS's `ModerationAuthorityClient` (case
+ * responses, appeals and recovery claims are still deferred verticals;
+ * they extend this interface when they land).
  *
  * The base URL comes from the [AuthorityListing] per call rather than
  * construction: the directory designates each authority's API
@@ -76,6 +75,40 @@ interface AuthorityClient {
         listing: AuthorityListing,
         mandate: ModerationMandate,
     ): MandateRegistrationReceipt
+
+    /**
+     * `POST /v1/reports` — body is the signed report's exact wire
+     * bytes ([ModerationReport.wireBytes]), passed as bytes rather
+     * than a value so a retry replays the persisted artifact
+     * byte-for-byte (a filed report is immutable; the authority
+     * refuses the same `reportId` with different bytes). No auth
+     * headers — the report's own `signature` field is the
+     * authentication.
+     */
+    suspend fun fileReport(
+        listing: AuthorityListing,
+        reportWireBytes: ByteArray,
+    ): ReportReceipt
+
+    /**
+     * `PUT /v1/evidence-blobs/:sha256` — raw image bytes, uploaded
+     * BEFORE the report that names them (a report naming an
+     * un-uploaded digest is refused `media_missing`). [sha256] is the
+     * lowercase hex digest of [bytes] — the plaintext digest the
+     * accused committed to. The three signed headers are the party
+     * credential (`evidence-blob:<sha256>:<timestamp>` signed by the
+     * reporter's key); resource control, not integrity — integrity is
+     * the digest. A 409 from this route means the bytes are already
+     * on file, which callers treat as agreement, not failure.
+     */
+    suspend fun uploadEvidenceImage(
+        listing: AuthorityListing,
+        sha256: String,
+        bytes: ByteArray,
+        userKey: String,
+        timestamp: String,
+        signatureBase64: String,
+    )
 }
 
 class OkHttpAuthorityClient(
@@ -89,46 +122,14 @@ class OkHttpAuthorityClient(
         listing: AuthorityListing,
         mandate: ModerationMandate,
     ): MandateRegistrationReceipt = withContext(Dispatchers.IO) {
-        val baseUrl = listing.apiBaseURL.trimEnd('/')
-        // ignoreCase: URL schemes are case-insensitive (RFC 3986 §3.1)
-        // and OkHttp normalizes them — an `HTTPS://` directory entry
-        // must not degrade into a permanently-retried "unreachable".
-        val secure = baseUrl.startsWith("https://", ignoreCase = true)
-        val loopback = allowInsecureLoopback &&
-            OkHttpEnforcementBackendClient.isLoopbackHost(baseUrl)
-        if (!secure && !loopback) {
-            // The listing is directory-served data; a bad entry must
-            // degrade like an unreachable authority (registration
-            // retried later), not throw out of a background retry.
-            throw AuthorityUnreachableException(
-                "authority API base URL must be https (or emulator loopback under a debug " +
-                    "build): $baseUrl",
-            )
-        }
-
+        val baseUrl = guardedBaseUrl(listing)
         val request = Request.Builder()
             .url("$baseUrl/v1/mandates")
             .post(mandate.wireBytes().toRequestBody(JSON_MEDIA_TYPE))
             .header("Accept", "application/json")
             .build()
-        val (code, text) = try {
-            httpClient.newCall(request).execute().use { response ->
-                response.code to (response.body?.string() ?: "")
-            }
-        } catch (e: IOException) {
-            throw AuthorityUnreachableException("authority unreachable", e)
-        }
-
-        if (code !in 200..299) {
-            val envelope = runCatching {
-                ModerationJson.json.decodeFromString(ErrorEnvelope.serializer(), text)
-            }.getOrNull()
-            throw AuthorityRejectedException(
-                statusCode = code,
-                rawCode = envelope?.error,
-                message = envelope?.message ?: "authority answered HTTP $code",
-            )
-        }
+        val (code, text) = execute(request)
+        if (code !in 200..299) throw rejection(code, text)
         try {
             ModerationJson.json.decodeFromString(MandateRegistrationReceipt.serializer(), text)
         } catch (e: Exception) {
@@ -139,10 +140,96 @@ class OkHttpAuthorityClient(
         }
     }
 
+    override suspend fun fileReport(
+        listing: AuthorityListing,
+        reportWireBytes: ByteArray,
+    ): ReportReceipt = withContext(Dispatchers.IO) {
+        val baseUrl = guardedBaseUrl(listing)
+        val request = Request.Builder()
+            .url("$baseUrl/v1/reports")
+            .post(reportWireBytes.toRequestBody(JSON_MEDIA_TYPE))
+            .header("Accept", "application/json")
+            .build()
+        val (code, text) = execute(request)
+        if (code !in 200..299) throw rejection(code, text)
+        try {
+            ModerationJson.json.decodeFromString(ReportReceipt.serializer(), text)
+        } catch (e: Exception) {
+            // Same posture as registration: the filing may have
+            // committed; keep the artifact and replay the exact bytes,
+            // which the authority answers idempotently.
+            throw AuthorityUnreachableException("authority answered unparseably", e)
+        }
+    }
+
+    override suspend fun uploadEvidenceImage(
+        listing: AuthorityListing,
+        sha256: String,
+        bytes: ByteArray,
+        userKey: String,
+        timestamp: String,
+        signatureBase64: String,
+    ): Unit = withContext(Dispatchers.IO) {
+        val baseUrl = guardedBaseUrl(listing)
+        val request = Request.Builder()
+            .url("$baseUrl/v1/evidence-blobs/$sha256")
+            .put(bytes.toRequestBody(OCTET_STREAM_MEDIA_TYPE))
+            .header("Accept", "application/json")
+            .header("X-Onym-Key", userKey)
+            .header("X-Onym-Timestamp", timestamp)
+            .header("X-Onym-Signature", signatureBase64)
+            .build()
+        val (code, text) = execute(request)
+        // The upload receipt's dimensions matter only to a sender
+        // building a commitment; a reporter already holds them from
+        // the message descriptor, so a 2xx body is not parsed here.
+        if (code !in 200..299) throw rejection(code, text)
+    }
+
+    private fun guardedBaseUrl(listing: AuthorityListing): String {
+        val baseUrl = listing.apiBaseURL.trimEnd('/')
+        // ignoreCase: URL schemes are case-insensitive (RFC 3986 §3.1)
+        // and OkHttp normalizes them — an `HTTPS://` directory entry
+        // must not degrade into a permanently-retried "unreachable".
+        val secure = baseUrl.startsWith("https://", ignoreCase = true)
+        val loopback = allowInsecureLoopback &&
+            OkHttpEnforcementBackendClient.isLoopbackHost(baseUrl)
+        if (!secure && !loopback) {
+            // The listing is directory-served data; a bad entry must
+            // degrade like an unreachable authority (the operation
+            // retried later), not throw out of a background retry.
+            throw AuthorityUnreachableException(
+                "authority API base URL must be https (or emulator loopback under a debug " +
+                    "build): $baseUrl",
+            )
+        }
+        return baseUrl
+    }
+
+    private fun execute(request: Request): Pair<Int, String> = try {
+        httpClient.newCall(request).execute().use { response ->
+            response.code to (response.body?.string() ?: "")
+        }
+    } catch (e: IOException) {
+        throw AuthorityUnreachableException("authority unreachable", e)
+    }
+
+    private fun rejection(code: Int, text: String): AuthorityRejectedException {
+        val envelope = runCatching {
+            ModerationJson.json.decodeFromString(ErrorEnvelope.serializer(), text)
+        }.getOrNull()
+        return AuthorityRejectedException(
+            statusCode = code,
+            rawCode = envelope?.error,
+            message = envelope?.message ?: "authority answered HTTP $code",
+        )
+    }
+
     @Serializable
     private data class ErrorEnvelope(val error: String? = null, val message: String? = null)
 
     private companion object {
         val JSON_MEDIA_TYPE = "application/json".toMediaType()
+        val OCTET_STREAM_MEDIA_TYPE = "application/octet-stream".toMediaType()
     }
 }

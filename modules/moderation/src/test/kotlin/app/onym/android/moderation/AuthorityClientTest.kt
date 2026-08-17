@@ -26,12 +26,15 @@ class AuthorityClientTest {
 
     private var requestUrl: String? = null
     private var requestBody: String? = null
+    private var requestHeaders: Map<String, String> = emptyMap()
 
     private fun client(status: Int, body: String): OkHttpAuthorityClient {
         val http = OkHttpClient.Builder()
             .addInterceptor(
                 Interceptor { chain ->
                     requestUrl = chain.request().url.toString()
+                    requestHeaders = chain.request().headers.toMultimap()
+                        .mapValues { (_, values) -> values.joinToString(",") }
                     requestBody = Buffer().also {
                         chain.request().body?.writeTo(it)
                     }.readUtf8()
@@ -126,5 +129,53 @@ class AuthorityClientTest {
             assertTrue(e.message!!.contains("https"))
         }
         assertEquals(null, requestUrl)
+    }
+
+    // ─── report filing transport ─────────────────────────────────
+
+    @Test
+    fun `fileReport posts the exact bytes and decodes the receipt`() = runTest {
+        val wireBytes = """{"reportId":"report-1","signature":"c2ln"}""".encodeToByteArray()
+        val receipt = client(
+            200,
+            """{"reportId":"report-1","receivedAt":"2026-08-16T00:00:01Z","caseId":"case-9"}""",
+        ).fileReport(ModerationFixtures.listing(), wireBytes)
+
+        assertEquals("https://authority.example/v1/reports", requestUrl)
+        assertEquals(wireBytes.decodeToString(), requestBody)
+        assertEquals("case-9", receipt.caseId)
+        // The report's own signature is the auth — no signed headers.
+        assertTrue(requestHeaders.keys.none { it.startsWith("x-onym", ignoreCase = true) })
+    }
+
+    @Test
+    fun `fileReport surfaces the authority's refusal envelope`() = runTest {
+        try {
+            client(422, """{"error":"authenticity_unverified","message":"item 0 fails"}""")
+                .fileReport(ModerationFixtures.listing(), ByteArray(2))
+            fail("a 422 must throw")
+        } catch (e: AuthorityRejectedException) {
+            assertEquals(422, e.statusCode)
+            assertEquals("authenticity_unverified", e.rawCode)
+            assertTrue(e.isDeterministic)
+        }
+    }
+
+    @Test
+    fun `uploadEvidenceImage puts the raw bytes under the signed headers`() = runTest {
+        val sha = "1a".repeat(32)
+        client(200, """{"sha256":"$sha"}""").uploadEvidenceImage(
+            listing = ModerationFixtures.listing(),
+            sha256 = sha,
+            bytes = byteArrayOf(1, 2, 3),
+            userKey = "onym:key:aabb",
+            timestamp = "2026-08-16T00:00:00Z",
+            signatureBase64 = "c2ln",
+        )
+
+        assertEquals("https://authority.example/v1/evidence-blobs/$sha", requestUrl)
+        assertEquals("onym:key:aabb", requestHeaders["x-onym-key"])
+        assertEquals("2026-08-16T00:00:00Z", requestHeaders["x-onym-timestamp"])
+        assertEquals("c2ln", requestHeaders["x-onym-signature"])
     }
 }
