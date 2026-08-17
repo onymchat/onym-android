@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -372,6 +373,85 @@ class ChatThreadViewModelTest {
         assertNull("a dismissed submit must not reopen \"Report filed\"", vm.reportState.value)
     }
 
+    /**
+     * The generation guard, at the case object identity cannot see:
+     * `Preparing` is a `data object`, so prepare A and prepare B hold
+     * the *same* instance and an identity check can't tell them
+     * apart. A's cancelled job would then write its result over B's
+     * `Preparing`, and B — finding a state it doesn't recognise —
+     * would give up, leaving "this message can't be reported" on a
+     * message that is perfectly reportable.
+     */
+    @Test
+    fun aDismissedPrepareNeverClobbersTheNextOne() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        // A *controlled* dispatcher, unlike the rest of this suite:
+        // the unconfined one resumes a cancelled job the instant
+        // `cancel()` is called, so the stale write would land before
+        // the next prepare even starts and the race would hide.
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        // Keyed by body, not popped from a queue: both prepares are in
+        // flight at once, so a queue would be drained out of order.
+        val gateA = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val gateB = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val vm = fixture.makeViewModel(
+            reporting = reportingHooks(
+                prepare = { message, _ ->
+                    if (message.body == "message A") {
+                        // Swallows its own cancellation and returns
+                        // normally. Cancelling A's job is therefore NOT
+                        // enough on its own — the VM must not depend on
+                        // an injected hook being cancellation-correct,
+                        // and this is what makes the stale write
+                        // actually reach the guard.
+                        try {
+                            gateA.await()
+                        } catch (_: kotlinx.coroutines.CancellationException) {
+                        }
+                        null
+                    } else {
+                        gateB.await()
+                        reportEvidence
+                    }
+                },
+            ),
+        )
+
+        vm.beginReport(sampleMessage(groupIdHex, "message A"))
+        runCurrent()                    // A reaches its gate
+        vm.dismissReport()              // A cancelled; resumption queued
+        vm.beginReport(sampleMessage(groupIdHex, "message B"))
+        runCurrent()                    // A's stale write runs, then B starts
+
+        assertTrue(
+            "a retired prepare must not write over the live one",
+            vm.reportState.value is ReportUiState.Preparing,
+        )
+
+        // B must still be able to complete into its own form.
+        gateB.complete(Unit)
+        runCurrent()
+        val form = vm.reportState.value as ReportUiState.Form
+        assertEquals("message B", form.displayBody)
+    }
+
+    @Test
+    fun transientClassLoadFailure_isRetryable_notADeadEnd() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val vm = fixture.makeViewModel(
+            reporting = reportingHooks(classes = { ReportClassesOutcome.TransientFailure }),
+        )
+
+        vm.beginReport(sampleMessage(groupIdHex, "abusive"))
+
+        // Store IO or a manifest that won't decode must not render as
+        // "your authority offers no reportable classes" — that copy is
+        // terminal and would send the user off to switch authorities.
+        assertEquals(ReportUiState.Unavailable(ReportError.Transient), vm.reportState.value)
+    }
+
     @Test
     fun beginReport_isReentrancyGuarded() = runTest {
         val fixture = newFixture()
@@ -486,8 +566,9 @@ class ChatThreadViewModelTest {
         val fixture = newFixture()
         fixture.seedGroup(groupIdHex)
         val vm = fixture.makeViewModel()
+        val group = vm.group.first { it != null }!!
 
-        assertTrue(!vm.canReport(sampleMessage(groupIdHex, "abusive")))
+        assertTrue(!vm.canReport(sampleMessage(groupIdHex, "abusive"), group))
         vm.beginReport(sampleMessage(groupIdHex, "abusive"))
         assertNull(vm.reportState.value)
     }

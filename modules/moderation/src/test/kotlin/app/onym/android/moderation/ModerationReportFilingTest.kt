@@ -85,11 +85,22 @@ class ModerationReportFilingTest {
         assertEquals(1, authority.filedReports.size)
         val stored = reportStore.records.single()
         assertEquals(receipt, stored.receipt)
-        // The delivered bytes are the persisted artifact, verbatim.
-        assertTrue(stored.report.wireBytes().contentEquals(authority.filedReports.single()))
-        // The reporter cites their own mandate and signs the filing.
-        assertEquals(fixtureMandateRecord().mandate.mandateHash(), stored.report.reporterMandate)
-        assertEquals("onym:key:aabb", stored.report.reporter)
+        // What actually went on the wire carried the evidence and the
+        // reporter's own mandate. (The stored row no longer does — it
+        // is redacted on resolution; byte-identical replay is pinned
+        // by the transient-failure test, where the row survives
+        // unredacted because delivery is still owed.)
+        val delivered = ModerationJson.json.decodeFromString(
+            ModerationReport.serializer(),
+            authority.filedReports.single().decodeToString(),
+        )
+        assertEquals(stored.report.reportId, delivered.reportId)
+        assertEquals(fixtureMandateRecord().mandate.mandateHash(), delivered.reporterMandate)
+        assertEquals("onym:key:aabb", delivered.reporter)
+        assertEquals(
+            "{\"body\":\"abusive\",\"proof_version\":1}",
+            delivered.evidence.single().disclosedContent,
+        )
     }
 
     @Test
@@ -228,6 +239,55 @@ class ModerationReportFilingTest {
     fun availableReportClasses_isTheConsentedIntersection() = runTest {
         val classes = repository().availableReportClasses()
         assertEquals(listOf("csam"), classes.map { it.classId })
+    }
+
+    @Test
+    fun aResolvedFilingKeepsNoCopyOfTheDisclosedContent() = runTest {
+        val body = "{\"body\":\"abusive\",\"proof_version\":1}"
+        repository().fileReport(evidence(disclosedContent = body), "csam")
+
+        val stored = reportStore.records.single()
+        assertTrue("the filing resolved", stored.isResolved)
+        assertTrue(
+            "a delivered report must leave no copy of the reported message behind",
+            stored.report.evidence.isEmpty(),
+        )
+        // Nothing anywhere in the persisted blob still spells the body.
+        val serialized = ModerationJson.json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(ReportFilingRecord.serializer()),
+            reportStore.records,
+        )
+        assertTrue(!serialized.contains("abusive"))
+        // The digest survives, which is all dedup needs.
+        assertEquals(sha256Hex(body.toByteArray(Charsets.UTF_8)), stored.disclosedDigest)
+    }
+
+    @Test
+    fun aConflictResolvedFilingIsRedactedToo() = runTest {
+        authority.reportFailure = AuthorityRejectedException(409, "case_state", "already on file")
+        try {
+            repository().fileReport(evidence(), "csam")
+            fail("expected AlreadyFiled")
+        } catch (_: ReportFilingException.AlreadyFiled) {
+        }
+
+        val stored = reportStore.records.single()
+        assertTrue(stored.resolvedWithoutReceipt)
+        assertTrue(stored.report.evidence.isEmpty())
+    }
+
+    @Test
+    fun anUndeliveredFilingKeepsItsEvidence_soTheRetryReplaysExactBytes() = runTest {
+        authority.reportFailure = AuthorityUnreachableException("offline")
+        try {
+            repository().fileReport(evidence(), "csam")
+            fail("expected AuthorityUnreachableException")
+        } catch (_: AuthorityUnreachableException) {
+        }
+
+        // The unresolved row is the one artifact that MUST keep its
+        // evidence: delivery replays these exact bytes.
+        assertTrue(reportStore.records.single().report.evidence.isNotEmpty())
     }
 
     @Test

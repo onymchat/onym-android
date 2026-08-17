@@ -6,6 +6,7 @@ import app.onym.android.moderation.ModerationRepository
 import app.onym.android.moderation.ReportFilingException
 import app.onym.android.moderation.ReportableEvidence
 import app.onym.android.moderation.ViolationClass
+import kotlinx.coroutines.CancellationException
 
 /**
  * The chat thread's seam onto the moderation report vertical —
@@ -55,8 +56,17 @@ class ChatReporting(
                     }
                 } catch (e: ReportFilingException.ReportingUnavailable) {
                     ReportClassesOutcome.MandateRequired
+                } catch (e: CancellationException) {
+                    // Cancellation is not a failure to report on — it
+                    // is this coroutine being torn down, and swallowing
+                    // it would let a dismissed prepare keep running and
+                    // then write its result to the screen.
+                    throw e
                 } catch (e: Exception) {
-                    ReportClassesOutcome.NoClasses
+                    // Store IO, a manifest that won't decode: retryable,
+                    // and must not render as the terminal "your
+                    // authority offers no reportable classes".
+                    ReportClassesOutcome.TransientFailure
                 }
             },
             submit = { evidence, classId ->
@@ -79,6 +89,8 @@ class ChatReporting(
                     ReportSubmitOutcome.Failed(
                         ReportError.Rejected(e.message.take(280)),
                     )
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     ReportSubmitOutcome.Failed(ReportError.Delivery)
                 }
@@ -100,6 +112,11 @@ sealed interface ReportClassesOutcome {
     /** Mandated, but the consented terms name no class to report
      *  under. Nothing the user can do from here. */
     data object NoClasses : ReportClassesOutcome
+
+    /** The terms couldn't be read this time (store IO, a decode
+     *  failure). Retryable — deliberately distinct from [NoClasses],
+     *  whose copy is a dead end. */
+    data object TransientFailure : ReportClassesOutcome
 }
 
 sealed interface ReportSubmitOutcome {
@@ -123,6 +140,10 @@ sealed interface ReportError {
     /** Mandated, but the consented terms name nothing to report
      *  under — not the user's problem to fix. */
     data object NoReportableClasses : ReportError
+
+    /** Couldn't read the authority's terms just now; trying again may
+     *  well work. */
+    data object Transient : ReportError
 
     /** The mandate's authority has no current directory listing. */
     data object AuthorityUnavailable : ReportError

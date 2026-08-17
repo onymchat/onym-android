@@ -217,6 +217,7 @@ private fun errorText(error: ReportError): String = when (error) {
     ReportError.NoValidProof -> stringResource(R.string.chat_report_error_no_proof)
     ReportError.MandateRequired -> stringResource(R.string.chat_report_error_mandate)
     ReportError.NoReportableClasses -> stringResource(R.string.chat_report_error_no_classes)
+    ReportError.Transient -> stringResource(R.string.chat_report_error_transient)
     ReportError.AuthorityUnavailable -> stringResource(R.string.chat_report_error_authority)
     ReportError.Delivery -> stringResource(R.string.chat_report_error_delivery)
     is ReportError.Rejected -> error.message

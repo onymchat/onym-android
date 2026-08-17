@@ -376,17 +376,39 @@ class ChatThreadViewModel(
     /** Report-sheet state; `null` = closed. */
     val reportState: StateFlow<ReportUiState?> = _reportState.asStateFlow()
 
-    /** Context-menu gate: cheap, synchronous, may over-offer for
-     *  photos (the full check runs in [beginReport]). */
-    fun canReport(message: ChatMessage): Boolean {
+    /**
+     * Context-menu gate: cheap, synchronous, may over-offer for
+     * photos (the full check runs in [beginReport]).
+     *
+     * Takes the [group] rather than reading `group.value`: this is
+     * called from composition, where a bare `StateFlow.value` read
+     * subscribes to nothing — the Report entry would then appear or
+     * not by the luck of an unrelated recomposition when the group
+     * loads after the messages. The caller passes the state it
+     * already collects.
+     */
+    fun canReport(message: ChatMessage, group: ChatGroup): Boolean {
         val hooks = reporting ?: return false
-        val currentGroup = group.value ?: return false
-        return hooks.isReportable(message, currentGroup)
+        return hooks.isReportable(message, group)
     }
 
     /** The in-flight prepare, cancelled when the user backs out — a
      *  blob download nobody is waiting for is pure cost. */
     private var prepareJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Monotonic id of the newest prepare. Every state write from a
+     * prepare is gated on still being the current generation.
+     *
+     * A counter, not the state object: [ReportUiState.Preparing] is a
+     * `data object`, so two prepares are the *same instance* and an
+     * identity check can't tell them apart — a cancelled prepare A
+     * would then happily write its result over prepare B's
+     * `Preparing`, and B would in turn see a state it doesn't
+     * recognise and give up, leaving "this message can't be reported"
+     * on a message that is perfectly reportable.
+     */
+    private var prepareGeneration: Int = 0
 
     /** Prepare disclosure: verify the proof, fetch photo bytes, load
      *  the class list. Re-entrancy-guarded by the state itself. */
@@ -394,22 +416,26 @@ class ChatThreadViewModel(
         val hooks = reporting ?: return
         val currentGroup = group.value ?: return
         if (_reportState.value != null) return
-        val preparing = ReportUiState.Preparing
-        _reportState.value = preparing
+        val generation = ++prepareGeneration
+        _reportState.value = ReportUiState.Preparing
         prepareJob = viewModelScope.launch {
-            val evidence = runCatching { hooks.prepare(message, currentGroup) }.getOrNull()
-            // Every write below is guarded on the state still being
-            // THIS prepare. Cancellation is checked at suspension
-            // points, so a dismissal landing just after `prepare`
-            // resumes would otherwise reopen a dialog the user
-            // explicitly backed out of.
-            if (_reportState.value !== preparing) return@launch
+            // Cancellation must not be swallowed here: a `runCatching`
+            // would turn "the user dismissed" into `evidence == null`
+            // and report the message as unreportable.
+            val evidence = try {
+                hooks.prepare(message, currentGroup)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            if (generation != prepareGeneration) return@launch
             if (evidence == null) {
                 _reportState.value = ReportUiState.Unavailable()
                 return@launch
             }
             val outcome = hooks.classes()
-            if (_reportState.value !== preparing) return@launch
+            if (generation != prepareGeneration) return@launch
             val classes = when (outcome) {
                 is ReportClassesOutcome.Available -> outcome.classes
                 // Actionable: say so, instead of the flat "can't be
@@ -420,6 +446,11 @@ class ChatThreadViewModel(
                 }
                 ReportClassesOutcome.NoClasses -> {
                     _reportState.value = ReportUiState.Unavailable(ReportError.NoReportableClasses)
+                    return@launch
+                }
+                // Retryable, so it must not read as a dead end.
+                ReportClassesOutcome.TransientFailure -> {
+                    _reportState.value = ReportUiState.Unavailable(ReportError.Transient)
                     return@launch
                 }
             }
@@ -469,6 +500,10 @@ class ChatThreadViewModel(
         // delivery runs on); the next attempt replays the same bytes,
         // which the authority accepts idempotently. A prepare, by
         // contrast, has no side effects worth finishing.
+        //
+        // The generation bump is what actually retires the in-flight
+        // prepare's writes; the cancel just stops the work early.
+        prepareGeneration++
         prepareJob?.cancel()
         prepareJob = null
         _reportState.value = null

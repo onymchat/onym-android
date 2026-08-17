@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.onym.android.moderation.AuthorityManifest
 import app.onym.android.moderation.ViolationClass
+import app.onym.android.moderation.violationClassDisplayName
 
 /**
  * Structured rendering of an authority manifest for the consent
@@ -48,9 +49,7 @@ fun ModerationTermsDisplay(
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         manifest.violationClasses.forEach { violationClass ->
-            TermSectionLabel(
-                app.onym.android.moderation.violationClassDisplayName(violationClass.classId),
-            )
+            TermSectionLabel(violationClassDisplayName(violationClass.classId))
             ViolationClassCard(violationClass, documents)
         }
 

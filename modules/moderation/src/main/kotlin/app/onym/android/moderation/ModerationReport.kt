@@ -116,8 +116,20 @@ data class ReportReceipt(
 data class ReportFilingRecord(
     /** Lowercase UUID of the reported chat message. */
     val sourceMessageId: String,
-    /** The signed report, exactly as delivered (or owed). */
+    /**
+     * The signed report. Carries its evidence — the disclosed message
+     * body — only while the filing is still owed; [redacted] strips it
+     * the moment the filing resolves, so a delivered report leaves no
+     * copy of the reported content behind.
+     */
     val report: ModerationReport,
+    /**
+     * SHA-256 (lowercase hex) over the disclosed content this filing
+     * carried. Survives redaction, and is what dedup matches on: it
+     * answers "is this the same disclosure?" without the ledger
+     * having to keep the disclosure.
+     */
+    val disclosedDigest: String,
     val authorityName: String,
     /** Set when the authority acknowledged the filing. */
     val receipt: ReportReceipt? = null,
@@ -127,6 +139,21 @@ data class ReportFilingRecord(
     val resolvedWithoutReceipt: Boolean = false,
 ) {
     val isResolved: Boolean get() = receipt != null || resolvedWithoutReceipt
+
+    /**
+     * This record with the disclosed evidence dropped — what a
+     * resolved filing is stored as.
+     *
+     * A resolved row is a receipt stub, never a filable artifact:
+     * nothing replays it (the repository short-circuits on the
+     * receipt, or on [resolvedWithoutReceipt], before any delivery
+     * path), and dedup runs off [disclosedDigest]. Keeping the bodies
+     * would leave the ledger an indefinite archive of reported
+     * content — in an app that flags the clipboard SENSITIVE so a
+     * single message can't leak, and whose central case for this
+     * feature is CSAM.
+     */
+    fun redacted(): ReportFilingRecord = copy(report = report.copy(evidence = emptyList()))
 }
 
 interface ReportFilingStore {

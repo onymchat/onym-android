@@ -19,8 +19,12 @@ import app.onym.android.moderation.MandateRegistrationReceipt
 import app.onym.android.moderation.MandateStore
 import app.onym.android.moderation.ModerationMandate
 import app.onym.android.moderation.ModerationJson
+import app.onym.android.moderation.ModerationReport
 import app.onym.android.moderation.ModerationSigner
 import app.onym.android.moderation.PersistedGateState
+import app.onym.android.moderation.ReportFilingRecord
+import app.onym.android.moderation.ReportFilingStore
+import app.onym.android.moderation.ReportReceipt
 import app.onym.android.moderation.ReviewedManifest
 import app.onym.android.moderation.SignedManifest
 import app.onym.android.moderation.ViolationClass
@@ -162,20 +166,20 @@ class FakeAuthorityClient : app.onym.android.moderation.AuthorityClient {
     var uploadFailure: Exception? = null
 
     /** Overrides the echoed receipt (e.g. a mismatched reportId). */
-    var reportReceiptOverride: app.onym.android.moderation.ReportReceipt? = null
+    var reportReceiptOverride: ReportReceipt? = null
 
     override suspend fun fileReport(
         listing: AuthorityListing,
         reportWireBytes: ByteArray,
-    ): app.onym.android.moderation.ReportReceipt {
+    ): ReportReceipt {
         filedReports += reportWireBytes
         reportFailure?.let { throw it }
         reportReceiptOverride?.let { return it }
-        val report = app.onym.android.moderation.ModerationJson.json.decodeFromString(
-            app.onym.android.moderation.ModerationReport.serializer(),
+        val report = ModerationJson.json.decodeFromString(
+            ModerationReport.serializer(),
             reportWireBytes.decodeToString(),
         )
-        return app.onym.android.moderation.ReportReceipt(
+        return ReportReceipt(
             reportId = report.reportId,
             receivedAt = "2026-08-16T00:00:00Z",
             caseId = "case-fixture",
@@ -211,10 +215,10 @@ class InMemoryMandateStore(private var records: List<MandateRecord> = emptyList(
 }
 
 class InMemoryReportFilingStore(
-    var records: List<app.onym.android.moderation.ReportFilingRecord> = emptyList(),
-) : app.onym.android.moderation.ReportFilingStore {
-    override suspend fun load(): List<app.onym.android.moderation.ReportFilingRecord> = records
-    override suspend fun save(records: List<app.onym.android.moderation.ReportFilingRecord>) {
+    var records: List<ReportFilingRecord> = emptyList(),
+) : ReportFilingStore {
+    override suspend fun load(): List<ReportFilingRecord> = records
+    override suspend fun save(records: List<ReportFilingRecord>) {
         this.records = records
     }
 }

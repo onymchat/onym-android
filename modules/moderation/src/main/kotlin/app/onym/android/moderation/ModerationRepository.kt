@@ -461,14 +461,16 @@ class ModerationRepository(
         // an already-filed message must answer from the ledger even
         // offline, rather than failing with "your authority isn't in
         // the directory right now" about a filing that already landed.
+        val disclosedDigest = sha256Hex(evidence.disclosedContent.toByteArray(Charsets.UTF_8))
         val existing = reports.load().firstOrNull {
             it.sourceMessageId == evidence.sourceMessageId &&
                 it.report.reporter == reporter &&
                 it.report.reporterMandate == mandateRef &&
                 it.report.accused == evidence.accused &&
                 it.report.classId == classId &&
-                it.report.evidence.map(ReportEvidenceItem::disclosedContent) ==
-                listOf(evidence.disclosedContent)
+                // Matched by digest, not content: a resolved row has
+                // had its disclosed body redacted away.
+                it.disclosedDigest == disclosedDigest
         }
         if (existing != null) {
             existing.receipt?.let { return@withLock it }
@@ -502,6 +504,7 @@ class ModerationRepository(
         val filing = ReportFilingRecord(
             sourceMessageId = evidence.sourceMessageId,
             report = signed,
+            disclosedDigest = disclosedDigest,
             authorityName = record.authorityName,
         )
         // Persist before delivering: an artifact that can't be
@@ -519,6 +522,12 @@ class ModerationRepository(
         images: List<ReportableImage>,
     ): ReportReceipt {
         val reports = checkNotNull(reportStore)
+        // A resolved row is a receipt stub with its evidence redacted;
+        // every caller short-circuits before here, and delivering one
+        // would post a report carrying no evidence at all.
+        check(filing.report.evidence.isNotEmpty()) {
+            "refusing to deliver a redacted filing (${filing.report.reportId})"
+        }
         for (image in images) {
             try {
                 val timestamp = Rfc3339InstantSerializer.format(clock())
@@ -549,7 +558,7 @@ class ModerationRepository(
             if (e.statusCode == 409) {
                 // This (reporter, reportId) is already on a case —
                 // terminal success without a receipt of our own.
-                updateReport(filing) { it.copy(resolvedWithoutReceipt = true) }
+                updateReport(filing) { it.copy(resolvedWithoutReceipt = true).redacted() }
                 throw ReportFilingException.AlreadyFiled(filing.report.reportId)
             }
             if (e.isDeterministic) discardReport(filing)
@@ -563,7 +572,9 @@ class ModerationRepository(
                     filing.report.reportId,
             )
         }
-        updateReport(filing) { it.copy(receipt = receipt) }
+        // Resolved: the disclosure has served its purpose, so the body
+        // goes. Dedup still works off the retained digest.
+        updateReport(filing) { it.copy(receipt = receipt).redacted() }
         return receipt
     }
 
@@ -626,13 +637,14 @@ class ModerationRepository(
     /**
      * Bound the ledger, newest first, with a separate cap per kind.
      *
-     * Unresolved rows are the ones that matter for privacy: nothing
-     * retries them on its own (only the user re-reporting that same
-     * message under that same class replays one), and each retains the
-     * full `disclosedContent` — the message body — indefinitely.
-     * Keeping every abandoned filing forever would turn the ledger
-     * into an unbounded archive of reported content, so the oldest
-     * fall off past [MAX_UNRESOLVED_REPORT_RECORDS].
+     * Unresolved rows are the ones still holding disclosed content:
+     * they must, because delivery replays their exact bytes, and
+     * nothing retries them on its own (only the user re-reporting
+     * that same message under that same class). Resolved rows have
+     * already been redacted ([ReportFilingRecord.redacted]), so the
+     * tight bound belongs on the unresolved ones — an abandoned
+     * filing is the row that would otherwise keep a message body
+     * indefinitely.
      *
      * Dropping one is safe: the authority holds at most one open case
      * per (accused, class), so a later report about the same thing

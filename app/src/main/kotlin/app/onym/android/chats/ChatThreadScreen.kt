@@ -242,7 +242,12 @@ fun ChatThreadScreen(
                 replyingTo = replyingTo,
                 onArmReply = viewModel::armReply,
                 onCancelReply = viewModel::cancelReply,
-                canReport = viewModel::canReport,
+                // Closes over the COLLECTED group, so the Report
+                // entry repaints when the group resolves rather than
+                // depending on an unrelated recomposition.
+                canReport = group?.let { resolved ->
+                    { message: ChatMessage -> viewModel.canReport(message, resolved) }
+                },
                 onReportRequested = viewModel::beginReport,
             )
         }
