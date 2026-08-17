@@ -372,10 +372,8 @@ open class CreateGroupInteractor(
      * Tyranny invite-offer send loop. Mint a per-invitee intro key and
      * ship a durable [GroupInviteOfferPayload] to each invitee's inbox.
      * Reuses the inbox seal+send path, but the payload grants nothing:
-     * it carries only the reply channel + display context, so it never
-     * expires and never anchors anyone. The invitee turns it into a
-     * join request on accept; the admin anchors only on explicit
-     * approve.
+     * it carries only the reply channel + display context. The key it
+     * rides on is retired only from the group's invite list.
      *
      * Mirrors `CreateGroupInteractor.sendOffers` from onym-ios PR #158.
      */
@@ -388,13 +386,13 @@ open class CreateGroupInteractor(
         inviterAlias: String,
     ) {
         for ((index, inboxKey) in invitees.withIndex()) {
-            // One fresh intro key per invitee → granular revoke and a
-            // clean 1:1 mapping from an inbound join request back to the
-            // person the admin meant to invite.
+            // One key per invitee keeps the 1:1 map from request back
+            // to person; `currentOrMint` would collapse it.
             val capability = try {
                 introducer.mint(
                     ownerIdentityId = ownerIdentityId,
                     groupId = groupId,
+                    label = IntroKeyEntry.fingerprint(inboxKey),
                     groupName = groupName,
                 )
             } catch (e: Throwable) {

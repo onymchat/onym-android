@@ -518,18 +518,21 @@ fun RootScreen(
                 JoinScreen(
                     viewModel = vm,
                     onBackClick = { navController.popBackStack() },
-                    onOpenChat = {
-                        // No chat-detail destination yet — for now
-                        // landing on Chats with the new group at the
-                        // top of the list is the success state. The
-                        // future ChatDetailScreen replaces this with
-                        // a navigate to chat_detail/{id}.
-                        navController.navigate(Tab.Chats.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
+                    onOpenChat = { group ->
+                        // Open the chat itself. This used to land on the
+                        // Chats tab instead, because no chat-detail
+                        // destination existed when the join flow was
+                        // written; `chat_thread/{groupId}` arrived later
+                        // (PR A5) and the Chats list has been using it
+                        // since. Dropping the user on a list one tap
+                        // after "You're in" read as a dead button.
+                        //
+                        // popUpTo start drops join_invite, so Back from
+                        // the thread lands on Chats, not back on the
+                        // just-completed join screen.
+                        navController.navigate("chat_thread/${group.id}") {
+                            popUpTo(navController.graph.findStartDestination().id)
                             launchSingleTop = true
-                            restoreState = true
                         }
                     },
                 )

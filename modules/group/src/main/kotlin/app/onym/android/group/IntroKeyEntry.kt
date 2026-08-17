@@ -19,11 +19,8 @@ import app.onym.android.identity.IdentityId
  * - [groupId] is the on-chain `group_id` the invite is for —
  *   needed when the inviter's app surfaces "Bob wants to join
  *   <group>?" so it can render the group's name.
- * - [createdAtMillis] drives time-based expiry. Entries older than
- *   [LIFETIME_MILLIS] are treated as revoked at the [IntroKeyStore]
- *   boundary ([IntroKeyStore.find] returns null,
- *   [IntroKeyStore.listForOwner] and [IntroKeyStore.entriesFlow]
- *   omit them) and lazily purged on the next read.
+ * - [createdAtMillis] is display-only; links live until revoked.
+ * - [label] is null for the shared link, else the invitee's fingerprint.
  */
 data class IntroKeyEntry(
     val introPublicKey: ByteArray,
@@ -31,6 +28,18 @@ data class IntroKeyEntry(
     val ownerIdentityId: IdentityId,
     val groupId: ByteArray,
     val createdAtMillis: Long,
+    /** null == the group's shared link. Non-null == a create-time
+     *  offer aimed at one invitee. */
+    val label: String? = null,
+    /** True for entries persisted before labels existed. Those decode
+     *  with `label == null`, which is indistinguishable from a shared
+     *  link — and on a create-with-invitees group the newest of them is
+     *  the LAST INVITEE'S PRIVATE OFFER KEY. Without this flag
+     *  [InviteIntroducer.currentOrMint] would adopt it as the group's
+     *  public link, and the first rotate would revoke every outstanding
+     *  legacy invite. Never adopted, never mass-revoked; listed and
+     *  individually revokable like any other superseded key. */
+    val isLegacy: Boolean = false,
 ) {
     init {
         require(introPublicKey.size == 32) {
@@ -44,14 +53,11 @@ data class IntroKeyEntry(
         }
     }
 
-    fun isExpired(atMillis: Long, lifetimeMillis: Long = LIFETIME_MILLIS): Boolean =
-        atMillis - createdAtMillis >= lifetimeMillis
-
     companion object {
-        /** How long an invite link is honored after minting. Issue
-         *  onymchat/onym-ios#111 — rotate every 24 hours to shrink
-         *  the leak window of a forwarded or screenshotted link. */
-        const val LIFETIME_MILLIS: Long = 24L * 60L * 60L * 1000L
+        /** First 4 bytes of the inbox key — the same fingerprint
+         *  shape the approval screen shows. */
+        fun fingerprint(inboxPublicKey: ByteArray): String =
+            inboxPublicKey.take(4).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
     }
 
     override fun equals(other: Any?): Boolean {
@@ -61,7 +67,9 @@ data class IntroKeyEntry(
             introPrivateKey.contentEquals(other.introPrivateKey) &&
             ownerIdentityId == other.ownerIdentityId &&
             groupId.contentEquals(other.groupId) &&
-            createdAtMillis == other.createdAtMillis
+            createdAtMillis == other.createdAtMillis &&
+            label == other.label &&
+            isLegacy == other.isLegacy
     }
 
     override fun hashCode(): Int {
@@ -70,6 +78,8 @@ data class IntroKeyEntry(
         h = 31 * h + ownerIdentityId.hashCode()
         h = 31 * h + groupId.contentHashCode()
         h = 31 * h + createdAtMillis.hashCode()
+        h = 31 * h + (label?.hashCode() ?: 0)
+        h = 31 * h + isLegacy.hashCode()
         return h
     }
 }

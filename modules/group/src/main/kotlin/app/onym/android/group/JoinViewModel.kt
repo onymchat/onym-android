@@ -3,6 +3,7 @@ package app.onym.android.group
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +53,9 @@ import kotlinx.coroutines.launch
  */
 class JoinViewModel(
     val capability: IntroCapability,
+    /** Wait before flipping to [State.Unanswered], null to never flip.
+     *  Injected because `runTest`'s virtual clock skips `delay`. */
+    private val unansweredAfterMillis: Long? = UNANSWERED_AFTER_MILLIS,
     /** Suspend function that ships a join request and returns the
      *  outcome. Production wires `JoinRequestSender::send` (which
      *  builds the payload, seals to [IntroCapability.introPublicKey],
@@ -71,6 +75,9 @@ class JoinViewModel(
         data class Ready(val capability: IntroCapability) : State()
         object Sending : State()
         object AwaitingApproval : State()
+        /** Nothing came back in time. Not a failure — a revoked link
+         *  and a slow host are indistinguishable from here. */
+        object Unanswered : State()
         data class Approved(val group: ChatGroup) : State()
         data class Failed(val reason: String) : State()
     }
@@ -79,6 +86,7 @@ class JoinViewModel(
     val state: StateFlow<State> = _state.asStateFlow()
 
     private var sendJob: Job? = null
+    private var unansweredJob: Job? = null
 
     init {
         // Watch the repository for the matching group throughout the
@@ -91,7 +99,12 @@ class JoinViewModel(
                 } ?: return@collect
                 when (_state.value) {
                     is State.Approved -> Unit  // already terminal
-                    else -> _state.value = State.Approved(match)
+                    else -> {
+                        // Beats Unanswered too: a late approval is
+                        // still an approval.
+                        unansweredJob?.cancel()
+                        _state.value = State.Approved(match)
+                    }
                 }
             }
         }
@@ -105,7 +118,9 @@ class JoinViewModel(
     fun send(displayLabel: String) {
         if (sendJob?.isActive == true) return
         val current = _state.value
-        if (current !is State.Ready && current !is State.Failed) return
+        if (current !is State.Ready && current !is State.Failed &&
+            current !is State.Unanswered
+        ) return
         sendJob = viewModelScope.launch {
             _state.value = State.Sending
             val outcome = submitRequest(capability, displayLabel)
@@ -113,12 +128,38 @@ class JoinViewModel(
             // while we were awaiting — defer to it if so.
             if (_state.value is State.Approved) return@launch
             _state.value = when (outcome) {
-                JoinRequestSender.Outcome.Sent -> State.AwaitingApproval
+                JoinRequestSender.Outcome.Sent -> {
+                    startUnansweredTimer()
+                    State.AwaitingApproval
+                }
                 is JoinRequestSender.Outcome.NoIdentityLoaded ->
                     State.Failed("Sign in first.")
                 is JoinRequestSender.Outcome.TransportFailed ->
                     State.Failed("Couldn't send: ${outcome.reason}")
             }
         }
+    }
+
+    /**
+     * Flip to [State.Unanswered] at the deadline. A late approval
+     * still overwrites it via the watcher.
+     */
+    private fun startUnansweredTimer() {
+        val after = unansweredAfterMillis ?: return
+        unansweredJob?.cancel()
+        unansweredJob = viewModelScope.launch {
+            delay(after)
+            if (_state.value is State.AwaitingApproval) {
+                _state.value = State.Unanswered
+            }
+        }
+    }
+
+    companion object {
+        /**
+         * Generous: approval is a human tap plus a proof and a chain
+         * round-trip, so anything short cries wolf on a thinking host.
+         */
+        const val UNANSWERED_AFTER_MILLIS: Long = 90_000L
     }
 }

@@ -25,20 +25,29 @@ import java.time.Instant
  * The matching intro *private* keys already persist
  * (`EncryptedPrefsIntroKeyStore`), so a request restored here is still
  * decryptable after a relaunch — [JoinRequestApprover.start] re-runs its
- * decode over the restored snapshot on subscribe. An intro key that has
- * passed its 24h lifetime is purged by that store, and a request whose
- * key is gone simply fails to decode and never renders; retention below
- * governs only how long the dead row occupies storage.
+ * decode over the restored snapshot on subscribe. A request whose intro
+ * key has been revoked simply fails to decode and never renders;
+ * retention below governs only how long the dead row occupies storage.
+ *
+ * Handled ids are tombstoned in [handledLog], which outlives the rows.
+ * Deleting the row is not enough now that links are multi-use: the
+ * subscription survives the approval and the relay REQ carries no
+ * `since`, so every reconnect replays a request already acted on.
  *
  * Mirrors `SwiftDataIntroRequestStore` in onym-ios.
  */
 class RoomIntroRequestStore(
     private val dao: IntroRequestDao,
     private val encryption: StorageEncryption,
+    private val handledLog: HandledIntroRequestLog = InMemoryHandledIntroRequestLog(),
     private val now: () -> Long = { System.currentTimeMillis() },
 ) : IntroRequestStore {
 
     private val mutex = Mutex()
+    /** Event ids already acted on, mirrored from [handledLog] so the
+     *  hot [record] path doesn't hit storage per inbound. */
+    private var consumed: MutableSet<String> = mutableSetOf()
+    private var seeded = false
     private val _requests = MutableStateFlow<List<IntroRequest>>(emptyList())
     override val requests: StateFlow<List<IntroRequest>> = _requests.asStateFlow()
 
@@ -47,9 +56,15 @@ class RoomIntroRequestStore(
      * this replay is what puts a restored request back into the thread
      * on a cold launch, without waiting for a fresh relay delivery.
      */
-    suspend fun start() = mutex.withLock { refreshLocked() }
+    suspend fun start() = mutex.withLock {
+        seedConsumedLocked()
+        refreshLocked()
+    }
 
     override suspend fun record(request: IntroRequest): Boolean = mutex.withLock {
+        seedConsumedLocked()
+        // Already acted on: a replay must not come back as pending.
+        if (request.id in consumed) return@withLock false
         if (dao.count(request.id) > 0) {
             // Backfill a row written before `firstSeenAtMillis` existed
             // (the column is nullable for migration). Its clock starts
@@ -78,8 +93,45 @@ class RoomIntroRequestStore(
     }
 
     override suspend fun consume(id: String) = mutex.withLock {
+        seedConsumedLocked()
+        // Unconditional, so a tombstone can be laid ahead of a replay
+        // that hasn't landed yet.
+        consumed += id
+        // Attribute to the link it arrived on so [pruneTombstones] can
+        // drop it when that link is retired. With no row to attribute
+        // it to it goes in unattributed rather than being dropped —
+        // losing it means the handled request returns as pending on the
+        // next cold start.
+        val introPubHex = dao.findById(id)
+            ?.let { row -> runCatching { encryption.decrypt(row.encryptedTargetIntroPublicKey) }.getOrNull() }
+            ?.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        handledLog.record(id, introPubHex ?: "")
         dao.delete(id)
         refreshLocked()
+    }
+
+    override suspend fun reconcileTombstones(livePublicKeysHex: Set<String>) = mutex.withLock {
+        handledLog.reconcile(livePublicKeysHex)
+        consumed = handledLog.handledIds().toMutableSet()
+        seeded = true
+    }
+
+    override suspend fun recordDeclined(collapseKey: String) {
+        handledLog.recordDeclined(collapseKey)
+    }
+
+    override suspend fun declinedCollapseKeys(): Set<String> = handledLog.declinedCollapseKeys()
+
+    override suspend fun pruneTombstones(retiringPublicKeysHex: Set<String>) = mutex.withLock {
+        handledLog.prune(retiringPublicKeysHex)
+        consumed = handledLog.handledIds().toMutableSet()
+        seeded = true
+    }
+
+    private suspend fun seedConsumedLocked() {
+        if (seeded) return
+        consumed = handledLog.handledIds().toMutableSet()
+        seeded = true
     }
 
     /**
@@ -97,9 +149,12 @@ class RoomIntroRequestStore(
         dao.deleteOlderThan(now() - RETENTION_MILLIS)
     }
 
+    /** Tombstoned ids are filtered on read as well as in [record]: the
+     *  tombstone commits before the row is deleted, so a crash in that
+     *  window would otherwise resurrect a handled request. */
     private suspend fun refreshLocked() {
         pruneLocked()
-        _requests.value = dao.list().mapNotNull(::decode)
+        _requests.value = dao.list().mapNotNull(::decode).filter { it.id !in consumed }
     }
 
     private fun encode(request: IntroRequest, firstSeenAtMillis: Long) = PersistedIntroRequest(

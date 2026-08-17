@@ -161,6 +161,9 @@ class JoinViewModelTest {
         outcome: JoinRequestSender.Outcome,
         initialActive: IdentityId? = IdentityId("alice"),
         seedGroups: List<ChatGroup> = emptyList(),
+        // Null by default: `runTest` skips `delay`, so a live timer
+        // fires instantly in tests that just want AwaitingApproval.
+        unansweredAfterMillis: Long? = null,
     ): Triple<JoinViewModel, GroupRepository, IntRef> {
         val store = InMemoryGroupStore()
         kotlinx.coroutines.runBlocking { store.preload(seedGroups) }
@@ -169,6 +172,7 @@ class JoinViewModelTest {
         kotlinx.coroutines.runBlocking { groupRepo.reload() }
         val calls = IntRef()
         val vm = JoinViewModel(
+            unansweredAfterMillis = unansweredAfterMillis,
             capability = capability,
             submitRequest = { _, _ ->
                 calls.value += 1
@@ -197,4 +201,48 @@ class JoinViewModelTest {
     )
 
     private class IntRef(var value: Int = 0)
+
+    @Test
+    fun awaitingApproval_afterTheTimeout_flipsToUnanswered() = runTest(mainDispatcher.scheduler) {
+        val (vm, _, _) = harness(
+            outcome = JoinRequestSender.Outcome.Sent,
+            unansweredAfterMillis = 1_000L,
+        )
+
+        vm.send("alice")
+        advanceUntilIdle()
+
+        // A revoked link is indistinguishable from a slow host here, so
+        // the joiner gets told rather than left on an endless spinner.
+        assertTrue(
+            "expected Unanswered, got ${vm.state.value}",
+            vm.state.value is JoinViewModel.State.Unanswered,
+        )
+    }
+
+    @Test
+    fun approvalArrivingAfterTheTimeout_stillWins() = runTest(mainDispatcher.scheduler) {
+        val owner = IdentityId("alice")
+        val (vm, repo, _) = harness(
+            outcome = JoinRequestSender.Outcome.Sent,
+            initialActive = owner,
+            unansweredAfterMillis = 1_000L,
+        )
+
+        vm.send("alice")
+        advanceUntilIdle()
+        assertTrue(vm.state.value is JoinViewModel.State.Unanswered)
+
+        // The watcher stays live past the timeout — Unanswered is a
+        // hint, not a terminal state.
+        repo.insert(makeGroup(groupId, owner))
+        advanceUntilIdle()
+
+        assertTrue(
+            "expected Approved, got ${vm.state.value}",
+            vm.state.value is JoinViewModel.State.Approved,
+        )
+    }
+
+
 }

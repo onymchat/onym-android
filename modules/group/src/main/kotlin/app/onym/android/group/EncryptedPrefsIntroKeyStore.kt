@@ -30,7 +30,6 @@ import kotlinx.serialization.json.Json
 class EncryptedPrefsIntroKeyStore(
     private val context: Context,
     private val prefsFileName: String = DEFAULT_PREFS_FILE_NAME,
-    private val clock: () -> Long = { System.currentTimeMillis() },
 ) : IntroKeyStore {
 
     private val mutex = Mutex()
@@ -72,11 +71,11 @@ class EncryptedPrefsIntroKeyStore(
         // wrote something. Routes through loadActiveUnlocked so
         // entries that aged past the lifetime while the app was
         // closed are pruned at boot.
-        _entriesFlow.value = loadActiveUnlocked().map { it.toEntry() }
+        _entriesFlow.value = loadAllUnlocked().map { it.toEntry() }
     }
 
     override suspend fun save(entry: IntroKeyEntry) = mutex.withLock {
-        val current = loadActiveUnlocked().toMutableList()
+        val current = loadAllUnlocked().toMutableList()
         val existingIdx = current.indexOfFirst {
             it.introPub.contentEquals(entry.introPublicKey)
         }
@@ -86,6 +85,8 @@ class EncryptedPrefsIntroKeyStore(
             ownerIdentityId = entry.ownerIdentityId.value,
             groupId = entry.groupId,
             createdAtMillis = entry.createdAtMillis,
+            label = entry.label,
+            labelVersion = StoredIntroKey.CURRENT_LABEL_VERSION,
         )
         if (existingIdx >= 0) current[existingIdx] = stored
         else current += stored
@@ -93,26 +94,32 @@ class EncryptedPrefsIntroKeyStore(
     }
 
     override suspend fun find(introPublicKey: ByteArray): IntroKeyEntry? = mutex.withLock {
-        loadActiveUnlocked()
+        loadAllUnlocked()
             .firstOrNull { it.introPub.contentEquals(introPublicKey) }
             ?.toEntry()
     }
 
     override suspend fun listForOwner(ownerIdentityId: IdentityId): List<IntroKeyEntry> = mutex.withLock {
-        loadActiveUnlocked()
+        loadAllUnlocked()
             .filter { it.ownerIdentityId == ownerIdentityId.value }
             .sortedByDescending { it.createdAtMillis }
             .map { it.toEntry() }
     }
 
     override suspend fun revoke(introPublicKey: ByteArray) = mutex.withLock {
-        val current = loadActiveUnlocked()
+        val current = loadAllUnlocked()
         val filtered = current.filterNot { it.introPub.contentEquals(introPublicKey) }
         if (filtered.size != current.size) saveAllUnlocked(filtered)
     }
 
+    override suspend fun allLivePublicKeysHex(): Set<String> = mutex.withLock {
+        loadAllUnlocked().mapTo(mutableSetOf()) { stored ->
+            stored.introPub.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        }
+    }
+
     override suspend fun deleteForOwner(ownerIdentityId: IdentityId): Int = mutex.withLock {
-        val current = loadActiveUnlocked()
+        val current = loadAllUnlocked()
         val filtered = current.filterNot { it.ownerIdentityId == ownerIdentityId.value }
         val removed = current.size - filtered.size
         if (removed > 0) saveAllUnlocked(filtered)
@@ -120,21 +127,6 @@ class EncryptedPrefsIntroKeyStore(
     }
 
     // ─── private ──────────────────────────────────────────────────
-
-    /** Load the blob, drop rows older than
-     *  [IntroKeyEntry.LIFETIME_MILLIS], and rewrite if anything was
-     *  pruned. Every read funnels through here so expired keys are
-     *  invisible to callers and the blob stays bounded without a
-     *  background timer. When rows are pruned, [_entriesFlow]
-     *  re-emits so [IntroInboxPump] cancels relayer subscriptions
-     *  for expired slots. */
-    private fun loadActiveUnlocked(): List<StoredIntroKey> {
-        val all = loadAllUnlocked()
-        val cutoffMillis = clock() - IntroKeyEntry.LIFETIME_MILLIS
-        val active = all.filter { it.createdAtMillis > cutoffMillis }
-        if (active.size != all.size) saveAllUnlocked(active)
-        return active
-    }
 
     private fun loadAllUnlocked(): List<StoredIntroKey> {
         val raw = prefs.getString(KEY_BLOB, null) ?: return emptyList()
@@ -171,6 +163,8 @@ class EncryptedPrefsIntroKeyStore(
         ownerIdentityId = IdentityId(ownerIdentityId),
         groupId = groupId,
         createdAtMillis = createdAtMillis,
+        label = label,
+        isLegacy = labelVersion == null,
     )
 
     companion object {
@@ -191,4 +185,16 @@ internal data class StoredIntroKey(
     val ownerIdentityId: String,
     @Serializable(with = Base64ByteArraySerializer::class) val groupId: ByteArray,
     val createdAtMillis: Long,
-)
+    /** MUST keep a default: the blob decode is caught into an empty
+     *  list, so a required field would wipe every invite on upgrade. */
+    val label: String? = null,
+    /** Absent on rows written before labels existed. Same defaulting
+     *  rule as [label], and its absence is exactly the legacy signal. */
+    val labelVersion: Int? = null,
+) {
+    companion object {
+        /** Stamped on every write, so a row without it is one this
+         *  build never wrote. Bumped only if [label]'s meaning changes. */
+        const val CURRENT_LABEL_VERSION = 1
+    }
+}
