@@ -44,6 +44,9 @@ class ModerationRepository(
     /** Ledger of filed reports; null leaves the report vertical dark
      * ([fileReport] refuses) without touching consent/gate callers. */
     private val reportStore: ReportFilingStore? = null,
+    /** Ledger of filed appeals; null leaves the appeal vertical dark
+     * ([appeal] refuses) the same way [reportStore] does. */
+    private val caseSubmissionStore: CaseSubmissionStore? = null,
     /** Resolves the active mandate's authority to its current
      * directory listing (the listing designates the API base URL a
      * report is delivered to). Null = not listed right now. */
@@ -578,6 +581,270 @@ class ModerationRepository(
         return receipt
     }
 
+    private val appealMutex = Mutex()
+
+    /**
+     * File an appeal against one case (Moderation.md §5.7) — the
+     * in-app route the authority's `appealUrl` link used to be the only
+     * form of.
+     *
+     * Same ordering discipline as [fileReport], for the same reasons:
+     *
+     *  1. Validate locally — an empty or oversized statement is refused
+     *     here rather than on the wire.
+     *  2. Persist the signed artifact BEFORE any network call, so an
+     *     ambiguous failure replays the exact signed bytes instead of
+     *     re-signing different ones.
+     *  3. Classify the outcome by what a retry could change: a
+     *     deterministic 4xx (outside the appeal window, case already
+     *     decided, the anti-oracle 404) discards the artifact, since
+     *     replay can never turn it into an acceptance; anything
+     *     ambiguous keeps it.
+     *
+     * Appealing the same case with the same statement returns the
+     * stored receipt without a second delivery. That ledger check is
+     * the ONLY thing that makes this idempotent — the authority files
+     * each delivered appeal as its own row.
+     *
+     * Standing comes from the active registered mandate, as with
+     * reports: this is the accused appealing under the terms they
+     * consented to. A new-holder claim is definitionally filed by
+     * someone who is not the mandated user and so is not on this path
+     * (see [AppealSubmission.Kind.NEW_HOLDER_CLAIM]).
+     */
+    suspend fun appeal(
+        caseId: String,
+        statement: String,
+    ): AppealReceipt = appealMutex.withLock {
+        val submissions = caseSubmissionStore ?: throw AppealFilingException.AppealsUnavailable()
+        val record = activeReportingMandate() ?: throw AppealFilingException.AppealsUnavailable()
+        val user = signer.userKeyId()
+        if (user != record.mandate.user) throw AppealFilingException.AppealsUnavailable()
+        val trimmed = validatedStatement(statement)
+        val mandateRef = record.mandate.mandateHash()
+        val statementDigest = sha256Hex(trimmed.toByteArray(Charsets.UTF_8))
+        purgeOrphanedAppeals(mandateRef)
+
+        // Resolved before the directory lookup, exactly as on the
+        // report path: re-appealing with a statement already filed must
+        // answer from the ledger even offline, rather than failing with
+        // "your authority isn't in the directory right now" about a
+        // filing that already landed.
+        val existing = submissions.load().firstOrNull {
+            it.appeal.caseId == caseId &&
+                it.appeal.kind == AppealSubmission.Kind.APPEAL &&
+                it.user == user &&
+                it.mandateRef == mandateRef &&
+                // By digest, not text: a resolved row's statement has
+                // been redacted away.
+                it.statementDigest == statementDigest
+        }
+        if (existing != null) {
+            existing.receipt?.let { return@withLock it }
+            return@withLock deliverAppeal(existing, requireAppealListing(record))
+        }
+
+        val listing = requireAppealListing(record)
+        val appeal = AppealSubmission(
+            caseId = caseId,
+            kind = AppealSubmission.Kind.APPEAL,
+            statement = trimmed,
+        )
+        val signed = appeal.copy(
+            signature = Base64.getEncoder().encodeToString(signer.sign(appeal.signingBytes())),
+        )
+        val submission = CaseSubmissionRecord(
+            id = "appeal-" + java.util.UUID.randomUUID().toString().lowercase(),
+            appeal = signed,
+            statementDigest = statementDigest,
+            mandateRef = mandateRef,
+            user = user,
+            authorityName = record.authorityName,
+            createdAt = Rfc3339InstantSerializer.format(clock()),
+        )
+        // Persist before delivering: a timeout can land after the
+        // authority committed, and only the retained artifact lets the
+        // retry re-deliver identical content.
+        saveSubmissions(listOf(submission) + submissions.load())
+        deliverAppeal(submission, listing)
+    }
+
+    /** Every appeal on file for [caseId], newest first — unresolved
+     *  rows are the retry artifacts, resolved ones the filing history
+     *  (statement redacted). */
+    suspend fun appeals(caseId: String): List<CaseSubmissionRecord> =
+        caseSubmissionStore?.load()?.filter { it.appeal.caseId == caseId } ?: emptyList()
+
+    /**
+     * Deliver one retained artifact and classify the outcome.
+     *
+     * ## The unparseable-2xx asymmetry, stated
+     *
+     * A receipt that PARSES but names another case or kind is terminal
+     * here, because a 200 means something was filed and this endpoint
+     * does not deduplicate. A 200 whose body does not parse at all is
+     * classified retryable by [AuthorityClient.appeal] instead — and
+     * those two are in tension: a committed-but-garbled 200 replayed
+     * later files a second appeal, which is the very hazard the
+     * correlation checks exist for.
+     *
+     * Kept retryable deliberately. The common cause of an unparseable
+     * 200 is an interloper — a captive portal or proxy answering for the
+     * authority — where nothing was filed and refusing to retry would
+     * strand a signed appeal for no reason. The mitigation is that the
+     * row stays in the ledger unresolved, and
+     * [ModerationRepository.appeals] counts unresolved rows, so the
+     * surface warns "already filed" on re-entry rather than inviting a
+     * silent duplicate. Terminal-with-kept-artifact would trade one
+     * failure mode for a worse one: a case the user cannot appeal at all
+     * because a proxy burped once.
+     */
+    private suspend fun deliverAppeal(
+        submission: CaseSubmissionRecord,
+        listing: AuthorityListing,
+    ): AppealReceipt {
+        // A resolved row is a receipt stub with its statement redacted;
+        // callers short-circuit on the receipt before here, and
+        // delivering one would post an appeal that says nothing.
+        check(!submission.isResolved && submission.appeal.statement.isNotEmpty()) {
+            "refusing to deliver a redacted appeal (${submission.id})"
+        }
+        val receipt = try {
+            authority.appeal(listing, submission.appeal.caseId, submission.appeal.wireBytes())
+        } catch (e: AuthorityRejectedException) {
+            if (e.isDeterministic) discardSubmission(submission)
+            throw e
+        }
+        // Correlation failures are terminal, not retryable: the
+        // authority answered 200, so the appeal is filed, and this
+        // endpoint does not deduplicate — a "retry" would file a second
+        // one rather than resolve this. Drop the artifact so nothing
+        // can replay it, and say what happened.
+        if (receipt.caseId != submission.appeal.caseId) {
+            discardSubmission(submission)
+            throw AppealFilingException.AcknowledgedDifferentSubmission(
+                "authority acknowledged case ${receipt.caseId} for ${submission.appeal.caseId}",
+            )
+        }
+        val expectedKind = ModerationJson.json
+            .encodeToJsonElement(AppealSubmission.Kind.serializer(), submission.appeal.kind)
+            .let { (it as kotlinx.serialization.json.JsonPrimitive).content }
+        if (receipt.kind != expectedKind) {
+            discardSubmission(submission)
+            throw AppealFilingException.AcknowledgedDifferentSubmission(
+                "authority acknowledged kind '${receipt.kind}' for '$expectedKind'",
+            )
+        }
+        // `filed: false` on a 200 is nonconforming — a refusal is
+        // supposed to arrive as a 4xx — so nothing here can be inferred
+        // about whether the row exists. What must NOT happen is storing
+        // it as resolved: that redacts the statement and renders
+        // "Appeal filed" over an authority that just said otherwise.
+        // Discarded rather than kept for replay, for the same reason as
+        // the correlation failures: we cannot rule out that it WAS
+        // filed, and an armed replay against an endpoint that does not
+        // deduplicate is the worse half of the uncertainty. The user's
+        // text is still in the field, so this costs them a tap, not
+        // their statement.
+        if (!receipt.filed) {
+            discardSubmission(submission)
+            throw AppealFilingException.RefusedWithoutFiling(
+                "authority answered 200 for ${submission.appeal.caseId} with filed=false" +
+                    (receipt.note?.let { ": $it" } ?: ""),
+            )
+        }
+        // Landed: the statement has served its purpose, so it goes.
+        // Dedup still works off the retained digest.
+        updateSubmission(submission) { it.copy(receipt = receipt).redacted() }
+        return receipt
+    }
+
+    /**
+     * Drop UNRESOLVED appeal rows filed under a mandate that is no
+     * longer the active one.
+     *
+     * Dedup is scoped to `mandateRef` because an appeal cites the
+     * standing a specific mandate gives, so after a rotation the
+     * identical statement legitimately files again under the new
+     * standing. The cost is that the old mandate's unresolved rows can
+     * never be matched or replayed again — nothing will ever look them
+     * up — while still holding the user's statement in plaintext until
+     * the 16-row bound happens to evict them.
+     *
+     * So they go here, which is the retention gap closed rather than
+     * merely documented. RESOLVED rows survive: they are already
+     * redacted, hold no statement, and are what makes
+     * [appeals] warn a returning user that this case already has a
+     * filing — a warning that must outlive a mandate rotation, since the
+     * authority's copy certainly does.
+     */
+    private suspend fun purgeOrphanedAppeals(activeMandateRef: String) {
+        val submissions = caseSubmissionStore ?: return
+        val records = submissions.load()
+        val kept = records.filter { it.isResolved || it.mandateRef == activeMandateRef }
+        if (kept.size != records.size) saveSubmissions(kept)
+    }
+
+    private fun validatedStatement(statement: String): String {
+        val trimmed = statement.trim()
+        if (trimmed.isEmpty()) {
+            throw AppealFilingException.StatementInvalid("statement is empty")
+        }
+        val bytes = trimmed.toByteArray(Charsets.UTF_8).size
+        if (bytes > MAX_STATEMENT_BYTES) {
+            throw AppealFilingException.StatementInvalid(
+                "statement exceeds $MAX_STATEMENT_BYTES bytes",
+            )
+        }
+        return trimmed
+    }
+
+    private suspend fun requireAppealListing(record: MandateRecord): AuthorityListing =
+        resolveAuthorityListing(record.mandate.authority)
+            ?: throw AppealFilingException.AuthorityUnavailable()
+
+    private suspend fun discardSubmission(submission: CaseSubmissionRecord) {
+        val submissions = checkNotNull(caseSubmissionStore)
+        saveSubmissions(submissions.load().filterNot { it.id == submission.id })
+    }
+
+    private suspend fun updateSubmission(
+        submission: CaseSubmissionRecord,
+        transform: (CaseSubmissionRecord) -> CaseSubmissionRecord,
+    ) {
+        val submissions = checkNotNull(caseSubmissionStore)
+        saveSubmissions(
+            submissions.load().map { if (it.id == submission.id) transform(it) else it },
+        )
+    }
+
+    /**
+     * Bound the appeal ledger, newest first, per kind — same shape as
+     * [saveReports] and for the same reason: an unresolved row still
+     * holds the user's statement, and nothing retries it except the
+     * user re-submitting, so the abandoned-artifact bound is the tight
+     * one.
+     *
+     * Dropping an unresolved row loses only the retry artifact: the
+     * user can appeal again, which re-signs. Dropping a resolved one
+     * loses idempotency for a statement already acknowledged — which is
+     * why that cap is generous.
+     */
+    private suspend fun saveSubmissions(records: List<CaseSubmissionRecord>) {
+        val submissions = checkNotNull(caseSubmissionStore)
+        var resolvedSeen = 0
+        var unresolvedSeen = 0
+        submissions.save(
+            records.filter { record ->
+                if (record.isResolved) {
+                    resolvedSeen++ < MAX_RESOLVED_APPEAL_RECORDS
+                } else {
+                    unresolvedSeen++ < MAX_UNRESOLVED_APPEAL_RECORDS
+                }
+            },
+        )
+    }
+
     private suspend fun requireListing(record: MandateRecord): AuthorityListing =
         resolveAuthorityListing(record.mandate.authority)
             ?: throw ReportFilingException.AuthorityUnavailable()
@@ -676,6 +943,24 @@ class ModerationRepository(
          * smaller than the resolved cap: these rows retain disclosed
          * message content and nothing retries them automatically. */
         const val MAX_UNRESOLVED_REPORT_RECORDS: Int = 16
+
+        /** Acknowledged-appeal bound. Generous, because dropping one
+         * loses idempotency for a statement the authority already has:
+         * re-filing it would land a second row rather than resolve the
+         * first. */
+        const val MAX_RESOLVED_APPEAL_RECORDS: Int = 128
+
+        /** Undelivered-appeal bound. Tighter, for the same reason as
+         * [MAX_UNRESOLVED_REPORT_RECORDS]: these rows retain the user's
+         * statement and nothing retries them on its own. Newest-first
+         * pruning, so the row just persisted always survives. */
+        const val MAX_UNRESOLVED_APPEAL_RECORDS: Int = 16
+
+        /** Statement cap for [appeal], iOS parity
+         * (`ModerationRepository.maxStatementBytes`). Bytes, not
+         * characters — the authority's body limit is bytes, and a
+         * Cyrillic statement is two per character. */
+        const val MAX_STATEMENT_BYTES: Int = 16_384
     }
 }
 

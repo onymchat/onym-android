@@ -668,6 +668,10 @@ fun RootScreen(
             }
             composable(ROUTE_MODERATION_SETTINGS) {
                 val moderation = dependencies.moderation ?: return@composable
+                // The open-case notices ride along on an operational
+                // gate answer — a case never blocks the app, so this
+                // screen is where one becomes visible and appealable.
+                val gateState by moderation.gate.snapshots.collectAsStateWithLifecycle()
                 app.onym.android.settings.ModerationSettingsScreen(
                     repository = moderation.repository,
                     onRetryRegistration = moderation.retryRegistration,
@@ -675,6 +679,46 @@ fun RootScreen(
                         navController.navigate(ROUTE_MODERATION_SWITCH_CONSENT)
                     },
                     onViewTerms = { navController.navigate(ROUTE_MODERATION_TERMS) },
+                    openCases =
+                        (gateState as? app.onym.android.moderation.ui.RootGate.Operational)
+                            ?.openCases
+                            .orEmpty(),
+                    onAppealCase = { caseId ->
+                        // Encoded, because a case id is opaque
+                        // authority-issued text: a `/` in one would
+                        // mismatch the `{caseId}` pattern and the screen
+                        // would simply never open. Navigation decodes
+                        // path arguments on read (`NavDeepLink` runs
+                        // `Uri.decode`), so the destination — and the
+                        // authority client below it — still sees the
+                        // original id. Same reason
+                        // `OkHttpAuthorityClient` percent-encodes the
+                        // path segment.
+                        navController.navigate(
+                            "moderation_case_appeal/${android.net.Uri.encode(caseId)}",
+                        )
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable("moderation_case_appeal/{caseId}") { entry ->
+                val moderation = dependencies.moderation ?: return@composable
+                val caseId = entry.arguments?.getString("caseId") ?: return@composable
+                // Keyed on the case: one controller carries one case's
+                // submit state, and reusing it across cases would show
+                // one case's outcome on another's screen.
+                val controller = remember(caseId) {
+                    moderation.makeCaseAppealController(caseId)
+                }
+                val gateState by moderation.gate.snapshots.collectAsStateWithLifecycle()
+                app.onym.android.moderation.ui.CaseAppealScreen(
+                    controller = controller,
+                    // The notice is context (class, deadlines), not a
+                    // precondition — a case the gate has since stopped
+                    // reporting is still appealable by id.
+                    notice = (gateState as? app.onym.android.moderation.ui.RootGate.Operational)
+                        ?.openCases
+                        ?.firstOrNull { it.caseId == caseId },
                     onBack = { navController.popBackStack() },
                 )
             }

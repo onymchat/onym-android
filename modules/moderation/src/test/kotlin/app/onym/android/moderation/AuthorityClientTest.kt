@@ -178,4 +178,59 @@ class AuthorityClientTest {
         assertEquals("2026-08-16T00:00:00Z", requestHeaders["x-onym-timestamp"])
         assertEquals("c2ln", requestHeaders["x-onym-signature"])
     }
+
+    @Test
+    fun `appeal posts the artifact to the case's own path`() = runTest {
+        val appeal = AppealSubmission(
+            caseId = "case-7",
+            kind = AppealSubmission.Kind.APPEAL,
+            statement = "mine",
+            signature = "c2ln",
+        )
+        val receipt = client(
+            200,
+            """{"caseId":"case-7","filed":true,"kind":"appeal","note":"under review"}""",
+        ).appeal(ModerationFixtures.listing(), appeal.caseId, appeal.wireBytes())
+
+        assertEquals("https://authority.example/v1/cases/case-7/appeal", requestUrl)
+        // The body is the artifact verbatim — the authority verifies the
+        // signature over these bytes.
+        assertEquals(appeal.wireBytes().decodeToString(), requestBody)
+        assertTrue(receipt.filed)
+        assertEquals("appeal", receipt.kind)
+        assertEquals("under review", receipt.note)
+    }
+
+    /** Case ids are opaque authority-issued text; a space or a slash in
+     *  one must not rewrite the route. */
+    @Test
+    fun `appeal percent-encodes the case id in the path`() = runTest {
+        client(200, """{"caseId":"a b/c","filed":true,"kind":"appeal"}""")
+            .appeal(ModerationFixtures.listing(), "a b/c", ByteArray(2))
+
+        assertEquals("https://authority.example/v1/cases/a%20b%2Fc/appeal", requestUrl)
+    }
+
+    @Test
+    fun `appeal surfaces a closed-window refusal as deterministic`() = runTest {
+        try {
+            client(403, """{"error":"appeal_window_closed","message":"the window closed"}""")
+                .appeal(ModerationFixtures.listing(), "case-7", ByteArray(2))
+            fail("a 403 must throw")
+        } catch (e: AuthorityRejectedException) {
+            assertEquals(403, e.statusCode)
+            assertEquals("appeal_window_closed", e.rawCode)
+            assertTrue(e.isDeterministic)
+        }
+    }
+
+    @Test
+    fun `appeal treats an unparseable 2xx as retryable`() = runTest {
+        try {
+            client(200, "not json")
+                .appeal(ModerationFixtures.listing(), "case-7", ByteArray(2))
+            fail("an unparseable receipt must throw")
+        } catch (_: AuthorityUnreachableException) {
+        }
+    }
 }

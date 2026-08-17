@@ -152,6 +152,9 @@ class ModerationUiDependencies(
      *  one the consent surface uses, so definition links behave
      *  identically on the Settings terms view. */
     val documents: app.onym.android.moderation.PolicyDocumentFetcher,
+    /** Fresh appeal controller per case surface — [state] is the whole
+     *  surface's state, so one instance must never serve two cases. */
+    val makeCaseAppealController: (caseId: String) -> app.onym.android.moderation.ui.CaseAppealController,
 )
 
 /**

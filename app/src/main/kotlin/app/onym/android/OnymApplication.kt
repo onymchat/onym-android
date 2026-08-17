@@ -1399,6 +1399,10 @@ class OnymApplication : Application() {
                 reportStore = app.onym.android.moderation.DataStorePreferencesReportFilingStore(
                     applicationContext.moderationDataStore,
                 ),
+                caseSubmissionStore =
+                    app.onym.android.moderation.DataStorePreferencesCaseSubmissionStore(
+                        applicationContext.moderationDataStore,
+                    ),
                 resolveAuthorityListing = { componentId ->
                     runCatching {
                         authoritiesFetcher.fetchLatest()
@@ -1527,6 +1531,17 @@ class OnymApplication : Application() {
                     }
                 },
                 documents = policyDocuments,
+                makeCaseAppealController = { caseId ->
+                    app.onym.android.moderation.ui.CaseAppealController(
+                        caseId = caseId,
+                        repository = moderationRepository,
+                        // applicationScope, not a screen scope: the
+                        // signed artifact is persisted before delivery,
+                        // and a backgrounded surface must not cancel the
+                        // delivery of an appeal already on the wire.
+                        scope = applicationScope,
+                    )
+                },
             )
         }
 

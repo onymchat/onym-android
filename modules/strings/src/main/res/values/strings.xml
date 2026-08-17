@@ -797,4 +797,8 @@
   <string name="share_invite_revoke_confirm_body">%1$s can no longer use their invite to request to join. This can\'t be undone — you would have to send them the group\'s link instead.</string>
   <string name="share_invite_revoke_confirm_body_unlabelled">Whoever holds this invite can no longer use it to request to join. This can\'t be undone — you would have to send them the group\'s link instead.</string>
   <string name="share_invite_revoke_confirm_action">Revoke</string>
+  <string name="moderation_settings_open_cases">Open cases</string>
+  <string name="moderation_settings_open_case_appeal">Appeal this case</string>
+  <string name="moderation_settings_open_case_class">Class: %1$s</string>
+  <string name="moderation_settings_open_cases_footnote">A case is open against you. It does not restrict the app; an appeal is filed with the authority and signed with your identity key.</string>
 </resources>
