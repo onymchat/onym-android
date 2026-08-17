@@ -561,12 +561,14 @@
   <string name="chat_report_unavailable">This message can\'t be reported.</string>
   <string name="chat_report_disclose_text">The message below and its sender proof will be disclosed to your moderation authority.</string>
   <string name="chat_report_disclose_photo">The photo and its sender proof will be disclosed to your moderation authority.</string>
+  <string name="chat_report_disclose_photo_caption">The photo below, its caption, and the sender proof will be disclosed to your moderation authority.</string>
   <string name="chat_report_submit">Submit report</string>
   <string name="chat_report_filed_title">Report filed</string>
   <string name="chat_report_filed_body">Your authority opened or joined a case. The accused will be notified and a human moderator will decide.</string>
   <string name="chat_report_already_filed">This message was already reported. The existing case stands.</string>
   <string name="chat_report_error_no_proof">This message has no valid sender proof and cannot be filed as evidence.</string>
   <string name="chat_report_error_mandate">Reporting requires an active mandate registered with your authority.</string>
+  <string name="chat_report_error_no_classes">Your current authority offers no reportable classes.</string>
   <string name="chat_report_error_authority">Your authority isn\'t in the directory right now. Try again later.</string>
   <string name="chat_report_error_delivery">The report could not be delivered. Try again to resend the exact signed report.</string>
   <!-- Chat-list signal that requests are waiting in a group. -->

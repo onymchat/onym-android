@@ -46,6 +46,19 @@ data class ViolationClass(
 )
 
 /**
+ * How a `classId` is spelled to a human — typography only, never a
+ * rename: the manifest's id is the authority's own vocabulary and no
+ * surface may quietly relabel it.
+ *
+ * One function so the consent terms and the report picker cannot
+ * spell the same taxonomy two ways. The rendering is the one the
+ * terms display already shipped (`ModerationTermsDisplay`), which is
+ * what users of a consented authority have already read.
+ */
+fun violationClassDisplayName(classId: String): String =
+    classId.replace('-', ' ').uppercase(java.util.Locale.ROOT)
+
+/**
  * A moderation authority's published, signed manifest (Moderation.md
  * §5.2): the complete enumeration of its power. Decoded tolerantly —
  * the exact bytes, not this decoding, are what the mandate pins.

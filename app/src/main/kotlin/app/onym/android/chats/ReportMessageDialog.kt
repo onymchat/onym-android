@@ -24,8 +24,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.onym.android.moderation.violationClassDisplayName
 import app.onym.android.strings.R
-import java.util.Locale
 
 /**
  * The report-to-authority sheet: shows exactly what will be disclosed,
@@ -65,7 +65,13 @@ internal fun ReportMessageDialog(
         is ReportUiState.Unavailable -> AlertDialog(
             onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.chat_report_title)) },
-            text = { Text(stringResource(R.string.chat_report_unavailable)) },
+            text = {
+                Text(
+                    state.error
+                        ?.let { errorText(it) }
+                        ?: stringResource(R.string.chat_report_unavailable),
+                )
+            },
             confirmButton = {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.ok)) }
             },
@@ -105,11 +111,16 @@ internal fun ReportMessageDialog(
                         .verticalScroll(rememberScrollState()),
                 ) {
                     Text(
+                        // A caption rides inside the signed preimage
+                        // too, so a captioned photo discloses both —
+                        // saying only "the photo" would understate what
+                        // the authority receives.
                         text = stringResource(
-                            if (state.hasPhoto) {
-                                R.string.chat_report_disclose_photo
-                            } else {
-                                R.string.chat_report_disclose_text
+                            when {
+                                state.hasPhoto && state.displayBody.isNotEmpty() ->
+                                    R.string.chat_report_disclose_photo_caption
+                                state.hasPhoto -> R.string.chat_report_disclose_photo
+                                else -> R.string.chat_report_disclose_text
                             },
                         ),
                         style = MaterialTheme.typography.bodySmall,
@@ -139,7 +150,7 @@ internal fun ReportMessageDialog(
                             ) {
                                 RadioButton(selected = selected, onClick = null)
                                 Text(
-                                    text = displayName(violationClass.classId),
+                                    text = violationClassDisplayName(violationClass.classId),
                                     fontWeight = FontWeight.Medium,
                                     modifier = Modifier.padding(start = 8.dp),
                                 )
@@ -205,17 +216,8 @@ internal fun ReportMessageDialog(
 private fun errorText(error: ReportError): String = when (error) {
     ReportError.NoValidProof -> stringResource(R.string.chat_report_error_no_proof)
     ReportError.MandateRequired -> stringResource(R.string.chat_report_error_mandate)
+    ReportError.NoReportableClasses -> stringResource(R.string.chat_report_error_no_classes)
     ReportError.AuthorityUnavailable -> stringResource(R.string.chat_report_error_authority)
     ReportError.Delivery -> stringResource(R.string.chat_report_error_delivery)
     is ReportError.Rejected -> error.message
 }
-
-/** Typography only, never a rename: split on `-`, capitalize the first
- *  word, uppercase the known acronyms. iOS parity. */
-private fun displayName(classId: String): String =
-    classId.split('-').joinToString(" ") { word ->
-        when (word.lowercase(Locale.ROOT)) {
-            "csam", "ncii" -> word.uppercase(Locale.ROOT)
-            else -> word
-        }
-    }.replaceFirstChar { it.titlecase(Locale.ROOT) }

@@ -384,23 +384,44 @@ class ChatThreadViewModel(
         return hooks.isReportable(message, currentGroup)
     }
 
+    /** The in-flight prepare, cancelled when the user backs out — a
+     *  blob download nobody is waiting for is pure cost. */
+    private var prepareJob: kotlinx.coroutines.Job? = null
+
     /** Prepare disclosure: verify the proof, fetch photo bytes, load
      *  the class list. Re-entrancy-guarded by the state itself. */
     fun beginReport(message: ChatMessage) {
         val hooks = reporting ?: return
         val currentGroup = group.value ?: return
         if (_reportState.value != null) return
-        _reportState.value = ReportUiState.Preparing
-        viewModelScope.launch {
+        val preparing = ReportUiState.Preparing
+        _reportState.value = preparing
+        prepareJob = viewModelScope.launch {
             val evidence = runCatching { hooks.prepare(message, currentGroup) }.getOrNull()
+            // Every write below is guarded on the state still being
+            // THIS prepare. Cancellation is checked at suspension
+            // points, so a dismissal landing just after `prepare`
+            // resumes would otherwise reopen a dialog the user
+            // explicitly backed out of.
+            if (_reportState.value !== preparing) return@launch
             if (evidence == null) {
-                _reportState.value = ReportUiState.Unavailable
+                _reportState.value = ReportUiState.Unavailable()
                 return@launch
             }
-            val classes = runCatching { hooks.classes() }.getOrDefault(emptyList())
-            if (classes.isEmpty()) {
-                _reportState.value = ReportUiState.Unavailable
-                return@launch
+            val outcome = hooks.classes()
+            if (_reportState.value !== preparing) return@launch
+            val classes = when (outcome) {
+                is ReportClassesOutcome.Available -> outcome.classes
+                // Actionable: say so, instead of the flat "can't be
+                // reported" that hides a fixable consent problem.
+                ReportClassesOutcome.MandateRequired -> {
+                    _reportState.value = ReportUiState.Unavailable(ReportError.MandateRequired)
+                    return@launch
+                }
+                ReportClassesOutcome.NoClasses -> {
+                    _reportState.value = ReportUiState.Unavailable(ReportError.NoReportableClasses)
+                    return@launch
+                }
             }
             _reportState.value = ReportUiState.Form(
                 evidence = evidence,
@@ -426,22 +447,30 @@ class ChatThreadViewModel(
         val form = _reportState.value as? ReportUiState.Form ?: return
         val classId = form.selectedClassId ?: return
         if (form.submitting) return
-        _reportState.value = form.copy(submitting = true, error = null)
+        val submitting = form.copy(submitting = true, error = null)
+        _reportState.value = submitting
+        // Deliberately NOT cancelled by dismissReport: the artifact is
+        // signed and persisted, and letting the delivery land is what
+        // records the receipt. Only the state write is guarded.
         viewModelScope.launch {
             val outcome = hooks.submit(form.evidence, classId)
+            if (_reportState.value !== submitting) return@launch
             _reportState.value = when (outcome) {
                 ReportSubmitOutcome.Filed -> ReportUiState.Done(alreadyFiled = false)
                 ReportSubmitOutcome.AlreadyFiled -> ReportUiState.Done(alreadyFiled = true)
                 is ReportSubmitOutcome.Failed ->
-                    form.copy(submitting = false, error = outcome.error)
+                    submitting.copy(submitting = false, error = outcome.error)
             }
         }
     }
 
     fun dismissReport() {
-        // Mid-submit dismissal keeps the persisted artifact; the next
-        // attempt replays the same bytes, which the authority accepts
-        // idempotently.
+        // Mid-submit dismissal keeps the persisted artifact (the
+        // delivery runs on); the next attempt replays the same bytes,
+        // which the authority accepts idempotently. A prepare, by
+        // contrast, has no side effects worth finishing.
+        prepareJob?.cancel()
+        prepareJob = null
         _reportState.value = null
     }
 

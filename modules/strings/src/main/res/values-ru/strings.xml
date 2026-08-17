@@ -557,12 +557,14 @@
   <string name="chat_report_unavailable">На это сообщение нельзя пожаловаться.</string>
   <string name="chat_report_disclose_text">Сообщение ниже и подпись отправителя будут раскрыты вашему модерационному органу.</string>
   <string name="chat_report_disclose_photo">Фотография и подпись отправителя будут раскрыты вашему модерационному органу.</string>
+  <string name="chat_report_disclose_photo_caption">Фотография, подпись к ней и подпись отправителя будут раскрыты вашему модерационному органу.</string>
   <string name="chat_report_submit">Отправить жалобу</string>
   <string name="chat_report_filed_title">Жалоба подана</string>
   <string name="chat_report_filed_body">Ваш орган открыл дело или присоединил жалобу к существующему. Обвиняемый будет уведомлён, решение примет модератор.</string>
   <string name="chat_report_already_filed">На это сообщение уже подана жалоба. Существующее дело остаётся в силе.</string>
   <string name="chat_report_error_no_proof">У этого сообщения нет действительной подписи отправителя — его нельзя приложить как доказательство.</string>
   <string name="chat_report_error_mandate">Для жалобы нужен действующий мандат, зарегистрированный у вашего органа.</string>
+  <string name="chat_report_error_no_classes">Ваш текущий орган не публикует категорий, по которым можно подать жалобу.</string>
   <string name="chat_report_error_authority">Ваш орган сейчас недоступен в каталоге. Попробуйте позже.</string>
   <string name="chat_report_error_delivery">Жалобу не удалось доставить. Повторите — будет отправлен тот же подписанный документ.</string>
   <!-- Chat-list signal that requests are waiting in a group. -->

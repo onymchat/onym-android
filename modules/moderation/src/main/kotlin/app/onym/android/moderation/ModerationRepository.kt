@@ -451,13 +451,16 @@ class ModerationRepository(
         }
         verifyAuthenticity(evidence)
 
-        val listing = resolveAuthorityListing(record.mandate.authority)
-            ?: throw ReportFilingException.AuthorityUnavailable()
         val mandateRef = record.mandate.mandateHash()
 
         // Idempotency: one signed artifact per (message, reporter,
         // mandate, accused, class, evidence). A hit replays or
         // short-circuits; it never re-signs.
+        //
+        // Resolved BEFORE the directory lookup on purpose: re-reporting
+        // an already-filed message must answer from the ledger even
+        // offline, rather than failing with "your authority isn't in
+        // the directory right now" about a filing that already landed.
         val existing = reports.load().firstOrNull {
             it.sourceMessageId == evidence.sourceMessageId &&
                 it.report.reporter == reporter &&
@@ -472,8 +475,12 @@ class ModerationRepository(
             if (existing.resolvedWithoutReceipt) {
                 throw ReportFilingException.AlreadyFiled(existing.report.reportId)
             }
-            return@withLock submitReport(existing, listing, evidence.images)
+            // Unresolved: the delivery is still owed, so this one does
+            // need the directory.
+            return@withLock submitReport(existing, requireListing(record), evidence.images)
         }
+
+        val listing = requireListing(record)
 
         val report = ModerationReport(
             reportId = "report-" + java.util.UUID.randomUUID().toString().lowercase(),
@@ -560,6 +567,10 @@ class ModerationRepository(
         return receipt
     }
 
+    private suspend fun requireListing(record: MandateRecord): AuthorityListing =
+        resolveAuthorityListing(record.mandate.authority)
+            ?: throw ReportFilingException.AuthorityUnavailable()
+
     /** Active + countersigned + registered — the only mandate a report
      * may cite: an unregistered one has no standing at the authority. */
     private suspend fun activeReportingMandate(): MandateRecord? =
@@ -612,14 +623,31 @@ class ModerationRepository(
         )
     }
 
-    /** Bound the ledger: resolved rows beyond the cap fall off oldest
-     * first; unresolved rows (signed but undelivered artifacts) are
-     * always kept — dropping one would orphan a delivery still owed. */
+    /**
+     * Bound the ledger, newest first, with a separate cap per kind.
+     *
+     * Unresolved rows are the ones that matter for privacy: nothing
+     * retries them on its own (only the user re-reporting that same
+     * message under that same class replays one), and each retains the
+     * full `disclosedContent` — the message body — indefinitely.
+     * Keeping every abandoned filing forever would turn the ledger
+     * into an unbounded archive of reported content, so the oldest
+     * fall off past [MAX_UNRESOLVED_REPORT_RECORDS].
+     *
+     * Dropping one is safe: the authority holds at most one open case
+     * per (accused, class), so a later report about the same thing
+     * joins that case rather than opening a second.
+     */
     private suspend fun saveReports(records: List<ReportFilingRecord>) {
         val reports = checkNotNull(reportStore)
         var resolvedSeen = 0
+        var unresolvedSeen = 0
         val bounded = records.filter { record ->
-            if (!record.isResolved) true else (resolvedSeen++ < MAX_RESOLVED_REPORT_RECORDS)
+            if (record.isResolved) {
+                resolvedSeen++ < MAX_RESOLVED_REPORT_RECORDS
+            } else {
+                unresolvedSeen++ < MAX_UNRESOLVED_REPORT_RECORDS
+            }
         }
         reports.save(bounded)
     }
@@ -631,6 +659,11 @@ class ModerationRepository(
 
         /** Resolved-ledger bound, oldest-first pruning (iOS parity). */
         const val MAX_RESOLVED_REPORT_RECORDS: Int = 128
+
+        /** Undelivered-artifact bound, oldest-first. Deliberately much
+         * smaller than the resolved cap: these rows retain disclosed
+         * message content and nothing retries them automatically. */
+        const val MAX_UNRESOLVED_REPORT_RECORDS: Int = 16
     }
 }
 

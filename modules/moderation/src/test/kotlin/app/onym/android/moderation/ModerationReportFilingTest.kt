@@ -229,4 +229,94 @@ class ModerationReportFilingTest {
         val classes = repository().availableReportClasses()
         assertEquals(listOf("csam"), classes.map { it.classId })
     }
+
+    @Test
+    fun refilingAnAlreadyFiledMessage_answersFromTheLedger_evenOffline() = runTest {
+        val first = repository().fileReport(evidence(), "csam")
+
+        // Directory gone (offline, or the authority delisted): a
+        // filing that already landed must still answer from the
+        // ledger rather than reporting the authority as unavailable.
+        val offline = repository(listing = null).fileReport(evidence(), "csam")
+
+        assertEquals(first, offline)
+        assertEquals(1, authority.filedReports.size)
+    }
+
+    @Test
+    fun conflictResolvedFiling_shortCircuitsOffline_too() = runTest {
+        authority.reportFailure = AuthorityRejectedException(409, "case_state", "already on file")
+        try {
+            repository().fileReport(evidence(), "csam")
+            fail("expected AlreadyFiled")
+        } catch (_: ReportFilingException.AlreadyFiled) {
+        }
+
+        try {
+            repository(listing = null).fileReport(evidence(), "csam")
+            fail("expected AlreadyFiled, not AuthorityUnavailable")
+        } catch (_: ReportFilingException.AlreadyFiled) {
+        }
+    }
+
+    @Test
+    fun undeliveredArtifactsAreBounded_oldestFallOff() = runTest {
+        authority.reportFailure = AuthorityUnreachableException("offline")
+        val repo = repository()
+        val attempts = ModerationRepository.MAX_UNRESOLVED_REPORT_RECORDS + 4
+        repeat(attempts) { index ->
+            try {
+                // A distinct message each time: each mints its own
+                // artifact rather than replaying the previous one.
+                repo.fileReport(
+                    evidence(
+                        disclosedContent = "{\"body\":\"abusive $index\",\"proof_version\":1}",
+                        messageId = "00000000-0000-0000-0000-%012d".format(index),
+                    ),
+                    "csam",
+                )
+                fail("expected AuthorityUnreachableException")
+            } catch (_: AuthorityUnreachableException) {
+            }
+        }
+
+        assertEquals(
+            "undelivered artifacts retain disclosed content, so they cannot grow without bound",
+            ModerationRepository.MAX_UNRESOLVED_REPORT_RECORDS,
+            reportStore.records.size,
+        )
+        // Newest kept, oldest dropped.
+        assertTrue(reportStore.records.first().report.evidence.single().disclosedContent
+            .contains("abusive ${attempts - 1}"))
+        assertTrue(
+            reportStore.records.none {
+                it.report.evidence.single().disclosedContent.contains("abusive 0\"")
+            },
+        )
+    }
+
+    @Test
+    fun undeliveredArtifactsDoNotEvictResolvedOnes() = runTest {
+        val repo = repository()
+        val receipt = repo.fileReport(evidence(), "csam")
+
+        authority.reportFailure = AuthorityUnreachableException("offline")
+        repeat(ModerationRepository.MAX_UNRESOLVED_REPORT_RECORDS + 2) { index ->
+            try {
+                repo.fileReport(
+                    evidence(
+                        disclosedContent = "{\"body\":\"later $index\",\"proof_version\":1}",
+                        messageId = "00000000-0000-0000-0000-%012d".format(index + 100),
+                    ),
+                    "csam",
+                )
+            } catch (_: AuthorityUnreachableException) {
+            }
+        }
+
+        // The separate caps mean a burst of failures cannot evict the
+        // receipt that proves a case was opened.
+        authority.reportFailure = null
+        assertEquals(receipt, repository(listing = null).fileReport(evidence(), "csam"))
+    }
 }

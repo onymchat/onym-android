@@ -8,6 +8,8 @@ import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupRepository
 import app.onym.android.group.MemberProfile
 import app.onym.android.identity.IdentityId
+import app.onym.android.moderation.ReportableEvidence
+import app.onym.android.moderation.ViolationClass
 import app.onym.android.support.FakeActiveIdentityProvider
 import app.onym.android.support.InMemoryGroupStore
 import app.onym.android.support.InMemoryMessageStore
@@ -269,6 +271,227 @@ class ChatThreadViewModelTest {
         vm.retry(UUID.randomUUID())
     }
 
+    // ─── report state machine ────────────────────────────────────
+
+    /**
+     * The report sheet is an async state machine over a UI the user
+     * can back out of at any moment, which is exactly where a dialog
+     * that reopens itself comes from: two of these cases (dismiss
+     * mid-prepare, dismiss mid-submit) pin races that shipped
+     * unobserved because this surface had no coverage at all.
+     */
+
+    private val reportEvidence = ReportableEvidence(
+        sourceMessageId = "00000000-0000-0000-0000-000000000001",
+        accused = "onym:key:" + "cc".repeat(32),
+        disclosedContent = "{\"body\":\"abusive\",\"proof_version\":1}",
+        authenticityProofBase64 = "c2ln",
+    )
+
+    private fun reportingHooks(
+        isReportable: (ChatMessage, ChatGroup) -> Boolean = { _, _ -> true },
+        prepare: suspend (ChatMessage, ChatGroup) -> ReportableEvidence? = { _, _ -> reportEvidence },
+        classes: suspend () -> ReportClassesOutcome = {
+            ReportClassesOutcome.Available(listOf(ViolationClass(classId = "csam")))
+        },
+        submit: suspend (ReportableEvidence, String) -> ReportSubmitOutcome = { _, _ ->
+            ReportSubmitOutcome.Filed
+        },
+    ) = ChatReporting(
+        isReportable = isReportable,
+        prepare = prepare,
+        classes = classes,
+        submit = submit,
+    )
+
+    @Test
+    fun beginReport_verifiesThenOffersTheConsentedClasses_withNoPreselection() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val vm = fixture.makeViewModel(reporting = reportingHooks())
+
+        vm.beginReport(sampleMessage(groupIdHex, "abusive"))
+
+        val form = vm.reportState.value as ReportUiState.Form
+        assertEquals(listOf("csam"), form.classes.map { it.classId })
+        assertNull("a preselected class invites mis-filings", form.selectedClassId)
+        assertEquals("abusive", form.displayBody)
+    }
+
+    @Test
+    fun dismissMidPrepare_neverReopensTheDialog() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val vm = fixture.makeViewModel(
+            reporting = reportingHooks(
+                prepare = { _, _ ->
+                    gate.await()
+                    reportEvidence
+                },
+            ),
+        )
+
+        vm.beginReport(sampleMessage(groupIdHex, "abusive"))
+        assertTrue(vm.reportState.value is ReportUiState.Preparing)
+
+        // User backs out while the photo blob is still downloading.
+        vm.dismissReport()
+        assertNull(vm.reportState.value)
+
+        // The prepare completing afterwards must stay silent — a form
+        // popping open seconds later, on a message the user backed
+        // out of, is the bug this pins.
+        gate.complete(Unit)
+        assertNull("a dismissed prepare must not resurrect the sheet", vm.reportState.value)
+    }
+
+    @Test
+    fun dismissMidSubmit_neverReopensTheFiledSheet() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val vm = fixture.makeViewModel(
+            reporting = reportingHooks(
+                submit = { _, _ ->
+                    gate.await()
+                    ReportSubmitOutcome.Filed
+                },
+            ),
+        )
+        vm.beginReport(sampleMessage(groupIdHex, "abusive"))
+        vm.selectReportClass("csam")
+        vm.submitReport()
+        assertTrue((vm.reportState.value as ReportUiState.Form).submitting)
+
+        vm.dismissReport()
+        // The delivery is deliberately NOT cancelled — the artifact is
+        // signed and persisted, and letting it land records the
+        // receipt. Only the state write is suppressed.
+        gate.complete(Unit)
+        assertNull("a dismissed submit must not reopen \"Report filed\"", vm.reportState.value)
+    }
+
+    @Test
+    fun beginReport_isReentrancyGuarded() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        var prepares = 0
+        val vm = fixture.makeViewModel(
+            reporting = reportingHooks(prepare = { _, _ -> prepares++; reportEvidence }),
+        )
+
+        val message = sampleMessage(groupIdHex, "abusive")
+        vm.beginReport(message)
+        vm.beginReport(message)
+
+        assertEquals("a second tap must not start a second prepare", 1, prepares)
+    }
+
+    @Test
+    fun unverifiableMessage_reportsUnavailableWithoutAnActionableReason() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val vm = fixture.makeViewModel(
+            reporting = reportingHooks(prepare = { _, _ -> null }),
+        )
+
+        vm.beginReport(sampleMessage(groupIdHex, "abusive"))
+
+        assertEquals(ReportUiState.Unavailable(null), vm.reportState.value)
+    }
+
+    @Test
+    fun missingMandate_surfacesTheActionableCopy_notTheFlatRefusal() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val vm = fixture.makeViewModel(
+            reporting = reportingHooks(classes = { ReportClassesOutcome.MandateRequired }),
+        )
+
+        vm.beginReport(sampleMessage(groupIdHex, "abusive"))
+
+        // "This message can't be reported" would hide a consent
+        // problem the user can actually fix.
+        assertEquals(
+            ReportUiState.Unavailable(ReportError.MandateRequired),
+            vm.reportState.value,
+        )
+    }
+
+    @Test
+    fun authorityWithNoReportableClasses_isDistinctFromAMissingMandate() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val vm = fixture.makeViewModel(
+            reporting = reportingHooks(classes = { ReportClassesOutcome.NoClasses }),
+        )
+
+        vm.beginReport(sampleMessage(groupIdHex, "abusive"))
+
+        assertEquals(
+            ReportUiState.Unavailable(ReportError.NoReportableClasses),
+            vm.reportState.value,
+        )
+    }
+
+    @Test
+    fun submitOutcomes_mapToTerminalOrRecoverableStates() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val message = sampleMessage(groupIdHex, "abusive")
+
+        val alreadyFiled = fixture.makeViewModel(
+            reporting = reportingHooks(submit = { _, _ -> ReportSubmitOutcome.AlreadyFiled }),
+        )
+        alreadyFiled.beginReport(message)
+        alreadyFiled.selectReportClass("csam")
+        alreadyFiled.submitReport()
+        assertEquals(ReportUiState.Done(alreadyFiled = true), alreadyFiled.reportState.value)
+
+        // A failure keeps the form open, with the selection intact so
+        // Submit resends the exact same signed report.
+        val failed = fixture.makeViewModel(
+            reporting = reportingHooks(
+                submit = { _, _ -> ReportSubmitOutcome.Failed(ReportError.Delivery) },
+            ),
+        )
+        failed.beginReport(message)
+        failed.selectReportClass("csam")
+        failed.submitReport()
+        val form = failed.reportState.value as ReportUiState.Form
+        assertEquals(ReportError.Delivery, form.error)
+        assertEquals("csam", form.selectedClassId)
+        assertTrue(!form.submitting)
+    }
+
+    @Test
+    fun submitWithoutAClass_doesNothing() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        var submits = 0
+        val vm = fixture.makeViewModel(
+            reporting = reportingHooks(submit = { _, _ -> submits++; ReportSubmitOutcome.Filed }),
+        )
+        vm.beginReport(sampleMessage(groupIdHex, "abusive"))
+
+        vm.submitReport()
+
+        assertEquals(0, submits)
+        assertTrue(vm.reportState.value is ReportUiState.Form)
+    }
+
+    @Test
+    fun withoutTheModerationSeat_reportIsNeverOffered() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(groupIdHex)
+        val vm = fixture.makeViewModel()
+
+        assertTrue(!vm.canReport(sampleMessage(groupIdHex, "abusive")))
+        vm.beginReport(sampleMessage(groupIdHex, "abusive"))
+        assertNull(vm.reportState.value)
+    }
+
     // ─── helpers ─────────────────────────────────────────────────
 
     private fun sampleMessage(groupIdHex: String, body: String): ChatMessage = ChatMessage(
@@ -340,12 +563,14 @@ class ChatThreadViewModelTest {
         fun makeViewModel(
             send: suspend (String, String, UUID?) -> Unit = { _, _, _ -> },
             retry: suspend (String, UUID) -> Unit = { _, _ -> },
+            reporting: ChatReporting? = null,
         ) = ChatThreadViewModel(
             groupId = groupIdHex,
             groupRepository = groupRepository,
             messageRepository = messageRepository,
             sendMessage = send,
             retryMessage = retry,
+            reporting = reporting,
         )
     }
 }

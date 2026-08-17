@@ -48,7 +48,9 @@ fun ModerationTermsDisplay(
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         manifest.violationClasses.forEach { violationClass ->
-            TermSectionLabel(violationClass.classId.replace('-', ' ').uppercase())
+            TermSectionLabel(
+                app.onym.android.moderation.violationClassDisplayName(violationClass.classId),
+            )
             ViolationClassCard(violationClass, documents)
         }
 

@@ -19,8 +19,10 @@ class ChatReporting(
     /** Full verification + evidence assembly; null = not reportable. */
     val prepare: suspend (ChatMessage, ChatGroup) -> ReportableEvidence?,
     /** The classes the user may report under (consented manifest ∩
-     *  mandate). */
-    val classes: suspend () -> List<ViolationClass>,
+     *  mandate), or why none can be offered — the two reasons are
+     *  different problems with different fixes, so they must not
+     *  collapse into one empty list. */
+    val classes: suspend () -> ReportClassesOutcome,
     /** File with the authority; never throws — outcomes are values. */
     val submit: suspend (ReportableEvidence, classId: String) -> ReportSubmitOutcome,
 ) {
@@ -43,7 +45,20 @@ class ChatReporting(
                 }
                 ReportableMessageFactory.make(message, group, bytes)
             },
-            classes = { repository.availableReportClasses() },
+            classes = {
+                try {
+                    val available = repository.availableReportClasses()
+                    if (available.isEmpty()) {
+                        ReportClassesOutcome.NoClasses
+                    } else {
+                        ReportClassesOutcome.Available(available)
+                    }
+                } catch (e: ReportFilingException.ReportingUnavailable) {
+                    ReportClassesOutcome.MandateRequired
+                } catch (e: Exception) {
+                    ReportClassesOutcome.NoClasses
+                }
+            },
             submit = { evidence, classId ->
                 try {
                     repository.fileReport(evidence, classId)
@@ -72,6 +87,21 @@ class ChatReporting(
     }
 }
 
+/** Why the class picker can (or can't) be shown. */
+sealed interface ReportClassesOutcome {
+    data class Available(val classes: List<ViolationClass>) : ReportClassesOutcome
+
+    /** No active, registered mandate — actionable by the user
+     *  (consent, or finish a pending registration), and distinct from
+     *  an authority that simply publishes nothing this user consented
+     *  to. */
+    data object MandateRequired : ReportClassesOutcome
+
+    /** Mandated, but the consented terms name no class to report
+     *  under. Nothing the user can do from here. */
+    data object NoClasses : ReportClassesOutcome
+}
+
 sealed interface ReportSubmitOutcome {
     /** The authority acknowledged the filing (a case opened or joined). */
     data object Filed : ReportSubmitOutcome
@@ -90,6 +120,10 @@ sealed interface ReportError {
     /** No active registered mandate / class not consented. */
     data object MandateRequired : ReportError
 
+    /** Mandated, but the consented terms name nothing to report
+     *  under — not the user's problem to fix. */
+    data object NoReportableClasses : ReportError
+
     /** The mandate's authority has no current directory listing. */
     data object AuthorityUnavailable : ReportError
 
@@ -106,9 +140,11 @@ sealed interface ReportUiState {
     /** Verifying the proof / fetching the photo bytes. */
     data object Preparing : ReportUiState
 
-    /** The message can't be reported (no verifying proof, no mandate,
-     *  or no classes on offer). */
-    data object Unavailable : ReportUiState
+    /** Nothing can be filed. [error] names why when there is
+     *  something the user could act on (no mandate); `null` is the
+     *  plain "this message can't be reported" — no verifying proof,
+     *  or an authority publishing nothing reportable. */
+    data class Unavailable(val error: ReportError? = null) : ReportUiState
 
     data class Form(
         val evidence: ReportableEvidence,
