@@ -779,4 +779,22 @@
   <string name="moderation_settings_registration_still_pending">Пока не доставлено — инстанция недоступна. Подписанный мандат сохранён; попробуйте позже.</string>
   <string name="moderation_settings_terms_unavailable">Не удаётся показать принятые условия — сохранённая запись отсутствует или нечитаема. Сам мандат не затронут.</string>
   <string name="chat_open_link">Открыть ссылку</string>
+  <string name="share_invite_rotate">Создать новую ссылку</string>
+  <string name="share_invite_rotating">Создаём\u2026</string>
+  <string name="share_invite_rotate_caption">Старая ссылка перестанет работать. Тех, у кого она осталась, об этом не уведомят.</string>
+  <string name="share_invite_direct_title">Персональные приглашения</string>
+  <string name="share_invite_direct_body">Отправлены при создании группы. По каждому из них всё ещё можно запросить вступление.</string>
+  <string name="share_invite_revoke">Отозвать</string>
+  <string name="join_unanswered_title">Пока нет ответа</string>
+  <string name="join_unanswered_body">Возможно, владелец группы не в сети или это приглашение больше не действует. Попросите новую ссылку.</string>
+  <string name="join_unanswered_hint">Можно не закрывать этот экран — если заявку одобрят, чат появится сам.</string>
+  <string name="share_invite_older_link">Старая ссылка</string>
+  <string name="join_unanswered_retry">Повторить</string>
+  <string name="share_invite_rotate_confirm_title">Создать новую ссылку?</string>
+  <string name="share_invite_rotate_confirm_body">Текущая ссылка перестанет работать сразу. Тех, у кого она осталась — включая тех, кому вы её уже отправили — об этом не уведомят, и им понадобится новая.</string>
+  <string name="share_invite_rotate_confirm_action">Создать новую ссылку</string>
+  <string name="share_invite_revoke_confirm_title">Отозвать это приглашение?</string>
+  <string name="share_invite_revoke_confirm_body">%1$s больше не сможет запросить вступление по своему приглашению. Это нельзя отменить — придётся отправить ссылку группы.</string>
+  <string name="share_invite_revoke_confirm_body_unlabelled">Тот, у кого есть это приглашение, больше не сможет запросить вступление по нему. Это нельзя отменить — придётся отправить ссылку группы.</string>
+  <string name="share_invite_revoke_confirm_action">Отозвать</string>
 </resources>

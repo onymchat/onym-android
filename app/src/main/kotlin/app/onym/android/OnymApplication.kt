@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.onEach
 import androidx.fragment.app.FragmentActivity
 import androidx.room.Room
 import app.onym.android.chain.BearerAuthInterceptor
@@ -155,6 +156,14 @@ private val Context.onboardingDataStore: DataStore<Preferences> by preferencesDa
     corruptionHandler = androidx.datastore.core.handlers.ReplaceFileCorruptionHandler {
         androidx.datastore.preferences.core.emptyPreferences()
     },
+)
+
+/**
+ * DataStore Preferences for intro-request tombstones. Event ids aren't
+ * secret, and the set is bounded by the links that still exist.
+ */
+private val Context.introRequestsDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.intro_requests",
 )
 
 /**
@@ -1079,16 +1088,29 @@ class OnymApplication : Application() {
         // to approve…". Falls back to the in-memory store if the Room
         // DAO can't be reached, so a storage failure degrades to the
         // old behaviour instead of blocking launch.
+        //
+        // Both stores tombstone handled ids in the same durable log: a
+        // multi-use link keeps its relay subscription for good, and the
+        // REQ carries no `since`, so every reconnect replays requests
+        // that were already acted on. The fallback needs it too — its
+        // rows are gone after a restart, so the tombstones are all that
+        // stop the replay refilling the queue.
+        val handledIntroRequests =
+            app.onym.android.group.DataStorePreferencesHandledIntroRequestLog(
+                applicationContext.introRequestsDataStore,
+            )
         val roomIntroRequestStore = try {
             app.onym.android.group.RoomIntroRequestStore(
                 dao = groupDatabase.introRequestDao(),
                 encryption = storageEncryption,
+                handledLog = handledIntroRequests,
             )
         } catch (_: Throwable) {
             null
         }
         val introRequestStore: app.onym.android.group.IntroRequestStore =
-            roomIntroRequestStore ?: app.onym.android.group.InMemoryIntroRequestStore()
+            roomIntroRequestStore
+                ?: app.onym.android.group.InMemoryIntroRequestStore(handledIntroRequests)
         // Replay what's on disk so a restored request is back in the
         // thread on a cold launch, without waiting for a relay delivery.
         if (roomIntroRequestStore != null) {
@@ -1112,6 +1134,32 @@ class OnymApplication : Application() {
         // intro keys.
         identityRepository.registerRemovalListener { id ->
             introKeyStore.deleteForOwner(id)
+        }
+        // Tombstone pruning runs off the UNFILTERED entries flow, on
+        // its own collector. It must not ride the pump's stream: that
+        // one is scoped to the active identity, so a switch A → B, or a
+        // sign-out emitting nothing, would read as "all of A's links
+        // retired" and delete A's tombstones — the wipe this whole
+        // rephrasing exists to prevent. See IntroKeyRetirementTracker.
+        applicationScope.launch {
+            val retirement = app.onym.android.group.IntroKeyRetirementTracker()
+            introKeyStore.entriesFlow.collect { entries ->
+                val current = entries.mapTo(mutableSetOf()) { entry ->
+                    entry.introPublicKey.joinToString("") {
+                        "%02x".format(it.toInt() and 0xFF)
+                    }
+                }
+                introRequestStore.pruneTombstones(retirement.retired(current))
+            }
+        }
+        // One owner-agnostic sweep at startup. The diff below only sees
+        // retirements that happen while an identity is subscribed, so
+        // links retired with the app closed — or under another identity
+        // — would otherwise linger until MAX_ENTRIES evicted them
+        // oldest-first, which can drop a LIVE link's tombstone and bring
+        // a handled request back as pending.
+        applicationScope.launch {
+            introRequestStore.reconcileTombstones(introKeyStore.allLivePublicKeysHex())
         }
         applicationScope.launch {
             introInboxPump.runFanout(
@@ -1138,7 +1186,12 @@ class OnymApplication : Application() {
         // user approval. Single instance — the toolbar badge + the
         // modal screen share state via [ApproveRequestsViewModel].
         val joinRequestApprover = app.onym.android.group.JoinRequestApprover(
-            identity = identityRepository,
+            activeIdentity = identityRepository,
+            envelopeSealer = identityRepository,
+            // Method reference, so the secret linter's call-syntax
+            // regex doesn't fire. onym:allow-secret-read
+            blsSecretKey = identityRepository::blsSecretKey,
+            identitySummaries = identityRepository.identities,
             introKeyStore = introKeyStore,
             introRequestStore = introRequestStore,
             groupRepository = groupRepository,

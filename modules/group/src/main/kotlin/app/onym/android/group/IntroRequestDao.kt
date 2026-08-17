@@ -16,6 +16,12 @@ interface IntroRequestDao {
     @Query("SELECT COUNT(*) FROM intro_requests WHERE id = :id")
     suspend fun count(id: String): Int
 
+    /** One row by id. `consume` needs a single row's intro pubkey to
+     *  attribute its tombstone; it used to read the whole table and
+     *  decrypt every row for that, once per collapsed sibling. */
+    @Query("SELECT * FROM intro_requests WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): PersistedIntroRequest?
+
     /** `ABORT` rather than `REPLACE`: the caller checks for an existing
      *  row first and this is the backstop, so a silent overwrite would
      *  reset a row's `firstSeenAtMillis` and with it its retention

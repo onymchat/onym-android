@@ -7,6 +7,7 @@ import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,7 +17,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -53,9 +56,8 @@ import app.onym.android.design.OnymQrCode
  * deeplink capability, and surfaces the link. The user shares via
  * the system share sheet, copies it, or skips.
  *
- * Mints exactly once per screen entry — re-entry (after Done →
- * back) re-mints with a fresh intro keypair so the previous share
- * stays revocable independently.
+ * Loads the link on each entry, idempotently — a QR the user already
+ * screenshotted keeps working.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -65,8 +67,17 @@ fun ShareInviteScreen(
     onDone: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val otherInvites by viewModel.otherInvites.collectAsStateWithLifecycle()
+    val isRotating by viewModel.isRotating.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
+    // Rotate and revoke are irreversible and one tap from a link the
+    // user is mid-share on: nothing re-mints a retired key, and the
+    // holders are never told. Both go through a confirm.
+    var confirmRotate by remember { mutableStateOf(false) }
+    var confirmRevoke by remember {
+        mutableStateOf<ShareInviteViewModel.InviteRow?>(null)
+    }
 
     LaunchedEffect(groupId) {
         viewModel.mintFor(groupId)
@@ -190,6 +201,89 @@ fun ShareInviteScreen(
                             ),
                         )
                     }
+
+                    Spacer(Modifier.height(20.dp))
+                    // The only way a leaked link stops working, framed as
+                    // generate-a-new-one so a working link always remains.
+                    TextButton(
+                        onClick = { confirmRotate = true },
+                        enabled = !isRotating,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("share_invite.rotate_button"),
+                    ) {
+                        Text(
+                            stringResource(
+                                if (isRotating) R.string.share_invite_rotating
+                                else R.string.share_invite_rotate,
+                            ),
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.share_invite_rotate_caption),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    // The create-time offers, one per invitee — this list
+                    // is the only way they are retired.
+                    if (otherInvites.isNotEmpty()) {
+                        Spacer(Modifier.height(24.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("share_invite.other_invites"),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.share_invite_direct_title),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = stringResource(R.string.share_invite_direct_body),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            for (row in otherInvites) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = row.label
+                                            ?: stringResource(R.string.share_invite_older_link),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(
+                                        onClick = { confirmRevoke = row },
+                                        modifier = Modifier
+                                            // Keyed on the intro pubkey,
+                                            // not the label: two
+                                            // invitees can share a
+                                            // 4-byte fingerprint, and
+                                            // duplicate tags leave the
+                                            // user unable to tell which
+                                            // Revoke kills which link.
+                                            .testTag(
+                                                "share_invite.revoke_button." +
+                                                    row.introPublicKey.take(8).joinToString("") {
+                                                        "%02x".format(it.toInt() and 0xFF)
+                                                    },
+                                            ),
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.share_invite_revoke),
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 is ShareInviteViewModel.State.Failed -> {
@@ -215,5 +309,73 @@ fun ShareInviteScreen(
                 )
             }
         }
+    }
+
+    if (confirmRotate) {
+        AlertDialog(
+            onDismissRequest = { confirmRotate = false },
+            title = { Text(stringResource(R.string.share_invite_rotate_confirm_title)) },
+            text = { Text(stringResource(R.string.share_invite_rotate_confirm_body)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmRotate = false
+                        copied = false
+                        viewModel.rotateLink(groupId)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                    ),
+                    modifier = Modifier.testTag("share_invite.rotate_confirm"),
+                ) {
+                    Text(stringResource(R.string.share_invite_rotate_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { confirmRotate = false },
+                    modifier = Modifier.testTag("share_invite.rotate_cancel"),
+                ) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
+    confirmRevoke?.let { row ->
+        AlertDialog(
+            onDismissRequest = { confirmRevoke = null },
+            title = { Text(stringResource(R.string.share_invite_revoke_confirm_title)) },
+            text = {
+                Text(
+                    // A pre-upgrade key has no label, so there is no
+                    // invitee to name — say what the tap does without
+                    // pretending to know who holds it.
+                    if (row.label != null) {
+                        stringResource(R.string.share_invite_revoke_confirm_body, row.label)
+                    } else {
+                        stringResource(R.string.share_invite_revoke_confirm_body_unlabelled)
+                    },
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmRevoke = null
+                        viewModel.revoke(row, groupId)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                    ),
+                    modifier = Modifier.testTag("share_invite.revoke_confirm"),
+                ) {
+                    Text(stringResource(R.string.share_invite_revoke_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { confirmRevoke = null },
+                    modifier = Modifier.testTag("share_invite.revoke_cancel"),
+                ) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }
