@@ -144,4 +144,8 @@ dependencies {
     testImplementation(testFixtures(project(":transport")))
     // This module's own fixture (InMemoryMessageStore).
     testImplementation(testFixtures(project(":chats-core")))
+    // Ed25519 verification of the authority's normative proof fixture
+    // (ChatModerationProofTest) — test-only; production signing lives
+    // in :identity.
+    testImplementation(libs.bouncycastle)
 }

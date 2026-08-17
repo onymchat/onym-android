@@ -6,6 +6,7 @@ import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupRepository
 import app.onym.android.group.MemberProfile
 import app.onym.android.identity.IdentityId
+import app.onym.android.identity.IdentityMessageSigner
 import app.onym.android.identity.IdentityRepository
 import app.onym.android.identity.IdentitySummary
 import app.onym.android.identity.InvitationEnvelopeSealer
@@ -865,7 +866,142 @@ class SendMessageInteractorTest {
             ),
         )
 
+    // ─── moderation authenticity proof ────────────────────────────
+
+    /** Captures the exact bytes the interactor asks it to sign, so a
+     *  test can assert the preimage independently reconstructs from
+     *  the persisted row — the property a reporter's client depends
+     *  on. */
+    private class RecordingMessageSigner(
+        var failWith: Throwable? = null,
+    ) : IdentityMessageSigner {
+        val signed = mutableListOf<ByteArray>()
+        override suspend fun signWithStellarKey(message: ByteArray): ByteArray {
+            failWith?.let { throw it }
+            signed.add(message)
+            return ByteArray(64) { 0x42 }
+        }
+    }
+
+    private val cannedSignatureBase64 =
+        java.util.Base64.getEncoder().encodeToString(ByteArray(64) { 0x42 })
+
+    @Test
+    fun send_signsTheCanonicalPreimage_andPersistsTheProof() = runTest {
+        val signer = RecordingMessageSigner()
+        val fixture = newFixture(messageSigner = signer)
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.send(groupIdHex, "hello")
+
+        assertEquals(cannedSignatureBase64, result.moderationAuthenticityProof)
+        val persisted = fixture.messageStore
+            .listForGroup(activeId.value, groupIdHex)
+            .single()
+        assertEquals(cannedSignatureBase64, persisted.moderationAuthenticityProof)
+        // The signed bytes must reconstruct from nothing but the
+        // persisted row + the group — exactly what a recipient later
+        // rebuilds to verify before disclosing.
+        val expectedPreimage = ChatModerationProof.signedContent(
+            messageId = persisted.id,
+            groupId = groupIdHex,
+            groupSecret = ByteArray(32),
+            sentAtMillis = persisted.sentAtMillis,
+            body = "hello",
+        )
+        assertEquals(expectedPreimage, signer.signed.single().toString(Charsets.UTF_8))
+    }
+
+    @Test
+    fun sendImage_signsThePhotoBytes_notJustTheCaption() = runTest {
+        val signer = RecordingMessageSigner()
+        val fixture = newFixture(messageSigner = signer)
+        fixture.seedGroup(includePeer = true)
+        val imageData = ByteArray(64) { it.toByte() }
+
+        fixture.interactor.sendImage(groupIdHex, imageData, caption = "look")
+
+        val persisted = fixture.messageStore
+            .listForGroup(activeId.value, groupIdHex)
+            .single()
+        val attachment = requireNotNull(persisted.imageAttachment)
+        // encodeImage in this fixture passes the bytes through, so the
+        // plaintext commitment hashes the input data itself.
+        val expectedPreimage = ChatModerationProof.signedContent(
+            messageId = persisted.id,
+            groupId = groupIdHex,
+            groupSecret = ByteArray(32),
+            sentAtMillis = persisted.sentAtMillis,
+            body = "look",
+            media = listOf(
+                ChatModerationProof.MediaCommitment(
+                    blobSha256 = attachment.sha256,
+                    mimeType = "image/jpeg",
+                    plaintextSha256 = ChatImageCrypto.sha256Hex(imageData),
+                    plaintextByteLength = imageData.size,
+                    width = 240,
+                    height = 160,
+                ),
+            ),
+        )
+        assertEquals(expectedPreimage, signer.signed.single().toString(Charsets.UTF_8))
+        assertTrue(expectedPreimage.contains("\"proof_version\":2"))
+    }
+
+    @Test
+    fun send_withoutASigner_shipsWithoutAProof() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.send(groupIdHex, "hello")
+
+        assertEquals(MessageStatus.SENT, result.status)
+        assertEquals(null, result.moderationAuthenticityProof)
+    }
+
+    @Test
+    fun send_whenSigningThrows_stillSends_withoutAProof() = runTest {
+        val signer = RecordingMessageSigner(failWith = IllegalStateException("keychain down"))
+        val fixture = newFixture(messageSigner = signer)
+        fixture.seedGroup(includePeer = true)
+
+        val result = fixture.interactor.send(groupIdHex, "hello")
+
+        assertEquals(MessageStatus.SENT, result.status)
+        assertEquals(null, result.moderationAuthenticityProof)
+    }
+
+    @Test
+    fun retry_reusesThePersistedProof_neverReSigns() = runTest {
+        val signer = RecordingMessageSigner()
+        val fixture = newFixture(messageSigner = signer)
+        fixture.seedGroup(includePeer = true)
+        val failed = ChatMessage(
+            id = UUID.randomUUID(),
+            groupId = groupIdHex,
+            ownerIdentityId = activeId.value,
+            senderBlsPubkeyHex = selfBlsHex,
+            body = "again",
+            sentAtMillis = 1_600_000_000_000L,
+            direction = MessageDirection.OUTGOING,
+            status = MessageStatus.FAILED,
+            groupType = SepGroupType.TYRANNY,
+            moderationAuthenticityProof = "original-proof",
+        )
+        fixture.messageStore.insert(failed)
+
+        fixture.interactor.retry(groupIdHex, failed.id)
+
+        // The original signature ships verbatim; the signer is never
+        // consulted — re-signing a drifted preimage would fork the
+        // evidence receivers already hold.
+        assertTrue(signer.signed.isEmpty())
+        val persisted = fixture.messageStore.findById(failed.id, activeId.value)
+        assertEquals("original-proof", persisted?.moderationAuthenticityProof)
+    }
+
     private fun newFixture(
+        messageSigner: IdentityMessageSigner? = null,
         blossomClient: BlossomClient = FakeBlossomClient(),
         resolveBlossomServerUrl: suspend () -> String = { "https://blossom.test" },
         encodeImage: (ByteArray) -> ChatImageEncoder.Encoded? = { data ->
@@ -921,6 +1057,7 @@ class SendMessageInteractorTest {
             encodeImage = encodeImage,
             encodeVideo = encodeVideo,
             outbox = outbox,
+            messageSigner = messageSigner,
         )
         return Fixture(
             interactor = interactor,

@@ -778,6 +778,12 @@ class IncomingMessageDispatcher(
             // Encrypted voice (if any). The waveform + duration render from
             // the descriptor; the audio blob downloads on play.
             voiceAttachment = payload.voiceAttachment,
+            // Stored, not verified: the proof only matters if the user
+            // later reports this message, and the report path verifies
+            // it against the sender's key before disclosing anything.
+            // Verifying here would add a per-message signature check to
+            // every receive for evidence that is almost never used.
+            moderationAuthenticityProof = payload.moderationAuthenticityProof,
         )
         // Use the receivedAt timestamp only for the "ordering by
         // arrival" UI follow-up — wire `sentAtMillis` is the

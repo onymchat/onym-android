@@ -131,6 +131,19 @@ data class ChatMessagePayload(
      */
     @SerialName("voice_attachment")
     val voiceAttachment: ChatVoiceAttachment? = null,
+    /**
+     * Detached Ed25519 signature (standard base64) by the sender's
+     * Stellar-derived identity key over the canonical
+     * [ChatModerationProof] preimage — the recipient-held evidence
+     * that lets a receiver later disclose this exact message to a
+     * moderation Authority. Additive + optional under `version = 1`:
+     * older senders omit it and the message is simply unreportable.
+     * Never verified at receive time; a reporter's client verifies it
+     * against the sender's `MemberProfile.sendingPubkey` before
+     * offering Report, and the Authority verifies it independently.
+     */
+    @SerialName("moderation_authenticity_proof")
+    val moderationAuthenticityProof: String? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -145,7 +158,8 @@ data class ChatMessagePayload(
             attachment == other.attachment &&
             videoAttachment == other.videoAttachment &&
             attachments == other.attachments &&
-            voiceAttachment == other.voiceAttachment
+            voiceAttachment == other.voiceAttachment &&
+            moderationAuthenticityProof == other.moderationAuthenticityProof
     }
 
     override fun hashCode(): Int {
@@ -160,6 +174,7 @@ data class ChatMessagePayload(
         h = 31 * h + (videoAttachment?.hashCode() ?: 0)
         h = 31 * h + (attachments?.hashCode() ?: 0)
         h = 31 * h + (voiceAttachment?.hashCode() ?: 0)
+        h = 31 * h + (moderationAuthenticityProof?.hashCode() ?: 0)
         return h
     }
 }

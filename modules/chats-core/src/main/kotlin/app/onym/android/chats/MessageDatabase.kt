@@ -38,7 +38,9 @@ import androidx.room.RoomDatabase
     // existing rows decode to a message with no album.
     // v7 (voice): adds nullable `encryptedVoiceAttachmentJson` BLOB.
     // Additive; existing rows decode to a message with no voice.
-    version = 8,
+    // v9 (moderation proof): adds nullable `encryptedModerationProof`
+    // BLOB. Additive; existing rows decode to an unreportable message.
+    version = 9,
     exportSchema = false,
 )
 abstract class MessageDatabase : RoomDatabase() {
@@ -165,6 +167,19 @@ object MessageDatabaseMigrations {
     val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE messages ADD COLUMN encryptedSystemEventJson BLOB")
+        }
+    }
+
+    /**
+     * v8 → v9: add the nullable `encryptedModerationProof` BLOB — the
+     * sender's signature over the canonical moderation proof preimage,
+     * encrypted at rest. Additive; every existing row decodes to a
+     * message without a proof (unreportable, exactly as it was when
+     * received).
+     */
+    val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN encryptedModerationProof BLOB")
         }
     }
 }
