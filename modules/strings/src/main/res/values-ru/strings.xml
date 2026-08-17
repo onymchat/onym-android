@@ -797,4 +797,8 @@
   <string name="share_invite_revoke_confirm_body">%1$s больше не сможет запросить вступление по своему приглашению. Это нельзя отменить — придётся отправить ссылку группы.</string>
   <string name="share_invite_revoke_confirm_body_unlabelled">Тот, у кого есть это приглашение, больше не сможет запросить вступление по нему. Это нельзя отменить — придётся отправить ссылку группы.</string>
   <string name="share_invite_revoke_confirm_action">Отозвать</string>
+  <string name="moderation_settings_open_cases">Открытые дела</string>
+  <string name="moderation_settings_open_case_appeal">Подать апелляцию</string>
+  <string name="moderation_settings_open_case_class">Класс: %1$s</string>
+  <string name="moderation_settings_open_cases_footnote">Против вас открыто дело. Работу приложения оно не ограничивает; апелляция подаётся инстанции и подписывается вашим ключом личности.</string>
 </resources>

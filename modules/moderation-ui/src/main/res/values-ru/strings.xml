@@ -64,4 +64,18 @@
   <string name="moderation_document_failed">Не удалось загрузить документ.</string>
   <string name="moderation_document_open_browser">Открыть в браузере</string>
   <string name="moderation_consent_debug_skip">Пропустить (отладочная сборка)</string>
+  <string name="moderation_appeal_title">Апелляция</string>
+  <string name="moderation_appeal_case_ref">Дело %1$s</string>
+  <string name="moderation_appeal_case_class">Класс: %1$s</string>
+  <string name="moderation_appeal_case_decision_deadline">Решение до %1$s</string>
+  <string name="moderation_appeal_statement_label">Ваше объяснение</string>
+  <string name="moderation_appeal_statement_help">Объясните, почему решение стоит пересмотреть. Текст уйдёт инстанции, которой вы дали согласие, вашими словами.</string>
+  <string name="moderation_appeal_statement_bytes">%1$d из %2$d байт</string>
+  <string name="moderation_appeal_submit">Подать апелляцию</string>
+  <string name="moderation_appeal_signed_note">Подписано вашим ключом личности, поэтому инстанция может установить автора без аккаунта.</string>
+  <string name="moderation_appeal_filed_title">Апелляция подана</string>
+  <string name="moderation_appeal_filed_body">Инстанция приняла её. Ответ придёт по тому же делу.</string>
+  <string name="moderation_appeal_done">Готово</string>
+  <string name="moderation_appeal_terminal_hint">Повторная подача даст тот же ответ. Если это ошибка, свяжитесь с инстанцией напрямую.</string>
+  <string name="moderation_appeal_already_filed">Вы уже подавали апелляцию по этому делу. Новый текст будет подан как вторая апелляция, а не заменит первую.</string>
 </resources>

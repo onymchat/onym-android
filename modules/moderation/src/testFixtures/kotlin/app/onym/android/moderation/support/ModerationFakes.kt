@@ -1,7 +1,11 @@
 package app.onym.android.moderation.support
 
+import app.onym.android.moderation.AppealReceipt
+import app.onym.android.moderation.AppealSubmission
 import app.onym.android.moderation.AttestationToken
 import app.onym.android.moderation.AuthorityListing
+import app.onym.android.moderation.CaseSubmissionRecord
+import app.onym.android.moderation.CaseSubmissionStore
 import app.onym.android.moderation.AuthorityManifest
 import app.onym.android.moderation.BackendRejectedException
 import app.onym.android.moderation.BackendUnreachableException
@@ -197,6 +201,52 @@ class FakeAuthorityClient : app.onym.android.moderation.AuthorityClient {
     ) {
         uploadedBlobs += sha256 to bytes.size
         uploadFailure?.let { throw it }
+    }
+
+    // ─── appeal vertical ─────────────────────────────────────────
+
+    /** `(caseId, body)` of every appeal delivery, in order. The body is
+     *  the exact bytes posted, so a test can assert a retry replayed
+     *  the artifact rather than re-signing it. */
+    val filedAppeals = mutableListOf<Pair<String, ByteArray>>()
+
+    var appealFailure: Exception? = null
+
+    /** Overrides the echoed receipt — a mismatched caseId or kind is
+     *  what the repository must treat as terminal. */
+    var appealReceiptOverride: AppealReceipt? = null
+
+    override suspend fun appeal(
+        listing: AuthorityListing,
+        caseId: String,
+        appealWireBytes: ByteArray,
+    ): AppealReceipt {
+        filedAppeals += caseId to appealWireBytes
+        appealFailure?.let { throw it }
+        appealReceiptOverride?.let { return it }
+        val submission = ModerationJson.json.decodeFromString(
+            AppealSubmission.serializer(),
+            appealWireBytes.decodeToString(),
+        )
+        return AppealReceipt(
+            caseId = submission.caseId,
+            filed = true,
+            // Echoed verbatim, as the reference does.
+            kind = if (submission.kind == AppealSubmission.Kind.APPEAL) {
+                "appeal"
+            } else {
+                "new-holder-claim"
+            },
+        )
+    }
+}
+
+class InMemoryCaseSubmissionStore(
+    private var records: List<CaseSubmissionRecord> = emptyList(),
+) : CaseSubmissionStore {
+    override suspend fun load(): List<CaseSubmissionRecord> = records
+    override suspend fun save(records: List<CaseSubmissionRecord>) {
+        this.records = records
     }
 }
 

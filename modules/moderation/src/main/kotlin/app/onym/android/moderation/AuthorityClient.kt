@@ -60,8 +60,8 @@ class AuthorityRegistrationRefusedException(override val message: String) : Exce
 /**
  * Client seam for a moderation Authority's user-facing operations —
  * the Android slice of iOS's `ModerationAuthorityClient` (case
- * responses, appeals and recovery claims are still deferred verticals;
- * they extend this interface when they land).
+ * responses and recovery claims are still deferred verticals; they
+ * extend this interface when they land).
  *
  * The base URL comes from the [AuthorityListing] per call rather than
  * construction: the directory designates each authority's API
@@ -109,6 +109,28 @@ interface AuthorityClient {
         timestamp: String,
         signatureBase64: String,
     )
+
+    /**
+     * `POST /v1/cases/:caseId/appeal` — body is the signed appeal's
+     * exact wire bytes ([AppealSubmission.wireBytes]), passed as bytes
+     * for the same reason as [fileReport]: a retry must replay the
+     * persisted artifact rather than re-derive it. No auth headers —
+     * the submission's own `signature` field is the authentication.
+     *
+     * [caseId] is passed separately because it belongs in the path as
+     * well as the signed body; the caller supplies the one the artifact
+     * carries, so the two can never disagree here. A conforming
+     * authority rejects a mismatch anyway.
+     *
+     * Receipt correlation (does it acknowledge THIS case and kind?) is
+     * the repository's, matching where the mandate and report receipts
+     * are checked — the checks hold for every implementation.
+     */
+    suspend fun appeal(
+        listing: AuthorityListing,
+        caseId: String,
+        appealWireBytes: ByteArray,
+    ): AppealReceipt
 }
 
 class OkHttpAuthorityClient(
@@ -185,6 +207,42 @@ class OkHttpAuthorityClient(
         // the message descriptor, so a 2xx body is not parsed here.
         if (code !in 200..299) throw rejection(code, text)
     }
+
+    override suspend fun appeal(
+        listing: AuthorityListing,
+        caseId: String,
+        appealWireBytes: ByteArray,
+    ): AppealReceipt = withContext(Dispatchers.IO) {
+        val baseUrl = guardedBaseUrl(listing)
+        val request = Request.Builder()
+            // The case id is opaque authority-issued text; percent-encode
+            // it rather than trusting it to be path-safe.
+            .url("$baseUrl/v1/cases/${pathSegment(caseId)}/appeal")
+            .post(appealWireBytes.toRequestBody(JSON_MEDIA_TYPE))
+            .header("Accept", "application/json")
+            .build()
+        val (code, text) = execute(request)
+        if (code !in 200..299) throw rejection(code, text)
+        try {
+            ModerationJson.json.decodeFromString(AppealReceipt.serializer(), text)
+        } catch (e: Exception) {
+            // Same posture as the other filings: an unparseable 2xx may
+            // still have committed. Classified retryable so the caller
+            // keeps the artifact — but note the appeal endpoint does not
+            // deduplicate, so the repository treats a *correlation*
+            // failure (a parsed receipt for another case) as terminal
+            // instead.
+            throw AuthorityUnreachableException("authority answered unparseably", e)
+        }
+    }
+
+    private fun pathSegment(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8")
+            // URLEncoder is form encoding, not path encoding: it maps a
+            // space to '+' and leaves '*' alone. Only the space differs
+            // for anything an authority would issue, and '+' in a path
+            // segment is a literal plus, not a space.
+            .replace("+", "%20")
 
     private fun guardedBaseUrl(listing: AuthorityListing): String {
         val baseUrl = listing.apiBaseURL.trimEnd('/')

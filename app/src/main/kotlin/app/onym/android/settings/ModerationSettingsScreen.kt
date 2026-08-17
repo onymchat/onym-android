@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.GppGood
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,6 +44,7 @@ import app.onym.android.design.SettingsSectionLabel
 import app.onym.android.design.SettingsTile
 import app.onym.android.design.SettingsTileBox
 import app.onym.android.moderation.AuthorityManifest
+import app.onym.android.moderation.CaseNotice
 import app.onym.android.moderation.MandateRecord
 import app.onym.android.moderation.ModerationJson
 import app.onym.android.moderation.ModerationRepository
@@ -70,6 +72,12 @@ fun ModerationSettingsScreen(
     /** Show the consented terms (the host re-resolves the active
      *  record; the terms screen renders the retained exact bytes). */
     onViewTerms: () -> Unit,
+    /** Cases the gate currently reports open against this identity —
+     *  the notices ride along on an otherwise-operational gate answer.
+     *  Empty is the normal state. */
+    openCases: List<CaseNotice> = emptyList(),
+    /** Open the appeal surface for one case id. */
+    onAppealCase: (String) -> Unit = {},
     onBack: () -> Unit,
 ) {
     val snapshots by repository.snapshots.collectAsState()
@@ -206,6 +214,48 @@ fun ModerationSettingsScreen(
                 }
                 retryError?.let { message ->
                     item { SettingsFootnote(message) }
+                }
+            }
+
+            // Cases the gate reported open against this identity. A
+            // case-open mark never restricts the app (that would make
+            // an accusation a punishment), so this is the only surface
+            // that shows one — and the only in-app route to an appeal.
+            // Gated on an active mandate: an appeal cites the standing
+            // that mandate gives, so without one the button could only
+            // fail.
+            if (record != null && openCases.isNotEmpty()) {
+                item { SettingsSectionLabel(stringResource(R.string.moderation_settings_open_cases)) }
+                item {
+                    SettingsCard {
+                        openCases.forEachIndexed { index, notice ->
+                            SettingsRow(
+                                leading = {
+                                    SettingsTileBox(Icons.Filled.Gavel, SettingsTile.Purple)
+                                },
+                                title = stringResource(
+                                    R.string.moderation_settings_open_case_appeal,
+                                ),
+                                subtitle = notice.classId.takeIf { it.isNotBlank() }?.let {
+                                    stringResource(
+                                        R.string.moderation_settings_open_case_class,
+                                        it,
+                                    )
+                                } ?: notice.caseId,
+                                showChevron = true,
+                                onClick = { onAppealCase(notice.caseId) },
+                                isLast = index == openCases.lastIndex,
+                                modifier = Modifier.testTag(
+                                    "moderation.settings.appeal.${notice.caseId}",
+                                ),
+                            )
+                        }
+                    }
+                }
+                item {
+                    SettingsFootnote(
+                        stringResource(R.string.moderation_settings_open_cases_footnote),
+                    )
                 }
             }
 
