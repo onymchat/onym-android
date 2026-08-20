@@ -79,6 +79,17 @@ class GroupRepository(
      * Idempotent — safe to call any time. Mostly redundant with
      * [start]'s automatic recompute on identity change, but kept for
      * tests + edge-case callers that want a deterministic refresh.
+     *
+     * The edge case in production is a **backup restore**: it writes
+     * groups straight through the [GroupStore] (so every restored row
+     * is re-encrypted under this device's at-rest key rather than
+     * imported wholesale) and therefore never touches the mutators
+     * above that keep [snapshots] current. [start] only recomputes
+     * when the active identity *changes*, so a restore onto an
+     * already-active identity leaves this flow holding whatever it
+     * had, and the restored chats surface only when some unrelated
+     * mutation happens to refresh it. The restore path calls this;
+     * see `BackupSeatComposer`'s `didRestore`.
      */
     suspend fun reload() = mutex.withLock {
         refreshLocked(identity.currentIdentityId.value)

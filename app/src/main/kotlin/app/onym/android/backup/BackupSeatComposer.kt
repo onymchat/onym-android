@@ -81,6 +81,11 @@ object BackupSeatComposer {
         backupStateDataStore: DataStore<Preferences>,
         strings: app.onym.android.foundation.StringProvider,
         runConditions: () -> app.onym.android.backup.ui.BackupRunConditions,
+        /** Runs after a restore has written and BEFORE its summary
+         *  reaches the screen — see where `composeOne` invokes it. No
+         *  default value: a caller with nothing to refresh should have
+         *  to write `{}` and mean it. */
+        didRestore: suspend () -> Unit,
         /** componentIds whose vendor is already built and live. A
          *  refresh after a fresh consent must ADD the new operator
          *  without rebuilding the ones already on screen: a rebuilt
@@ -119,6 +124,7 @@ object BackupSeatComposer {
                     backupStateDataStore = backupStateDataStore,
                     strings = strings,
                     runConditions = runConditions,
+                    didRestore = didRestore,
                 )
                 // A single vendor failing to compose (malformed
                 // manifest, key-derivation failure) must not take
@@ -149,6 +155,7 @@ object BackupSeatComposer {
         backupStateDataStore: DataStore<Preferences>,
         strings: app.onym.android.foundation.StringProvider,
         runConditions: () -> app.onym.android.backup.ui.BackupRunConditions,
+        didRestore: suspend () -> Unit,
     ): BackupUiDependencies? {
         val manifest = BackupSeat.manifest(consent) ?: return null
         val endpoint = manifest.endpoint ?: return null
@@ -376,12 +383,44 @@ object BackupSeatComposer {
                     BackupRestoreSummary(0, 0, 0, 0, 0, emptyMap(), emptyList())
                 } else {
                     val sealedFile = File(workingDir, "restore-${latest.snapshotReference.digest.removePrefix("sha256:")}.seal")
-                    try {
+                    val summary = try {
                         rt.client.downloadSnapshot(latest.snapshotReference, sealedFile)
                         rt.restorer.restore(sealedFile, latest.snapshotReference, rt.keyMaterial, workingDir)
                     } finally {
                         sealedFile.delete()
                     }
+                    // The rows are on disk; nothing that renders them
+                    // knows it yet. `AppBackupSink` writes through the
+                    // stores rather than the repositories, deliberately
+                    // — that is what re-encrypts every restored row
+                    // under this device's at-rest key instead of
+                    // importing another device's database — and the
+                    // cost is that the in-memory caches the chat list
+                    // and the open thread read from are bypassed
+                    // entirely. `GroupRepository` recomputes only when
+                    // the active identity changes or one of its own
+                    // mutators runs, which is why on iOS the restored
+                    // chat appeared the moment the person created an
+                    // unrelated one and not before; `MessageRepository`
+                    // caches per group, so a thread hydrated before the
+                    // restore keeps serving the empty list it holds.
+                    //
+                    // Here rather than in the sink or the restorer:
+                    // teaching `AppBackupSink` about repositories turns
+                    // a thin store adapter into something that knows
+                    // about view state, and teaching `BackupRestorer`
+                    // puts UI cache invalidation inside the crypto and
+                    // I/O it exists to do. This closure is the seam the
+                    // composition root already owns.
+                    //
+                    // And here rather than at the screen's call site,
+                    // because the ordering is the requirement: this
+                    // returns the summary the screen renders, so
+                    // refreshing before the return is what stops
+                    // someone reading "1 chat, 3 messages" over a list
+                    // that hasn't caught up. A caller cannot forget it.
+                    didRestore()
+                    summary
                 }
             },
         )

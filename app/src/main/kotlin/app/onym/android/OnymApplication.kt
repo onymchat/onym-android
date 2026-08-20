@@ -1680,6 +1680,23 @@ class OnymApplication : Application() {
                         val isCharging = batteryManager?.isCharging == true
                         app.onym.android.backup.ui.BackupRunConditions(isOnWifi = isOnWifi, isCharging = isCharging)
                     },
+                    // Make the caches behind the chat list and the open
+                    // thread re-read the stores a restore wrote
+                    // straight into. Invoked by the restore flow after
+                    // the write and before the summary is rendered, so
+                    // the numbers the person is shown and the list
+                    // behind them agree — see
+                    // `BackupSeatComposer.makeRestoreFlow` for why the
+                    // ordering is enforced there and not here.
+                    //
+                    // Groups first, then messages. The chat list
+                    // resolves each row's latest message, so refreshing
+                    // messages into a roster that does not yet hold
+                    // their group is work thrown away.
+                    didRestore = {
+                        groupRepository.reload()
+                        messageRepository.reload()
+                    },
                     alreadyComposed = alreadyComposed,
                 )
             }
