@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
@@ -141,6 +142,13 @@ fun SettingsScreen(
     /** Review the open cases: the single case's appeal when there is
      *  one, otherwise the Moderation screen that lists them all. */
     onReviewCases: () -> Unit = {},
+    /** Settings → Device Backup entry. Null when no backup operator is
+     *  consented (or the identity has no recovery phrase) — the
+     *  section is omitted entirely, same posture as Discovery/Moderation. */
+    onDeviceBackupClick: (() -> Unit)? = null,
+    /** Live backup status, driving the row's subtitle. Null = not yet
+     *  resolved. */
+    deviceBackupStatus: app.onym.android.backup.ui.DeviceBackupStatus? = null,
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -281,6 +289,27 @@ fun SettingsScreen(
                             onClick = onModerationClick,
                             isLast = true,
                             modifier = Modifier.testTag("settings.moderation_row"),
+                        )
+                    }
+                }
+            }
+
+            // ─── DEVICE BACKUP ─────────────────────────────────────
+            if (onDeviceBackupClick != null) {
+                item { SettingsSectionLabel(stringResource(R.string.settings_section_device_backup)) }
+                item {
+                    SettingsCard {
+                        SettingsRow(
+                            leading = {
+                                SettingsTileBox(Icons.Filled.Backup, SettingsTile.Indigo)
+                            },
+                            title = stringResource(R.string.settings_device_backup_row_title),
+                            subtitle = deviceBackupStatus?.let {
+                                app.onym.android.backup.ui.statusText(it)
+                            },
+                            onClick = onDeviceBackupClick,
+                            isLast = true,
+                            modifier = Modifier.testTag("settings.device_backup_row"),
                         )
                     }
                 }

@@ -21,9 +21,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -437,6 +439,15 @@ fun RootScreen(
                         ?.value as? app.onym.android.moderation.ui.RootGate.Operational)
                         ?.openCases
                         .orEmpty()
+                // Re-resolved every time Settings is opened, not just
+                // at cold app launch — a mid-session operator change
+                // (or a first enrolment) must be reflected without a
+                // process restart.
+                LaunchedEffect(dependencies.backup) {
+                    dependencies.backup?.settingsFlow?.refresh()
+                }
+                val deviceBackupStatus = dependencies.backup?.settingsFlow?.status
+                    ?.collectAsStateWithLifecycle()
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
@@ -516,6 +527,14 @@ fun RootScreen(
                             navController.navigate(ROUTE_MODERATION_SETTINGS)
                         }
                     },
+                    // Null exactly when no backup operator is
+                    // consented (or the identity has no recovery
+                    // phrase) — the DEVICE BACKUP section is omitted,
+                    // same posture as Discovery/Moderation above.
+                    onDeviceBackupClick = dependencies.backup?.let {
+                        { navController.navigate(ROUTE_DEVICE_BACKUP_SETTINGS) }
+                    },
+                    deviceBackupStatus = deviceBackupStatus?.value,
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -754,6 +773,61 @@ fun RootScreen(
                         )
                     },
                     onBack = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_DEVICE_BACKUP_SETTINGS) {
+                val backup = dependencies.backup ?: return@composable
+                val status by backup.settingsFlow.status.collectAsStateWithLifecycle()
+                val coroutineScope = rememberCoroutineScope()
+
+                if (status is app.onym.android.backup.ui.DeviceBackupStatus.Off) {
+                    var disclosure by remember {
+                        mutableStateOf<Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>?>(null)
+                    }
+                    LaunchedEffect(Unit) {
+                        disclosure = backup.makeEnrolmentDisclosure()
+                    }
+                    val resolved = disclosure
+                    if (resolved == null) {
+                        // Terms not yet fetched (or unreachable) —
+                        // refuse enrolment rather than offering
+                        // "continue without terms."
+                        androidx.compose.material3.Text(
+                            stringResource(R.string.settings),
+                            modifier = Modifier.testTag("backup.enrolment.loading"),
+                        )
+                    } else {
+                        val (items, scheduleSentence) = resolved
+                        app.onym.android.backup.ui.BackupEnrolmentScreen(
+                            items = items,
+                            scheduleSentence = scheduleSentence,
+                            onAccept = {
+                                val termsId = items.first { it.id == "termsId" }.value
+                                coroutineScope.launch {
+                                    backup.acceptEnrolment(termsId)
+                                    backup.backUpNow()
+                                }
+                            },
+                            onDecline = { navController.popBackStack() },
+                        )
+                    }
+                } else {
+                    app.onym.android.backup.ui.DeviceBackupSettingsScreen(
+                        flow = backup.settingsFlow,
+                        canRestore = true,
+                        onBackUpNow = { coroutineScope.launch { backup.backUpNow() } },
+                        onRestoreFromBackup = {
+                            navController.navigate(ROUTE_DEVICE_BACKUP_RESTORE)
+                        },
+                        onErase = { coroutineScope.launch { backup.erase() } },
+                    )
+                }
+            }
+            composable(ROUTE_DEVICE_BACKUP_RESTORE) {
+                val backup = dependencies.backup ?: return@composable
+                app.onym.android.backup.ui.BackupRestoreScreen(
+                    makeRestoreFlow = backup.makeRestoreFlow,
+                    onDone = { navController.popBackStack() },
                 )
             }
             composable("moderation_case_appeal/{caseId}") { entry ->
@@ -1027,6 +1101,8 @@ private const val ROUTE_DISCOVERY_SETTINGS = "discovery_settings"
 private const val ROUTE_MODERATION_SETTINGS = "moderation_settings"
 private const val ROUTE_MODERATION_SWITCH_CONSENT = "moderation_switch_consent"
 private const val ROUTE_MODERATION_TERMS = "moderation_terms"
+private const val ROUTE_DEVICE_BACKUP_SETTINGS = "device_backup_settings"
+private const val ROUTE_DEVICE_BACKUP_RESTORE = "device_backup_restore"
 private const val ROUTE_ADD_DISCOVERY_PROVIDER = "add_discovery_provider"
 private const val ROUTE_NOSTR_RELAYS = "nostr_relays"
 private const val ROUTE_BLOSSOM_RELAYS = "blossom_relays"

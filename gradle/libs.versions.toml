@@ -46,13 +46,19 @@ onym-sdk = "0.0.2"
 
 # Play Integrity — StandardIntegrityManager for the moderation seat's
 # device-recall profile: prepared token provider + standard requests
-# whose requestHash binds the backend-issued challenge. First (and
-# only) Google Play services dependency in the app; the moderation
+# whose requestHash binds the backend-issued challenge. The moderation
 # manifest must disclose the resulting reach limitation (emulators and
 # de-Googled devices fail to checkRequired by design).
 play-integrity = "1.4.0"
 # kotlinx-coroutines-play-services — Task.await() over the Play
 # Integrity Tasks API.
+
+# Play Billing — the seat-purchase flow's Google Play counterpart to
+# iOS's StoreKit 2 (backup/UI-Backup.md §12, WHITEPAPER §17.5's
+# SeatEntitlement redemption). Second Google Play services dependency
+# in the app; a de-Googled device simply can't purchase a paid seat
+# (free offers are unaffected — see FreeTierEntitlementProvider).
+play-billing = "7.1.1"
 
 # Crypto
 bouncycastle = "1.78.1"
@@ -157,6 +163,7 @@ bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "boun
 
 # Play Integrity (see the version entry for why this exists at all).
 play-integrity = { module = "com.google.android.play:integrity", version.ref = "play-integrity" }
+play-billing = { module = "com.android.billingclient:billing-ktx", version.ref = "play-billing" }
 kotlinx-coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "kotlinx-coroutines" }
 
 # ZXing core — QR-bit-matrix generator (encode) + `MultiFormatReader`

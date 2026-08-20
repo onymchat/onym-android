@@ -168,12 +168,25 @@ object ServiceManifestCanonical {
      * @throws ServiceManifestException.ManifestInvalid if [raw] is not
      *   valid JSON or the top level is not an object.
      */
-    fun signingBytes(raw: ByteArray): ByteArray {
+    fun signingBytes(raw: ByteArray): ByteArray = signingBytes(raw, omitting = setOf("signature"))
+
+    /**
+     * As [signingBytes], but omitting an arbitrary top-level field set
+     * instead of just `signature` — e.g. a backup `BackupTerms`
+     * document's `termsId` computes over `{termsId, signature}`
+     * omitted, and a `SeatEntitlement`'s canonical bytes likewise omit
+     * only `signature`. Every field is removed **structurally**, never
+     * by string surgery.
+     *
+     * @throws ServiceManifestException.ManifestInvalid if [raw] is not
+     *   valid JSON or the top level is not an object.
+     */
+    fun signingBytes(raw: ByteArray, omitting: Set<String>): ByteArray {
         val obj = ServiceManifestFormat.topLevelObject(raw)
-        val withoutSignature = JsonObject(obj.filterKeys { it != "signature" })
+        val withoutOmitted = JsonObject(obj.filterKeys { it !in omitting })
         return Json.encodeToString(
             JsonElement.serializer(),
-            sortKeysRecursively(withoutSignature),
+            sortKeysRecursively(withoutOmitted),
         ).toByteArray(Charsets.UTF_8)
     }
 

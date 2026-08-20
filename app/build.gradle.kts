@@ -205,6 +205,8 @@ dependencies {
     implementation(project(":onboarding"))
     implementation(project(":moderation"))
     implementation(project(":moderation-ui"))
+    implementation(project(":backup"))
+    implementation(project(":backup-ui"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

@@ -72,6 +72,11 @@ dependencies {
     // exposes android.content.Context only.
     implementation(libs.androidx.security.crypto)
 
+    // api: PurchasesUpdatedListener / Purchase / BillingClient appear
+    // in SeatPurchaseFlow's and PlayBillingEntitlementProvider's
+    // public constructor signatures.
+    api(libs.play.billing)
+
     // Unit tests: plain JUnit4. The tests reach BouncyCastle (test key
     // generation / provider registration) through the implementation
     // dep above — testImplementation extends implementation.

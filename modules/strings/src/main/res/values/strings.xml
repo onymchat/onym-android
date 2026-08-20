@@ -752,6 +752,8 @@
   <!-- Settings → Moderation (iOS ModerationSettingsView parity) -->
   <string name="settings_section_moderation">Moderation</string>
   <string name="settings_moderation_row_title">Moderation</string>
+  <string name="settings_section_device_backup">Backup</string>
+  <string name="settings_device_backup_row_title">Device Backup</string>
   <string name="settings_moderation_row_consented">Consented to %1$s</string>
   <string name="settings_moderation_row_none">No authority chosen yet</string>
   <string name="moderation_settings_title">Moderation</string>

@@ -752,6 +752,8 @@
   <!-- Настройки → Модерация -->
   <string name="settings_section_moderation">Модерация</string>
   <string name="settings_moderation_row_title">Модерация</string>
+  <string name="settings_section_device_backup">Резервное копирование</string>
+  <string name="settings_device_backup_row_title">Резервная копия устройства</string>
   <string name="settings_moderation_row_consented">Согласие: %1$s</string>
   <string name="settings_moderation_row_none">Инстанция ещё не выбрана</string>
   <string name="moderation_settings_title">Модерация</string>

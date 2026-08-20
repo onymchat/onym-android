@@ -117,6 +117,44 @@ class AppDependencies(
      *  and no UI-test fakes registered — in which case RootScreen and
      *  onboarding render as before the seat existed. */
     val moderation: ModerationUiDependencies? = null,
+    /** The device-backup seat's settings surfaces + purchase gating.
+     *  `null` exactly when no backup operator is consented, or the
+     *  active identity has no recovery phrase to derive a backup key
+     *  from — both are ordinary states, and every consumer (Settings)
+     *  renders as before the feature existed. */
+    val backup: BackupUiDependencies? = null,
+)
+
+/**
+ * Everything the device-backup seat's Settings surfaces need, bundled
+ * so [AppDependencies] carries one nullable value. Mirrors iOS's
+ * `BackupSeatComposer`-produced bundle.
+ */
+class BackupUiDependencies(
+    /** The consented operator's componentId, cheap to read — lets
+     *  Settings detect a mid-session operator change without
+     *  rebuilding the whole surface. Re-read on every Settings open,
+     *  not cached at construction. */
+    val consentedComponentId: suspend () -> String?,
+    val settingsFlow: app.onym.android.backup.ui.DeviceBackupSettingsFlow,
+    /** Runs one compose→preflight→upload cycle. */
+    val backUpNow: suspend () -> Unit,
+    /** Retries a pending-payment operation after a purchase. */
+    val retryAfterPurchase: suspend () -> Unit,
+    val erase: suspend () -> Unit,
+    /** Builds the consent/enrolment screen's static disclosure content
+     *  for the currently consented (or about-to-be-consented) operator.
+     *  `null` if no operator manifest/terms are currently resolvable. */
+    val makeEnrolmentDisclosure: suspend () -> Pair<
+        List<app.onym.android.backup.ui.BackupDisclosureItem>,
+        String,
+        >?,
+    /** Pins acceptance of the currently-fetched terms (its digest) so
+     *  the next [backUpNow] composes and uploads under it. Called once
+     *  the enrolment screen's "Turn On Backup" is tapped. */
+    val acceptEnrolment: suspend (termsId: String) -> Unit,
+    /** History-restore surface — see Phase 8. `null` until wired. */
+    val makeRestoreFlow: (suspend () -> app.onym.android.backup.BackupRestoreSummary)? = null,
 )
 
 /**

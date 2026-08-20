@@ -46,6 +46,17 @@ interface BlossomClient {
 internal class BlossomException(message: String) : Exception(message)
 
 /**
+ * Thrown by [BlossomClient.download] specifically for a server's
+ * explicit "not held" answer (HTTP 404/410) — public, unlike
+ * [BlossomException], so a cross-module caller (the device-backup
+ * source, which must distinguish "not held" from "network failure" —
+ * see `BackupBlobAvailability` in `:backup`) can catch it by type
+ * instead of parsing an opaque message string.
+ */
+class BlobNotFoundException(val sha256: String, val httpCode: Int) :
+    Exception("blob not found: $sha256 (HTTP $httpCode)")
+
+/**
  * Production [BlossomClient] over OkHttp. Uploads carry a BUD-01
  * `Authorization: Nostr <base64(kind:24242 event)>` header signed by an
  * ephemeral Nostr key. Downloads are unauthenticated `GET`s by hash.
@@ -76,6 +87,9 @@ class OkHttpBlossomClient(
     override suspend fun download(sha256: String): ByteArray = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(baseUrl.trimEnd('/') + "/" + sha256).get().build()
         httpClient.newCall(request).execute().use { response ->
+            if (response.code == 404 || response.code == 410) {
+                throw BlobNotFoundException(sha256, response.code)
+            }
             if (!response.isSuccessful) throw BlossomException("download HTTP ${response.code}")
             response.body?.bytes() ?: throw BlossomException("empty blob body")
         }

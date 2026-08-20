@@ -1,0 +1,232 @@
+package app.onym.android.backup
+
+import kotlinx.coroutines.sync.Mutex
+import java.io.File
+import java.time.Instant
+
+/** [BackupRepository.backUp] and [BackupRepository.retry]'s result. */
+sealed class BackupRunResult {
+    data class Success(val outcome: BackupOutcome) : BackupRunResult()
+    /** A concurrent call was already in flight — Kotlin's [Mutex] has
+     *  no reentrancy, so this is the observable "already running"
+     *  answer rather than a deadlock or a silent second run. */
+    data object AlreadyRunning : BackupRunResult()
+    /** [BackupRepository.retry] found no pending-payment operation to
+     *  resume. */
+    data object NothingPending : BackupRunResult()
+}
+
+/**
+ * Drives one operator's compose → preflight → upload cycle, plus
+ * reconciliation and payment retry. Guarded by a [Mutex] so two
+ * concurrent `backUp()`/`retry()` calls never race each other's state
+ * writes.
+ *
+ * Three behaviors this class exists to get right (see the
+ * implementation plan's parameter table for the full rationale):
+ *
+ * 1. Payment refusal preserves the exact sealed bytes and
+ *    `operationId` — a retry resubmits the identical composed
+ *    snapshot rather than re-sealing (which would mint a new
+ *    `snapshotSalt` and a new digest).
+ * 2. A pending-operation record is written **before** the upload
+ *    attempt, not after — a lost response then reconciles to
+ *    `unknown` rather than being silently treated as clean.
+ * 3. `terms_changed` / an operator mismatch stops uploading and is
+ *    never re-pinned automatically.
+ *
+ * Mirrors `BackupRepository` in onym-ios OnymBackup (an `actor`
+ * there; a [Mutex]-guarded class here for the same serialization
+ * property).
+ */
+class BackupRepository(
+    private val port: BackupPort,
+    private val composer: BackupComposer,
+    private val stateStore: BackupStateStore,
+    private val workingDirectory: File,
+) {
+    private val mutex = Mutex()
+
+    /** Compose (or resume a pending payment retry) and upload one
+     *  snapshot for [componentId]. Reconciles any earlier pending
+     *  operation first. */
+    suspend fun backUp(
+        keyMaterial: BackupKeyMaterial,
+        componentId: String,
+        acceptedTermsId: String,
+        now: Instant = Instant.now(),
+    ): BackupRunResult {
+        if (!mutex.tryLock()) return BackupRunResult.AlreadyRunning
+        try {
+            reconcileLocked(componentId)
+
+            val state = stateStore.load()
+            if (state?.componentId != null && state.componentId != componentId) {
+                throw BackupError.TermsChanged(state.acceptedTermsId ?: "")
+            }
+
+            val pendingPayment = state?.pendingPayment?.takeIf { it.componentId == componentId }
+            val snapshot = pendingPayment?.let {
+                SealedSnapshot(
+                    operationId = it.operationId,
+                    snapshotReference = SnapshotReference(digest = it.snapshotDigest, sealedByteSize = it.sealedByteSize),
+                    sealedBytesFile = File(it.sealedFilePath),
+                    sealedAt = now,
+                    acceptedTermsId = it.acceptedTermsId,
+                )
+            } ?: composer.compose(keyMaterial, acceptedTermsId, now = now)
+
+            recordPendingLocked(componentId, snapshot)
+
+            val outcome = try {
+                when (val preflight = port.preflight(snapshot)) {
+                    is BackupPreflight.Resolved -> preflight.outcome
+                    is BackupPreflight.Grant -> port.uploadSnapshot(snapshot, preflight.upload)
+                }
+            } catch (paymentRequired: BackupError.PaymentRequired) {
+                recordPendingPaymentLocked(componentId, snapshot, paymentRequired)
+                throw paymentRequired
+            }
+
+            resolvePendingLocked(componentId, snapshot, outcome)
+            return BackupRunResult.Success(outcome)
+        } finally {
+            mutex.unlock()
+        }
+    }
+
+    /** Retries the pending payment operation for [componentId], if
+     *  any, after an entitlement was obtained — same operation id,
+     *  same sealed bytes. No-op success with no pending payment. */
+    suspend fun retry(componentId: String, now: Instant = Instant.now()): BackupRunResult {
+        if (!mutex.tryLock()) return BackupRunResult.AlreadyRunning
+        try {
+            val state = stateStore.load()
+            val pending = state?.pendingPayment?.takeIf { it.componentId == componentId }
+                ?: return BackupRunResult.NothingPending
+            val snapshot = SealedSnapshot(
+                operationId = pending.operationId,
+                snapshotReference = SnapshotReference(digest = pending.snapshotDigest, sealedByteSize = pending.sealedByteSize),
+                sealedBytesFile = File(pending.sealedFilePath),
+                sealedAt = now,
+                acceptedTermsId = pending.acceptedTermsId,
+            )
+            recordPendingLocked(componentId, snapshot)
+            val outcome = when (val preflight = port.preflight(snapshot)) {
+                is BackupPreflight.Resolved -> preflight.outcome
+                is BackupPreflight.Grant -> port.uploadSnapshot(snapshot, preflight.upload)
+            }
+            resolvePendingLocked(componentId, snapshot, outcome)
+            return BackupRunResult.Success(outcome)
+        } finally {
+            mutex.unlock()
+        }
+    }
+
+    /** Reconciles any earlier pending operation before composing a
+     *  new one: checks `listSnapshots()` first (authoritative), then
+     *  `queryOutcome()` (valid only within the operator's declared
+     *  outcome-record retention window). Only a *failed* fetch stays
+     *  pending — a successful check that doesn't find the digest
+     *  resolves negatively rather than staying stuck forever. */
+    private suspend fun reconcileLocked(componentId: String) {
+        val state = stateStore.load() ?: return
+        val pending = state.pendingOperation?.takeIf { it.componentId == componentId } ?: return
+
+        val viaList = runCatching { port.listSnapshots() }.getOrNull()
+        if (viaList != null) {
+            // Presence or absence both resolve the pending record —
+            // `listSnapshots` is authoritative either way; only a
+            // *failed* fetch leaves it open for a later attempt.
+            clearPendingOperationLocked(state, resolved = true, componentId = componentId, terms = pending.acceptedTermsId)
+            return
+        }
+
+        val viaQuery = runCatching { port.queryOutcome(pending.operationId) }
+        if (viaQuery.isSuccess) {
+            // A successful query — found or not — resolves the
+            // pending record either way; `null` just means the
+            // operator no longer has a record for it (outside its
+            // declared retention window), not that it's still open.
+            clearPendingOperationLocked(state, resolved = true, componentId = componentId, terms = pending.acceptedTermsId)
+        }
+        // A failed fetch (both list and query threw) leaves the
+        // pending record untouched — reconciled on a later attempt.
+    }
+
+    private suspend fun recordPendingLocked(componentId: String, snapshot: SealedSnapshot) {
+        val state = stateStore.load() ?: PersistedBackupState()
+        stateStore.save(
+            state.copy(
+                componentId = componentId,
+                pendingOperation = PendingOperation(
+                    componentId = componentId,
+                    operationId = snapshot.operationId,
+                    snapshotDigest = snapshot.snapshotReference.digest,
+                    sealedByteSize = snapshot.snapshotReference.sealedByteSize,
+                    sealedFilePath = snapshot.sealedBytesFile.absolutePath,
+                    acceptedTermsId = snapshot.acceptedTermsId,
+                    sealedAtEpochSeconds = snapshot.sealedAt.epochSecond,
+                ),
+            ),
+        )
+    }
+
+    private suspend fun recordPendingPaymentLocked(
+        componentId: String,
+        snapshot: SealedSnapshot,
+        error: BackupError.PaymentRequired,
+    ) {
+        val state = stateStore.load() ?: PersistedBackupState()
+        stateStore.save(
+            state.copy(
+                componentId = componentId,
+                pendingOperation = null,
+                pendingPayment = PendingPayment(
+                    componentId = componentId,
+                    operationId = snapshot.operationId,
+                    snapshotDigest = snapshot.snapshotReference.digest,
+                    sealedByteSize = snapshot.snapshotReference.sealedByteSize,
+                    sealedFilePath = snapshot.sealedBytesFile.absolutePath,
+                    acceptedTermsId = snapshot.acceptedTermsId,
+                    offerIds = error.offerIds,
+                ),
+            ),
+        )
+    }
+
+    private suspend fun resolvePendingLocked(componentId: String, snapshot: SealedSnapshot, outcome: BackupOutcome) {
+        val state = stateStore.load() ?: PersistedBackupState()
+        val resolved = outcome.status.isRetention || outcome.status == BackupOutcomeStatus.Rejected
+        stateStore.save(
+            state.copy(
+                componentId = componentId,
+                acceptedTermsId = snapshot.acceptedTermsId,
+                pendingOperation = if (resolved) null else state.pendingOperation,
+                pendingPayment = null,
+                lastSuccessAtEpochSeconds = if (outcome.status.isRetention) {
+                    Instant.now().epochSecond
+                } else {
+                    state.lastSuccessAtEpochSeconds
+                },
+            ),
+        )
+        if (resolved) {
+            // The pending snapshot's sealed bytes are no longer
+            // needed once its outcome is settled — a retry-relevant
+            // file is only kept while pendingOperation/pendingPayment
+            // still reference it.
+            if (snapshot.sealedBytesFile.exists()) snapshot.sealedBytesFile.delete()
+        }
+    }
+
+    private suspend fun clearPendingOperationLocked(
+        state: PersistedBackupState,
+        resolved: Boolean,
+        componentId: String,
+        terms: String,
+    ) {
+        if (!resolved) return
+        stateStore.save(state.copy(componentId = componentId, acceptedTermsId = terms, pendingOperation = null))
+    }
+}

@@ -138,6 +138,49 @@ class IdentityRepository(
     }
 
     /**
+     * One-shot HKDF-SHA256 derivation from the current identity's
+     * BIP39 seed — `salt = "app.onym.bip39"`, the same root every
+     * other seed-scoped key (Nostr, BLS) derives from, `info = [info]`,
+     * 32-byte output. The seed is read fresh from storage and zeroed
+     * after use; never cached.
+     *
+     * [info] must start with one of [allowedSeedScopedInfoPrefixes] —
+     * an ALLOWLIST, not a denylist (see
+     * [IdentityError.SeedScopeNotPermitted]'s doc comment for why).
+     * Every caller outside this module reaches this only through a
+     * seat-specific interface (e.g. `BackupSeedDeriving`) that already
+     * constrains which `info` strings it will ever pass, but the check
+     * lives here too so the method is safe to call directly.
+     *
+     * @throws IdentityError.SeedScopeNotPermitted if [info] isn't
+     *   allowlisted.
+     * @throws IdentityError.NoRecoveryPhrase if the loaded identity has
+     *   no BIP39 entropy (imported from raw key material).
+     * @throws IdentityError.IdentityNotLoaded before [bootstrap].
+     *
+     * Mirrors `IdentityRepository.deriveSeedScopedKey` from onym-ios.
+     */
+    suspend fun deriveSeedScopedKey(info: String): ByteArray = withContext(ioDispatcher) {
+        if (allowedSeedScopedInfoPrefixes.none { info.startsWith(it) }) {
+            throw IdentityError.SeedScopeNotPermitted(info)
+        }
+        val id = store.loadCurrent() ?: throw IdentityError.IdentityNotLoaded
+        val snapshot = store.load(id) ?: throw IdentityError.IdentityNotLoaded
+        val entropy = snapshot.entropy ?: throw IdentityError.NoRecoveryPhrase
+        var seed = Bip39.seedFromMnemonic(Bip39.mnemonicFromEntropy(entropy))
+        try {
+            Bip39.hkdfSha256(
+                ikm = seed,
+                salt = "app.onym.bip39".toByteArray(Charsets.UTF_8),
+                info = info.toByteArray(Charsets.UTF_8),
+                length = 32,
+            )
+        } finally {
+            seed.fill(0)
+        }
+    }
+
+    /**
      * Ed25519 detached signature with the Stellar-derived identity
      * key — the key `Identity.stellarPublicKey` is the public half of,
      * and the one moderation mandates/sessions name as
@@ -627,6 +670,12 @@ class IdentityRepository(
     }
 
     companion object {
+
+        /** [deriveSeedScopedKey] refuses any `info` not starting with
+         *  one of these — currently just the backup seat. Extend this
+         *  list, don't remove the check, when a future seat needs its
+         *  own seed-scoped derivation. */
+        private val allowedSeedScopedInfoPrefixes = listOf("backup-")
 
         /**
          * Open a [SealedEnvelope] with an arbitrary X25519 private

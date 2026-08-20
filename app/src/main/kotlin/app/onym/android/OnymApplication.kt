@@ -143,6 +143,17 @@ private val Context.consentDataStore: DataStore<Preferences> by preferencesDataS
 )
 
 /**
+ * DataStore Preferences for the device-backup seat's state
+ * (`BackupStateStore`): accepted terms digest, pending operations,
+ * pending-payment records. Its own file per the one-domain-one-blob
+ * convention — none of this is secret (the sealed snapshot bytes it
+ * points at live under the app's files directory, not here).
+ */
+private val Context.backupDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.backup_prefs",
+)
+
+/**
  * DataStore Preferences for the onboarding completion flag
  * (`onboarding.completed`). Its own file per the one-domain-one-blob
  * convention — the test reset path can wipe onboarding without
@@ -511,8 +522,12 @@ class OnymApplication : Application() {
             Room.inMemoryDatabaseBuilder(applicationContext, GroupDatabase::class.java).build()
         }
         val storageEncryption = StorageEncryption.fromContext(applicationContext)
+        // Named (rather than inlined into GroupRepository below) so the
+        // device-backup composition root can read/write the same store
+        // — see `backupUi` further down.
+        val groupStore = RoomGroupStore(dao = groupDatabase.groupDao(), encryption = storageEncryption)
         val groupRepository = GroupRepository(
-            store = RoomGroupStore(dao = groupDatabase.groupDao(), encryption = storageEncryption),
+            store = groupStore,
             identity = identityRepository,
             scope = applicationScope,
         )
@@ -554,11 +569,14 @@ class OnymApplication : Application() {
                 app.onym.android.chats.MessageDatabase::class.java,
             ).build()
         }
+        // Named for the same reason as `groupStore` above — the
+        // device-backup composition root reads/writes this store too.
+        val messageStore = app.onym.android.chats.RoomMessageStore(
+            dao = messageDatabase.messageDao(),
+            encryption = storageEncryption,
+        )
         val messageRepository = app.onym.android.chats.MessageRepository(
-            store = app.onym.android.chats.RoomMessageStore(
-                dao = messageDatabase.messageDao(),
-                encryption = storageEncryption,
-            ),
+            store = messageStore,
             identity = identityRepository,
             scope = applicationScope,
         )
@@ -925,8 +943,14 @@ class OnymApplication : Application() {
         // routes to the right X25519 private key when the user
         // surfaces the envelope. Resubscribes wholesale when the
         // identities list changes (add / remove).
+        // Named for the same reason as `groupStore`/`messageStore`
+        // above — the device-backup composition root reads/writes
+        // this store too. (In-memory today, same as before this
+        // extraction — invitations don't yet survive process death
+        // independent of this feature.)
+        val invitationStore = app.onym.android.persistence.InMemoryInvitationStore()
         val invitationsRepository = app.onym.android.inbox.IncomingInvitationsRepository(
-            store = app.onym.android.persistence.InMemoryInvitationStore(),
+            store = invitationStore,
             identity = identityRepository,
             scope = applicationScope,
         )
@@ -1594,9 +1618,37 @@ class OnymApplication : Application() {
             },
         )
 
+        // Device backup (storage.backup seat). `null` exactly when no
+        // operator is consented yet or the active identity has no
+        // recovery phrase — see `BackupSeatComposer`'s doc comment.
+        // Resolved synchronously at boot, same posture as the
+        // Blossom-server bootstrap above (`runBlocking` over a handful
+        // of local DataStore reads, never a network call at this
+        // point — the manifest was already verified when it was
+        // consented).
+        val backupUi: app.onym.android.BackupUiDependencies? = try {
+            kotlinx.coroutines.runBlocking {
+                app.onym.android.backup.BackupSeatComposer.compose(
+                    identityRepository = identityRepository,
+                    consentStore = pinnedConsentStore,
+                    groupStore = groupStore,
+                    messageStore = messageStore,
+                    invitationStore = invitationStore,
+                    blossomClient = blossomClient,
+                    httpClient = httpClient,
+                    filesDir = applicationContext.filesDir,
+                    scope = applicationScope,
+                    backupStateDataStore = applicationContext.backupDataStore,
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+
         return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
             moderation = moderationUi,
+            backup = backupUi,
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
                 RecoveryPhraseBackupViewModel(
                     repository = identityRepository,
