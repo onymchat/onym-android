@@ -50,8 +50,11 @@ object BackupSeatComposer {
         // No recovery phrase (raw-key-imported identity) means no
         // seed to derive a backup key from — hide the section rather
         // than offer a feature that can never actually seal anything.
+        // `hasRecoveryPhrase` is the non-secret presence check;
+        // reading the phrase field itself outside :identity is
+        // forbidden by scripts/lint-secrets.py.
         val identity = identityRepository.currentIdentity() ?: return null
-        if (identity.recoveryPhrase == null) return null
+        if (!identity.hasRecoveryPhrase) return null
 
         val seedDeriving = object : BackupSeedDeriving {
             override suspend fun deriveSeedScopedKey(info: String): ByteArray =
