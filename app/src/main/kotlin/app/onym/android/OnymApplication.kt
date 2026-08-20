@@ -1648,6 +1648,20 @@ class OnymApplication : Application() {
                     scope = applicationScope,
                     backupStateDataStore = applicationContext.backupDataStore,
                     strings = app.onym.android.foundation.AndroidStringProvider(applicationContext),
+                    runConditions = {
+                        val connectivityManager = applicationContext.getSystemService(
+                            android.net.ConnectivityManager::class.java,
+                        )
+                        val capabilities = connectivityManager?.activeNetwork
+                            ?.let { connectivityManager.getNetworkCapabilities(it) }
+                        val isOnWifi = capabilities
+                            ?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+                        val batteryManager = applicationContext.getSystemService(
+                            android.os.BatteryManager::class.java,
+                        )
+                        val isCharging = batteryManager?.isCharging == true
+                        app.onym.android.backup.ui.BackupRunConditions(isOnWifi = isOnWifi, isCharging = isCharging)
+                    },
                 )
             }
         } catch (_: Exception) {

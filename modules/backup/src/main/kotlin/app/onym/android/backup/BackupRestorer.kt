@@ -1,6 +1,9 @@
 package app.onym.android.backup
 
 import app.onym.android.backup.BackupFormat.toLowercaseHex
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.SecureRandom
 
@@ -20,7 +23,7 @@ class BackupRestorer(private val sink: BackupSinkProviding) {
         reference: SnapshotReference,
         keyMaterial: BackupKeyMaterial,
         workingDirectory: File,
-    ): BackupRestoreSummary {
+    ): BackupRestoreSummary = withContext(Dispatchers.IO) {
         val plaintextFile = File(workingDirectory, "backup-restore-plain-${randomId()}.tmp")
         try {
             // Gate 1: verify the whole-snapshot reference, then decrypt.
@@ -73,6 +76,12 @@ class BackupRestorer(private val sink: BackupSinkProviding) {
                     b++
                 }
                 WriteCounts(g, m, i, c, b)
+            } catch (cancelled: CancellationException) {
+                // A cancelled coroutine (navigation away, process
+                // death) is not a write failure — rethrow so it
+                // propagates as cancellation, not as a reportable
+                // RestoreInterrupted the UI would render as an error.
+                throw cancelled
             } catch (e: Exception) {
                 // Writes are idempotent (insertOrUpdate) so this is
                 // explicitly non-atomic-but-safe: earlier writes remain,
@@ -96,7 +105,7 @@ class BackupRestorer(private val sink: BackupSinkProviding) {
                 emptyList()
             }
 
-            return BackupRestoreSummary(
+            return@withContext BackupRestoreSummary(
                 groups = writtenGroups,
                 messages = writtenMessages,
                 invitations = writtenInvitations,

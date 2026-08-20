@@ -128,17 +128,23 @@ class BackupRepository(
      *  `queryOutcome()` (valid only within the operator's declared
      *  outcome-record retention window). Only a *failed* fetch stays
      *  pending — a successful check that doesn't find the digest
-     *  resolves negatively rather than staying stuck forever. */
+     *  resolves negatively rather than staying stuck forever. Either
+     *  way, if the pending digest turns out to actually be retained —
+     *  a response that was lost on the wire but landed at the
+     *  operator — that's a genuine success and must set
+     *  `lastSuccessAtEpochSeconds`, not just silently clear the
+     *  pending record and leave Settings still reading stale/no-backup. */
     private suspend fun reconcileLocked(componentId: String) {
         val state = stateStore.load() ?: return
         val pending = state.pendingOperation?.takeIf { it.componentId == componentId } ?: return
 
         val viaList = runCatching { port.listSnapshots() }.getOrNull()
         if (viaList != null) {
-            // Presence or absence both resolve the pending record —
-            // `listSnapshots` is authoritative either way; only a
+            // `listSnapshots` is authoritative either way — presence
+            // or absence both resolve the pending record; only a
             // *failed* fetch leaves it open for a later attempt.
-            clearPendingOperationLocked(state, resolved = true, componentId = componentId, terms = pending.acceptedTermsId)
+            val wasRetained = viaList.any { it.snapshotReference.digest == pending.snapshotDigest }
+            clearPendingOperationLocked(state, componentId = componentId, terms = pending.acceptedTermsId, wasRetained = wasRetained)
             return
         }
 
@@ -148,7 +154,8 @@ class BackupRepository(
             // pending record either way; `null` just means the
             // operator no longer has a record for it (outside its
             // declared retention window), not that it's still open.
-            clearPendingOperationLocked(state, resolved = true, componentId = componentId, terms = pending.acceptedTermsId)
+            val wasRetained = viaQuery.getOrNull()?.status?.isRetention == true
+            clearPendingOperationLocked(state, componentId = componentId, terms = pending.acceptedTermsId, wasRetained = wasRetained)
         }
         // A failed fetch (both list and query threw) leaves the
         // pending record untouched — reconciled on a later attempt.
@@ -222,11 +229,10 @@ class BackupRepository(
 
     private suspend fun clearPendingOperationLocked(
         state: PersistedBackupState,
-        resolved: Boolean,
         componentId: String,
         terms: String,
+        wasRetained: Boolean,
     ) {
-        if (!resolved) return
         // The pending record's sealed bytes are only kept while
         // something might still retry against them — once reconcile
         // resolves the record (found retained, or confirmed the
@@ -237,6 +243,13 @@ class BackupRepository(
             val file = File(pending.sealedFilePath)
             if (file.exists()) file.delete()
         }
-        stateStore.save(state.copy(componentId = componentId, acceptedTermsId = terms, pendingOperation = null))
+        stateStore.save(
+            state.copy(
+                componentId = componentId,
+                acceptedTermsId = terms,
+                pendingOperation = null,
+                lastSuccessAtEpochSeconds = if (wasRetained) Instant.now().epochSecond else state.lastSuccessAtEpochSeconds,
+            ),
+        )
     }
 }

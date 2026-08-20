@@ -2,12 +2,17 @@ package app.onym.android.backup.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -35,6 +40,12 @@ fun DeviceBackupSettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val status by flow.status.collectAsState()
+    // Two-step confirm, matching Settings' clear-message-cache
+    // pattern — erasing at the operator is at least as consequential
+    // (it's remote and, per the spec, not reliably undoable) and
+    // deserves the same friction, not a single unconfirmed tap.
+    var showEraseConfirm1 by remember { mutableStateOf(false) }
+    var showEraseConfirm2 by remember { mutableStateOf(false) }
 
     Scaffold(modifier = modifier) { padding ->
         Column(modifier = Modifier.padding(padding).padding(16.dp)) {
@@ -61,12 +72,55 @@ fun DeviceBackupSettingsScreen(
             }
 
             Button(
-                onClick = onErase,
+                onClick = { showEraseConfirm1 = true },
                 modifier = Modifier.padding(top = 8.dp).testTag("backup.settings.erase"),
             ) {
                 Text(stringResource(R.string.backup_settings_erase))
             }
         }
+    }
+
+    if (showEraseConfirm1) {
+        AlertDialog(
+            onDismissRequest = { showEraseConfirm1 = false },
+            title = { Text(stringResource(R.string.backup_erase_confirm_1_title)) },
+            text = { Text(stringResource(R.string.backup_erase_confirm_1_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showEraseConfirm1 = false
+                        showEraseConfirm2 = true
+                    },
+                    modifier = Modifier.testTag("backup.settings.erase_confirm_1"),
+                ) {
+                    Text(stringResource(R.string.backup_erase_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEraseConfirm1 = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+    if (showEraseConfirm2) {
+        AlertDialog(
+            onDismissRequest = { showEraseConfirm2 = false },
+            title = { Text(stringResource(R.string.backup_erase_confirm_2_title)) },
+            text = { Text(stringResource(R.string.backup_erase_confirm_2_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showEraseConfirm2 = false
+                        onErase()
+                    },
+                    modifier = Modifier.testTag("backup.settings.erase_confirm_2"),
+                ) {
+                    Text(stringResource(R.string.backup_erase_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEraseConfirm2 = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }
 

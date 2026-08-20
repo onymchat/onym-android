@@ -861,6 +861,18 @@
   <string name="backup_disclosure_recovery_value">Никто — ни этот оператор, ни Onym — не может восстановить этот архив без вашей фразы восстановления. Утрата фразы восстановления означает навсегда нечитаемую резервную копию. Восстановление через поддержку невозможно.</string>
   <string name="backup_disclosure_yes">Да</string>
   <string name="backup_disclosure_no">Нет</string>
+
+  <!-- Резервное копирование устройства — запасные сообщения об ошибках -->
+  <string name="backup_error_not_enrolled">Резервное копирование ещё не включено</string>
+  <string name="backup_error_generic_failed">Сбой резервного копирования</string>
+  <string name="backup_error_erase_failed">Не удалось удалить резервную копию</string>
+
+  <!-- Резервное копирование устройства — подтверждение удаления -->
+  <string name="backup_erase_confirm_1_title">Удалить резервную копию?</string>
+  <string name="backup_erase_confirm_1_body">Это запросит у оператора удаление всех снимков, хранящихся в этой резервной копии. На это устройство это не влияет, и отменить действие после того, как оператор его выполнит, будет нельзя.</string>
+  <string name="backup_erase_confirm_2_title">Вы уверены?</string>
+  <string name="backup_erase_confirm_2_body">Это последнее подтверждение. Оператор удалит эту резервную копию.</string>
+  <string name="backup_erase_confirm_action">Удалить</string>
   <string name="settings_moderation_row_consented">Согласие: %1$s</string>
   <string name="settings_moderation_row_none">Инстанция ещё не выбрана</string>
   <string name="moderation_settings_title">Модерация</string>

@@ -146,11 +146,32 @@ class BackupUiDependencies(
      *  separate display name field today). */
     val displayName: String,
     val settingsFlow: app.onym.android.backup.ui.DeviceBackupSettingsFlow,
-    /** Runs one compose→preflight→upload cycle. */
-    val backUpNow: suspend () -> Unit,
-    /** Retries a pending-payment operation after a purchase. */
-    val retryAfterPurchase: suspend () -> Unit,
-    val erase: suspend () -> Unit,
+    /** Launches one compose→preflight→upload cycle on the vendor's own
+     *  long-lived scope (NOT the caller's) — deliberately not
+     *  `suspend`. A backup started from a tapped button must survive
+     *  the person navigating away from the screen that started it:
+     *  `recordPendingLocked` writes the pending-operation record
+     *  before the upload even begins, so a cancelled-by-navigation run
+     *  would abandon real, already-committed local state exactly like
+     *  a lost network response would — reconcile can recover from
+     *  that on a later attempt, but there is no reason to manufacture
+     *  the same failure mode on every screen change. */
+    val backUpNow: () -> Unit,
+    /** Retries a pending-payment operation after a purchase. Same
+     *  fire-and-forget posture as [backUpNow]. */
+    val retryAfterPurchase: () -> Unit,
+    /** Same fire-and-forget posture as [backUpNow] — an erase in
+     *  flight must not be interrupted by navigating off the screen
+     *  that started it. */
+    val erase: () -> Unit,
+    /** Call on every app-open (cold start AND resume from
+     *  background — both are "opening the app" to a person, and the
+     *  consent screen's disclosure sentence doesn't qualify which one
+     *  it means) — no-ops instantly unless [BackupSchedule]'s
+     *  conditions AND interval are actually satisfied right now. This
+     *  is what makes that sentence a description of real behavior
+     *  rather than dead code sitting next to honest-sounding copy. */
+    val checkOpportunistic: () -> Unit,
     /** Builds the consent/enrolment screen's static disclosure content
      *  for the currently consented (or about-to-be-consented) operator.
      *  `null` if no operator manifest/terms are currently resolvable. */

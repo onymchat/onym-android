@@ -15,6 +15,7 @@ import app.onym.android.identity.IdentityRepository
 import app.onym.android.transport.blossom.BlossomClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -79,6 +80,7 @@ object BackupSeatComposer {
         scope: CoroutineScope,
         backupStateDataStore: DataStore<Preferences>,
         strings: app.onym.android.foundation.StringProvider,
+        runConditions: () -> app.onym.android.backup.ui.BackupRunConditions,
     ): List<BackupUiDependencies> {
         // No recovery phrase (raw-key-imported identity) means no
         // seed to derive ANY backup key from — hide the whole feature
@@ -91,7 +93,7 @@ object BackupSeatComposer {
         if (!identity.hasRecoveryPhrase) return emptyList()
 
         return BackupSeat.activeConsents(consentStore).mapNotNull { consent ->
-            runCatching {
+            try {
                 composeOne(
                     consent = consent,
                     identityRepository = identityRepository,
@@ -105,11 +107,20 @@ object BackupSeatComposer {
                     scope = scope,
                     backupStateDataStore = backupStateDataStore,
                     strings = strings,
+                    runConditions = runConditions,
                 )
-            }.getOrNull()
-            // A single vendor failing to compose (malformed manifest,
-            // key-derivation failure) must not take every OTHER
-            // vendor's Settings row down with it.
+                // A single vendor failing to compose (malformed
+                // manifest, key-derivation failure) must not take
+                // every OTHER vendor's Settings row down with it —
+                // but a cancelled coroutine (boot aborted) is not
+                // "one vendor failed," it's the whole call being torn
+                // down, and must propagate rather than being read as
+                // "this vendor has no manifest."
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 
@@ -126,6 +137,7 @@ object BackupSeatComposer {
         scope: CoroutineScope,
         backupStateDataStore: DataStore<Preferences>,
         strings: app.onym.android.foundation.StringProvider,
+        runConditions: () -> app.onym.android.backup.ui.BackupRunConditions,
     ): BackupUiDependencies? {
         val manifest = BackupSeat.manifest(consent) ?: return null
         val endpoint = manifest.endpoint ?: return null
@@ -215,68 +227,108 @@ object BackupSeatComposer {
             } catch (termsChanged: BackupError.TermsChanged) {
                 settingsFlow.reportTermsChanged()
             } catch (e: Exception) {
-                settingsFlow.reportFailed(e.message ?: "backup failed")
+                settingsFlow.reportFailed(e.message ?: strings[app.onym.android.strings.R.string.backup_error_generic_failed])
             } finally {
                 settingsFlow.refresh()
             }
         }
+
+        /** @return `false` without touching [settingsFlow] if backup
+         *  was never turned on — the opportunistic checker needs to
+         *  tell "not enrolled" apart from "ran and failed" so it never
+         *  flips an un-enrolled vendor's status to Failed just because
+         *  it happened to check. */
+        suspend fun runBackUpNowIfEnrolled(): Boolean {
+            val acceptedTermsId = stateStore.load()?.acceptedTermsId ?: return false
+            runBackup {
+                val rt = runtime.get()
+                rt.repository.backUp(rt.keyMaterial, manifest.componentId, acceptedTermsId)
+            }
+            return true
+        }
+
+        // Drawn once here — composeOne runs once per vendor per app
+        // process — matching BackupSchedule.drawJitter's "once per
+        // session, not re-drawn per check" contract.
+        val jitter = schedule.drawJitter()
 
         return BackupUiDependencies(
             componentId = manifest.componentId,
             displayName = manifest.componentId.substringAfterLast(':'),
             settingsFlow = settingsFlow,
             backUpNow = {
-                val acceptedTermsId = stateStore.load()?.acceptedTermsId
-                if (acceptedTermsId == null) {
-                    settingsFlow.reportFailed("Backup has not been turned on yet")
-                } else {
-                    runBackup {
-                        val rt = runtime.get()
-                        rt.repository.backUp(rt.keyMaterial, manifest.componentId, acceptedTermsId)
+                scope.launch {
+                    if (!runBackUpNowIfEnrolled()) {
+                        settingsFlow.reportFailed(strings[app.onym.android.strings.R.string.backup_error_not_enrolled])
                     }
                 }
             },
-            retryAfterPurchase = { runBackup { runtime.get().repository.retry(manifest.componentId) } },
+            retryAfterPurchase = {
+                scope.launch { runBackup { runtime.get().repository.retry(manifest.componentId) } }
+            },
+            checkOpportunistic = {
+                scope.launch {
+                    val persisted = stateStore.load() ?: return@launch
+                    // Never enrolled, or reconcile hasn't caught up
+                    // with an earlier attempt yet — an opportunistic
+                    // check is not the place to start racing either.
+                    if (persisted.acceptedTermsId == null) return@launch
+                    if (persisted.pendingOperation != null || persisted.pendingPayment != null) return@launch
+                    val lastSuccessAt = persisted.lastSuccessAtEpochSeconds?.let(java.time.Instant::ofEpochSecond)
+                    if (schedule.permitsOpportunisticRun(runConditions(), jitter, lastSuccessAt)) {
+                        runBackUpNowIfEnrolled()
+                    }
+                }
+            },
             erase = {
-                settingsFlow.markRunning()
-                try {
-                    val receipt = runtime.get().client.eraseSnapshot(ErasureScope.All)
-                    // Erasure touches local state too: nothing is
-                    // retained at the operator anymore, so a pending
-                    // operation/payment referencing a now-erased
-                    // snapshot is moot, and `lastSuccessAtEpochSeconds`
-                    // must stop claiming a backup exists. The pinned
-                    // terms survive — erase doesn't turn backup off,
-                    // it clears what was retained under it. The
-                    // receipt itself is kept, not discarded, so
-                    // `isCompletionPending` is actually checkable
-                    // later against the clock, not just true for the
-                    // lifetime of this call.
-                    val current = stateStore.load() ?: PersistedBackupState()
-                    stateStore.save(
-                        current.copy(
-                            pendingOperation = null,
-                            pendingPayment = null,
-                            lastSuccessAtEpochSeconds = null,
-                            lastErasureReceipt = PersistedErasureReceipt(
-                                receiptId = receipt.receiptId,
-                                acknowledgedAtEpochSeconds = receipt.acknowledgedAt.epochSecond,
-                                completionCommittedByEpochSeconds = receipt.completionCommittedBy.epochSecond,
-                                coveredScope = receipt.coveredScope,
-                                excludedScope = receipt.excludedScope,
-                                termsId = receipt.termsId,
+                scope.launch {
+                    settingsFlow.markRunning()
+                    try {
+                        val receipt = runtime.get().client.eraseSnapshot(ErasureScope.All)
+                        // Erasure touches local state too: nothing is
+                        // retained at the operator anymore, so a pending
+                        // operation/payment referencing a now-erased
+                        // snapshot is moot, and `lastSuccessAtEpochSeconds`
+                        // must stop claiming a backup exists. The pinned
+                        // terms survive — erase doesn't turn backup off,
+                        // it clears what was retained under it. The
+                        // receipt itself is kept, not discarded, so
+                        // `isCompletionPending` is actually checkable
+                        // later against the clock, not just true for the
+                        // lifetime of this call.
+                        val current = stateStore.load() ?: PersistedBackupState()
+                        // Both a pending upload and a pending-payment
+                        // snapshot point at now-moot sealed bytes (nothing
+                        // is retained at the operator to reconcile against
+                        // or pay for anymore) — delete both files, not
+                        // just the state fields referencing them.
+                        current.pendingOperation?.let { File(it.sealedFilePath).let { f -> if (f.exists()) f.delete() } }
+                        current.pendingPayment?.let { File(it.sealedFilePath).let { f -> if (f.exists()) f.delete() } }
+                        stateStore.save(
+                            current.copy(
+                                pendingOperation = null,
+                                pendingPayment = null,
+                                lastSuccessAtEpochSeconds = null,
+                                lastErasureReceipt = PersistedErasureReceipt(
+                                    receiptId = receipt.receiptId,
+                                    acknowledgedAtEpochSeconds = receipt.acknowledgedAt.epochSecond,
+                                    completionCommittedByEpochSeconds = receipt.completionCommittedBy.epochSecond,
+                                    coveredScope = receipt.coveredScope,
+                                    excludedScope = receipt.excludedScope,
+                                    termsId = receipt.termsId,
+                                ),
                             ),
-                        ),
-                    )
-                } catch (e: Exception) {
-                    // A destructive, privacy-sensitive user action —
-                    // the whole point of the affordance is that the
-                    // person knows whether it worked. Silent failure
-                    // here would leave "Backed up" showing while the
-                    // erase never reached the operator.
-                    settingsFlow.reportFailed(e.message ?: "erase failed")
-                } finally {
-                    settingsFlow.refresh()
+                        )
+                    } catch (e: Exception) {
+                        // A destructive, privacy-sensitive user action —
+                        // the whole point of the affordance is that the
+                        // person knows whether it worked. Silent failure
+                        // here would leave "Backed up" showing while the
+                        // erase never reached the operator.
+                        settingsFlow.reportFailed(e.message ?: strings[app.onym.android.strings.R.string.backup_error_erase_failed])
+                    } finally {
+                        settingsFlow.refresh()
+                    }
                 }
             },
             makeEnrolmentDisclosure = {

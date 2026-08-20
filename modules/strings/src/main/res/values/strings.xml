@@ -859,6 +859,21 @@
   <string name="backup_disclosure_recovery_value">Nobody — not this operator, not Onym — can recover this archive without your recovery phrase. A lost recovery phrase means a permanently unreadable backup. There is no support-driven reset.</string>
   <string name="backup_disclosure_yes">Yes</string>
   <string name="backup_disclosure_no">No</string>
+
+  <!-- Device backup — error fallbacks (used only when the underlying
+       exception carries no message of its own). -->
+  <string name="backup_error_not_enrolled">Backup has not been turned on yet</string>
+  <string name="backup_error_generic_failed">Backup failed</string>
+  <string name="backup_error_erase_failed">Erase failed</string>
+
+  <!-- Device backup — erase confirmation (two-step, matching the
+       clear-message-cache pattern; erasing at the operator is at
+       least as consequential). -->
+  <string name="backup_erase_confirm_1_title">Erase Backup?</string>
+  <string name="backup_erase_confirm_1_body">This asks the operator to erase every snapshot retained under this backup. It does not affect anything on this device, and it cannot be undone once the operator acts on it.</string>
+  <string name="backup_erase_confirm_2_title">Are you sure?</string>
+  <string name="backup_erase_confirm_2_body">This is the last confirmation. The operator will erase this backup.</string>
+  <string name="backup_erase_confirm_action">Erase</string>
   <string name="settings_moderation_row_consented">Consented to %1$s</string>
   <string name="settings_moderation_row_none">No authority chosen yet</string>
   <string name="moderation_settings_title">Moderation</string>

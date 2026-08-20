@@ -19,7 +19,11 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -113,6 +117,26 @@ fun RootScreen(
      *  later back-navigation doesn't re-fire the same capability. */
     onPendingCapabilityHandled: () -> Unit = {},
 ) {
+    // Device backup's "opportunistic" check — the consent screen's
+    // disclosure sentence promises "when you open the app, at most
+    // once every N hours…", so this is what makes that a description
+    // of real behavior instead of dead code sitting next to
+    // honest-sounding copy. ON_START fires on cold start AND on
+    // resuming from the background — both are "opening the app" to a
+    // person, and the sentence doesn't say otherwise. Each vendor's
+    // own checkOpportunistic() no-ops instantly unless BackupSchedule's
+    // conditions and interval are actually satisfied right now.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, dependencies.backupVendors) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                dependencies.backupVendors.forEach { it.checkOpportunistic() }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // First-launch onboarding gate (PR 3): while the completed/
     // grandfathered decision is unresolved hold a blank frame (a
     // single fast DataStore read — flashing the tabs at a user who is
@@ -843,6 +867,13 @@ fun RootScreen(
                             onAccept = {
                                 val termsId = items.first { it.id == "termsId" }.value
                                 coroutineScope.launch {
+                                    // acceptEnrolment is a fast local
+                                    // state write, awaited so the
+                                    // subsequent backUpNow (which
+                                    // reads the just-pinned terms) never
+                                    // races it. backUpNow itself is
+                                    // fire-and-forget — it survives
+                                    // navigating off this screen.
                                     backup.acceptEnrolment(termsId)
                                     backup.backUpNow()
                                 }
@@ -854,11 +885,11 @@ fun RootScreen(
                     app.onym.android.backup.ui.DeviceBackupSettingsScreen(
                         flow = backup.settingsFlow,
                         canRestore = true,
-                        onBackUpNow = { coroutineScope.launch { backup.backUpNow() } },
+                        onBackUpNow = backup.backUpNow,
                         onRestoreFromBackup = {
                             navController.navigate(deviceBackupRestoreRoute(componentId))
                         },
-                        onErase = { coroutineScope.launch { backup.erase() } },
+                        onErase = backup.erase,
                     )
                 }
             }

@@ -1,6 +1,8 @@
 package app.onym.android.backup
 
 import app.onym.android.backup.BackupFormat.toLowercaseHex
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -28,7 +30,7 @@ class BackupComposer(
         acceptedTermsId: String,
         supersedes: SnapshotReference? = null,
         now: Instant = Instant.now(),
-    ): SealedSnapshot {
+    ): SealedSnapshot = withContext(Dispatchers.IO) {
         val operationId = randomOperationId()
         val scratchFile = File(workingDirectory, "backup-scratch-$operationId.tmp")
         val plaintextFile = File(workingDirectory, "backup-plain-$operationId.tmp")
@@ -75,7 +77,7 @@ class BackupComposer(
                 throw e
             }
 
-            return SealedSnapshot(
+            return@withContext SealedSnapshot(
                 operationId = operationId,
                 snapshotReference = reference,
                 sealedBytesFile = sealedFile,

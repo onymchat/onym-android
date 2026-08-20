@@ -52,10 +52,20 @@ object BackupSeat {
     /** On-disk working directory for one operator's in-flight sealing
      *  scratch files and pending-payment sealed snapshots. Lives under
      *  the app's persistent (not cache) storage — a pending payment
-     *  retry must survive a process death. */
+     *  retry must survive a process death.
+     *
+     *  Keyed by a hash of the FULL componentId, not a trailing
+     *  substring — `SignedServiceManifest.parse` already constrains a
+     *  validated componentId to a single colon-free local segment, so
+     *  two DIFFERENT componentIds can't collide today, but this
+     *  doesn't want to depend on that invariant holding in a different
+     *  code path or a future format relaxation. */
     fun workingDirectory(filesDir: File, componentId: String): File =
-        File(filesDir, "backup/${componentId.substringAfterLast(':')}").apply { mkdirs() }
+        File(filesDir, "backup/${componentDirectoryName(componentId)}").apply { mkdirs() }
 
     fun blobDirectory(filesDir: File, componentId: String): File =
         File(workingDirectory(filesDir, componentId), "blobs").apply { mkdirs() }
+
+    private fun componentDirectoryName(componentId: String): String =
+        BackupFormat.digest(componentId.toByteArray(Charsets.UTF_8)).removePrefix("sha256:").take(32)
 }
