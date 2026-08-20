@@ -19,10 +19,22 @@ const val BACKUP_SEAT_TYPE = "storage.backup"
  * A holder may consent to several backup operators at once —
  * `PinnedConsentStore.accept()` only deactivates a PRIOR record for
  * the SAME componentId, never records for other components under the
- * same seat — so this seat is multi-vendor by construction: every key
- * derivation is already scoped per componentId (see `BackupKeys`),
- * and each vendor gets its own independent working directory, wire
- * client, and persisted state (see `BackupSeatComposer.composeAll`).
+ * same seat — so this seat is multi-vendor by construction: each
+ * vendor gets its own independent working directory, wire client, and
+ * persisted state (see `BackupSeatComposer.composeAll`).
+ *
+ * The anti-correlation property this depends on is narrower than "every
+ * key is scoped per componentId": only the ACCESS SIGNING and ACCESS
+ * AGREEMENT keys are componentId-scoped (`BackupKeys.signingInfo`/
+ * `agreementInfo`) — those are what an operator or broker actually
+ * sees, and the pinned reason two operators must derive unrelated
+ * keypairs from them. The ARCHIVE ROOT (`BackupKeys.ARCHIVE_INFO`) is
+ * deliberately shared across every vendor, per onym-system
+ * `backup/UI-Backup-Object-HTTP.md` §5.2's derivation table — it is
+ * never presented to an operator, and every snapshot draws a fresh
+ * random 32-byte salt before deriving its own key from that shared
+ * root (`BackupKeys.snapshotKey`), so no two snapshots — same vendor
+ * or different — ever share a key even though they share a root.
  *
  * Mirrors `BackupSeat` in onym-ios.
  */

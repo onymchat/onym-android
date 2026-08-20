@@ -10,11 +10,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.onym.android.strings.R
 
 /**
- * Settings → Device Backup. Status text is a pure function of
- * [DeviceBackupStatus] so it's testable without composing anything.
+ * Settings → Device Backup.
  *
  * [canRestore] gates the "Restore From Backup" row's presence — true
  * whenever backup is already enrolled, independent of its current
@@ -44,7 +45,7 @@ fun DeviceBackupSettingsScreen(
                 enabled = status !is DeviceBackupStatus.Running,
                 modifier = Modifier.padding(top = 16.dp).testTag("backup.settings.back_up_now"),
             ) {
-                Text("Back Up Now")
+                Text(stringResource(R.string.backup_settings_back_up_now))
             }
 
             if (canRestore) {
@@ -53,8 +54,8 @@ fun DeviceBackupSettingsScreen(
                     modifier = Modifier.padding(top = 8.dp).testTag("backup.settings.restore_row"),
                 ) {
                     Column {
-                        Text("Restore From Backup")
-                        Text("Adds messages and chats — nothing is deleted")
+                        Text(stringResource(R.string.backup_settings_restore_row_title))
+                        Text(stringResource(R.string.backup_settings_restore_row_subtitle))
                     }
                 }
             }
@@ -63,21 +64,29 @@ fun DeviceBackupSettingsScreen(
                 onClick = onErase,
                 modifier = Modifier.padding(top = 8.dp).testTag("backup.settings.erase"),
             ) {
-                Text("Erase Backup")
+                Text(stringResource(R.string.backup_settings_erase))
             }
         }
     }
 }
 
-/** Pure — testable without composing anything. */
+/** Localized rendering of [DeviceBackupStatus] — `@Composable` so it
+ *  can call `stringResource`. Every call site is already inside
+ *  composition (this screen, and `BackupVendorsListScreen`'s row
+ *  list). */
+@Composable
 fun statusText(status: DeviceBackupStatus): String = when (status) {
-    is DeviceBackupStatus.Off -> "Off"
-    is DeviceBackupStatus.Idle -> if (status.lastSuccessAt != null) "Backed up" else "On — no backup yet"
-    is DeviceBackupStatus.Running -> "Backing up…"
-    is DeviceBackupStatus.Stale -> "Backup is out of date"
-    is DeviceBackupStatus.PaymentRequired -> "Payment required to continue backing up"
-    is DeviceBackupStatus.TermsChanged -> "The operator's terms changed — review and re-accept to continue"
-    is DeviceBackupStatus.OperatorChanged -> "Backup operator changed — review Settings"
-    is DeviceBackupStatus.CheckingEarlierBackup -> "Checking an earlier backup…"
-    is DeviceBackupStatus.Failed -> "Backup failed: ${status.message}"
+    is DeviceBackupStatus.Off -> stringResource(R.string.backup_status_off)
+    is DeviceBackupStatus.Idle -> if (status.lastSuccessAt != null) {
+        stringResource(R.string.backup_status_backed_up)
+    } else {
+        stringResource(R.string.backup_status_no_backup_yet)
+    }
+    is DeviceBackupStatus.Running -> stringResource(R.string.backup_status_backing_up)
+    is DeviceBackupStatus.Stale -> stringResource(R.string.backup_status_stale)
+    is DeviceBackupStatus.PaymentRequired -> stringResource(R.string.backup_status_payment_required)
+    is DeviceBackupStatus.TermsChanged -> stringResource(R.string.backup_status_terms_changed)
+    is DeviceBackupStatus.OperatorChanged -> stringResource(R.string.backup_status_operator_changed)
+    is DeviceBackupStatus.CheckingEarlierBackup -> stringResource(R.string.backup_status_checking_earlier)
+    is DeviceBackupStatus.Failed -> stringResource(R.string.backup_status_failed, status.message)
 }

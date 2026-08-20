@@ -40,6 +40,21 @@ data class PendingPayment(
     val offerIds: List<String>,
 )
 
+/** The signed commitment from the operator's last acknowledged
+ *  erasure — kept locally so [app.onym.android.backup.ErasureReceipt.isCompletionPending]
+ *  can actually be checked later (against the clock, on a later app
+ *  open), instead of the claim being true only for the lifetime of
+ *  whatever in-memory call produced it. */
+@Serializable
+data class PersistedErasureReceipt(
+    val receiptId: String,
+    val acknowledgedAtEpochSeconds: Long,
+    val completionCommittedByEpochSeconds: Long,
+    val coveredScope: String,
+    val excludedScope: String,
+    val termsId: String,
+)
+
 @Serializable
 data class PersistedBackupState(
     val componentId: String? = null,
@@ -47,6 +62,7 @@ data class PersistedBackupState(
     val pendingOperation: PendingOperation? = null,
     val pendingPayment: PendingPayment? = null,
     val lastSuccessAtEpochSeconds: Long? = null,
+    val lastErasureReceipt: PersistedErasureReceipt? = null,
 )
 
 interface BackupStateStore {

@@ -1,17 +1,40 @@
 package app.onym.android.backup.ui
 
+import app.onym.android.foundation.StringProvider
+import app.onym.android.strings.R
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Duration
 import java.time.Instant
 
+/** English-only fake mirroring the schedule templates in
+ *  `modules/strings/src/main/res/values/strings.xml`. */
+private class FakeScheduleStringProvider : StringProvider {
+    override fun get(resId: Int): String = "resId=$resId"
+    override fun get(resId: Int, vararg formatArgs: Any): String {
+        val hours = formatArgs[0]
+        val conditionClause = when (resId) {
+            R.string.backup_schedule_both_conditions -> ", on Wi-Fi and while charging"
+            R.string.backup_schedule_wifi_only -> ", on Wi-Fi"
+            R.string.backup_schedule_charging_only -> ", while charging"
+            else -> ""
+        }
+        return "Backups happen when you open the app, at most once every $hours hours$conditionClause. " +
+            "There is no background schedule — opening the app is what gives a backup the chance to run."
+    }
+    override fun getQuantity(pluralsResId: Int, quantity: Int, vararg formatArgs: Any): String =
+        "pluralsResId=$pluralsResId quantity=$quantity"
+}
+
 class BackupScheduleTest {
+
+    private val strings = FakeScheduleStringProvider()
 
     @Test
     fun disclosure_sentence_never_claims_automatic() {
         val schedule = BackupSchedule()
-        assertFalse(schedule.disclosureSentence().contains("automatic", ignoreCase = true))
+        assertFalse(schedule.disclosureSentence(strings).contains("automatic", ignoreCase = true))
     }
 
     @Test

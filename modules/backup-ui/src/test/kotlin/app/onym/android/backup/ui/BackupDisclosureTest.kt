@@ -2,10 +2,23 @@ package app.onym.android.backup.ui
 
 import app.onym.android.backup.BackupMediaPolicy
 import app.onym.android.backup.BackupTerms
+import app.onym.android.foundation.StringProvider
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/** Resource-name fake — the disclosure test only asserts on [id] and
+ *  raw [BackupTerms] field values, never on label text, so a fake that
+ *  just echoes back an identifiable marker is enough. */
+private class FakeDisclosureStringProvider : StringProvider {
+    override fun get(resId: Int): String = "resId=$resId"
+    override fun get(resId: Int, vararg formatArgs: Any): String = "resId=$resId args=${formatArgs.joinToString()}"
+    override fun getQuantity(pluralsResId: Int, quantity: Int, vararg formatArgs: Any): String =
+        "pluralsResId=$pluralsResId quantity=$quantity"
+}
+
 class BackupDisclosureTest {
+
+    private val strings = FakeDisclosureStringProvider()
 
     private fun sampleTerms(): BackupTerms {
         val json = """
@@ -30,7 +43,7 @@ class BackupDisclosureTest {
 
     @Test
     fun every_required_term_is_present_by_field_id() {
-        val items = BackupDisclosure.items("onym:component:backup-op-1", sampleTerms(), BackupMediaPolicy.DescriptorsOnly)
+        val items = BackupDisclosure.items("onym:component:backup-op-1", sampleTerms(), BackupMediaPolicy.DescriptorsOnly, strings)
         val ids = items.map { it.id }.toSet()
         for (required in listOf(
             "operator", "retention.class", "retention.period", "erasure.scope", "erasure.excluded",
@@ -44,7 +57,7 @@ class BackupDisclosureTest {
 
     @Test
     fun excluded_scope_is_rendered_verbatim() {
-        val items = BackupDisclosure.items("onym:component:backup-op-1", sampleTerms(), BackupMediaPolicy.DescriptorsOnly)
+        val items = BackupDisclosure.items("onym:component:backup-op-1", sampleTerms(), BackupMediaPolicy.DescriptorsOnly, strings)
         val excluded = items.first { it.id == "erasure.excluded" }
         assertTrue(excluded.value == "recipient copies")
     }

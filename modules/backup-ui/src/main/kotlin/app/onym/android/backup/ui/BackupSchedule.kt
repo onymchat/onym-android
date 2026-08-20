@@ -1,5 +1,7 @@
 package app.onym.android.backup.ui
 
+import app.onym.android.foundation.StringProvider
+import app.onym.android.strings.R
 import java.security.SecureRandom
 import java.time.Duration
 import java.time.Instant
@@ -64,15 +66,21 @@ data class BackupSchedule(
      *  computed from the live schedule, never a hardcoded claim of
      *  "automatically." A minimum-interval-only phrasing understates
      *  what actually happens (foreground-only, condition-gated), so
-     *  this states the real conditions plainly. */
-    fun disclosureSentence(): String {
-        val hours = minimumInterval.toHours()
-        val conditions = buildList {
-            if (requiresWifi) add("on Wi-Fi")
-            if (requiresCharging) add("while charging")
+     *  this states the real conditions plainly.
+     *
+     *  Four pre-composed templates, not fragment concatenation — see
+     *  the string resources' own comment for why gluing localized
+     *  "on Wi-Fi"/"while charging" fragments together isn't a safe
+     *  general i18n pattern even though it happens to read fine in
+     *  English. */
+    fun disclosureSentence(strings: StringProvider): String {
+        val hours = minimumInterval.toHours().toInt()
+        val resId = when {
+            requiresWifi && requiresCharging -> R.string.backup_schedule_both_conditions
+            requiresWifi -> R.string.backup_schedule_wifi_only
+            requiresCharging -> R.string.backup_schedule_charging_only
+            else -> R.string.backup_schedule_no_conditions
         }
-        val conditionClause = if (conditions.isEmpty()) "" else " " + conditions.joinToString(" and ")
-        return "Backups happen when you open the app, at most once every $hours hours,$conditionClause. " +
-            "There is no background schedule — opening the app is what gives a backup the chance to run."
+        return strings.get(resId, hours)
     }
 }

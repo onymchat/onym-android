@@ -227,6 +227,16 @@ class BackupRepository(
         terms: String,
     ) {
         if (!resolved) return
+        // The pending record's sealed bytes are only kept while
+        // something might still retry against them — once reconcile
+        // resolves the record (found retained, or confirmed the
+        // operator has no memory of it), the file is dead weight.
+        // Left undeleted, every reconciled-but-failed upload attempt
+        // accumulates a `.seal` file in the working directory forever.
+        state.pendingOperation?.let { pending ->
+            val file = File(pending.sealedFilePath)
+            if (file.exists()) file.delete()
+        }
         stateStore.save(state.copy(componentId = componentId, acceptedTermsId = terms, pendingOperation = null))
     }
 }

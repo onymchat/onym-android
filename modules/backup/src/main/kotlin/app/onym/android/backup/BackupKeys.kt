@@ -36,6 +36,14 @@ class BackupKeyMaterial(
  * Mirrors `BackupKeys` in onym-ios OnymBackup.
  */
 object BackupKeys {
+    /** Deliberately NOT componentId-scoped — per onym-system
+     *  `backup/UI-Backup-Object-HTTP.md` §5.2's derivation table, every
+     *  vendor derives the SAME archive root from one identity. This is
+     *  safe because the archive root never reaches an operator and
+     *  every snapshot draws a fresh random salt before [snapshotKey]
+     *  derives from it — two snapshots never share a key regardless of
+     *  vendor. Only [signingInfo]/[agreementInfo] are componentId-
+     *  scoped, because those keys ARE what an operator/broker sees. */
     private const val ARCHIVE_INFO = "backup-archive-v1"
     private const val SNAPSHOT_INFO = "backup-snapshot-v1"
     private const val SIGNING_INFO_PREFIX = "backup-access-ed25519-v1"

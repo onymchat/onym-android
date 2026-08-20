@@ -803,18 +803,38 @@ fun RootScreen(
                     var disclosure by remember {
                         mutableStateOf<Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>?>(null)
                     }
-                    LaunchedEffect(componentId) {
+                    // Distinct from `disclosure == null` before the
+                    // first attempt returns, so a genuinely unreachable
+                    // terms URL gets a retry affordance instead of a
+                    // permanent, indistinguishable-from-loading blank
+                    // screen.
+                    var fetchAttempts by remember { mutableStateOf(0) }
+                    var isFetching by remember { mutableStateOf(true) }
+                    LaunchedEffect(componentId, fetchAttempts) {
+                        isFetching = true
                         disclosure = backup.makeEnrolmentDisclosure()
+                        isFetching = false
                     }
                     val resolved = disclosure
                     if (resolved == null) {
-                        // Terms not yet fetched (or unreachable) —
-                        // refuse enrolment rather than offering
-                        // "continue without terms."
-                        androidx.compose.material3.Text(
-                            stringResource(R.string.settings),
+                        androidx.compose.foundation.layout.Column(
                             modifier = Modifier.testTag("backup.enrolment.loading"),
-                        )
+                        ) {
+                            if (isFetching) {
+                                androidx.compose.material3.Text(stringResource(R.string.backup_enrolment_fetching))
+                            } else {
+                                androidx.compose.material3.Text(
+                                    stringResource(R.string.backup_enrolment_fetch_failed),
+                                    modifier = Modifier.testTag("backup.enrolment.fetch_failed"),
+                                )
+                                androidx.compose.material3.Button(
+                                    onClick = { fetchAttempts += 1 },
+                                    modifier = Modifier.testTag("backup.enrolment.retry"),
+                                ) {
+                                    androidx.compose.material3.Text(stringResource(R.string.backup_enrolment_retry))
+                                }
+                            }
+                        }
                     } else {
                         val (items, scheduleSentence) = resolved
                         app.onym.android.backup.ui.BackupEnrolmentScreen(

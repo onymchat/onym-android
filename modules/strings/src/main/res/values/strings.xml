@@ -754,6 +754,111 @@
   <string name="settings_moderation_row_title">Moderation</string>
   <string name="settings_section_device_backup">Backup</string>
   <string name="settings_device_backup_row_title">Device Backup</string>
+  <plurals name="backup_vendor_count">
+    <item quantity="one">%1$d backup vendor</item>
+    <item quantity="other">%1$d backup vendors</item>
+  </plurals>
+
+  <!-- Device backup — enrolment screen -->
+  <string name="backup_enrolment_accept">Turn On Backup</string>
+  <string name="backup_enrolment_decline">Not Now</string>
+  <string name="backup_enrolment_fetching">Fetching this operator\'s terms…</string>
+  <string name="backup_enrolment_fetch_failed">Couldn\'t fetch this operator\'s terms. Backup can\'t be turned on without reviewing them first.</string>
+  <string name="backup_enrolment_retry">Retry</string>
+
+  <!-- Device backup — settings screen -->
+  <string name="backup_settings_back_up_now">Back Up Now</string>
+  <string name="backup_settings_restore_row_title">Restore From Backup</string>
+  <string name="backup_settings_restore_row_subtitle">Adds messages and chats — nothing is deleted</string>
+  <string name="backup_settings_erase">Erase Backup</string>
+
+  <!-- Device backup — status text, one entry per DeviceBackupStatus case -->
+  <string name="backup_status_off">Off</string>
+  <string name="backup_status_backed_up">Backed up</string>
+  <string name="backup_status_no_backup_yet">On — no backup yet</string>
+  <string name="backup_status_backing_up">Backing up…</string>
+  <string name="backup_status_stale">Backup is out of date</string>
+  <string name="backup_status_payment_required">Payment required to continue backing up</string>
+  <string name="backup_status_terms_changed">The operator\'s terms changed — review and re-accept to continue</string>
+  <string name="backup_status_operator_changed">Backup operator changed — review Settings</string>
+  <string name="backup_status_checking_earlier">Checking an earlier backup…</string>
+  <string name="backup_status_failed">Backup failed: %1$s</string>
+
+  <!-- Device backup — vendors list -->
+  <string name="backup_vendors_empty">No backup vendor is consented yet.</string>
+
+  <!-- Device backup — restore screen -->
+  <string name="backup_restore_intro">Adds messages and chats from your most recent backup — nothing on this device is deleted.</string>
+  <string name="backup_restore_running">Restoring…</string>
+  <string name="backup_restore_done">Done</string>
+  <string name="backup_restore_close">Close</string>
+  <string name="backup_restore_unavailable">Restore is not available right now.</string>
+  <string name="backup_restore_generic_failed">Restore failed. Nothing on this device was changed.</string>
+  <string name="backup_restore_interrupted_default">Restore was interrupted partway through.</string>
+  <string name="backup_restore_failed_prefix">Nothing was changed. %1$s</string>
+  <string name="backup_restore_partial">Restore was interrupted. Some messages and chats may already have been added — restoring again is safe and won\'t duplicate anything. %1$s</string>
+  <string name="backup_restore_nothing_found">Nothing found for this backup. If you expected history here, check that this is the same operator and identity the backup was made under.</string>
+  <plurals name="backup_restore_chats_count">
+    <item quantity="one">%1$d chat</item>
+    <item quantity="other">%1$d chats</item>
+  </plurals>
+  <plurals name="backup_restore_messages_count">
+    <item quantity="one">%1$d message</item>
+    <item quantity="other">%1$d messages</item>
+  </plurals>
+  <string name="backup_restore_summary_template">Restored %1$s and %2$s.</string>
+  <string name="backup_restore_skipped">This version of the app couldn\'t restore: %1$s.</string>
+  <plurals name="backup_restore_unresolved_blobs">
+    <item quantity="one">%1$d attachment was referenced by the backup but wasn\'t included in it.</item>
+    <item quantity="other">%1$d attachments were referenced by the backup but weren\'t included in it.</item>
+  </plurals>
+
+  <!-- Device backup — enrolment schedule sentence. Four pre-composed
+       templates, not fragment concatenation: word order for "on
+       Wi-Fi"/"while charging" varies by language, so gluing localized
+       fragments together (as the original English-only implementation
+       did) is not a safe general i18n pattern even though it happens
+       to read fine in English. -->
+  <string name="backup_schedule_both_conditions">Backups happen when you open the app, at most once every %1$d hours, on Wi-Fi and while charging. There is no background schedule — opening the app is what gives a backup the chance to run.</string>
+  <string name="backup_schedule_wifi_only">Backups happen when you open the app, at most once every %1$d hours, on Wi-Fi. There is no background schedule — opening the app is what gives a backup the chance to run.</string>
+  <string name="backup_schedule_charging_only">Backups happen when you open the app, at most once every %1$d hours, while charging. There is no background schedule — opening the app is what gives a backup the chance to run.</string>
+  <string name="backup_schedule_no_conditions">Backups happen when you open the app, at most once every %1$d hours. There is no background schedule — opening the app is what gives a backup the chance to run.</string>
+
+  <!-- Device backup — disclosure item labels (BackupTerms fields, shown
+       in full on the enrolment screen before "Turn On Backup" unlocks). -->
+  <string name="backup_disclosure_operator">Operator</string>
+  <string name="backup_disclosure_retention_class">Retention class</string>
+  <string name="backup_disclosure_retention_period">Maximum retention period</string>
+  <string name="backup_disclosure_snapshots_retained">Snapshots retained</string>
+  <string name="backup_disclosure_retention_expiry">When retention expires</string>
+  <string name="backup_disclosure_erasure_ack_deadline">Erasure acknowledged within</string>
+  <string name="backup_disclosure_erasure_completion_deadline">Erasure completed within</string>
+  <string name="backup_disclosure_erasure_scope">What erasure covers</string>
+  <string name="backup_disclosure_erasure_excluded">What erasure does NOT cover</string>
+  <string name="backup_disclosure_jurisdictions">Jurisdictions</string>
+  <string name="backup_disclosure_sub_processors">Sub-processors</string>
+  <string name="backup_disclosure_lawful_access">What a lawful-access demand can produce</string>
+  <string name="backup_disclosure_lawful_access_notify">Notified when legally permitted</string>
+  <string name="backup_disclosure_breach_notice">Breach notice</string>
+  <string name="backup_disclosure_export_format">Export format</string>
+  <string name="backup_disclosure_export_while_unpaid">Export available while unpaid</string>
+  <string name="backup_disclosure_shutdown_notice">Notice before shutdown</string>
+  <string name="backup_disclosure_end_of_payment_notice">End-of-payment notice</string>
+  <string name="backup_disclosure_end_of_payment_grace">End-of-payment grace period</string>
+  <string name="backup_disclosure_end_of_payment_during_grace">Available during grace</string>
+  <string name="backup_disclosure_end_of_payment_after_grace">After grace ends</string>
+  <string name="backup_disclosure_metadata_access_logs">Access-log retention</string>
+  <string name="backup_disclosure_metadata_size_timing">Size/timing metadata retention</string>
+  <string name="backup_disclosure_media_policy">Attachments</string>
+  <string name="backup_disclosure_media_included">Included in the backup</string>
+  <string name="backup_disclosure_media_not_included">Not included — descriptors only</string>
+  <string name="backup_disclosure_terms_digest">Terms digest</string>
+  <string name="backup_disclosure_third_party_label">What this means for people you talk to</string>
+  <string name="backup_disclosure_third_party_value">A backup extends how long this history exists for everyone in every conversation it contains — including people who did not choose this operator.</string>
+  <string name="backup_disclosure_recovery_label">Recovery</string>
+  <string name="backup_disclosure_recovery_value">Nobody — not this operator, not Onym — can recover this archive without your recovery phrase. A lost recovery phrase means a permanently unreadable backup. There is no support-driven reset.</string>
+  <string name="backup_disclosure_yes">Yes</string>
+  <string name="backup_disclosure_no">No</string>
   <string name="settings_moderation_row_consented">Consented to %1$s</string>
   <string name="settings_moderation_row_none">No authority chosen yet</string>
   <string name="moderation_settings_title">Moderation</string>

@@ -106,8 +106,12 @@ class ObjectHttpBackupClient(
         if (response.code == 200) {
             val body = response.boundedJsonBody(ObjectHttpLimits.MAX_JSON_RESPONSE_BYTES)
             if (body["uploadId"] != null) {
-                val chunkBytes = (body["chunkBytes"] as JsonPrimitive).long
-                val chunkCount = (body["chunkCount"] as JsonPrimitive).long
+                // A malformed operator response here must surface as a
+                // typed BackupError, not a raw ClassCastException —
+                // requirePrimitive throws InvalidUploadGrant on any
+                // field that isn't the JSON primitive shape it claims.
+                val chunkBytes = body.requirePrimitive("chunkBytes").long
+                val chunkCount = body.requirePrimitive("chunkCount").long
                 if (chunkBytes <= 0 || chunkBytes > ObjectHttpLimits.MAX_UPLOAD_CHUNK_BYTES) {
                     throw BackupError.LocalFailure(LocalFailureReason.InvalidUploadGrant)
                 }
@@ -129,10 +133,10 @@ class ObjectHttpBackupClient(
                 }
                 return@withContext BackupPreflight.Grant(
                     BackupUploadGrant(
-                        uploadId = (body["uploadId"] as JsonPrimitive).content,
+                        uploadId = body.requirePrimitive("uploadId").content,
                         chunkBytes = chunkBytes,
                         chunkCount = chunkCount,
-                        expiresAt = (body["expiresAt"] as JsonPrimitive).content.let(BackupFormat::instantFromRfc3339)
+                        expiresAt = body.requirePrimitive("expiresAt").content.let(BackupFormat::instantFromRfc3339)
                             ?: Instant.now(),
                     ),
                 )
@@ -324,10 +328,16 @@ class ObjectHttpBackupClient(
         val contentLength = body.contentLength()
         if (contentLength in 0..maxBytes) return body.bytes()
         // Unknown or over-declared length: read up to the bound and
-        // refuse if there's more.
-        val bytes = body.byteStream().readNBytesCompat(maxBytes + 1)
-        if (bytes.size.toLong() > maxBytes) throw BackupError.OperatorUnavailable
-        return bytes
+        // refuse if there's more. `.use {}` closes the stream (and
+        // releases the underlying connection back to OkHttp's pool)
+        // on every exit path, including the throw below — a bare
+        // `byteStream()` read that throws before closing leaks the
+        // connection.
+        return body.byteStream().use { stream ->
+            val bytes = stream.readNBytesCompat(maxBytes + 1)
+            if (bytes.size.toLong() > maxBytes) throw BackupError.OperatorUnavailable
+            bytes
+        }
     }
 
     private fun Response.boundedJsonBody(maxBytes: Long): JsonObject {
@@ -384,6 +394,12 @@ class ObjectHttpBackupClient(
     }
 
     private fun JsonObject.str(key: String): String = (this[key] as? JsonPrimitive)?.content ?: ""
+
+    /** A malformed operator response must surface as a typed
+     *  [BackupError], never a raw [ClassCastException] from an
+     *  unchecked `as JsonPrimitive`. */
+    private fun JsonObject.requirePrimitive(key: String): JsonPrimitive =
+        this[key] as? JsonPrimitive ?: throw BackupError.LocalFailure(LocalFailureReason.InvalidUploadGrant)
 
     private fun JsonObject.toReference(): SnapshotReference? {
         val digest = (this["digest"] as? JsonPrimitive)?.content ?: return null

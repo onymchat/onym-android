@@ -7,28 +7,26 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.Json
 import java.io.IOException
 import java.util.Base64
-
-/** One stored entitlement's raw bytes, keyed by (audience, offerId)
- *  for lookup. */
-@Serializable
-private data class StoredSeatEntitlement(
-    val audience: String,
-    val offerId: String,
-    val rawBytesBase64: String,
-)
 
 /**
  * Persists purchased [SeatEntitlement] credentials — one live
  * credential per `(audience, offerId)` pair, replacing any prior
- * entry for that pair on [put] but otherwise keeping undecodable or
- * foreign entries untouched (a store that discards what it can't
- * currently parse would silently drop a real purchase across an
- * app-version skew).
+ * entry for that pair on [put] but otherwise keeping every other
+ * pair's entry untouched.
+ *
+ * Each pair lives under its OWN DataStore key rather than one shared
+ * JSON array. That's load-bearing, not just tidiness: a single shared
+ * blob means one undecodable entry (a future field, a corrupt write)
+ * fails the WHOLE list's parse, and the previous implementation's
+ * `getOrDefault(emptyList())` on that failure meant the very next
+ * [put] would persist just the new entry and silently discard every
+ * other previously-purchased entitlement — exactly the loss this
+ * class's contract promises to avoid. Per-key storage makes that
+ * failure mode structurally impossible: [put] only ever writes its
+ * own key, and a decode failure on one entry in [all] only drops that
+ * one entry.
  *
  * Mirrors `SeatEntitlementStore` (`FileSeatEntitlementStore` in the
  * app target) in onym-ios OnymBilling. A DataStore-backed
@@ -47,45 +45,36 @@ class DataStorePreferencesSeatEntitlementStore(
     private val dataStore: DataStore<Preferences>,
 ) : SeatEntitlementStore {
 
-    override suspend fun get(audience: String, offerId: String): SeatEntitlement? =
-        loadAll().firstOrNull { it.audience == audience && it.offerId == offerId }
-            ?.let { decodeOrNull(it) }
+    override suspend fun get(audience: String, offerId: String): SeatEntitlement? {
+        val raw = snapshot()[keyFor(audience, offerId)] ?: return null
+        return decodeOrNull(raw)
+    }
 
     override suspend fun put(entitlement: SeatEntitlement) {
-        val existing = loadRaw()
-        val filtered = existing.filterNot { it.audience == entitlement.audience && it.offerId == entitlement.offerId }
-        val updated = filtered + StoredSeatEntitlement(
-            audience = entitlement.audience,
-            offerId = entitlement.offerId,
-            rawBytesBase64 = Base64.getEncoder().encodeToString(entitlement.rawBytes),
-        )
-        save(updated)
-    }
-
-    override suspend fun all(): List<SeatEntitlement> = loadRaw().mapNotNull(::decodeOrNull)
-
-    private fun decodeOrNull(stored: StoredSeatEntitlement): SeatEntitlement? = runCatching {
-        SeatEntitlement.decode(Base64.getDecoder().decode(stored.rawBytesBase64))
-    }.getOrNull()
-
-    private suspend fun loadAll(): List<StoredSeatEntitlement> = loadRaw()
-
-    private suspend fun loadRaw(): List<StoredSeatEntitlement> {
-        val raw = dataStore.data
-            .catch { failure -> if (failure is IOException) emit(emptyPreferences()) else throw failure }
-            .first()[KEY] ?: return emptyList()
-        return runCatching {
-            Json.decodeFromString(ListSerializer(StoredSeatEntitlement.serializer()), raw)
-        }.getOrDefault(emptyList())
-    }
-
-    private suspend fun save(entries: List<StoredSeatEntitlement>) {
         dataStore.edit { preferences ->
-            preferences[KEY] = Json.encodeToString(ListSerializer(StoredSeatEntitlement.serializer()), entries)
+            preferences[keyFor(entitlement.audience, entitlement.offerId)] =
+                Base64.getEncoder().encodeToString(entitlement.rawBytes)
         }
     }
 
+    override suspend fun all(): List<SeatEntitlement> =
+        snapshot().asMap().entries
+            .filter { (key, _) -> key.name.startsWith(KEY_PREFIX) }
+            .mapNotNull { (_, value) -> decodeOrNull(value as? String ?: return@mapNotNull null) }
+
+    private suspend fun snapshot(): Preferences =
+        dataStore.data
+            .catch { failure -> if (failure is IOException) emit(emptyPreferences()) else throw failure }
+            .first()
+
+    private fun decodeOrNull(base64: String): SeatEntitlement? = runCatching {
+        SeatEntitlement.decode(Base64.getDecoder().decode(base64))
+    }.getOrNull()
+
+    private fun keyFor(audience: String, offerId: String) =
+        stringPreferencesKey("$KEY_PREFIX${audience}|$offerId")
+
     private companion object {
-        val KEY = stringPreferencesKey("seat_entitlements")
+        const val KEY_PREFIX = "seat_entitlement."
     }
 }

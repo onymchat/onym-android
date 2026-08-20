@@ -16,7 +16,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.onym.android.strings.R
 
 /**
  * The device-backup consent screen. Leads with, in this order: (1)
@@ -47,13 +49,13 @@ fun BackupEnrolmentScreen(
             LazyColumn(state = listState, modifier = Modifier.weight(1f, fill = true)) {
                 item {
                     Text(
-                        BackupDisclosure.THIRD_PARTY_CONSEQUENCE,
+                        stringResource(R.string.backup_disclosure_third_party_value),
                         modifier = Modifier.padding(16.dp).testTag("backup.enrolment.third_party"),
                     )
                 }
                 item {
                     Text(
-                        BackupDisclosure.NO_RESET_PATH,
+                        stringResource(R.string.backup_disclosure_recovery_value),
                         modifier = Modifier.padding(16.dp).testTag("backup.enrolment.no_reset"),
                     )
                 }
@@ -79,10 +81,10 @@ fun BackupEnrolmentScreen(
                     enabled = reachedEnd,
                     modifier = Modifier.testTag("backup.enrolment.accept"),
                 ) {
-                    Text("Turn On Backup")
+                    Text(stringResource(R.string.backup_enrolment_accept))
                 }
                 Button(onClick = onDecline, modifier = Modifier.testTag("backup.enrolment.decline")) {
-                    Text("Not Now")
+                    Text(stringResource(R.string.backup_enrolment_decline))
                 }
             }
         }

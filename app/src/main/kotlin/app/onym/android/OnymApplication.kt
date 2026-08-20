@@ -1623,11 +1623,17 @@ class OnymApplication : Application() {
         // at once (see `BackupSeat`'s doc comment). Empty exactly when
         // no operator is consented yet or the active identity has no
         // recovery phrase — see `BackupSeatComposer`'s doc comment.
-        // Resolved synchronously at boot, same posture as the
-        // Blossom-server bootstrap above (`runBlocking` over a handful
-        // of local DataStore reads, never a network call at this
-        // point — every manifest was already verified when it was
-        // consented).
+        // Resolved synchronously at boot via `runBlocking`, but
+        // `composeAll` itself does only local DataStore reads and
+        // manifest parsing here — no network call (every manifest was
+        // already verified when it was consented) and, load-bearingly,
+        // NO BIP39 seed derivation. Deriving a vendor's key material is
+        // a 2048-round PBKDF2-HMAC-SHA512 stretch — several hundred ms
+        // — and `composeAll` builds one vendor per consented operator,
+        // so doing that here would multiply straight into ANR
+        // territory for anyone backing up to more than one vendor.
+        // `BackupSeatComposer.composeOne`'s `SuspendLazy` defers it to
+        // the first actual backup/restore/erase/enrolment-accept call.
         val backupVendors: List<app.onym.android.BackupUiDependencies> = try {
             kotlinx.coroutines.runBlocking {
                 app.onym.android.backup.BackupSeatComposer.composeAll(
@@ -1641,6 +1647,7 @@ class OnymApplication : Application() {
                     filesDir = applicationContext.filesDir,
                     scope = applicationScope,
                     backupStateDataStore = applicationContext.backupDataStore,
+                    strings = app.onym.android.foundation.AndroidStringProvider(applicationContext),
                 )
             }
         } catch (_: Exception) {

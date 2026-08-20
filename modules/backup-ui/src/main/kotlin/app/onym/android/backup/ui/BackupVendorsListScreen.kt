@@ -8,6 +8,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import app.onym.android.strings.R
 
 /** One vendor row's display data — a plain snapshot, not a live
  *  dependency bundle, so this screen doesn't need to know how a
@@ -34,7 +36,7 @@ fun BackupVendorsListScreen(
     Scaffold(modifier = modifier) { padding ->
         if (vendors.isEmpty()) {
             Text(
-                "No backup vendor is consented yet.",
+                stringResource(R.string.backup_vendors_empty),
                 modifier = Modifier.testTag("backup.vendors.empty"),
             )
         } else {

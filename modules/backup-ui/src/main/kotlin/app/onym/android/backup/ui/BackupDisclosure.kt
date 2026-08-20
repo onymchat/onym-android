@@ -2,6 +2,8 @@ package app.onym.android.backup.ui
 
 import app.onym.android.backup.BackupMediaPolicy
 import app.onym.android.backup.BackupTerms
+import app.onym.android.foundation.StringProvider
+import app.onym.android.strings.R
 
 /** One rendered disclosure line. [id] is a stable, testable handle —
  *  the enrolment-screen fixture asserts presence by [id], not by
@@ -24,57 +26,66 @@ object BackupDisclosure {
     /** Two fixed strings the spec requires regardless of what any
      *  operator declares: the third-party consequence, and that there
      *  is no operator-side reset path. */
-    const val THIRD_PARTY_CONSEQUENCE =
-        "A backup extends how long this history exists for everyone in every conversation it contains — " +
-            "including people who did not choose this operator."
-    const val NO_RESET_PATH =
-        "Nobody — not this operator, not Onym — can recover this archive without your recovery phrase. " +
-            "A lost recovery phrase means a permanently unreadable backup. There is no support-driven reset."
+    fun thirdPartyConsequence(strings: StringProvider): String = strings[R.string.backup_disclosure_third_party_value]
 
-    fun items(operatorComponentId: String, terms: BackupTerms, mediaPolicy: BackupMediaPolicy): List<BackupDisclosureItem> =
-        listOf(
-            BackupDisclosureItem("operator", "Operator", operatorComponentId),
-            BackupDisclosureItem("retention.class", "Retention class", terms.retention.retentionClass),
-            BackupDisclosureItem("retention.period", "Maximum retention period", terms.retention.maximumRetentionPeriod),
-            BackupDisclosureItem("retention.snapshotsRetained", "Snapshots retained", terms.retention.snapshotsRetained),
-            BackupDisclosureItem("retention.expiryBehavior", "When retention expires", terms.retention.expiryBehavior),
-            BackupDisclosureItem("erasure.acknowledgementDeadline", "Erasure acknowledged within", terms.erasure.acknowledgementDeadline),
-            BackupDisclosureItem("erasure.completionDeadline", "Erasure completed within", terms.erasure.completionDeadline),
-            BackupDisclosureItem("erasure.scope", "What erasure covers", terms.erasure.scope),
-            BackupDisclosureItem("erasure.excluded", "What erasure does NOT cover", terms.erasure.excluded),
-            BackupDisclosureItem("jurisdictions", "Jurisdictions", terms.jurisdictions.joinToString(", ")),
+    fun noResetPath(strings: StringProvider): String = strings[R.string.backup_disclosure_recovery_value]
+
+    fun items(
+        operatorComponentId: String,
+        terms: BackupTerms,
+        mediaPolicy: BackupMediaPolicy,
+        strings: StringProvider,
+    ): List<BackupDisclosureItem> {
+        val yes = strings[R.string.backup_disclosure_yes]
+        val no = strings[R.string.backup_disclosure_no]
+        return listOf(
+            BackupDisclosureItem("operator", strings[R.string.backup_disclosure_operator], operatorComponentId),
+            BackupDisclosureItem("retention.class", strings[R.string.backup_disclosure_retention_class], terms.retention.retentionClass),
+            BackupDisclosureItem("retention.period", strings[R.string.backup_disclosure_retention_period], terms.retention.maximumRetentionPeriod),
+            BackupDisclosureItem("retention.snapshotsRetained", strings[R.string.backup_disclosure_snapshots_retained], terms.retention.snapshotsRetained),
+            BackupDisclosureItem("retention.expiryBehavior", strings[R.string.backup_disclosure_retention_expiry], terms.retention.expiryBehavior),
+            BackupDisclosureItem("erasure.acknowledgementDeadline", strings[R.string.backup_disclosure_erasure_ack_deadline], terms.erasure.acknowledgementDeadline),
+            BackupDisclosureItem("erasure.completionDeadline", strings[R.string.backup_disclosure_erasure_completion_deadline], terms.erasure.completionDeadline),
+            BackupDisclosureItem("erasure.scope", strings[R.string.backup_disclosure_erasure_scope], terms.erasure.scope),
+            BackupDisclosureItem("erasure.excluded", strings[R.string.backup_disclosure_erasure_excluded], terms.erasure.excluded),
+            BackupDisclosureItem("jurisdictions", strings[R.string.backup_disclosure_jurisdictions], terms.jurisdictions.joinToString(", ")),
             BackupDisclosureItem(
                 "subProcessors",
-                "Sub-processors",
+                strings[R.string.backup_disclosure_sub_processors],
                 terms.subProcessors.joinToString(", ") { "${it.role} (${it.jurisdiction})" },
             ),
-            BackupDisclosureItem("lawfulAccess.disclosure", "What a lawful-access demand can produce", terms.lawfulAccess.disclosureWhatIsProduced),
+            BackupDisclosureItem("lawfulAccess.disclosure", strings[R.string.backup_disclosure_lawful_access], terms.lawfulAccess.disclosureWhatIsProduced),
             BackupDisclosureItem(
                 "lawfulAccess.notify",
-                "Notified when legally permitted",
-                if (terms.lawfulAccess.notifyHolderWhenPermitted) "Yes" else "No",
+                strings[R.string.backup_disclosure_lawful_access_notify],
+                if (terms.lawfulAccess.notifyHolderWhenPermitted) yes else no,
             ),
-            BackupDisclosureItem("breachDisclosure.holderNotice", "Breach notice", terms.breachDisclosureHolderNotice),
-            BackupDisclosureItem("export.format", "Export format", terms.export.format),
+            BackupDisclosureItem("breachDisclosure.holderNotice", strings[R.string.backup_disclosure_breach_notice], terms.breachDisclosureHolderNotice),
+            BackupDisclosureItem("export.format", strings[R.string.backup_disclosure_export_format], terms.export.format),
             BackupDisclosureItem(
                 "export.availableWhileUnpaid",
-                "Export available while unpaid",
-                if (terms.export.availableWhileUnpaid) "Yes" else "No",
+                strings[R.string.backup_disclosure_export_while_unpaid],
+                if (terms.export.availableWhileUnpaid) yes else no,
             ),
-            BackupDisclosureItem("shutdownNotice", "Notice before shutdown", terms.shutdownNotice),
-            BackupDisclosureItem("endOfPayment.notice", "End-of-payment notice", terms.endOfPayment.notice),
-            BackupDisclosureItem("endOfPayment.grace", "End-of-payment grace period", terms.endOfPayment.grace),
-            BackupDisclosureItem("endOfPayment.duringGrace", "Available during grace", terms.endOfPayment.duringGrace.joinToString(", ")),
-            BackupDisclosureItem("endOfPayment.afterGrace", "After grace ends", terms.endOfPayment.afterGrace),
-            BackupDisclosureItem("metadataRetention.accessLogs", "Access-log retention", terms.metadataRetention.accessLogs),
-            BackupDisclosureItem("metadataRetention.sizeAndTiming", "Size/timing metadata retention", terms.metadataRetention.sizeAndTiming),
+            BackupDisclosureItem("shutdownNotice", strings[R.string.backup_disclosure_shutdown_notice], terms.shutdownNotice),
+            BackupDisclosureItem("endOfPayment.notice", strings[R.string.backup_disclosure_end_of_payment_notice], terms.endOfPayment.notice),
+            BackupDisclosureItem("endOfPayment.grace", strings[R.string.backup_disclosure_end_of_payment_grace], terms.endOfPayment.grace),
+            BackupDisclosureItem("endOfPayment.duringGrace", strings[R.string.backup_disclosure_end_of_payment_during_grace], terms.endOfPayment.duringGrace.joinToString(", ")),
+            BackupDisclosureItem("endOfPayment.afterGrace", strings[R.string.backup_disclosure_end_of_payment_after_grace], terms.endOfPayment.afterGrace),
+            BackupDisclosureItem("metadataRetention.accessLogs", strings[R.string.backup_disclosure_metadata_access_logs], terms.metadataRetention.accessLogs),
+            BackupDisclosureItem("metadataRetention.sizeAndTiming", strings[R.string.backup_disclosure_metadata_size_timing], terms.metadataRetention.sizeAndTiming),
             BackupDisclosureItem(
                 "mediaPolicy",
-                "Attachments",
-                if (mediaPolicy == BackupMediaPolicy.IncludeCiphertext) "Included in the backup" else "Not included — descriptors only",
+                strings[R.string.backup_disclosure_media_policy],
+                if (mediaPolicy == BackupMediaPolicy.IncludeCiphertext) {
+                    strings[R.string.backup_disclosure_media_included]
+                } else {
+                    strings[R.string.backup_disclosure_media_not_included]
+                },
             ),
-            BackupDisclosureItem("termsId", "Terms digest", terms.termsId),
-            BackupDisclosureItem("thirdPartyConsequence", "What this means for people you talk to", THIRD_PARTY_CONSEQUENCE),
-            BackupDisclosureItem("noResetPath", "Recovery", NO_RESET_PATH),
+            BackupDisclosureItem("termsId", strings[R.string.backup_disclosure_terms_digest], terms.termsId),
+            BackupDisclosureItem("thirdPartyConsequence", strings[R.string.backup_disclosure_third_party_label], thirdPartyConsequence(strings)),
+            BackupDisclosureItem("noResetPath", strings[R.string.backup_disclosure_recovery_label], noResetPath(strings)),
         )
+    }
 }

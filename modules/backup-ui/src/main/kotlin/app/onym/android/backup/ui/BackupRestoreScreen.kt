@@ -12,11 +12,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.onym.android.backup.BackupError
 import app.onym.android.backup.BackupRestoreSummary
 import app.onym.android.backup.LocalFailureReason
+import app.onym.android.foundation.AndroidStringProvider
+import app.onym.android.foundation.StringProvider
+import app.onym.android.strings.R
 import kotlinx.coroutines.launch
 
 internal sealed class RestoreScreenState {
@@ -56,13 +61,18 @@ fun BackupRestoreScreen(
 ) {
     var state by remember { mutableStateOf<RestoreScreenState>(RestoreScreenState.Idle) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val strings = remember(context) { AndroidStringProvider(context) }
+    val genericFailedMessage = stringResource(R.string.backup_restore_generic_failed)
+    val interruptedDefaultMessage = stringResource(R.string.backup_restore_interrupted_default)
+    val unavailableMessage = stringResource(R.string.backup_restore_unavailable)
 
     Scaffold(modifier = modifier) { padding ->
         Column(modifier = Modifier.padding(padding).padding(16.dp)) {
             when (val current = state) {
                 is RestoreScreenState.Idle -> {
                     Text(
-                        "Adds messages and chats from your most recent backup — nothing on this device is deleted.",
+                        stringResource(R.string.backup_restore_intro),
                         modifier = Modifier.testTag("backup.restore.intro"),
                     )
                     Button(
@@ -72,7 +82,7 @@ fun BackupRestoreScreen(
                                 state = try {
                                     val summary = makeRestoreFlow?.invoke()
                                     if (summary == null) {
-                                        RestoreScreenState.Failed("Restore is not available right now.")
+                                        RestoreScreenState.Failed(unavailableMessage)
                                     } else {
                                         RestoreScreenState.Done(summary)
                                     }
@@ -82,56 +92,49 @@ fun BackupRestoreScreen(
                                         // earlier rows in this attempt are
                                         // already committed (writes are
                                         // idempotent insertOrUpdate).
-                                        RestoreScreenState.PartiallyRestored(
-                                            e.message ?: "Restore was interrupted partway through.",
-                                        )
+                                        RestoreScreenState.PartiallyRestored(e.message ?: interruptedDefaultMessage)
                                     } else {
-                                        RestoreScreenState.Failed(
-                                            e.message ?: "Restore failed. Nothing on this device was changed.",
-                                        )
+                                        RestoreScreenState.Failed(e.message ?: genericFailedMessage)
                                     }
                                 } catch (e: Exception) {
                                     // Gates 1 (verify) and 2 (decode)
                                     // never write — a failure here
                                     // genuinely leaves the device
                                     // untouched.
-                                    RestoreScreenState.Failed(
-                                        e.message ?: "Restore failed. Nothing on this device was changed.",
-                                    )
+                                    RestoreScreenState.Failed(e.message ?: genericFailedMessage)
                                 }
                             }
                         },
                         modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.start"),
                     ) {
-                        Text("Restore From Backup")
+                        Text(stringResource(R.string.backup_settings_restore_row_title))
                     }
                 }
                 is RestoreScreenState.Running -> {
-                    Text("Restoring…", modifier = Modifier.testTag("backup.restore.running"))
+                    Text(stringResource(R.string.backup_restore_running), modifier = Modifier.testTag("backup.restore.running"))
                 }
                 is RestoreScreenState.Done -> {
-                    RestoreSummaryText(current.summary)
+                    Text(restoreSummaryText(current.summary, strings), modifier = Modifier.testTag("backup.restore.summary"))
                     Button(onClick = onDone, modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.done")) {
-                        Text("Done")
+                        Text(stringResource(R.string.backup_restore_done))
                     }
                 }
                 is RestoreScreenState.Failed -> {
                     Text(
-                        "Nothing was changed. ${current.message}",
+                        stringResource(R.string.backup_restore_failed_prefix, current.message),
                         modifier = Modifier.testTag("backup.restore.failed"),
                     )
                     Button(onClick = onDone, modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.close")) {
-                        Text("Close")
+                        Text(stringResource(R.string.backup_restore_close))
                     }
                 }
                 is RestoreScreenState.PartiallyRestored -> {
                     Text(
-                        "Restore was interrupted. Some messages and chats may already have been added — " +
-                            "restoring again is safe and won't duplicate anything. ${current.message}",
+                        stringResource(R.string.backup_restore_partial, current.message),
                         modifier = Modifier.testTag("backup.restore.partial"),
                     )
                     Button(onClick = onDone, modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.close_partial")) {
-                        Text("Close")
+                        Text(stringResource(R.string.backup_restore_close))
                     }
                 }
             }
@@ -139,29 +142,29 @@ fun BackupRestoreScreen(
     }
 }
 
-@Composable
-private fun RestoreSummaryText(summary: BackupRestoreSummary) {
-    Text(restoreSummaryText(summary), modifier = Modifier.testTag("backup.restore.summary"))
-}
-
-/** Pure — testable without composing anything. */
-internal fun restoreSummaryText(summary: BackupRestoreSummary): String {
+/** Pure — testable with a fake [StringProvider] without composing
+ *  anything (see `RecoveryPhraseBackupViewModel`'s use of the same
+ *  seam elsewhere in this codebase for the precedent). */
+internal fun restoreSummaryText(summary: BackupRestoreSummary, strings: StringProvider): String {
     val totalWritten = summary.groups + summary.messages + summary.invitations + summary.consents + summary.blobs
     if (totalWritten == 0) {
         // Deliberately not framed as a failure or a warning — an
         // empty result under a different operator or identity is
         // exactly what this looks like when nothing is wrong.
-        return "Nothing found for this backup. If you expected history here, check that this is the same " +
-            "operator and identity the backup was made under."
+        return strings[R.string.backup_restore_nothing_found]
     }
     val parts = mutableListOf<String>()
-    parts += "Restored ${summary.groups} chat(s) and ${summary.messages} message(s)."
+    parts += strings.get(
+        R.string.backup_restore_summary_template,
+        strings.getQuantity(R.plurals.backup_restore_chats_count, summary.groups),
+        strings.getQuantity(R.plurals.backup_restore_messages_count, summary.messages),
+    )
     if (summary.skipped.isNotEmpty()) {
         val skippedText = summary.skipped.entries.joinToString(", ") { (kind, count) -> "$count $kind" }
-        parts += "This version of the app couldn't restore: $skippedText."
+        parts += strings.get(R.string.backup_restore_skipped, skippedText)
     }
     if (summary.unresolvedBlobs.isNotEmpty()) {
-        parts += "${summary.unresolvedBlobs.size} attachment(s) were referenced by the backup but weren't included in it."
+        parts += strings.getQuantity(R.plurals.backup_restore_unresolved_blobs, summary.unresolvedBlobs.size)
     }
     return parts.joinToString(" ")
 }

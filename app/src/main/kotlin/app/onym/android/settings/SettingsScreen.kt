@@ -306,8 +306,9 @@ fun SettingsScreen(
                                 SettingsTileBox(Icons.Filled.Backup, SettingsTile.Indigo)
                             },
                             title = stringResource(R.string.settings_device_backup_row_title),
-                            subtitle = stringResource(
-                                R.string.endpoints_configured_count,
+                            subtitle = androidx.compose.ui.res.pluralStringResource(
+                                R.plurals.backup_vendor_count,
+                                deviceBackupVendorCount,
                                 deviceBackupVendorCount,
                             ),
                             onClick = onDeviceBackupClick,

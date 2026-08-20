@@ -15,10 +15,41 @@ import app.onym.android.identity.IdentityRepository
 import app.onym.android.transport.blossom.BlossomClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+
+/**
+ * Memoized suspend initializer — computes [initializer] at most once,
+ * on first [get], and caches the result. Used to keep expensive,
+ * seed-derived construction (BIP39 PBKDF2 stretch, wire client) off
+ * the app-boot path: [BackupSeatComposer] builds every vendor's cheap
+ * surface (status display, terms fetch) eagerly, but defers this
+ * until the person actually taps something that needs it.
+ */
+private class SuspendLazy<T>(private val initializer: suspend () -> T) {
+    private val mutex = Mutex()
+    @Volatile private var cached: T? = null
+
+    suspend fun get(): T {
+        cached?.let { return it }
+        return mutex.withLock {
+            cached ?: initializer().also { cached = it }
+        }
+    }
+}
+
+/** The expensive, seed-derived half of one vendor's dependencies —
+ *  everything [SuspendLazy]-deferred by [BackupSeatComposer]. */
+private class VendorRuntime(
+    val keyMaterial: BackupKeyMaterial,
+    val client: ObjectHttpBackupClient,
+    val repository: BackupRepository,
+    val restorer: BackupRestorer,
+)
 
 /**
  * Builds one [BackupUiDependencies] per consented backup vendor — a
@@ -47,6 +78,7 @@ object BackupSeatComposer {
         filesDir: File,
         scope: CoroutineScope,
         backupStateDataStore: DataStore<Preferences>,
+        strings: app.onym.android.foundation.StringProvider,
     ): List<BackupUiDependencies> {
         // No recovery phrase (raw-key-imported identity) means no
         // seed to derive ANY backup key from — hide the whole feature
@@ -72,6 +104,7 @@ object BackupSeatComposer {
                     filesDir = filesDir,
                     scope = scope,
                     backupStateDataStore = backupStateDataStore,
+                    strings = strings,
                 )
             }.getOrNull()
             // A single vendor failing to compose (malformed manifest,
@@ -92,64 +125,75 @@ object BackupSeatComposer {
         filesDir: File,
         scope: CoroutineScope,
         backupStateDataStore: DataStore<Preferences>,
+        strings: app.onym.android.foundation.StringProvider,
     ): BackupUiDependencies? {
         val manifest = BackupSeat.manifest(consent) ?: return null
         val endpoint = manifest.endpoint ?: return null
 
-        val seedDeriving = object : BackupSeedDeriving {
-            override suspend fun deriveSeedScopedKey(info: String): ByteArray =
-                identityRepository.deriveSeedScopedKey(info)
-            override suspend fun deriveSeedScopedKeys(infos: List<String>): List<ByteArray> =
-                identityRepository.deriveSeedScopedKeys(infos)
-        }
-        val keyMaterial = try {
-            BackupKeys.material(seedDeriving, manifest.componentId)
-        } catch (_: Exception) {
-            return null
-        }
-
         val workingDir = BackupSeat.workingDirectory(filesDir, manifest.componentId)
         val blobDir = BackupSeat.blobDirectory(filesDir, manifest.componentId)
-        val holderReference = BackupKeys.holderReference(keyMaterial.accessSigningKey.generatePublicKey().encoded)
-
         val stateStore = DataStorePreferencesBackupStateStore(backupStateDataStore, manifest.componentId)
 
-        // Read fresh per request, never captured — a paid operator
-        // must not keep refusing after a successful purchase just
-        // because a stale `null` was captured at construction time.
-        // Entitlement redemption/storage lands with the Play Billing
-        // purchase flow; until then this operator's uploads proceed
-        // unauthenticated on the entitlement axis (fine for a free
-        // operator, refused with `payment_required` by a paid one,
-        // surfaced to Settings as `PaymentRequired`).
-        val entitlementProvider: suspend () -> String? = { null }
+        // Everything below this point is expensive (BIP39 seed
+        // derivation is a 2048-round PBKDF2-HMAC-SHA512 stretch — a
+        // few hundred milliseconds, per vendor) and is deliberately
+        // NEVER constructed eagerly here: `composeAll` runs inside
+        // `runBlocking` on the app-boot thread, and a device backing
+        // up to several vendors would multiply that cost straight
+        // into ANR territory. `runtime` builds it once, off the boot
+        // path, the first time a closure below is actually invoked
+        // (tapping "Back Up Now", opening enrolment's accept flow,
+        // restoring, or erasing) — never merely for showing the
+        // Settings row's status, which only reads `stateStore`.
+        val runtime = SuspendLazy {
+            val seedDeriving = object : BackupSeedDeriving {
+                override suspend fun deriveSeedScopedKey(info: String): ByteArray =
+                    identityRepository.deriveSeedScopedKey(info)
+                override suspend fun deriveSeedScopedKeys(infos: List<String>): List<ByteArray> =
+                    identityRepository.deriveSeedScopedKeys(infos)
+            }
+            val keyMaterial = BackupKeys.material(seedDeriving, manifest.componentId)
+            val holderReference = BackupKeys.holderReference(keyMaterial.accessSigningKey.generatePublicKey().encoded)
 
-        val client = ObjectHttpBackupClient(
-            baseUrl = endpoint,
-            httpClient = httpClient,
-            signingKey = keyMaterial.accessSigningKey,
-            holderReference = holderReference,
-            entitlementProvider = entitlementProvider,
-        )
+            // Read fresh per request, never captured — a paid operator
+            // must not keep refusing after a successful purchase just
+            // because a stale `null` was captured at construction time.
+            // Entitlement redemption/storage lands with the Play Billing
+            // purchase flow; until then this operator's uploads proceed
+            // unauthenticated on the entitlement axis (fine for a free
+            // operator, refused with `payment_required` by a paid one,
+            // surfaced to Settings as `PaymentRequired`).
+            val entitlementProvider: suspend () -> String? = { null }
 
-        val source = AppBackupSource(
-            groupStore = groupStore,
-            messageStore = messageStore,
-            invitationStore = invitationStore,
-            consentStore = consentStore,
-            blossomClient = blossomClient,
-            identityCountProvider = { identityRepository.identities.value.size },
-        )
-        val sink = AppBackupSink(
-            groupStore = groupStore,
-            messageStore = messageStore,
-            invitationStore = invitationStore,
-            consentStore = consentStore,
-            blobWriter = { sha256, ciphertext -> File(blobDir, sha256).writeBytes(ciphertext) },
-        )
-        val composer = BackupComposer(source, BackupMediaPolicy.DescriptorsOnly, workingDir)
-        val repository = BackupRepository(client, composer, stateStore, workingDir)
-        val restorer = BackupRestorer(sink)
+            val client = ObjectHttpBackupClient(
+                baseUrl = endpoint,
+                httpClient = httpClient,
+                signingKey = keyMaterial.accessSigningKey,
+                holderReference = holderReference,
+                entitlementProvider = entitlementProvider,
+            )
+
+            val source = AppBackupSource(
+                groupStore = groupStore,
+                messageStore = messageStore,
+                invitationStore = invitationStore,
+                consentStore = consentStore,
+                blossomClient = blossomClient,
+                identityCountProvider = { identityRepository.identities.value.size },
+            )
+            val sink = AppBackupSink(
+                groupStore = groupStore,
+                messageStore = messageStore,
+                invitationStore = invitationStore,
+                consentStore = consentStore,
+                blobWriter = { sha256, ciphertext -> File(blobDir, sha256).writeBytes(ciphertext) },
+            )
+            val composer = BackupComposer(source, BackupMediaPolicy.DescriptorsOnly, workingDir)
+            val repository = BackupRepository(client, composer, stateStore, workingDir)
+            val restorer = BackupRestorer(sink)
+
+            VendorRuntime(keyMaterial, client, repository, restorer)
+        }
 
         val schedule = BackupSchedule()
         val settingsFlow = DeviceBackupSettingsFlow(
@@ -186,14 +230,44 @@ object BackupSeatComposer {
                 if (acceptedTermsId == null) {
                     settingsFlow.reportFailed("Backup has not been turned on yet")
                 } else {
-                    runBackup { repository.backUp(keyMaterial, manifest.componentId, acceptedTermsId) }
+                    runBackup {
+                        val rt = runtime.get()
+                        rt.repository.backUp(rt.keyMaterial, manifest.componentId, acceptedTermsId)
+                    }
                 }
             },
-            retryAfterPurchase = { runBackup { repository.retry(manifest.componentId) } },
+            retryAfterPurchase = { runBackup { runtime.get().repository.retry(manifest.componentId) } },
             erase = {
                 settingsFlow.markRunning()
                 try {
-                    client.eraseSnapshot(ErasureScope.All)
+                    val receipt = runtime.get().client.eraseSnapshot(ErasureScope.All)
+                    // Erasure touches local state too: nothing is
+                    // retained at the operator anymore, so a pending
+                    // operation/payment referencing a now-erased
+                    // snapshot is moot, and `lastSuccessAtEpochSeconds`
+                    // must stop claiming a backup exists. The pinned
+                    // terms survive — erase doesn't turn backup off,
+                    // it clears what was retained under it. The
+                    // receipt itself is kept, not discarded, so
+                    // `isCompletionPending` is actually checkable
+                    // later against the clock, not just true for the
+                    // lifetime of this call.
+                    val current = stateStore.load() ?: PersistedBackupState()
+                    stateStore.save(
+                        current.copy(
+                            pendingOperation = null,
+                            pendingPayment = null,
+                            lastSuccessAtEpochSeconds = null,
+                            lastErasureReceipt = PersistedErasureReceipt(
+                                receiptId = receipt.receiptId,
+                                acknowledgedAtEpochSeconds = receipt.acknowledgedAt.epochSecond,
+                                completionCommittedByEpochSeconds = receipt.completionCommittedBy.epochSecond,
+                                coveredScope = receipt.coveredScope,
+                                excludedScope = receipt.excludedScope,
+                                termsId = receipt.termsId,
+                            ),
+                        ),
+                    )
                 } catch (e: Exception) {
                     // A destructive, privacy-sensitive user action —
                     // the whole point of the affordance is that the
@@ -206,7 +280,7 @@ object BackupSeatComposer {
                 }
             },
             makeEnrolmentDisclosure = {
-                fetchAndDisclose(client = httpClient, manifest = manifest, schedule = schedule)
+                fetchAndDisclose(client = httpClient, manifest = manifest, schedule = schedule, strings = strings)
             },
             acceptEnrolment = { termsId ->
                 val current = stateStore.load() ?: PersistedBackupState()
@@ -218,15 +292,16 @@ object BackupSeatComposer {
                 // — a different operator or a different identity has a
                 // different holder key and legitimately sees nothing.
                 // "Your history is gone" would be the wrong read here.
-                val snapshots = client.listSnapshots()
+                val rt = runtime.get()
+                val snapshots = rt.client.listSnapshots()
                 val latest = snapshots.maxByOrNull { it.retainedAt }
                 if (latest == null) {
                     BackupRestoreSummary(0, 0, 0, 0, 0, emptyMap(), emptyList())
                 } else {
                     val sealedFile = File(workingDir, "restore-${latest.snapshotReference.digest.removePrefix("sha256:")}.seal")
                     try {
-                        client.downloadSnapshot(latest.snapshotReference, sealedFile)
-                        restorer.restore(sealedFile, latest.snapshotReference, keyMaterial, workingDir)
+                        rt.client.downloadSnapshot(latest.snapshotReference, sealedFile)
+                        rt.restorer.restore(sealedFile, latest.snapshotReference, rt.keyMaterial, workingDir)
                     } finally {
                         sealedFile.delete()
                     }
@@ -239,6 +314,7 @@ object BackupSeatComposer {
         client: OkHttpClient,
         manifest: BackupOperatorManifest,
         schedule: BackupSchedule,
+        strings: app.onym.android.foundation.StringProvider,
     ): Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>? = withContext(Dispatchers.IO) {
         val termsUrl = manifest.termsUrl(manifest.declaredTermsDigest) ?: return@withContext null
         try {
@@ -253,8 +329,9 @@ object BackupSeatComposer {
                 manifest.componentId,
                 terms,
                 BackupMediaPolicy.DescriptorsOnly,
+                strings,
             )
-            items to schedule.disclosureSentence()
+            items to schedule.disclosureSentence(strings)
         } catch (_: Exception) {
             null
         }

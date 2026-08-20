@@ -15,6 +15,15 @@ android {
         minSdk = 26
     }
 
+    // Hard i18n gate, same as :strings / :moderation-ui: every string
+    // this module adds must land in every `res/values-<lang>/`,
+    // otherwise lint MissingTranslation fails.
+    lint {
+        checkReleaseBuilds = true
+        abortOnError = true
+        disable.remove("MissingTranslation")
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -35,6 +44,10 @@ dependencies {
     // api: SeatEntitlement / ServiceEntitlement types appear in the
     // purchase-gated status surfaces.
     api(project(":foundation"))
+    // implementation: R.string / R.plurals references only, resolved
+    // via stringResource/pluralStringResource inside this module's
+    // own Composables — no :strings type escapes a public signature.
+    implementation(project(":strings"))
 
     api(platform(libs.androidx.compose.bom))
     api(libs.androidx.compose.ui)
