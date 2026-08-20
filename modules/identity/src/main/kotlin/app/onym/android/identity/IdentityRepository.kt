@@ -294,19 +294,46 @@ class IdentityRepository(
      *
      * @throws IdentityError.InvalidMnemonic if the mnemonic is
      *         malformed or has a bad checksum.
+     *
+     * The restored identity lands on the id
+     * [IdentityId.derivedFromEntropy] gives the phrase, which is the
+     * whole point: an archive's groups and messages are stamped with
+     * that same id, so they are visible the moment they are written
+     * back.
+     *
+     * That also makes a collision reachable for the first time — the
+     * phrase being restored may be one this device already holds. Two
+     * guards follow, both the same "an import is not a rename"
+     * principle iOS applied in `addLocked`:
+     *
+     *  - **Never wipe the slot we are about to land on.** Replacing the
+     *    active slot with itself would fire [removalListener] — which
+     *    cascade-deletes the chats owned by that id — and then re-save
+     *    the identity it had just emptied. Re-entering the phrase you
+     *    are already using is now a no-op rather than silent data loss.
+     *  - **Never overwrite an existing snapshot.** The stored snapshot
+     *    carries the user's display name, and re-deriving would blank
+     *    it — relabelling an identity the user already has merely
+     *    because they typed its recovery phrase. The keys are identical
+     *    either way (the snapshot is a pure function of the same
+     *    entropy), so keeping the persisted one costs nothing.
      */
     suspend fun restore(mnemonic: String): Identity = mutex.withLock {
         withContext(ioDispatcher) {
             val entropy = Bip39.entropyFromMnemonic(mnemonic)
                 ?: throw IdentityError.InvalidMnemonic
             val previousId = store.loadCurrent()
-            val newId = IdentityId.new()
-            val snapshot = snapshotFromEntropy(entropy, name = "")
-            if (previousId != null) {
+            val newId = IdentityId.derivedFromEntropy(entropy)
+            val existing = store.load(newId)
+            if (previousId != null && previousId != newId) {
                 removalListeners.forEach { it.invoke(previousId) }
                 store.wipe(previousId)
             }
-            store.save(newId, snapshot)
+            val snapshot = if (existing != null) {
+                existing
+            } else {
+                snapshotFromEntropy(entropy, name = "").also { store.save(newId, it) }
+            }
             store.saveCurrent(newId)
             val identity = identityFromSnapshot(snapshot)
             _snapshots.value = identity
@@ -343,6 +370,22 @@ class IdentityRepository(
      *
      * @throws IdentityError.InvalidMnemonic if [restoreMnemonic] is
      *         present but malformed.
+     *
+     * Both branches derive their id from entropy, generated and
+     * imported alike — today's freshly-minted identity is the one
+     * someone re-imports from a recovery phrase in a year, and a random
+     * id at birth would leave the invisible-chats bug perfectly intact
+     * for every identity that does not exist yet.
+     *
+     * Importing a phrase the device already holds therefore resolves to
+     * an id already in the store. That returns the existing identity —
+     * selected, but otherwise untouched. It is deliberately *not*
+     * re-saved under [name]: an import is not a rename, and silently
+     * relabelling an identity the user already has is a worse surprise
+     * than ignoring a name they probably did not type. (Before the id
+     * was derived, this same input produced two indistinguishable
+     * identities holding identical keys — a latent bug that is now
+     * unreachable.)
      */
     suspend fun add(name: String, restoreMnemonic: String? = null): IdentityId = mutex.withLock {
         withContext(ioDispatcher) {
@@ -352,8 +395,15 @@ class IdentityRepository(
                 val mnemonic = Bip39.generateMnemonic()
                 Bip39.entropyFromMnemonic(mnemonic) ?: throw IdentityError.InvalidMnemonic
             }
+            val newId = IdentityId.derivedFromEntropy(entropy)
+            store.load(newId)?.let { alreadyHeld ->
+                store.saveCurrent(newId)
+                _snapshots.value = identityFromSnapshot(alreadyHeld)
+                _currentIdentityId.value = newId
+                refreshIdentitiesList()
+                return@withContext newId
+            }
             val resolvedName = resolveDisplayName(name)
-            val newId = IdentityId.new()
             val snapshot = snapshotFromEntropy(entropy, name = resolvedName)
             store.save(newId, snapshot)
             store.saveCurrent(newId)
@@ -634,13 +684,30 @@ class IdentityRepository(
 
     // ─── Private ─────────────────────────────────────────────────────
 
+    /**
+     * A freshly-generated identity derives its id from its own entropy
+     * for exactly the reason an imported one does: this is the identity
+     * whose recovery phrase gets typed back in on a new phone. If only
+     * the import path derived, every identity minted from here on would
+     * still be unrestorable.
+     *
+     * The `previousId != newId` guard is unreachable in practice — the
+     * mnemonic came out of a CSPRNG two lines up, so colliding with an
+     * identity already on the device is a 2^-128 event. It is here
+     * because the failure mode if it ever did happen is losing the
+     * user's chats: `store.wipe` fires [removalListener], which
+     * cascade-deletes the groups owned by that id, and we would then
+     * re-save the identity we had just emptied. Same shape as the guard
+     * in [restore], where the collision is routine rather than
+     * impossible.
+     */
     private suspend fun generateNewLocked(name: String): Identity {
         val mnemonic = Bip39.generateMnemonic()
         val entropy = Bip39.entropyFromMnemonic(mnemonic)
             // Unreachable: generateMnemonic always emits a valid mnemonic.
             ?: throw IdentityError.InvalidMnemonic
         val previousId = store.loadCurrent()
-        val newId = IdentityId.new()
+        val newId = IdentityId.derivedFromEntropy(entropy)
         val resolved = if (name.isBlank() && previousId == null && store.listIds().isEmpty()) {
             // Bootstrap-from-zero: skip the auto "Identity 1" label so
             // the first install reads as a single nameless identity in
@@ -650,7 +717,7 @@ class IdentityRepository(
             resolveDisplayName(name)
         }
         val snapshot = snapshotFromEntropy(entropy, name = resolved)
-        if (previousId != null) {
+        if (previousId != null && previousId != newId) {
             removalListeners.forEach { it.invoke(previousId) }
             store.wipe(previousId)
         }
