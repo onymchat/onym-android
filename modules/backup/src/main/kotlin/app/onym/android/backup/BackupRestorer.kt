@@ -65,7 +65,7 @@ class BackupRestorer(private val sink: BackupSinkProviding) {
 
             // Gate 3: only now write, in fixed order — groups before
             // messages so no write ever references a nonexistent group.
-            val (writtenGroups, writtenMessages, writtenInvitations, writtenConsents, writtenBlobs) = try {
+            val (groupOutcome, messageOutcome, invitationOutcome, consentOutcome, writtenBlobs) = try {
                 val g = sink.restoreGroups(groups)
                 val m = sink.restoreMessages(messages)
                 val i = sink.restoreInvitations(invitations)
@@ -75,7 +75,7 @@ class BackupRestorer(private val sink: BackupSinkProviding) {
                     sink.restoreBlob(blob)
                     b++
                 }
-                WriteCounts(g, m, i, c, b)
+                WriteOutcomes(g, m, i, c, b)
             } catch (cancelled: CancellationException) {
                 // A cancelled coroutine (navigation away, process
                 // death) is not a write failure — rethrow so it
@@ -90,11 +90,32 @@ class BackupRestorer(private val sink: BackupSinkProviding) {
                 throw BackupError.LocalFailure(LocalFailureReason.RestoreInterrupted)
             }
 
+            // What could not be read is what the sink SAID could not be
+            // read — never what is left over after subtracting what it
+            // wrote from what the archive held.
+            //
+            // That subtraction was `archiveCount - written`, and it was
+            // wrong for every row already on the device. Writes here are
+            // idempotent precisely so that restoring twice, or onto a
+            // phone that has since received some of the same rows,
+            // converges instead of duplicating — and a sink reporting
+            // only *newly inserted* rows made every one of those
+            // convergences look like a parse failure, which the restore
+            // screen renders as "This version of the app couldn't
+            // restore: …". A second restore of the same archive
+            // therefore declared 100% of the groups unrestorable, having
+            // restored all of them. The consent list made it
+            // unmissable: you cannot reach an operator's snapshot
+            // without having consented to that operator, so the
+            // consents in the archive are always already held.
+            //
+            // Only the sink knows which of the two happened, so only
+            // the sink may say. See `BackupSinkOutcome`.
             val skipped = buildMap {
-                (groups.size - writtenGroups).takeIf { it > 0 }?.let { put("groups", it) }
-                (messages.size - writtenMessages).takeIf { it > 0 }?.let { put("messages", it) }
-                (invitations.size - writtenInvitations).takeIf { it > 0 }?.let { put("invitations", it) }
-                (consents.size - writtenConsents).takeIf { it > 0 }?.let { put("consents", it) }
+                groupOutcome.unreadable.takeIf { it > 0 }?.let { put("groups", it) }
+                messageOutcome.unreadable.takeIf { it > 0 }?.let { put("messages", it) }
+                invitationOutcome.unreadable.takeIf { it > 0 }?.let { put("invitations", it) }
+                consentOutcome.unreadable.takeIf { it > 0 }?.let { put("consents", it) }
             }
 
             val unresolvedBlobs = if (mediaPolicy == BackupMediaPolicy.IncludeCiphertext) {
@@ -106,10 +127,10 @@ class BackupRestorer(private val sink: BackupSinkProviding) {
             }
 
             return@withContext BackupRestoreSummary(
-                groups = writtenGroups,
-                messages = writtenMessages,
-                invitations = writtenInvitations,
-                consents = writtenConsents,
+                groups = groupOutcome.landed,
+                messages = messageOutcome.landed,
+                invitations = invitationOutcome.landed,
+                consents = consentOutcome.landed,
                 blobs = writtenBlobs,
                 skipped = skipped,
                 unresolvedBlobs = unresolvedBlobs,
@@ -119,11 +140,13 @@ class BackupRestorer(private val sink: BackupSinkProviding) {
         }
     }
 
-    private data class WriteCounts(
-        val groups: Int,
-        val messages: Int,
-        val invitations: Int,
-        val consents: Int,
+    private data class WriteOutcomes(
+        val groups: BackupSinkOutcome,
+        val messages: BackupSinkOutcome,
+        val invitations: BackupSinkOutcome,
+        val consents: BackupSinkOutcome,
+        /** Blobs are a plain count: `restoreBlob` either wrote the
+         *  file or threw, so there is no third answer to disambiguate. */
         val blobs: Int,
     )
 

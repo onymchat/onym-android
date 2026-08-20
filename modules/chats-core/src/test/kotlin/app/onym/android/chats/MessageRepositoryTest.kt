@@ -259,6 +259,60 @@ class MessageRepositoryTest {
         assertEquals("bob-msg", flowAsBob.first().single().body)
     }
 
+    // ─── reload() (writes that bypassed this repository) ──────────
+
+    @Test
+    fun reload_picksUpRowsWrittenStraightToTheStore() = runTest {
+        // The backup restore's exact shape: the thread is subscribed
+        // and cached empty, then rows appear in the store without
+        // going through append(). Nothing else will ever write them,
+        // so without reload() the chat stays empty for good.
+        val store = InMemoryMessageStore()
+        val repo = makeRepo(store, aliceId)
+        val flow = repo.snapshots(groupA)
+        assertTrue("cached empty before the out-of-band write", flow.first().isEmpty())
+
+        store.insert(makeMessage(owner = aliceId, group = groupA, body = "restored"))
+        assertTrue("the cache cannot know on its own", flow.first().isEmpty())
+
+        repo.reload()
+        assertEquals("restored", flow.first().single().body)
+    }
+
+    @Test
+    fun reload_refreshesEveryCachedGroupNotJustOne() = runTest {
+        // Half a refresh is the failure this method exists to close:
+        // whichever group the caller failed to name stays empty while
+        // its rows sit on disk.
+        val store = InMemoryMessageStore()
+        val repo = makeRepo(store, aliceId)
+        val flowA = repo.snapshots(groupA)
+        val flowB = repo.snapshots(groupB)
+
+        store.insert(makeMessage(owner = aliceId, group = groupA, body = "a"))
+        store.insert(makeMessage(owner = aliceId, group = groupB, body = "b"))
+        repo.reload()
+
+        assertEquals("a", flowA.first().single().body)
+        assertEquals("b", flowB.first().single().body)
+    }
+
+    @Test
+    fun reload_readsUnderTheActiveIdentityOnly() = runTest {
+        // A restore writes rows for whichever owner the archive held.
+        // The cached flow is the ACTIVE identity's view and must stay
+        // that way — another identity's rows must not leak into the
+        // open thread.
+        val store = InMemoryMessageStore()
+        val repo = makeRepo(store, aliceId)
+        val flow = repo.snapshots(groupA)
+
+        store.insert(makeMessage(owner = bobId, group = groupA, body = "bob's"))
+        repo.reload()
+
+        assertTrue("another identity's rows stay out", flow.first().isEmpty())
+    }
+
     // ─── helpers ──────────────────────────────────────────────────
 
     // ─── upgradeStatus() (delivery / read receipts) ───────────────

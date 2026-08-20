@@ -94,6 +94,41 @@ class MessageRepository(
     }
 
     /**
+     * Re-read every cached group's messages from the store.
+     *
+     * For writes that reached the [MessageStore] without passing
+     * through here. The only one today is a backup restore, which
+     * writes through the app's stores on purpose — that is what
+     * re-encrypts every restored row under this device's at-rest key
+     * instead of importing another device's database — and therefore
+     * bypasses the repository that owns this cache. Without it, a
+     * group whose flow was hydrated *before* the restore keeps serving
+     * what it held then: an open chat stays empty while its messages
+     * sit on disk, and nothing else ever writes those rows, so it
+     * stays empty for good.
+     *
+     * Every cached group, not the ones a caller believes were touched.
+     * A group this session never opened isn't in `perGroup` at all and
+     * hydrates from the store on its first [snapshots] call, so the
+     * cached ones are the entire exposure — and there are only ever as
+     * many of those as the person has opened since the last identity
+     * switch. Narrowing to "affected" groups would mean the restore
+     * telling the repository which keys it wrote: a list that is wrong
+     * the moment one record is skipped, whose failure mode is a chat
+     * that silently stays empty. A restore is rare; a restore that
+     * half-refreshes is the bug this method exists to close.
+     *
+     * Shaped after [app.onym.android.group.GroupRepository.reload].
+     * Mirrors `MessageRepository.reload()` from onym-ios PR #293.
+     */
+    suspend fun reload() = mutex.withLock {
+        val activeOwnerId = identity.currentIdentityId.value?.value
+        for ((groupId, _) in perGroup) {
+            refreshGroupLocked(activeOwnerId, groupId)
+        }
+    }
+
+    /**
      * Look up one identity's copy of a message by id. Goes through the
      * store, not the cache, so the retry-on-failed path doesn't depend
      * on the chat thread being currently subscribed. Scoped to the

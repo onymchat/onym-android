@@ -23,22 +23,35 @@ private class FakeSource(
         blobs[sha256]?.let { BackupBlobAvailability.Available(it) } ?: BackupBlobAvailability.Gone
 }
 
-private class RecordingSink(private val groupCapacity: Int = Int.MAX_VALUE) : BackupSinkProviding {
+/**
+ * @param groupCapacity how many of the groups handed over this sink
+ *   can reconstruct; the remainder it reports as `unreadable`.
+ * @param groupsAlreadyHeld groups it reports as landed *without*
+ *   inserting — the ordinary outcome of an idempotent write onto a
+ *   device that already holds the row, which must never be reported
+ *   as a failure to restore.
+ */
+private class RecordingSink(
+    private val groupCapacity: Int = Int.MAX_VALUE,
+    private val groupsAlreadyHeld: Set<String> = emptySet(),
+) : BackupSinkProviding {
     val writtenGroups = mutableListOf<BackupGroupRecord>()
     val writtenMessages = mutableListOf<BackupMessageRecord>()
     val writtenBlobs = mutableListOf<BackupBlobRecord>()
 
-    override suspend fun restoreGroups(records: List<BackupGroupRecord>): Int {
-        val accepted = records.take(groupCapacity)
-        writtenGroups += accepted
-        return accepted.size
+    override suspend fun restoreGroups(records: List<BackupGroupRecord>): BackupSinkOutcome {
+        val readable = records.take(groupCapacity)
+        writtenGroups += readable.filter { it.groupId !in groupsAlreadyHeld }
+        return BackupSinkOutcome(landed = readable.size, unreadable = records.size - readable.size)
     }
-    override suspend fun restoreMessages(records: List<BackupMessageRecord>): Int {
+    override suspend fun restoreMessages(records: List<BackupMessageRecord>): BackupSinkOutcome {
         writtenMessages += records
-        return records.size
+        return BackupSinkOutcome(landed = records.size, unreadable = 0)
     }
-    override suspend fun restoreInvitations(records: List<BackupInvitationRecord>): Int = records.size
-    override suspend fun restoreConsents(records: List<BackupConsentRecord>): Int = records.size
+    override suspend fun restoreInvitations(records: List<BackupInvitationRecord>): BackupSinkOutcome =
+        BackupSinkOutcome(landed = records.size, unreadable = 0)
+    override suspend fun restoreConsents(records: List<BackupConsentRecord>): BackupSinkOutcome =
+        BackupSinkOutcome(landed = records.size, unreadable = 0)
     override suspend fun restoreBlob(record: BackupBlobRecord) {
         writtenBlobs += record
     }
@@ -102,6 +115,33 @@ class BackupCompositionTest {
 
         assertEquals(1, summary.groups)
         assertEquals(1, summary.skipped["groups"])
+    }
+
+    @Test
+    fun rows_the_device_already_holds_are_restored_not_skipped() = runTest {
+        // The regression this guards: the summary used to be
+        // `archiveCount - written`, so restoring an archive whose rows
+        // the device already had reported every one of them under
+        // "This version of the app couldn't restore…" — a second
+        // restore of the same archive claimed 100% failure having
+        // succeeded completely. Nothing here is unreadable, so nothing
+        // may be skipped.
+        val groups = listOf(
+            BackupGroupRecord("g1", "id1", "{}", 1000L),
+            BackupGroupRecord("g2", "id1", "{}", 1000L),
+        )
+        val source = FakeSource(groups, emptyMap())
+        val workDir = tempDir()
+        val keys = keyMaterial()
+        val sealed = BackupComposer(source, BackupMediaPolicy.DescriptorsOnly, workDir)
+            .compose(keys, acceptedTermsId = "sha256:" + "d".repeat(64))
+
+        val sink = RecordingSink(groupsAlreadyHeld = setOf("g1", "g2"))
+        val summary = BackupRestorer(sink).restore(sealed.sealedBytesFile, sealed.snapshotReference, keys, workDir)
+
+        assertEquals("both groups are on the device", 2, summary.groups)
+        assertTrue("nothing was inserted", sink.writtenGroups.isEmpty())
+        assertTrue("…and nothing is unreadable", summary.skipped.isEmpty())
     }
 
     @Test
