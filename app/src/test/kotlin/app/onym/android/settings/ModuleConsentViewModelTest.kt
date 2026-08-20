@@ -345,6 +345,84 @@ class ModuleConsentViewModelTest {
         assertNotNull(vm.state.value.errorMessage)
     }
 
+    // ─── The backup seat's arrival ────────────────────────────────
+
+    /**
+     * `storage.backup` has no legacy configuration to apply into — the
+     * pinned consent record IS the wiring. So the consent flow's job
+     * for this seat is finished the moment the record exists, and what
+     * matters is that the record is one the backup seat can actually
+     * read: `BackupSeat.activeConsents` finds it by seat type, and
+     * `BackupOperatorManifest.from` decodes the endpoint the client
+     * will talk to out of the same pinned bytes.
+     *
+     * That whole path — catalog entry to a vendor Settings can show —
+     * is asserted here in one test because every piece of it existed
+     * separately before this and none of it was joined up: the flow
+     * had no backup entry point, and the decoder was reading fields
+     * the operator never published.
+     */
+    @Test
+    fun accept_backupSeat_pinsARecordTheBackupSeatCanRead() = runTest {
+        // The operator's published manifest shape, per onym-system
+        // `backup/UI-Backup.md` §5.3: the seat's fields at the top
+        // level, and `offers` as objects.
+        val manifest = buildJsonObject {
+            put("version", 1)
+            put("componentId", "onym:component:test-backup")
+            put("seat", "storage.backup")
+            put("operator", operatorKey)
+            put("backupProfileId", "onym:backup-profile:sealed-device-archive-v1")
+            put("implementationProfileId", "onym:backup-implementation:object-http-v1")
+            put(
+                "endpoints",
+                buildJsonArray {
+                    addJsonObject {
+                        put("uri", "https://backup.example.com")
+                        put("role", "read-write")
+                    }
+                },
+            )
+            put("declaredTerms", "sha256:" + "b".repeat(64))
+            // Free mode: no issuer named, so this operator never asks
+            // for an entitlement, and there is no offer to select.
+            put("entitlementIssuers", buildJsonArray { })
+            put("offers", buildJsonArray { })
+            put("validUntil", "2999-12-31T23:59:59Z")
+        }
+        val bytes = signedManifestBytes(manifest)
+        val digest = sha256Digest(bytes)
+        val h = Harness(
+            attributedEntry(
+                componentId = "onym:component:test-backup",
+                seatType = "storage.backup",
+                digest = digest,
+            ),
+            bytes,
+        )
+
+        h.viewModel.start(); yield()
+        assertEquals(ModuleConsentViewModel.Step.Reviewing, h.viewModel.state.value.step)
+        // Nothing to select, and nothing that blocks accepting: a free
+        // operator publishes no offer, and consent must not require one.
+        assertNull(h.viewModel.state.value.selectedOfferId)
+
+        h.viewModel.tappedAccept(); yield()
+
+        assertEquals(ModuleConsentViewModel.Step.Done, h.viewModel.state.value.step)
+
+        val consents = app.onym.android.backup.BackupSeat.activeConsents(h.consentStore)
+        assertEquals(1, consents.size)
+        assertEquals(app.onym.android.backup.BACKUP_SEAT_TYPE, consents.single().seatType)
+        assertTrue(consents.single().manifestBytes.contentEquals(bytes))
+
+        val decoded = app.onym.android.backup.BackupSeat.manifest(consents.single())
+        assertNotNull("the pinned record must decode as a backup operator manifest", decoded)
+        assertEquals("https://backup.example.com", decoded!!.endpoint)
+        assertEquals("sha256:" + "b".repeat(64), decoded.declaredTermsDigest)
+        assertTrue(decoded.entitlementIssuers.isEmpty())
+    }
+
     // ─── Static helpers ───────────────────────────────────────────
 
     @Test

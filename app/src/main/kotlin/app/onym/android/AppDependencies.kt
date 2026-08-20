@@ -125,8 +125,22 @@ class AppDependencies(
      *  operator is consented, or the active identity has no recovery
      *  phrase to derive backup keys from — an ordinary state, and
      *  every consumer (Settings) renders as before the feature
-     *  existed. */
-    val backupVendors: List<BackupUiDependencies> = emptyList(),
+     *  existed.
+     *
+     *  A flow, not a snapshot: consent to a backup operator is written
+     *  by the generic module-consent flow mid-session, and a list
+     *  resolved once at boot would leave the holder staring at a
+     *  Settings screen that says nothing happened until the next
+     *  process restart. */
+    val backupVendors: kotlinx.coroutines.flow.StateFlow<List<BackupUiDependencies>> =
+        kotlinx.coroutines.flow.MutableStateFlow(emptyList()),
+    /** Re-reads the pinned consent store and composes a vendor for
+     *  every `storage.backup` operator not already in [backupVendors].
+     *  Composing only the MISSING componentIds is deliberate: a vendor
+     *  already on the list keeps its instance, and with it its settings
+     *  flow, its memoized (expensive) key material, and its
+     *  once-per-session schedule jitter. */
+    val refreshBackupVendors: suspend () -> Unit = {},
 )
 
 /**

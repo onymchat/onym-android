@@ -127,10 +127,14 @@ fun RootScreen(
     // own checkOpportunistic() no-ops instantly unless BackupSchedule's
     // conditions and interval are actually satisfied right now.
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, dependencies.backupVendors) {
+    // Collected once at the root and passed down: a vendor consented
+    // to mid-session appears in this list without a process restart,
+    // so the observer below re-registers over the new list too.
+    val backupVendors by dependencies.backupVendors.collectAsStateWithLifecycle()
+    DisposableEffect(lifecycleOwner, backupVendors) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
-                dependencies.backupVendors.forEach { it.checkOpportunistic() }
+                backupVendors.forEach { it.checkOpportunistic() }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -463,12 +467,25 @@ fun RootScreen(
                         ?.value as? app.onym.android.moderation.ui.RootGate.Operational)
                         ?.openCases
                         .orEmpty()
+                // Discovery's `storage.backup` entries — what makes the
+                // section reachable for a holder who hasn't consented
+                // to an operator yet. Without this the row would only
+                // ever appear for someone who already had a pinned
+                // consent, and nothing in the app could give them one.
+                val (backupCatalogEntries, _) = rememberSeatCatalog(
+                    dependencies = dependencies,
+                    seatType = app.onym.android.backup.BACKUP_SEAT_TYPE,
+                )
                 // Re-resolved every time Settings is opened, not just
                 // at cold app launch — a mid-session status change (or
                 // a first enrolment) must be reflected without a
-                // process restart, for every consented vendor.
-                LaunchedEffect(dependencies.backupVendors) {
-                    dependencies.backupVendors.forEach { it.settingsFlow.refresh() }
+                // process restart, for every consented vendor. The
+                // vendor list itself is re-read here too: consent may
+                // have been given since boot, through a flow that knows
+                // nothing about this seat.
+                LaunchedEffect(backupVendors) {
+                    dependencies.refreshBackupVendors()
+                    backupVendors.forEach { it.settingsFlow.refresh() }
                 }
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
@@ -549,14 +566,23 @@ fun RootScreen(
                             navController.navigate(ROUTE_MODERATION_SETTINGS)
                         }
                     },
-                    // Null exactly when no backup vendor is consented
-                    // (or the identity has no recovery phrase) — the
-                    // DEVICE BACKUP section is omitted, same posture as
-                    // Discovery/Moderation above.
-                    onDeviceBackupClick = dependencies.backupVendors.takeIf { it.isNotEmpty() }?.let {
-                        { navController.navigate(ROUTE_DEVICE_BACKUP_VENDORS) }
-                    },
-                    deviceBackupVendorCount = dependencies.backupVendors.size,
+                    // Non-null when there is either a consented vendor
+                    // to manage or an operator on offer to consent to.
+                    // Null — section omitted, same posture as
+                    // Discovery/Moderation above — only when the seat
+                    // has genuinely nothing to show: no consent, and no
+                    // catalog entry filling it. "Consented vendors
+                    // only" was the wrong gate: the screen behind this
+                    // row is also where a first vendor is acquired, so
+                    // gating it on already having one made the whole
+                    // seat unreachable.
+                    onDeviceBackupClick =
+                        if (backupVendors.isNotEmpty() || backupCatalogEntries.isNotEmpty()) {
+                            { navController.navigate(ROUTE_DEVICE_BACKUP_VENDORS) }
+                        } else {
+                            null
+                        },
+                    deviceBackupVendorCount = backupVendors.size,
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -802,8 +828,21 @@ fun RootScreen(
                 // may back up to several at once (see BackupSeat's doc
                 // comment) — this list is what "Device Backup" in
                 // Settings actually opens onto.
+                //
+                // It is also where a vendor is ACQUIRED: the catalog
+                // section below routes a `storage.backup` entry into
+                // the same module-consent flow every other non-
+                // moderation seat uses, and the pinned consent it
+                // writes is what `BackupSeat.activeConsents` reads. The
+                // refresh is what turns that consent into a row here on
+                // the way back, without a process restart.
+                val (backupEntries, backupConsents) = rememberSeatCatalog(
+                    dependencies = dependencies,
+                    seatType = app.onym.android.backup.BACKUP_SEAT_TYPE,
+                )
+                LaunchedEffect(backupConsents) { dependencies.refreshBackupVendors() }
                 app.onym.android.backup.ui.BackupVendorsListScreen(
-                    vendors = dependencies.backupVendors.map { vendor ->
+                    vendors = backupVendors.map { vendor ->
                         val status by vendor.settingsFlow.status.collectAsStateWithLifecycle()
                         app.onym.android.backup.ui.BackupVendorRow(
                             componentId = vendor.componentId,
@@ -814,11 +853,27 @@ fun RootScreen(
                     onVendorClick = { componentId ->
                         navController.navigate(deviceBackupSettingsRoute(componentId))
                     },
+                    catalogSection = {
+                        if (backupEntries.isNotEmpty()) {
+                            androidx.compose.foundation.layout.Column {
+                                app.onym.android.design.SettingsSectionLabel(
+                                    stringResource(R.string.discovery_catalog_section),
+                                )
+                                app.onym.android.settings.DiscoveryCatalogCard(
+                                    entries = backupEntries,
+                                    consentByComponentId = backupConsents,
+                                    onEntryClick = { entry ->
+                                        navController.navigate(moduleConsentRoute(entry))
+                                    },
+                                )
+                            }
+                        }
+                    },
                 )
             }
             composable(ROUTE_DEVICE_BACKUP_SETTINGS) { entry ->
                 val componentId = entry.arguments?.getString("componentId") ?: return@composable
-                val backup = dependencies.backupVendors.firstOrNull { it.componentId == componentId }
+                val backup = backupVendors.firstOrNull { it.componentId == componentId }
                     ?: return@composable
                 val status by backup.settingsFlow.status.collectAsStateWithLifecycle()
                 val coroutineScope = rememberCoroutineScope()
@@ -895,7 +950,7 @@ fun RootScreen(
             }
             composable(ROUTE_DEVICE_BACKUP_RESTORE) { entry ->
                 val componentId = entry.arguments?.getString("componentId") ?: return@composable
-                val backup = dependencies.backupVendors.firstOrNull { it.componentId == componentId }
+                val backup = backupVendors.firstOrNull { it.componentId == componentId }
                     ?: return@composable
                 app.onym.android.backup.ui.BackupRestoreScreen(
                     makeRestoreFlow = backup.makeRestoreFlow,

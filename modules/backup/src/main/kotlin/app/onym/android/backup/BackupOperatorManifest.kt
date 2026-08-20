@@ -37,12 +37,29 @@ data class BackupOperatorManifest(
     }
 
     companion object {
+        /**
+         * The seat's fields live at the manifest's **top level**, next
+         * to the spine `:foundation` already parsed — `backupProfileId`,
+         * `implementationProfileId`, `endpoints`, `capabilities`,
+         * `limits`, `declaredTerms`, `entitlementIssuers` — exactly as
+         * onym-system `backup/UI-Backup.md` §5.3 lays the document out
+         * and exactly as the operator publishes it
+         * (`operator/src/documents.rs::manifest_document`). They are NOT
+         * nested under a `storage.backup` object: `storage.backup` is
+         * the value of the spine's `seat` field, not a container.
+         *
+         * A manifest missing `declaredTerms` is refused rather than
+         * defaulted — the declared terms digest is what enrolment pins
+         * and what every later upload is checked against, so there is
+         * no safe fallback for it. The two profile ids DO fall back,
+         * because this client only speaks one of each and a manifest
+         * that omits them is asserting nothing this code could disagree
+         * with.
+         */
         fun from(manifest: SignedServiceManifest): BackupOperatorManifest {
             val obj = Json.parseToJsonElement(String(manifest.rawBytes, Charsets.UTF_8)).jsonObject
-            val storage = (obj["storage"] as? JsonObject)?.get("backup") as? JsonObject
-                ?: throw BackupError.LocalFailure(LocalFailureReason.ArchiveUnreadable)
 
-            val endpoints = (storage["endpoints"] as? JsonArray).orEmpty()
+            val endpoints = (obj["endpoints"] as? JsonArray).orEmpty()
             val endpoint = endpoints.firstNotNullOfOrNull { element ->
                 val entry = element as? JsonObject ?: return@firstNotNullOfOrNull null
                 val role = (entry["role"] as? JsonPrimitive)?.content
@@ -53,20 +70,20 @@ data class BackupOperatorManifest(
                 uri
             }
 
-            val limits = storage["limits"] as? JsonObject
+            val limits = obj["limits"] as? JsonObject
             fun JsonObject?.longField(key: String): Long? =
                 (this?.get(key) as? JsonPrimitive)?.content?.toLongOrNull()
 
             return BackupOperatorManifest(
                 componentId = manifest.componentId,
-                backupProfileId = (storage["backupProfileId"] as? JsonPrimitive)?.content
+                backupProfileId = (obj["backupProfileId"] as? JsonPrimitive)?.content
                     ?: BackupProfile.PORTABLE_PROFILE_ID,
-                implementationProfileId = (storage["implementationProfileId"] as? JsonPrimitive)?.content
+                implementationProfileId = (obj["implementationProfileId"] as? JsonPrimitive)?.content
                     ?: BackupProfile.IMPLEMENTATION_PROFILE_ID,
                 endpoint = endpoint,
-                declaredTermsDigest = (storage["declaredTerms"] as? JsonPrimitive)?.content
+                declaredTermsDigest = (obj["declaredTerms"] as? JsonPrimitive)?.content
                     ?: throw BackupError.LocalFailure(LocalFailureReason.ArchiveUnreadable),
-                entitlementIssuers = (storage["entitlementIssuers"] as? JsonArray)
+                entitlementIssuers = (obj["entitlementIssuers"] as? JsonArray)
                     ?.mapNotNull { (it as? JsonPrimitive)?.content }
                     ?: emptyList(),
                 maximumSealedSnapshotBytes = limits.longField("maximumSealedSnapshotBytes"),
