@@ -38,4 +38,23 @@ internal sealed class IdentityError(message: String, cause: Throwable? = null) :
 
     class SdkFailure(message: String, cause: Throwable? = null) :
         IdentityError("OnymSDK call failed: $message", cause)
+
+    /** [IdentityRepository.deriveSeedScopedKey] was asked to derive a
+     *  key under an `info` string outside the caller allowlist. An
+     *  ALLOWLIST, not a denylist: an unconstrained `info` parameter
+     *  would let a caller reconstruct any other seed-scoped secret
+     *  (e.g. the Nostr key) through this one seam, since every
+     *  seed-scoped derivation shares the same BIP39 root. Mirrors
+     *  `IdentityError.seedScopeNotPermitted` from onym-ios. */
+    class SeedScopeNotPermitted(info: String) :
+        IdentityError("seed scope not permitted: $info")
+
+    /** The loaded identity has no BIP39 entropy — it was imported from
+     *  raw key material — so no mnemonic-rooted material (device
+     *  backup among them) can be derived for it. Mirrors
+     *  `IdentityError.noRecoveryPhrase` from onym-ios. */
+    object NoRecoveryPhrase :
+        IdentityError("Identity has no recovery phrase to derive from") {
+        private fun readResolve(): Any = NoRecoveryPhrase
+    }
 }

@@ -117,6 +117,74 @@ class AppDependencies(
      *  and no UI-test fakes registered — in which case RootScreen and
      *  onboarding render as before the seat existed. */
     val moderation: ModerationUiDependencies? = null,
+    /** One entry per backup vendor the holder is currently consented
+     *  to — `storage.backup` consent is multi-vendor by construction
+     *  (see `BackupSeat`'s doc comment), so a device can back up its
+     *  history to several operators at once, each under its own
+     *  seed-derived key material. Empty exactly when no backup
+     *  operator is consented, or the active identity has no recovery
+     *  phrase to derive backup keys from — an ordinary state, and
+     *  every consumer (Settings) renders as before the feature
+     *  existed. */
+    val backupVendors: List<BackupUiDependencies> = emptyList(),
+)
+
+/**
+ * Everything ONE backup vendor's Settings surfaces need. One instance
+ * per consented operator — [AppDependencies.backupVendors] carries the
+ * list. Mirrors iOS's `BackupSeatComposer`-produced bundle, extended
+ * for multi-vendor.
+ */
+class BackupUiDependencies(
+    /** `onym:component:<operator>` — fixed for this instance's
+     *  lifetime (one instance is always exactly one vendor). Used to
+     *  key navigation routes and as the row identity in a vendor
+     *  list. */
+    val componentId: String,
+    /** Human-legible label for this vendor's row — currently just
+     *  [componentId]'s trailing segment (manifests don't carry a
+     *  separate display name field today). */
+    val displayName: String,
+    val settingsFlow: app.onym.android.backup.ui.DeviceBackupSettingsFlow,
+    /** Launches one compose→preflight→upload cycle on the vendor's own
+     *  long-lived scope (NOT the caller's) — deliberately not
+     *  `suspend`. A backup started from a tapped button must survive
+     *  the person navigating away from the screen that started it:
+     *  `recordPendingLocked` writes the pending-operation record
+     *  before the upload even begins, so a cancelled-by-navigation run
+     *  would abandon real, already-committed local state exactly like
+     *  a lost network response would — reconcile can recover from
+     *  that on a later attempt, but there is no reason to manufacture
+     *  the same failure mode on every screen change. */
+    val backUpNow: () -> Unit,
+    /** Retries a pending-payment operation after a purchase. Same
+     *  fire-and-forget posture as [backUpNow]. */
+    val retryAfterPurchase: () -> Unit,
+    /** Same fire-and-forget posture as [backUpNow] — an erase in
+     *  flight must not be interrupted by navigating off the screen
+     *  that started it. */
+    val erase: () -> Unit,
+    /** Call on every app-open (cold start AND resume from
+     *  background — both are "opening the app" to a person, and the
+     *  consent screen's disclosure sentence doesn't qualify which one
+     *  it means) — no-ops instantly unless [BackupSchedule]'s
+     *  conditions AND interval are actually satisfied right now. This
+     *  is what makes that sentence a description of real behavior
+     *  rather than dead code sitting next to honest-sounding copy. */
+    val checkOpportunistic: () -> Unit,
+    /** Builds the consent/enrolment screen's static disclosure content
+     *  for the currently consented (or about-to-be-consented) operator.
+     *  `null` if no operator manifest/terms are currently resolvable. */
+    val makeEnrolmentDisclosure: suspend () -> Pair<
+        List<app.onym.android.backup.ui.BackupDisclosureItem>,
+        String,
+        >?,
+    /** Pins acceptance of the currently-fetched terms (its digest) so
+     *  the next [backUpNow] composes and uploads under it. Called once
+     *  the enrolment screen's "Turn On Backup" is tapped. */
+    val acceptEnrolment: suspend (termsId: String) -> Unit,
+    /** History-restore surface — see Phase 8. `null` until wired. */
+    val makeRestoreFlow: (suspend () -> app.onym.android.backup.BackupRestoreSummary)? = null,
 )
 
 /**

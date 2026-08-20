@@ -49,6 +49,16 @@ data class Identity(
      */
     val recoveryPhrase: String?,
 ) {
+    /** Whether this identity has a recovery phrase to derive
+     *  seed-scoped material from (e.g. a device-backup key) — without
+     *  callers elsewhere in the app having to read [recoveryPhrase]
+     *  itself just to check presence. `scripts/lint-secrets.py`
+     *  forbids reading that field outside this module; this getter is
+     *  the sanctioned non-secret substitute. */
+    val hasRecoveryPhrase: Boolean
+        get() = recoveryPhrase != null
+
+
     // Default data-class equals/hashCode use reference equality for
     // ByteArray fields. Override with content-based comparison so two
     // Identity instances with the same bytes compare equal.

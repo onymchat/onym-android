@@ -19,11 +19,17 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -111,6 +117,26 @@ fun RootScreen(
      *  later back-navigation doesn't re-fire the same capability. */
     onPendingCapabilityHandled: () -> Unit = {},
 ) {
+    // Device backup's "opportunistic" check — the consent screen's
+    // disclosure sentence promises "when you open the app, at most
+    // once every N hours…", so this is what makes that a description
+    // of real behavior instead of dead code sitting next to
+    // honest-sounding copy. ON_START fires on cold start AND on
+    // resuming from the background — both are "opening the app" to a
+    // person, and the sentence doesn't say otherwise. Each vendor's
+    // own checkOpportunistic() no-ops instantly unless BackupSchedule's
+    // conditions and interval are actually satisfied right now.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, dependencies.backupVendors) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                dependencies.backupVendors.forEach { it.checkOpportunistic() }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // First-launch onboarding gate (PR 3): while the completed/
     // grandfathered decision is unresolved hold a blank frame (a
     // single fast DataStore read — flashing the tabs at a user who is
@@ -437,6 +463,13 @@ fun RootScreen(
                         ?.value as? app.onym.android.moderation.ui.RootGate.Operational)
                         ?.openCases
                         .orEmpty()
+                // Re-resolved every time Settings is opened, not just
+                // at cold app launch — a mid-session status change (or
+                // a first enrolment) must be reflected without a
+                // process restart, for every consented vendor.
+                LaunchedEffect(dependencies.backupVendors) {
+                    dependencies.backupVendors.forEach { it.settingsFlow.refresh() }
+                }
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
@@ -516,6 +549,14 @@ fun RootScreen(
                             navController.navigate(ROUTE_MODERATION_SETTINGS)
                         }
                     },
+                    // Null exactly when no backup vendor is consented
+                    // (or the identity has no recovery phrase) — the
+                    // DEVICE BACKUP section is omitted, same posture as
+                    // Discovery/Moderation above.
+                    onDeviceBackupClick = dependencies.backupVendors.takeIf { it.isNotEmpty() }?.let {
+                        { navController.navigate(ROUTE_DEVICE_BACKUP_VENDORS) }
+                    },
+                    deviceBackupVendorCount = dependencies.backupVendors.size,
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -754,6 +795,111 @@ fun RootScreen(
                         )
                     },
                     onBack = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_DEVICE_BACKUP_VENDORS) {
+                // Every consented vendor gets its own row; a holder
+                // may back up to several at once (see BackupSeat's doc
+                // comment) — this list is what "Device Backup" in
+                // Settings actually opens onto.
+                app.onym.android.backup.ui.BackupVendorsListScreen(
+                    vendors = dependencies.backupVendors.map { vendor ->
+                        val status by vendor.settingsFlow.status.collectAsStateWithLifecycle()
+                        app.onym.android.backup.ui.BackupVendorRow(
+                            componentId = vendor.componentId,
+                            displayName = vendor.displayName,
+                            status = status,
+                        )
+                    },
+                    onVendorClick = { componentId ->
+                        navController.navigate(deviceBackupSettingsRoute(componentId))
+                    },
+                )
+            }
+            composable(ROUTE_DEVICE_BACKUP_SETTINGS) { entry ->
+                val componentId = entry.arguments?.getString("componentId") ?: return@composable
+                val backup = dependencies.backupVendors.firstOrNull { it.componentId == componentId }
+                    ?: return@composable
+                val status by backup.settingsFlow.status.collectAsStateWithLifecycle()
+                val coroutineScope = rememberCoroutineScope()
+
+                if (status is app.onym.android.backup.ui.DeviceBackupStatus.Off) {
+                    var disclosure by remember {
+                        mutableStateOf<Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>?>(null)
+                    }
+                    // Distinct from `disclosure == null` before the
+                    // first attempt returns, so a genuinely unreachable
+                    // terms URL gets a retry affordance instead of a
+                    // permanent, indistinguishable-from-loading blank
+                    // screen.
+                    var fetchAttempts by remember { mutableStateOf(0) }
+                    var isFetching by remember { mutableStateOf(true) }
+                    LaunchedEffect(componentId, fetchAttempts) {
+                        isFetching = true
+                        disclosure = backup.makeEnrolmentDisclosure()
+                        isFetching = false
+                    }
+                    val resolved = disclosure
+                    if (resolved == null) {
+                        androidx.compose.foundation.layout.Column(
+                            modifier = Modifier.testTag("backup.enrolment.loading"),
+                        ) {
+                            if (isFetching) {
+                                androidx.compose.material3.Text(stringResource(R.string.backup_enrolment_fetching))
+                            } else {
+                                androidx.compose.material3.Text(
+                                    stringResource(R.string.backup_enrolment_fetch_failed),
+                                    modifier = Modifier.testTag("backup.enrolment.fetch_failed"),
+                                )
+                                androidx.compose.material3.Button(
+                                    onClick = { fetchAttempts += 1 },
+                                    modifier = Modifier.testTag("backup.enrolment.retry"),
+                                ) {
+                                    androidx.compose.material3.Text(stringResource(R.string.backup_enrolment_retry))
+                                }
+                            }
+                        }
+                    } else {
+                        val (items, scheduleSentence) = resolved
+                        app.onym.android.backup.ui.BackupEnrolmentScreen(
+                            items = items,
+                            scheduleSentence = scheduleSentence,
+                            onAccept = {
+                                val termsId = items.first { it.id == "termsId" }.value
+                                coroutineScope.launch {
+                                    // acceptEnrolment is a fast local
+                                    // state write, awaited so the
+                                    // subsequent backUpNow (which
+                                    // reads the just-pinned terms) never
+                                    // races it. backUpNow itself is
+                                    // fire-and-forget — it survives
+                                    // navigating off this screen.
+                                    backup.acceptEnrolment(termsId)
+                                    backup.backUpNow()
+                                }
+                            },
+                            onDecline = { navController.popBackStack() },
+                        )
+                    }
+                } else {
+                    app.onym.android.backup.ui.DeviceBackupSettingsScreen(
+                        flow = backup.settingsFlow,
+                        canRestore = true,
+                        onBackUpNow = backup.backUpNow,
+                        onRestoreFromBackup = {
+                            navController.navigate(deviceBackupRestoreRoute(componentId))
+                        },
+                        onErase = backup.erase,
+                    )
+                }
+            }
+            composable(ROUTE_DEVICE_BACKUP_RESTORE) { entry ->
+                val componentId = entry.arguments?.getString("componentId") ?: return@composable
+                val backup = dependencies.backupVendors.firstOrNull { it.componentId == componentId }
+                    ?: return@composable
+                app.onym.android.backup.ui.BackupRestoreScreen(
+                    makeRestoreFlow = backup.makeRestoreFlow,
+                    onDone = { navController.popBackStack() },
                 )
             }
             composable("moderation_case_appeal/{caseId}") { entry ->
@@ -1027,6 +1173,15 @@ private const val ROUTE_DISCOVERY_SETTINGS = "discovery_settings"
 private const val ROUTE_MODERATION_SETTINGS = "moderation_settings"
 private const val ROUTE_MODERATION_SWITCH_CONSENT = "moderation_switch_consent"
 private const val ROUTE_MODERATION_TERMS = "moderation_terms"
+private const val ROUTE_DEVICE_BACKUP_VENDORS = "device_backup_vendors"
+private const val ROUTE_DEVICE_BACKUP_SETTINGS = "device_backup_settings/{componentId}"
+private const val ROUTE_DEVICE_BACKUP_RESTORE = "device_backup_restore/{componentId}"
+
+private fun deviceBackupSettingsRoute(componentId: String) =
+    "device_backup_settings/${android.net.Uri.encode(componentId)}"
+
+private fun deviceBackupRestoreRoute(componentId: String) =
+    "device_backup_restore/${android.net.Uri.encode(componentId)}"
 private const val ROUTE_ADD_DISCOVERY_PROVIDER = "add_discovery_provider"
 private const val ROUTE_NOSTR_RELAYS = "nostr_relays"
 private const val ROUTE_BLOSSOM_RELAYS = "blossom_relays"

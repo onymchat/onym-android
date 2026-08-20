@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
@@ -141,6 +142,15 @@ fun SettingsScreen(
     /** Review the open cases: the single case's appeal when there is
      *  one, otherwise the Moderation screen that lists them all. */
     onReviewCases: () -> Unit = {},
+    /** Settings → Device Backup entry. Null when no backup operator is
+     *  consented for any vendor (or the identity has no recovery
+     *  phrase) — the section is omitted entirely, same posture as
+     *  Discovery/Moderation. */
+    onDeviceBackupClick: (() -> Unit)? = null,
+    /** Count of consented backup vendors — a holder may back up to
+     *  several at once — driving the row's "{n} vendor(s)" subtitle.
+     *  Only meaningful when [onDeviceBackupClick] is non-null. */
+    deviceBackupVendorCount: Int = 0,
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -281,6 +291,29 @@ fun SettingsScreen(
                             onClick = onModerationClick,
                             isLast = true,
                             modifier = Modifier.testTag("settings.moderation_row"),
+                        )
+                    }
+                }
+            }
+
+            // ─── DEVICE BACKUP ─────────────────────────────────────
+            if (onDeviceBackupClick != null) {
+                item { SettingsSectionLabel(stringResource(R.string.settings_section_device_backup)) }
+                item {
+                    SettingsCard {
+                        SettingsRow(
+                            leading = {
+                                SettingsTileBox(Icons.Filled.Backup, SettingsTile.Indigo)
+                            },
+                            title = stringResource(R.string.settings_device_backup_row_title),
+                            subtitle = androidx.compose.ui.res.pluralStringResource(
+                                R.plurals.backup_vendor_count,
+                                deviceBackupVendorCount,
+                                deviceBackupVendorCount,
+                            ),
+                            onClick = onDeviceBackupClick,
+                            isLast = true,
+                            modifier = Modifier.testTag("settings.device_backup_row"),
                         )
                     }
                 }

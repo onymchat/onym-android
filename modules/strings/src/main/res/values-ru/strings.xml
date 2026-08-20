@@ -752,6 +752,127 @@
   <!-- Настройки → Модерация -->
   <string name="settings_section_moderation">Модерация</string>
   <string name="settings_moderation_row_title">Модерация</string>
+  <string name="settings_section_device_backup">Резервное копирование</string>
+  <string name="settings_device_backup_row_title">Резервная копия устройства</string>
+  <plurals name="backup_vendor_count">
+    <item quantity="one">%1$d поставщик резервного копирования</item>
+    <item quantity="few">%1$d поставщика резервного копирования</item>
+    <item quantity="many">%1$d поставщиков резервного копирования</item>
+    <item quantity="other">%1$d поставщика резервного копирования</item>
+  </plurals>
+
+  <!-- Резервное копирование устройства — экран согласия -->
+  <string name="backup_enrolment_accept">Включить резервное копирование</string>
+  <string name="backup_enrolment_decline">Не сейчас</string>
+  <string name="backup_enrolment_fetching">Получение условий этого оператора…</string>
+  <string name="backup_enrolment_fetch_failed">Не удалось получить условия этого оператора. Резервное копирование нельзя включить без их ознакомления.</string>
+  <string name="backup_enrolment_retry">Повторить</string>
+
+  <!-- Резервное копирование устройства — экран настроек -->
+  <string name="backup_settings_back_up_now">Создать резервную копию</string>
+  <string name="backup_settings_restore_row_title">Восстановить из резервной копии</string>
+  <string name="backup_settings_restore_row_subtitle">Добавляет сообщения и чаты — ничего не удаляется</string>
+  <string name="backup_settings_erase">Удалить резервную копию</string>
+
+  <!-- Резервное копирование устройства — статус -->
+  <string name="backup_status_off">Выключено</string>
+  <string name="backup_status_backed_up">Резервная копия создана</string>
+  <string name="backup_status_no_backup_yet">Включено — резервной копии ещё нет</string>
+  <string name="backup_status_backing_up">Создание резервной копии…</string>
+  <string name="backup_status_stale">Резервная копия устарела</string>
+  <string name="backup_status_payment_required">Для продолжения резервного копирования требуется оплата</string>
+  <string name="backup_status_terms_changed">Условия оператора изменились — просмотрите и примите их заново</string>
+  <string name="backup_status_operator_changed">Оператор резервного копирования изменился — проверьте настройки</string>
+  <string name="backup_status_checking_earlier">Проверка более ранней резервной копии…</string>
+  <string name="backup_status_failed">Ошибка резервного копирования: %1$s</string>
+
+  <!-- Резервное копирование устройства — список поставщиков -->
+  <string name="backup_vendors_empty">Ни один поставщик резервного копирования пока не подтверждён.</string>
+
+  <!-- Резервное копирование устройства — экран восстановления -->
+  <string name="backup_restore_intro">Добавляет сообщения и чаты из последней резервной копии — ничего на этом устройстве не удаляется.</string>
+  <string name="backup_restore_running">Восстановление…</string>
+  <string name="backup_restore_done">Готово</string>
+  <string name="backup_restore_close">Закрыть</string>
+  <string name="backup_restore_unavailable">Восстановление сейчас недоступно.</string>
+  <string name="backup_restore_generic_failed">Восстановление не удалось. Ничего на этом устройстве не изменилось.</string>
+  <string name="backup_restore_interrupted_default">Восстановление было прервано.</string>
+  <string name="backup_restore_failed_prefix">Ничего не изменилось. %1$s</string>
+  <string name="backup_restore_partial">Восстановление было прервано. Часть сообщений и чатов могла уже быть добавлена — повторное восстановление безопасно и не создаст дублей. %1$s</string>
+  <string name="backup_restore_nothing_found">Для этой резервной копии ничего не найдено. Если вы ожидали увидеть историю, проверьте, что это тот же оператор и та же личность, под которыми делалась резервная копия.</string>
+  <plurals name="backup_restore_chats_count">
+    <item quantity="one">%1$d чат</item>
+    <item quantity="few">%1$d чата</item>
+    <item quantity="many">%1$d чатов</item>
+    <item quantity="other">%1$d чата</item>
+  </plurals>
+  <plurals name="backup_restore_messages_count">
+    <item quantity="one">%1$d сообщение</item>
+    <item quantity="few">%1$d сообщения</item>
+    <item quantity="many">%1$d сообщений</item>
+    <item quantity="other">%1$d сообщения</item>
+  </plurals>
+  <string name="backup_restore_summary_template">Восстановлено: %1$s и %2$s.</string>
+  <string name="backup_restore_skipped">Эта версия приложения не смогла восстановить: %1$s.</string>
+  <plurals name="backup_restore_unresolved_blobs">
+    <item quantity="one">%1$d вложение упомянуто в резервной копии, но не включено в неё.</item>
+    <item quantity="few">%1$d вложения упомянуты в резервной копии, но не включены в неё.</item>
+    <item quantity="many">%1$d вложений упомянуто в резервной копии, но не включено в неё.</item>
+    <item quantity="other">%1$d вложения упомянуты в резервной копии, но не включены в неё.</item>
+  </plurals>
+
+  <!-- Резервное копирование устройства — предложение о расписании -->
+  <string name="backup_schedule_both_conditions">Резервные копии создаются при открытии приложения, не чаще одного раза в %1$d ч., по Wi-Fi и во время зарядки. Фонового расписания нет — именно открытие приложения даёт резервному копированию шанс выполниться.</string>
+  <string name="backup_schedule_wifi_only">Резервные копии создаются при открытии приложения, не чаще одного раза в %1$d ч., по Wi-Fi. Фонового расписания нет — именно открытие приложения даёт резервному копированию шанс выполниться.</string>
+  <string name="backup_schedule_charging_only">Резервные копии создаются при открытии приложения, не чаще одного раза в %1$d ч., во время зарядки. Фонового расписания нет — именно открытие приложения даёт резервному копированию шанс выполниться.</string>
+  <string name="backup_schedule_no_conditions">Резервные копии создаются при открытии приложения, не чаще одного раза в %1$d ч. Фонового расписания нет — именно открытие приложения даёт резервному копированию шанс выполниться.</string>
+
+  <!-- Резервное копирование устройства — метки условий раскрытия информации -->
+  <string name="backup_disclosure_operator">Оператор</string>
+  <string name="backup_disclosure_retention_class">Класс хранения</string>
+  <string name="backup_disclosure_retention_period">Максимальный срок хранения</string>
+  <string name="backup_disclosure_snapshots_retained">Хранимые снимки</string>
+  <string name="backup_disclosure_retention_expiry">Что происходит по истечении срока хранения</string>
+  <string name="backup_disclosure_erasure_ack_deadline">Подтверждение удаления в течение</string>
+  <string name="backup_disclosure_erasure_completion_deadline">Завершение удаления в течение</string>
+  <string name="backup_disclosure_erasure_scope">Что охватывает удаление</string>
+  <string name="backup_disclosure_erasure_excluded">Что НЕ охватывает удаление</string>
+  <string name="backup_disclosure_jurisdictions">Юрисдикции</string>
+  <string name="backup_disclosure_sub_processors">Субподрядчики обработки данных</string>
+  <string name="backup_disclosure_lawful_access">Что может быть предоставлено по законному запросу доступа</string>
+  <string name="backup_disclosure_lawful_access_notify">Уведомление при законной возможности</string>
+  <string name="backup_disclosure_breach_notice">Уведомление об утечке</string>
+  <string name="backup_disclosure_export_format">Формат экспорта</string>
+  <string name="backup_disclosure_export_while_unpaid">Экспорт доступен при неоплате</string>
+  <string name="backup_disclosure_shutdown_notice">Уведомление перед прекращением работы</string>
+  <string name="backup_disclosure_end_of_payment_notice">Уведомление об окончании оплаты</string>
+  <string name="backup_disclosure_end_of_payment_grace">Льготный период после окончания оплаты</string>
+  <string name="backup_disclosure_end_of_payment_during_grace">Доступно в льготный период</string>
+  <string name="backup_disclosure_end_of_payment_after_grace">После окончания льготного периода</string>
+  <string name="backup_disclosure_metadata_access_logs">Хранение журналов доступа</string>
+  <string name="backup_disclosure_metadata_size_timing">Хранение метаданных о размере и времени</string>
+  <string name="backup_disclosure_media_policy">Вложения</string>
+  <string name="backup_disclosure_media_included">Включены в резервную копию</string>
+  <string name="backup_disclosure_media_not_included">Не включены — только описания</string>
+  <string name="backup_disclosure_terms_digest">Хэш условий</string>
+  <string name="backup_disclosure_third_party_label">Что это значит для людей, с которыми вы общаетесь</string>
+  <string name="backup_disclosure_third_party_value">Резервная копия продлевает срок существования истории для всех участников каждой беседы, которую она содержит, — включая тех, кто не выбирал этого оператора.</string>
+  <string name="backup_disclosure_recovery_label">Восстановление</string>
+  <string name="backup_disclosure_recovery_value">Никто — ни этот оператор, ни Onym — не может восстановить этот архив без вашей фразы восстановления. Утрата фразы восстановления означает навсегда нечитаемую резервную копию. Восстановление через поддержку невозможно.</string>
+  <string name="backup_disclosure_yes">Да</string>
+  <string name="backup_disclosure_no">Нет</string>
+
+  <!-- Резервное копирование устройства — запасные сообщения об ошибках -->
+  <string name="backup_error_not_enrolled">Резервное копирование ещё не включено</string>
+  <string name="backup_error_generic_failed">Сбой резервного копирования</string>
+  <string name="backup_error_erase_failed">Не удалось удалить резервную копию</string>
+
+  <!-- Резервное копирование устройства — подтверждение удаления -->
+  <string name="backup_erase_confirm_1_title">Удалить резервную копию?</string>
+  <string name="backup_erase_confirm_1_body">Это запросит у оператора удаление всех снимков, хранящихся в этой резервной копии. На это устройство это не влияет, и отменить действие после того, как оператор его выполнит, будет нельзя.</string>
+  <string name="backup_erase_confirm_2_title">Вы уверены?</string>
+  <string name="backup_erase_confirm_2_body">Это последнее подтверждение. Оператор удалит эту резервную копию.</string>
+  <string name="backup_erase_confirm_action">Удалить</string>
   <string name="settings_moderation_row_consented">Согласие: %1$s</string>
   <string name="settings_moderation_row_none">Инстанция ещё не выбрана</string>
   <string name="moderation_settings_title">Модерация</string>
