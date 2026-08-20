@@ -81,6 +81,14 @@ object BackupSeatComposer {
         backupStateDataStore: DataStore<Preferences>,
         strings: app.onym.android.foundation.StringProvider,
         runConditions: () -> app.onym.android.backup.ui.BackupRunConditions,
+        /** componentIds whose vendor is already built and live. A
+         *  refresh after a fresh consent must ADD the new operator
+         *  without rebuilding the ones already on screen: a rebuilt
+         *  vendor would throw away its memoized key material, re-draw
+         *  the schedule jitter that is contractually once-per-session,
+         *  and hand the UI a second settings flow for a vendor the
+         *  holder is already looking at. Empty at boot. */
+        alreadyComposed: Set<String> = emptySet(),
     ): List<BackupUiDependencies> {
         // No recovery phrase (raw-key-imported identity) means no
         // seed to derive ANY backup key from — hide the whole feature
@@ -92,7 +100,10 @@ object BackupSeatComposer {
         val identity = identityRepository.currentIdentity() ?: return emptyList()
         if (!identity.hasRecoveryPhrase) return emptyList()
 
-        return BackupSeat.activeConsents(consentStore).mapNotNull { consent ->
+        val pending = BackupSeat.activeConsents(consentStore)
+            .filter { it.componentId !in alreadyComposed }
+
+        return pending.mapNotNull { consent ->
             try {
                 composeOne(
                     consent = consent,

@@ -44,6 +44,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.bouncycastle.jce.provider.BouncyCastleProvider
@@ -767,6 +768,16 @@ class OnymApplication : Application() {
                             // seat has no running code on Android and
                             // its entries are hidden from every
                             // picker.
+                            //
+                            // No `storage.backup` branch either, but
+                            // for the opposite reason: that seat has
+                            // no legacy configuration to write into.
+                            // The pinned consent record IS its wiring
+                            // — `BackupSeat.activeConsents` reads the
+                            // store directly, and the endpoint comes
+                            // off the consented manifest's exact bytes
+                            // (`BackupOperatorManifest.from`), never
+                            // off a copy some settings screen kept.
                         }
                     }
                 DiscoveryUiDependencies(
@@ -1634,8 +1645,15 @@ class OnymApplication : Application() {
         // territory for anyone backing up to more than one vendor.
         // `BackupSeatComposer.composeOne`'s `SuspendLazy` defers it to
         // the first actual backup/restore/erase/enrolment-accept call.
-        val backupVendors: List<app.onym.android.BackupUiDependencies> = try {
-            kotlinx.coroutines.runBlocking {
+        //
+        // The same call also runs AFTER boot, whenever the holder may
+        // have consented to a new operator — `storage.backup` consent
+        // is written by the generic module-consent flow, which knows
+        // nothing about this seat, so nothing else would notice. It is
+        // passed the componentIds already built so a refresh only ever
+        // ADDS: see `composeAll`'s `alreadyComposed` parameter.
+        val composeBackupVendors: suspend (Set<String>) -> List<app.onym.android.BackupUiDependencies> =
+            { alreadyComposed ->
                 app.onym.android.backup.BackupSeatComposer.composeAll(
                     identityRepository = identityRepository,
                     consentStore = pinnedConsentStore,
@@ -1662,16 +1680,46 @@ class OnymApplication : Application() {
                         val isCharging = batteryManager?.isCharging == true
                         app.onym.android.backup.ui.BackupRunConditions(isOnWifi = isOnWifi, isCharging = isCharging)
                     },
+                    alreadyComposed = alreadyComposed,
                 )
             }
-        } catch (_: Exception) {
-            emptyList()
+
+        val backupVendors = kotlinx.coroutines.flow.MutableStateFlow(
+            try {
+                kotlinx.coroutines.runBlocking { composeBackupVendors(emptySet()) }
+            } catch (_: Exception) {
+                emptyList()
+            },
+        )
+
+        // Serialized: two surfaces asking at once (Settings opening
+        // while the vendors list is still composing) must not both read
+        // the same `alreadyComposed` set and append the same vendor
+        // twice.
+        val backupVendorsMutex = kotlinx.coroutines.sync.Mutex()
+        val refreshBackupVendors: suspend () -> Unit = {
+            backupVendorsMutex.withLock {
+                val current = backupVendors.value
+                // A consent-store read that fails is not a reason to
+                // drop the vendors already built — the refresh answers
+                // "nothing new", same as a store with nothing new in
+                // it, and the next attempt tries again.
+                val added = try {
+                    composeBackupVendors(current.map { it.componentId }.toSet())
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                if (added.isNotEmpty()) backupVendors.value = current + added
+            }
         }
 
         return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
             moderation = moderationUi,
             backupVendors = backupVendors,
+            refreshBackupVendors = refreshBackupVendors,
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
                 RecoveryPhraseBackupViewModel(
                     repository = identityRepository,
