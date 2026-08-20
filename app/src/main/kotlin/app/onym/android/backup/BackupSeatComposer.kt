@@ -226,6 +226,8 @@ object BackupSeatComposer {
                 block()
             } catch (termsChanged: BackupError.TermsChanged) {
                 settingsFlow.reportTermsChanged()
+            } catch (operatorChanged: BackupError.OperatorChanged) {
+                settingsFlow.reportOperatorChanged()
             } catch (e: Exception) {
                 settingsFlow.reportFailed(e.message ?: strings[app.onym.android.strings.R.string.backup_error_generic_failed])
             } finally {

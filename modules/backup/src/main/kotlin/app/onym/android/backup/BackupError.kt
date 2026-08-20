@@ -18,6 +18,12 @@ sealed class BackupError(message: String) : Exception(message) {
     object TermsUnavailable : BackupError("operator terms could not be fetched or verified")
     class TermsChanged(val currentTermsId: String) :
         BackupError("operator's current terms ($currentTermsId) differ from what was accepted")
+    /** The locally-pinned operator no longer matches the one this run
+     *  is being asked to back up to — a distinct condition from a
+     *  terms change on the *same* operator, and routed to a different
+     *  status/screen ([DeviceBackupStatus.OperatorChanged] rather than
+     *  `.TermsChanged`). */
+    object OperatorChanged : BackupError("locally pinned operator differs from the one being backed up to")
     class TermsRegression(val field: String) :
         BackupError("proposed terms are weaker than the pinned terms on field '$field'")
     object AccessRefused : BackupError("access proof was rejected")

@@ -62,7 +62,7 @@ class BackupRepository(
 
             val state = stateStore.load()
             if (state?.componentId != null && state.componentId != componentId) {
-                throw BackupError.TermsChanged(state.acceptedTermsId ?: "")
+                throw BackupError.OperatorChanged
             }
 
             val pendingPayment = state?.pendingPayment?.takeIf { it.componentId == componentId }
@@ -104,6 +104,20 @@ class BackupRepository(
             val state = stateStore.load()
             val pending = state?.pendingPayment?.takeIf { it.componentId == componentId }
                 ?: return BackupRunResult.NothingPending
+
+            // The snapshot was sealed under `pending.acceptedTermsId`.
+            // If the local pin has since moved past it, resubmitting
+            // would only be refused again at the operator
+            // (terms_changed) and leave nothing behind to retry
+            // against — so the stale pending payment is cleared here,
+            // same as iOS, rather than sent.
+            if (state.acceptedTermsId != null && state.acceptedTermsId != pending.acceptedTermsId) {
+                val file = File(pending.sealedFilePath)
+                if (file.exists()) file.delete()
+                stateStore.save(state.copy(pendingPayment = null))
+                throw BackupError.TermsChanged(state.acceptedTermsId)
+            }
+
             val snapshot = SealedSnapshot(
                 operationId = pending.operationId,
                 snapshotReference = SnapshotReference(digest = pending.snapshotDigest, sealedByteSize = pending.sealedByteSize),
@@ -150,12 +164,23 @@ class BackupRepository(
 
         val viaQuery = runCatching { port.queryOutcome(pending.operationId) }
         if (viaQuery.isSuccess) {
-            // A successful query — found or not — resolves the
-            // pending record either way; `null` just means the
-            // operator no longer has a record for it (outside its
-            // declared retention window), not that it's still open.
-            val wasRetained = viaQuery.getOrNull()?.status?.isRetention == true
-            clearPendingOperationLocked(state, componentId = componentId, terms = pending.acceptedTermsId, wasRetained = wasRetained)
+            // Unlike `listSnapshots` above, a successful query here
+            // does NOT resolve the record on every answer: `listSnapshots`
+            // itself just failed, so a `null`/in-flight status has no
+            // corroborating "not in the authoritative list" to resolve
+            // against — it may simply not be recorded yet. Only a
+            // determinate answer (actually retained, or explicitly
+            // refused) resolves the pending record here; queued/
+            // submitted/accepted/unreachable/unknown/no-record all stay
+            // pending for a later reconcile attempt.
+            val outcome = viaQuery.getOrNull()
+            when {
+                outcome?.status?.isRetention == true ->
+                    clearPendingOperationLocked(state, componentId = componentId, terms = pending.acceptedTermsId, wasRetained = true)
+                outcome?.status == BackupOutcomeStatus.Rejected ->
+                    clearPendingOperationLocked(state, componentId = componentId, terms = pending.acceptedTermsId, wasRetained = false)
+                else -> Unit
+            }
         }
         // A failed fetch (both list and query threw) leaves the
         // pending record untouched — reconciled on a later attempt.

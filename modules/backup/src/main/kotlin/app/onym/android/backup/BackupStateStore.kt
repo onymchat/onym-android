@@ -3,11 +3,11 @@ package app.onym.android.backup
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import java.io.IOException
 
@@ -89,11 +89,18 @@ class DataStorePreferencesBackupStateStore(
 
     override suspend fun load(): PersistedBackupState? {
         val raw = dataStore.data
-            .catch { failure -> if (failure is IOException) emit(emptyPreferences()) else throw failure }
+            .catch { failure ->
+                if (failure is IOException) throw BackupError.LocalFailure(LocalFailureReason.StateUnreadable)
+                else throw failure
+            }
             .first()[key] ?: return null
-        return runCatching {
+        return try {
             Json.decodeFromString(PersistedBackupState.serializer(), raw)
-        }.getOrNull()
+        } catch (e: SerializationException) {
+            throw BackupError.LocalFailure(LocalFailureReason.StateUnreadable)
+        } catch (e: IllegalArgumentException) {
+            throw BackupError.LocalFailure(LocalFailureReason.StateUnreadable)
+        }
     }
 
     override suspend fun save(state: PersistedBackupState?) {

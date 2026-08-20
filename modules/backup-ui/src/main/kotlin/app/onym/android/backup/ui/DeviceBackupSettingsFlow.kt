@@ -60,10 +60,19 @@ class DeviceBackupSettingsFlow(
 
     /** The composition root calls this when a run throws
      *  `BackupError.TermsChanged` — a transient signal until the next
-     *  [refresh], not something persisted here (the repository itself
-     *  already refuses to upload under changed terms). */
+     *  [refresh]. Nothing is persisted here; the run was refused at
+     *  the operator, which answered `terms_changed` for this upload. */
     fun reportTermsChanged() {
         _status.value = DeviceBackupStatus.TermsChanged
+    }
+
+    /** The composition root calls this when a run throws
+     *  `BackupError.OperatorChanged` — a transient signal until the
+     *  next [refresh], which will independently reach the same
+     *  conclusion by comparing [currentComponentId] against the
+     *  pinned state. */
+    fun reportOperatorChanged() {
+        _status.value = DeviceBackupStatus.OperatorChanged
     }
 
     fun reportFailed(message: String) {

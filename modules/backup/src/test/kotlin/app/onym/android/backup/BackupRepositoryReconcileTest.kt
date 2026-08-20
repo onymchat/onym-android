@@ -4,6 +4,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.security.SecureRandom
@@ -47,6 +48,26 @@ private class FakePort(
     override suspend fun eraseSnapshot(scope: ErasureScope) = error("not used")
     override suspend fun exportSnapshots(directory: File) = error("not used")
     override suspend fun queryOutcome(operationId: String): BackupOutcome? = null
+}
+
+/** A port whose `listSnapshots()` always fails (simulating the
+ *  operator being unreachable for the authoritative check) and whose
+ *  `queryOutcome()` answers with a fixed, controllable status —
+ *  isolating what `reconcileLocked` does on the query-only fallback
+ *  path from the `listSnapshots`-succeeds path `FakePort` covers. */
+private class QueryOnlyPort(
+    private val queriedOutcome: BackupOutcome?,
+) : BackupPort {
+    override suspend fun connect(): BackupConnection = BackupConnection(null)
+    override suspend fun preflight(snapshot: SealedSnapshot): BackupPreflight =
+        throw BackupError.OperatorUnavailable
+    override suspend fun uploadSnapshot(snapshot: SealedSnapshot, grant: BackupUploadGrant): BackupOutcome =
+        error("not used")
+    override suspend fun listSnapshots(): List<RetainedSnapshot> = throw BackupError.OperatorUnavailable
+    override suspend fun downloadSnapshot(reference: SnapshotReference, destination: File) = error("not used")
+    override suspend fun eraseSnapshot(scope: ErasureScope) = error("not used")
+    override suspend fun exportSnapshots(directory: File) = error("not used")
+    override suspend fun queryOutcome(operationId: String): BackupOutcome? = queriedOutcome
 }
 
 private class InMemoryStateStore : BackupStateStore {
@@ -154,5 +175,54 @@ class BackupRepositoryReconcileTest {
             stateStore.state?.lastSuccessAtEpochSeconds,
         )
         assertFalse("the pending operation is resolved (not retained) so its sealed file is dead weight", sealedFile.exists())
+    }
+
+    @Test
+    fun reconcile_via_query_leaves_an_in_flight_status_pending_rather_than_resolving_it() = runTest {
+        val workDir = tempDir()
+        val pendingDigest = "sha256:" + "d".repeat(64)
+        val sealedFile = File(workDir, "pending3.seal").apply { writeBytes(ByteArray(10)) }
+
+        val stateStore = InMemoryStateStore()
+        stateStore.state = PersistedBackupState(
+            componentId = "onym:component:op-1",
+            acceptedTermsId = "sha256:" + "a".repeat(64),
+            pendingOperation = PendingOperation(
+                componentId = "onym:component:op-1",
+                operationId = "op-3",
+                snapshotDigest = pendingDigest,
+                sealedByteSize = 10,
+                sealedFilePath = sealedFile.absolutePath,
+                acceptedTermsId = "sha256:" + "a".repeat(64),
+                sealedAtEpochSeconds = Instant.now().epochSecond,
+            ),
+            lastSuccessAtEpochSeconds = null,
+        )
+
+        // `listSnapshots` is unreachable, so reconcile falls back to
+        // `queryOutcome`, which answers `submitted` — the upload is
+        // genuinely still in flight at the operator, not refused and
+        // not retained. This must NOT resolve the pending record: a
+        // client that clears it here would compose and send a second
+        // snapshot on top of one the operator is still working on.
+        val outcome = BackupOutcome(
+            operationId = "op-3",
+            snapshotReference = SnapshotReference(digest = pendingDigest, sealedByteSize = 10),
+            status = BackupOutcomeStatus.Submitted,
+        )
+        val port = QueryOnlyPort(queriedOutcome = outcome)
+        val composer = BackupComposer(EmptySource(), BackupMediaPolicy.DescriptorsOnly, workDir)
+        val repository = BackupRepository(port, composer, stateStore, workDir)
+
+        // `preflight` throws `OperatorUnavailable` on this fake port,
+        // so `backUp()`'s own fresh attempt (which runs after
+        // reconcile) fails too — the assertions are about reconcile.
+        runCatching { repository.backUp(keyMaterial(), "onym:component:op-1", "sha256:" + "a".repeat(64)) }
+
+        assertNotNull(
+            "an in-flight (submitted) outcome must leave the pending operation in place, not clear it",
+            stateStore.state?.pendingOperation,
+        )
+        assertTrue("the sealed file must survive so a later reconcile/retry can still act on it", sealedFile.exists())
     }
 }
