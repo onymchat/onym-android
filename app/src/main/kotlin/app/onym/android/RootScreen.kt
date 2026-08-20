@@ -440,14 +440,12 @@ fun RootScreen(
                         ?.openCases
                         .orEmpty()
                 // Re-resolved every time Settings is opened, not just
-                // at cold app launch — a mid-session operator change
-                // (or a first enrolment) must be reflected without a
-                // process restart.
-                LaunchedEffect(dependencies.backup) {
-                    dependencies.backup?.settingsFlow?.refresh()
+                // at cold app launch — a mid-session status change (or
+                // a first enrolment) must be reflected without a
+                // process restart, for every consented vendor.
+                LaunchedEffect(dependencies.backupVendors) {
+                    dependencies.backupVendors.forEach { it.settingsFlow.refresh() }
                 }
-                val deviceBackupStatus = dependencies.backup?.settingsFlow?.status
-                    ?.collectAsStateWithLifecycle()
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
@@ -527,14 +525,14 @@ fun RootScreen(
                             navController.navigate(ROUTE_MODERATION_SETTINGS)
                         }
                     },
-                    // Null exactly when no backup operator is
-                    // consented (or the identity has no recovery
-                    // phrase) — the DEVICE BACKUP section is omitted,
-                    // same posture as Discovery/Moderation above.
-                    onDeviceBackupClick = dependencies.backup?.let {
-                        { navController.navigate(ROUTE_DEVICE_BACKUP_SETTINGS) }
+                    // Null exactly when no backup vendor is consented
+                    // (or the identity has no recovery phrase) — the
+                    // DEVICE BACKUP section is omitted, same posture as
+                    // Discovery/Moderation above.
+                    onDeviceBackupClick = dependencies.backupVendors.takeIf { it.isNotEmpty() }?.let {
+                        { navController.navigate(ROUTE_DEVICE_BACKUP_VENDORS) }
                     },
-                    deviceBackupStatus = deviceBackupStatus?.value,
+                    deviceBackupVendorCount = dependencies.backupVendors.size,
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -775,8 +773,29 @@ fun RootScreen(
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable(ROUTE_DEVICE_BACKUP_SETTINGS) {
-                val backup = dependencies.backup ?: return@composable
+            composable(ROUTE_DEVICE_BACKUP_VENDORS) {
+                // Every consented vendor gets its own row; a holder
+                // may back up to several at once (see BackupSeat's doc
+                // comment) — this list is what "Device Backup" in
+                // Settings actually opens onto.
+                app.onym.android.backup.ui.BackupVendorsListScreen(
+                    vendors = dependencies.backupVendors.map { vendor ->
+                        val status by vendor.settingsFlow.status.collectAsStateWithLifecycle()
+                        app.onym.android.backup.ui.BackupVendorRow(
+                            componentId = vendor.componentId,
+                            displayName = vendor.displayName,
+                            status = status,
+                        )
+                    },
+                    onVendorClick = { componentId ->
+                        navController.navigate(deviceBackupSettingsRoute(componentId))
+                    },
+                )
+            }
+            composable(ROUTE_DEVICE_BACKUP_SETTINGS) { entry ->
+                val componentId = entry.arguments?.getString("componentId") ?: return@composable
+                val backup = dependencies.backupVendors.firstOrNull { it.componentId == componentId }
+                    ?: return@composable
                 val status by backup.settingsFlow.status.collectAsStateWithLifecycle()
                 val coroutineScope = rememberCoroutineScope()
 
@@ -784,7 +803,7 @@ fun RootScreen(
                     var disclosure by remember {
                         mutableStateOf<Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>?>(null)
                     }
-                    LaunchedEffect(Unit) {
+                    LaunchedEffect(componentId) {
                         disclosure = backup.makeEnrolmentDisclosure()
                     }
                     val resolved = disclosure
@@ -817,14 +836,16 @@ fun RootScreen(
                         canRestore = true,
                         onBackUpNow = { coroutineScope.launch { backup.backUpNow() } },
                         onRestoreFromBackup = {
-                            navController.navigate(ROUTE_DEVICE_BACKUP_RESTORE)
+                            navController.navigate(deviceBackupRestoreRoute(componentId))
                         },
                         onErase = { coroutineScope.launch { backup.erase() } },
                     )
                 }
             }
-            composable(ROUTE_DEVICE_BACKUP_RESTORE) {
-                val backup = dependencies.backup ?: return@composable
+            composable(ROUTE_DEVICE_BACKUP_RESTORE) { entry ->
+                val componentId = entry.arguments?.getString("componentId") ?: return@composable
+                val backup = dependencies.backupVendors.firstOrNull { it.componentId == componentId }
+                    ?: return@composable
                 app.onym.android.backup.ui.BackupRestoreScreen(
                     makeRestoreFlow = backup.makeRestoreFlow,
                     onDone = { navController.popBackStack() },
@@ -1101,8 +1122,15 @@ private const val ROUTE_DISCOVERY_SETTINGS = "discovery_settings"
 private const val ROUTE_MODERATION_SETTINGS = "moderation_settings"
 private const val ROUTE_MODERATION_SWITCH_CONSENT = "moderation_switch_consent"
 private const val ROUTE_MODERATION_TERMS = "moderation_terms"
-private const val ROUTE_DEVICE_BACKUP_SETTINGS = "device_backup_settings"
-private const val ROUTE_DEVICE_BACKUP_RESTORE = "device_backup_restore"
+private const val ROUTE_DEVICE_BACKUP_VENDORS = "device_backup_vendors"
+private const val ROUTE_DEVICE_BACKUP_SETTINGS = "device_backup_settings/{componentId}"
+private const val ROUTE_DEVICE_BACKUP_RESTORE = "device_backup_restore/{componentId}"
+
+private fun deviceBackupSettingsRoute(componentId: String) =
+    "device_backup_settings/${android.net.Uri.encode(componentId)}"
+
+private fun deviceBackupRestoreRoute(componentId: String) =
+    "device_backup_restore/${android.net.Uri.encode(componentId)}"
 private const val ROUTE_ADD_DISCOVERY_PROVIDER = "add_discovery_provider"
 private const val ROUTE_NOSTR_RELAYS = "nostr_relays"
 private const val ROUTE_BLOSSOM_RELAYS = "blossom_relays"

@@ -8,6 +8,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -76,15 +78,22 @@ class ObjectHttpBackupClient(
         .followSslRedirects(false)
         .build()
 
-    override suspend fun connect(): BackupConnection {
+    // Every override below runs its OkHttp `.execute()` (a blocking
+    // socket call) and, for download/export, subsequent file I/O
+    // under `Dispatchers.IO` — callers invoke these from Main-bound
+    // scopes (Compose's `rememberCoroutineScope`/`LaunchedEffect`),
+    // and `.execute()` on Main throws `NetworkOnMainThreadException`.
+    // Matches `OkHttpBlossomClient`'s posture.
+
+    override suspend fun connect(): BackupConnection = withContext(Dispatchers.IO) {
         val response = signedGet("/profile.json")
         val body = response.boundedJsonBody(ObjectHttpLimits.MAX_JSON_RESPONSE_BYTES)
         // Readiness only — the terms fetch/verify happens where the
         // manifest is available (composition root), not here.
-        return BackupConnection(acceptedTermsId = (body["acceptedTermsId"] as? JsonPrimitive)?.content)
+        BackupConnection(acceptedTermsId = (body["acceptedTermsId"] as? JsonPrimitive)?.content)
     }
 
-    override suspend fun preflight(snapshot: SealedSnapshot): BackupPreflight {
+    override suspend fun preflight(snapshot: SealedSnapshot): BackupPreflight = withContext(Dispatchers.IO) {
         val request = PreflightRequest(
             operationId = snapshot.operationId,
             snapshotReference = snapshot.snapshotReference.toWire(),
@@ -105,13 +114,20 @@ class ObjectHttpBackupClient(
                 // The grant must be consistent with the sealed file's
                 // ACTUAL size before any byte moves — a corrupt or
                 // hostile grant that under/over-states chunking must
-                // never drive the upload loop.
+                // never drive the upload loop. A conforming grant
+                // covers the file with the last chunk possibly
+                // partial: chunkCount == ceil(actualSize / chunkBytes),
+                // i.e. expectedTotal in [actualSize, actualSize + chunkBytes).
+                // (A symmetric ±chunkBytes window here would admit a
+                // grant that under-counts by one whole chunk, which
+                // then drives the upload loop into sending a
+                // last-chunk body larger than chunkBytes.)
                 val actualSize = snapshot.sealedBytesFile.length()
                 val expectedTotal = chunkCount * chunkBytes
-                if (chunkCount > 0 && (expectedTotal < actualSize - chunkBytes || expectedTotal > actualSize + chunkBytes)) {
+                if (expectedTotal < actualSize || expectedTotal >= actualSize + chunkBytes) {
                     throw BackupError.LocalFailure(LocalFailureReason.InvalidUploadGrant)
                 }
-                return BackupPreflight.Grant(
+                return@withContext BackupPreflight.Grant(
                     BackupUploadGrant(
                         uploadId = (body["uploadId"] as JsonPrimitive).content,
                         chunkBytes = chunkBytes,
@@ -123,12 +139,12 @@ class ObjectHttpBackupClient(
             }
             // 200 without an uploadId is an already-resolved outcome
             // (e.g. already_retained).
-            return BackupPreflight.Resolved(decodeOutcome(body, snapshot.operationId, snapshot.snapshotReference))
+            return@withContext BackupPreflight.Resolved(decodeOutcome(body, snapshot.operationId, snapshot.snapshotReference))
         }
         throw response.toBackupError()
     }
 
-    override suspend fun uploadSnapshot(snapshot: SealedSnapshot, grant: BackupUploadGrant): BackupOutcome {
+    override suspend fun uploadSnapshot(snapshot: SealedSnapshot, grant: BackupUploadGrant): BackupOutcome = withContext(Dispatchers.IO) {
         snapshot.sealedBytesFile.inputStream().use { input ->
             for (index in 0 until grant.chunkCount) {
                 val isLast = index == grant.chunkCount - 1
@@ -151,17 +167,17 @@ class ObjectHttpBackupClient(
         val commitResponse = signedPost("/v1/uploads/${grant.uploadId}/commit", ByteArray(0))
         if (commitResponse.code != 200) throw commitResponse.toBackupError()
         val body = commitResponse.boundedJsonBody(ObjectHttpLimits.MAX_JSON_RESPONSE_BYTES)
-        return decodeOutcome(body, snapshot.operationId, snapshot.snapshotReference)
+        decodeOutcome(body, snapshot.operationId, snapshot.snapshotReference)
     }
 
-    override suspend fun listSnapshots(): List<RetainedSnapshot> {
+    override suspend fun listSnapshots(): List<RetainedSnapshot> = withContext(Dispatchers.IO) {
         val response = signedGet("/v1/snapshots")
         if (response.code != 200) throw response.toBackupError()
         val bytes = response.boundedBytes(ObjectHttpLimits.MAX_LIST_RESPONSE_BYTES)
         val array = Json.parseToJsonElement(String(bytes, Charsets.UTF_8)).let {
             (it as? kotlinx.serialization.json.JsonArray) ?: kotlinx.serialization.json.JsonArray(emptyList())
         }
-        return array.take(ObjectHttpLimits.MAX_LISTED_SNAPSHOTS.toInt()).mapNotNull { element ->
+        array.take(ObjectHttpLimits.MAX_LISTED_SNAPSHOTS.toInt()).mapNotNull { element ->
             val obj = element.jsonObject
             val refObj = obj["snapshotReference"]?.jsonObject ?: return@mapNotNull null
             RetainedSnapshot(
@@ -176,7 +192,7 @@ class ObjectHttpBackupClient(
         }
     }
 
-    override suspend fun downloadSnapshot(reference: SnapshotReference, destination: File) {
+    override suspend fun downloadSnapshot(reference: SnapshotReference, destination: File): Unit = withContext(Dispatchers.IO) {
         val response = signedGet("/v1/snapshots/${reference.digest.removePrefix("sha256:")}")
         if (response.code != 200 && response.code != 206) throw response.toBackupError()
         val body = response.body ?: throw BackupError.OperatorUnavailable
@@ -205,7 +221,7 @@ class ObjectHttpBackupClient(
         }
     }
 
-    override suspend fun eraseSnapshot(scope: ErasureScope): ErasureReceipt {
+    override suspend fun eraseSnapshot(scope: ErasureScope): ErasureReceipt = withContext(Dispatchers.IO) {
         val scopeValue = when (scope) {
             is ErasureScope.All -> "\"all\""
             is ErasureScope.Snapshot -> "\"${scope.reference.digest}\""
@@ -214,7 +230,7 @@ class ObjectHttpBackupClient(
         val response = signedPost("/v1/erasures", bodyBytes)
         if (response.code != 200) throw response.toBackupError()
         val body = response.boundedJsonBody(ObjectHttpLimits.MAX_JSON_RESPONSE_BYTES)
-        return ErasureReceipt(
+        ErasureReceipt(
             receiptId = body.str("receiptId"),
             operator = body.str("operator"),
             scope = body.str("scope"),
@@ -227,7 +243,7 @@ class ObjectHttpBackupClient(
         )
     }
 
-    override suspend fun exportSnapshots(directory: File): BackupExport {
+    override suspend fun exportSnapshots(directory: File): BackupExport = withContext(Dispatchers.IO) {
         // Export never consults entitlement state (spec §9.7) — this
         // path deliberately never reads [entitlementProvider].
         val response = signedGetUnauthenticatedEntitlement("/v1/exports")
@@ -236,17 +252,17 @@ class ObjectHttpBackupClient(
         directory.mkdirs()
         val manifestFile = File(directory, "manifest.tar")
         FileOutputStream(manifestFile).use { out -> body.byteStream().use { it.copyTo(out) } }
-        return BackupExport(exportedAt = Instant.now(), directory = directory)
+        BackupExport(exportedAt = Instant.now(), directory = directory)
     }
 
-    override suspend fun queryOutcome(operationId: String): BackupOutcome? {
+    override suspend fun queryOutcome(operationId: String): BackupOutcome? = withContext(Dispatchers.IO) {
         val response = signedGet("/v1/operations/$operationId")
-        if (response.code == 404) return null
+        if (response.code == 404) return@withContext null
         if (response.code != 200) throw response.toBackupError()
         val body = response.boundedJsonBody(ObjectHttpLimits.MAX_JSON_RESPONSE_BYTES)
-        val refObj = body["snapshotReference"]?.jsonObject ?: return null
-        val reference = refObj.toReference() ?: return null
-        return decodeOutcome(body, operationId, reference)
+        val refObj = body["snapshotReference"]?.jsonObject ?: return@withContext null
+        val reference = refObj.toReference() ?: return@withContext null
+        decodeOutcome(body, operationId, reference)
     }
 
     // -- wire plumbing --

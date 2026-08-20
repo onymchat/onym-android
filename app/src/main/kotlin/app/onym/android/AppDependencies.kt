@@ -117,25 +117,34 @@ class AppDependencies(
      *  and no UI-test fakes registered — in which case RootScreen and
      *  onboarding render as before the seat existed. */
     val moderation: ModerationUiDependencies? = null,
-    /** The device-backup seat's settings surfaces + purchase gating.
-     *  `null` exactly when no backup operator is consented, or the
-     *  active identity has no recovery phrase to derive a backup key
-     *  from — both are ordinary states, and every consumer (Settings)
-     *  renders as before the feature existed. */
-    val backup: BackupUiDependencies? = null,
+    /** One entry per backup vendor the holder is currently consented
+     *  to — `storage.backup` consent is multi-vendor by construction
+     *  (see `BackupSeat`'s doc comment), so a device can back up its
+     *  history to several operators at once, each under its own
+     *  seed-derived key material. Empty exactly when no backup
+     *  operator is consented, or the active identity has no recovery
+     *  phrase to derive backup keys from — an ordinary state, and
+     *  every consumer (Settings) renders as before the feature
+     *  existed. */
+    val backupVendors: List<BackupUiDependencies> = emptyList(),
 )
 
 /**
- * Everything the device-backup seat's Settings surfaces need, bundled
- * so [AppDependencies] carries one nullable value. Mirrors iOS's
- * `BackupSeatComposer`-produced bundle.
+ * Everything ONE backup vendor's Settings surfaces need. One instance
+ * per consented operator — [AppDependencies.backupVendors] carries the
+ * list. Mirrors iOS's `BackupSeatComposer`-produced bundle, extended
+ * for multi-vendor.
  */
 class BackupUiDependencies(
-    /** The consented operator's componentId, cheap to read — lets
-     *  Settings detect a mid-session operator change without
-     *  rebuilding the whole surface. Re-read on every Settings open,
-     *  not cached at construction. */
-    val consentedComponentId: suspend () -> String?,
+    /** `onym:component:<operator>` — fixed for this instance's
+     *  lifetime (one instance is always exactly one vendor). Used to
+     *  key navigation routes and as the row identity in a vendor
+     *  list. */
+    val componentId: String,
+    /** Human-legible label for this vendor's row — currently just
+     *  [componentId]'s trailing segment (manifests don't carry a
+     *  separate display name field today). */
+    val displayName: String,
     val settingsFlow: app.onym.android.backup.ui.DeviceBackupSettingsFlow,
     /** Runs one compose→preflight→upload cycle. */
     val backUpNow: suspend () -> Unit,

@@ -69,8 +69,13 @@ class AppBackupSink(
                     direction = MessageDirection.valueOf(record.direction),
                     status = MessageStatus.valueOf(record.status),
                     replyToMessageId = record.replyToMessageId?.let(UUID::fromString),
+                    // Skip the row on an unknown wire value, like every
+                    // other undecodable field in this block (direction/
+                    // status above) — never silently downgrade to a
+                    // default group type. Matches RoomMessageStore's own
+                    // skip-on-unknown handling of the same field.
                     groupType = SepGroupType.entries.firstOrNull { it.wireValue == record.groupTypeWireValue }
-                        ?: SepGroupType.ANARCHY,
+                        ?: return@runCatching null,
                 )
             }.getOrNull() ?: continue
             if (messageStore.insert(message)) written++

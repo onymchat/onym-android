@@ -61,9 +61,9 @@ object BackupKeys {
         componentId: String,
         rotation: Int = 0,
     ): BackupKeyMaterial {
-        val archiveRoot = deriving.deriveSeedScopedKey(ARCHIVE_INFO)
-        val signingSeed = deriving.deriveSeedScopedKey(signingInfo(componentId, rotation))
-        val agreementSeed = deriving.deriveSeedScopedKey(agreementInfo(componentId, rotation))
+        val (archiveRoot, signingSeed, agreementSeed) = deriving.deriveSeedScopedKeys(
+            listOf(ARCHIVE_INFO, signingInfo(componentId, rotation), agreementInfo(componentId, rotation)),
+        )
         if (archiveRoot.size != 32 || signingSeed.size != 32 || agreementSeed.size != 32) {
             throw BackupError.LocalFailure(LocalFailureReason.KeyMaterialInvalid)
         }

@@ -93,11 +93,17 @@ fun BackupEnrolmentScreen(
  * Pure predicate: has the list been scrolled to its end? Extracted
  * out of the Composable so it's independently testable. Content
  * shorter than the viewport counts as already-read — there's nothing
- * more to scroll to.
+ * more to scroll to — but that's only knowable AFTER the first
+ * measurement pass: `visibleItemsInfo` is also empty before
+ * `LazyColumn` has measured anything at all (first composition frame,
+ * briefly after a configuration change), and defaulting to `true` in
+ * that ambiguous case would let "Turn On Backup" render enabled for a
+ * frame before the person has read anything.
  */
 internal fun hasReachedEnd(state: LazyListState): Boolean {
     val layoutInfo = state.layoutInfo
-    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull() ?: return true
+    if (layoutInfo.totalItemsCount == 0) return false
+    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull() ?: return false
     val isLastItemVisible = lastVisible.index == layoutInfo.totalItemsCount - 1
     val isLastItemFullyVisible = lastVisible.offset + lastVisible.size <= layoutInfo.viewportEndOffset
     return isLastItemVisible && isLastItemFullyVisible

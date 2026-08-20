@@ -11,17 +11,27 @@ import java.io.File
 const val BACKUP_SEAT_TYPE = "storage.backup"
 
 /**
- * Static helpers reading the active pinned consent for the backup
+ * Static helpers reading the active pinned consent(s) for the backup
  * seat. Entitlement-issuer keys are resolved **from the consented
  * manifest**, never from a presented credential — a credential must
  * never be able to nominate its own authority.
+ *
+ * A holder may consent to several backup operators at once —
+ * `PinnedConsentStore.accept()` only deactivates a PRIOR record for
+ * the SAME componentId, never records for other components under the
+ * same seat — so this seat is multi-vendor by construction: every key
+ * derivation is already scoped per componentId (see `BackupKeys`),
+ * and each vendor gets its own independent working directory, wire
+ * client, and persisted state (see `BackupSeatComposer.composeAll`).
  *
  * Mirrors `BackupSeat` in onym-ios.
  */
 object BackupSeat {
 
-    suspend fun activeConsent(consentStore: PinnedConsentStore): PinnedConsentRecord? =
-        consentStore.load().firstOrNull { it.seatType == BACKUP_SEAT_TYPE && it.isActive }
+    /** Every currently-active backup consent, oldest first — one per
+     *  vendor the holder has backed up to. */
+    suspend fun activeConsents(consentStore: PinnedConsentStore): List<PinnedConsentRecord> =
+        consentStore.load().filter { it.seatType == BACKUP_SEAT_TYPE && it.isActive }
 
     fun manifest(record: PinnedConsentRecord): BackupOperatorManifest? = runCatching {
         BackupOperatorManifest.from(SignedServiceManifest.parse(record.manifestBytes))

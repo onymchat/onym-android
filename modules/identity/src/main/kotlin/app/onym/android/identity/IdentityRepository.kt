@@ -181,6 +181,46 @@ class IdentityRepository(
     }
 
     /**
+     * Batched [deriveSeedScopedKey]: derives every key in [infos] from
+     * ONE seed load instead of one per key. `Bip39.seedFromMnemonic`
+     * is a 2048-round PBKDF2-HMAC-SHA512 stretch — deliberately slow —
+     * so re-deriving it once per key (as calling [deriveSeedScopedKey]
+     * N times would) multiplies a several-hundred-millisecond cost by
+     * N for no reason; every key after the first is a cheap HKDF
+     * expand over the same intermediate.
+     *
+     * @throws IdentityError.SeedScopeNotPermitted if any entry in
+     *   [infos] isn't allowlisted — checked for every entry before any
+     *   derivation runs, so a call is all-or-nothing.
+     * @throws IdentityError.NoRecoveryPhrase if the loaded identity has
+     *   no BIP39 entropy (imported from raw key material).
+     * @throws IdentityError.IdentityNotLoaded before [bootstrap].
+     */
+    suspend fun deriveSeedScopedKeys(infos: List<String>): List<ByteArray> = withContext(ioDispatcher) {
+        infos.forEach { info ->
+            if (allowedSeedScopedInfoPrefixes.none { info.startsWith(it) }) {
+                throw IdentityError.SeedScopeNotPermitted(info)
+            }
+        }
+        val id = store.loadCurrent() ?: throw IdentityError.IdentityNotLoaded
+        val snapshot = store.load(id) ?: throw IdentityError.IdentityNotLoaded
+        val entropy = snapshot.entropy ?: throw IdentityError.NoRecoveryPhrase
+        var seed = Bip39.seedFromMnemonic(Bip39.mnemonicFromEntropy(entropy))
+        try {
+            infos.map { info ->
+                Bip39.hkdfSha256(
+                    ikm = seed,
+                    salt = "app.onym.bip39".toByteArray(Charsets.UTF_8),
+                    info = info.toByteArray(Charsets.UTF_8),
+                    length = 32,
+                )
+            }
+        } finally {
+            seed.fill(0)
+        }
+    }
+
+    /**
      * Ed25519 detached signature with the Stellar-derived identity
      * key — the key `Identity.stellarPublicKey` is the public half of,
      * and the one moderation mandates/sessions name as

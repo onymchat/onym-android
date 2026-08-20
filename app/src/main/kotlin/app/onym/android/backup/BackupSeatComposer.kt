@@ -6,6 +6,7 @@ import app.onym.android.AppDependencies
 import app.onym.android.BackupUiDependencies
 import app.onym.android.backup.ui.BackupSchedule
 import app.onym.android.backup.ui.DeviceBackupSettingsFlow
+import app.onym.android.foundation.PinnedConsentRecord
 import app.onym.android.foundation.PinnedConsentStore
 import app.onym.android.group.GroupStore
 import app.onym.android.chats.MessageStore
@@ -13,14 +14,18 @@ import app.onym.android.persistence.InvitationStore
 import app.onym.android.identity.IdentityRepository
 import app.onym.android.transport.blossom.BlossomClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 
 /**
- * Builds [BackupUiDependencies], or `null` when there's nothing to
- * build: no consented backup operator, or the active identity has no
- * recovery phrase to derive a backup key from. Both are ordinary
+ * Builds one [BackupUiDependencies] per consented backup vendor — a
+ * holder may back up to several operators at once (see
+ * [BackupSeat]'s doc comment) — or an empty list when there's nothing
+ * to build: no consented backup operator, or the active identity has
+ * no recovery phrase to derive backup keys from. Both are ordinary
  * states that hide the Settings section rather than showing a broken
  * screen — mirrors iOS's `BackupSeatComposer`.
  *
@@ -31,7 +36,52 @@ import java.io.File
  */
 object BackupSeatComposer {
 
-    suspend fun compose(
+    suspend fun composeAll(
+        identityRepository: IdentityRepository,
+        consentStore: PinnedConsentStore,
+        groupStore: GroupStore,
+        messageStore: MessageStore,
+        invitationStore: InvitationStore,
+        blossomClient: BlossomClient?,
+        httpClient: OkHttpClient,
+        filesDir: File,
+        scope: CoroutineScope,
+        backupStateDataStore: DataStore<Preferences>,
+    ): List<BackupUiDependencies> {
+        // No recovery phrase (raw-key-imported identity) means no
+        // seed to derive ANY backup key from — hide the whole feature
+        // rather than offer vendors that can never actually seal
+        // anything. `hasRecoveryPhrase` is the non-secret presence
+        // check; reading the phrase field itself outside :identity is
+        // forbidden by scripts/lint-secrets.py. Identity-wide, so
+        // checked once rather than per vendor.
+        val identity = identityRepository.currentIdentity() ?: return emptyList()
+        if (!identity.hasRecoveryPhrase) return emptyList()
+
+        return BackupSeat.activeConsents(consentStore).mapNotNull { consent ->
+            runCatching {
+                composeOne(
+                    consent = consent,
+                    identityRepository = identityRepository,
+                    consentStore = consentStore,
+                    groupStore = groupStore,
+                    messageStore = messageStore,
+                    invitationStore = invitationStore,
+                    blossomClient = blossomClient,
+                    httpClient = httpClient,
+                    filesDir = filesDir,
+                    scope = scope,
+                    backupStateDataStore = backupStateDataStore,
+                )
+            }.getOrNull()
+            // A single vendor failing to compose (malformed manifest,
+            // key-derivation failure) must not take every OTHER
+            // vendor's Settings row down with it.
+        }
+    }
+
+    private suspend fun composeOne(
+        consent: PinnedConsentRecord,
         identityRepository: IdentityRepository,
         consentStore: PinnedConsentStore,
         groupStore: GroupStore,
@@ -43,22 +93,14 @@ object BackupSeatComposer {
         scope: CoroutineScope,
         backupStateDataStore: DataStore<Preferences>,
     ): BackupUiDependencies? {
-        val consent = BackupSeat.activeConsent(consentStore) ?: return null
         val manifest = BackupSeat.manifest(consent) ?: return null
         val endpoint = manifest.endpoint ?: return null
-
-        // No recovery phrase (raw-key-imported identity) means no
-        // seed to derive a backup key from — hide the section rather
-        // than offer a feature that can never actually seal anything.
-        // `hasRecoveryPhrase` is the non-secret presence check;
-        // reading the phrase field itself outside :identity is
-        // forbidden by scripts/lint-secrets.py.
-        val identity = identityRepository.currentIdentity() ?: return null
-        if (!identity.hasRecoveryPhrase) return null
 
         val seedDeriving = object : BackupSeedDeriving {
             override suspend fun deriveSeedScopedKey(info: String): ByteArray =
                 identityRepository.deriveSeedScopedKey(info)
+            override suspend fun deriveSeedScopedKeys(infos: List<String>): List<ByteArray> =
+                identityRepository.deriveSeedScopedKeys(infos)
         }
         val keyMaterial = try {
             BackupKeys.material(seedDeriving, manifest.componentId)
@@ -70,7 +112,7 @@ object BackupSeatComposer {
         val blobDir = BackupSeat.blobDirectory(filesDir, manifest.componentId)
         val holderReference = BackupKeys.holderReference(keyMaterial.accessSigningKey.generatePublicKey().encoded)
 
-        val stateStore = DataStorePreferencesBackupStateStore(backupStateDataStore)
+        val stateStore = DataStorePreferencesBackupStateStore(backupStateDataStore, manifest.componentId)
 
         // Read fresh per request, never captured — a paid operator
         // must not keep refusing after a successful purchase just
@@ -113,7 +155,12 @@ object BackupSeatComposer {
         val settingsFlow = DeviceBackupSettingsFlow(
             stateStore = stateStore,
             schedule = schedule,
-            currentComponentId = { BackupSeat.activeConsent(consentStore)?.componentId },
+            // One instance is always exactly one vendor now (the
+            // consent-store list, not a single slot, is what can gain
+            // or lose vendors) — this is definitionally always true,
+            // kept so DeviceBackupSettingsFlow's shape stays shared
+            // with the single-vendor path it was designed for.
+            currentComponentId = { manifest.componentId },
             scope = scope,
         )
 
@@ -131,7 +178,8 @@ object BackupSeatComposer {
         }
 
         return BackupUiDependencies(
-            consentedComponentId = { BackupSeat.activeConsent(consentStore)?.componentId },
+            componentId = manifest.componentId,
+            displayName = manifest.componentId.substringAfterLast(':'),
             settingsFlow = settingsFlow,
             backUpNow = {
                 val acceptedTermsId = stateStore.load()?.acceptedTermsId
@@ -143,8 +191,16 @@ object BackupSeatComposer {
             },
             retryAfterPurchase = { runBackup { repository.retry(manifest.componentId) } },
             erase = {
+                settingsFlow.markRunning()
                 try {
                     client.eraseSnapshot(ErasureScope.All)
+                } catch (e: Exception) {
+                    // A destructive, privacy-sensitive user action —
+                    // the whole point of the affordance is that the
+                    // person knows whether it worked. Silent failure
+                    // here would leave "Backed up" showing while the
+                    // erase never reached the operator.
+                    settingsFlow.reportFailed(e.message ?: "erase failed")
                 } finally {
                     settingsFlow.refresh()
                 }
@@ -179,20 +235,20 @@ object BackupSeatComposer {
         )
     }
 
-    private fun fetchAndDisclose(
+    private suspend fun fetchAndDisclose(
         client: OkHttpClient,
         manifest: BackupOperatorManifest,
         schedule: BackupSchedule,
-    ): Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>? {
-        val termsUrl = manifest.termsUrl(manifest.declaredTermsDigest) ?: return null
-        return try {
+    ): Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>? = withContext(Dispatchers.IO) {
+        val termsUrl = manifest.termsUrl(manifest.declaredTermsDigest) ?: return@withContext null
+        try {
             val request = Request.Builder().url(termsUrl).get().build()
             val bytes = client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
+                if (!response.isSuccessful) return@withContext null
                 response.body?.bytes()
-            } ?: return null
+            } ?: return@withContext null
             val terms = BackupTerms.decode(bytes)
-            if (terms.termsId != manifest.declaredTermsDigest) return null
+            if (terms.termsId != manifest.declaredTermsDigest) return@withContext null
             val items = app.onym.android.backup.ui.BackupDisclosure.items(
                 manifest.componentId,
                 terms,

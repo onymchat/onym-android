@@ -14,14 +14,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import app.onym.android.backup.BackupError
 import app.onym.android.backup.BackupRestoreSummary
+import app.onym.android.backup.LocalFailureReason
 import kotlinx.coroutines.launch
 
 internal sealed class RestoreScreenState {
     data object Idle : RestoreScreenState()
     data object Running : RestoreScreenState()
     data class Done(val summary: BackupRestoreSummary) : RestoreScreenState()
+    /** A failure before any write — gates 1 (verify) and 2 (decode)
+     *  never touch the sink, so the device is genuinely untouched. */
     data class Failed(val message: String) : RestoreScreenState()
+    /** `BackupError.LocalFailure(RestoreInterrupted)` — gate 3 (write)
+     *  failed partway. Writes are idempotent `insertOrUpdate`, so
+     *  earlier rows in this attempt were already committed; telling
+     *  the user "nothing changed" here would be false. */
+    data class PartiallyRestored(val message: String) : RestoreScreenState()
 }
 
 /**
@@ -67,11 +76,25 @@ fun BackupRestoreScreen(
                                     } else {
                                         RestoreScreenState.Done(summary)
                                     }
+                                } catch (e: BackupError.LocalFailure) {
+                                    if (e.reason == LocalFailureReason.RestoreInterrupted) {
+                                        // Gate 3 (write) failed partway —
+                                        // earlier rows in this attempt are
+                                        // already committed (writes are
+                                        // idempotent insertOrUpdate).
+                                        RestoreScreenState.PartiallyRestored(
+                                            e.message ?: "Restore was interrupted partway through.",
+                                        )
+                                    } else {
+                                        RestoreScreenState.Failed(
+                                            e.message ?: "Restore failed. Nothing on this device was changed.",
+                                        )
+                                    }
                                 } catch (e: Exception) {
-                                    // Any failure here leaves the device
-                                    // untouched — BackupRestorer's three
-                                    // gates never write until both
-                                    // verify and decode fully succeed.
+                                    // Gates 1 (verify) and 2 (decode)
+                                    // never write — a failure here
+                                    // genuinely leaves the device
+                                    // untouched.
                                     RestoreScreenState.Failed(
                                         e.message ?: "Restore failed. Nothing on this device was changed.",
                                     )
@@ -98,6 +121,16 @@ fun BackupRestoreScreen(
                         modifier = Modifier.testTag("backup.restore.failed"),
                     )
                     Button(onClick = onDone, modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.close")) {
+                        Text("Close")
+                    }
+                }
+                is RestoreScreenState.PartiallyRestored -> {
+                    Text(
+                        "Restore was interrupted. Some messages and chats may already have been added — " +
+                            "restoring again is safe and won't duplicate anything. ${current.message}",
+                        modifier = Modifier.testTag("backup.restore.partial"),
+                    )
+                    Button(onClick = onDone, modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.close_partial")) {
                         Text("Close")
                     }
                 }

@@ -143,12 +143,14 @@ fun SettingsScreen(
      *  one, otherwise the Moderation screen that lists them all. */
     onReviewCases: () -> Unit = {},
     /** Settings → Device Backup entry. Null when no backup operator is
-     *  consented (or the identity has no recovery phrase) — the
-     *  section is omitted entirely, same posture as Discovery/Moderation. */
+     *  consented for any vendor (or the identity has no recovery
+     *  phrase) — the section is omitted entirely, same posture as
+     *  Discovery/Moderation. */
     onDeviceBackupClick: (() -> Unit)? = null,
-    /** Live backup status, driving the row's subtitle. Null = not yet
-     *  resolved. */
-    deviceBackupStatus: app.onym.android.backup.ui.DeviceBackupStatus? = null,
+    /** Count of consented backup vendors — a holder may back up to
+     *  several at once — driving the row's "{n} vendor(s)" subtitle.
+     *  Only meaningful when [onDeviceBackupClick] is non-null. */
+    deviceBackupVendorCount: Int = 0,
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -304,9 +306,10 @@ fun SettingsScreen(
                                 SettingsTileBox(Icons.Filled.Backup, SettingsTile.Indigo)
                             },
                             title = stringResource(R.string.settings_device_backup_row_title),
-                            subtitle = deviceBackupStatus?.let {
-                                app.onym.android.backup.ui.statusText(it)
-                            },
+                            subtitle = stringResource(
+                                R.string.endpoints_configured_count,
+                                deviceBackupVendorCount,
+                            ),
                             onClick = onDeviceBackupClick,
                             isLast = true,
                             modifier = Modifier.testTag("settings.device_backup_row"),

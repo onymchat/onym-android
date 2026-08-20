@@ -54,17 +54,27 @@ interface BackupStateStore {
     suspend fun save(state: PersistedBackupState?)
 }
 
-/** One-domain-one-blob DataStore persistence, matching
- *  `:moderation`'s `DataStorePreferencesGateStateStore` convention.
- *  Backup state (terms pin, pending operations) is not secret; the
- *  sealed bytes it points at live elsewhere on disk. */
+/**
+ * One-domain-one-blob DataStore persistence, matching `:moderation`'s
+ * `DataStorePreferencesGateStateStore` convention — but keyed by
+ * [componentId], not a single fixed key. A holder may back up to
+ * several vendors at once (each with its own seed-derived key
+ * material, per `BackupKeys`); this store gives each vendor its own
+ * independent slice of the same DataStore file rather than sharing
+ * one state blob across all of them. Backup state (terms pin, pending
+ * operations) is not secret; the sealed bytes it points at live
+ * elsewhere on disk.
+ */
 class DataStorePreferencesBackupStateStore(
     private val dataStore: DataStore<Preferences>,
+    componentId: String,
 ) : BackupStateStore {
+    private val key = stringPreferencesKey("backup_state.$componentId")
+
     override suspend fun load(): PersistedBackupState? {
         val raw = dataStore.data
             .catch { failure -> if (failure is IOException) emit(emptyPreferences()) else throw failure }
-            .first()[KEY] ?: return null
+            .first()[key] ?: return null
         return runCatching {
             Json.decodeFromString(PersistedBackupState.serializer(), raw)
         }.getOrNull()
@@ -73,14 +83,10 @@ class DataStorePreferencesBackupStateStore(
     override suspend fun save(state: PersistedBackupState?) {
         dataStore.edit { preferences ->
             if (state == null) {
-                preferences.remove(KEY)
+                preferences.remove(key)
             } else {
-                preferences[KEY] = Json.encodeToString(PersistedBackupState.serializer(), state)
+                preferences[key] = Json.encodeToString(PersistedBackupState.serializer(), state)
             }
         }
-    }
-
-    private companion object {
-        val KEY = stringPreferencesKey("backup_state")
     }
 }

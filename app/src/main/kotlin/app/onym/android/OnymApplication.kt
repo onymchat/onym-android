@@ -1618,17 +1618,19 @@ class OnymApplication : Application() {
             },
         )
 
-        // Device backup (storage.backup seat). `null` exactly when no
-        // operator is consented yet or the active identity has no
+        // Device backup (storage.backup seat) — one entry per
+        // consented vendor; a holder may back up to several operators
+        // at once (see `BackupSeat`'s doc comment). Empty exactly when
+        // no operator is consented yet or the active identity has no
         // recovery phrase — see `BackupSeatComposer`'s doc comment.
         // Resolved synchronously at boot, same posture as the
         // Blossom-server bootstrap above (`runBlocking` over a handful
         // of local DataStore reads, never a network call at this
-        // point — the manifest was already verified when it was
+        // point — every manifest was already verified when it was
         // consented).
-        val backupUi: app.onym.android.BackupUiDependencies? = try {
+        val backupVendors: List<app.onym.android.BackupUiDependencies> = try {
             kotlinx.coroutines.runBlocking {
-                app.onym.android.backup.BackupSeatComposer.compose(
+                app.onym.android.backup.BackupSeatComposer.composeAll(
                     identityRepository = identityRepository,
                     consentStore = pinnedConsentStore,
                     groupStore = groupStore,
@@ -1642,13 +1644,13 @@ class OnymApplication : Application() {
                 )
             }
         } catch (_: Exception) {
-            null
+            emptyList()
         }
 
         return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
             moderation = moderationUi,
-            backup = backupUi,
+            backupVendors = backupVendors,
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
                 RecoveryPhraseBackupViewModel(
                     repository = identityRepository,

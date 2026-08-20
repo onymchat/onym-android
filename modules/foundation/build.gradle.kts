@@ -72,10 +72,16 @@ dependencies {
     // exposes android.content.Context only.
     implementation(libs.androidx.security.crypto)
 
-    // api: PurchasesUpdatedListener / Purchase / BillingClient appear
-    // in SeatPurchaseFlow's and PlayBillingEntitlementProvider's
-    // public constructor signatures.
-    api(libs.play.billing)
+    // implementation: no Play Billing type is actually referenced by
+    // this module yet — SeatPurchaseFlow takes a bespoke
+    // BillingBrokerClient interface and plain closures/Strings,
+    // PlayBillingEntitlementProvider takes a suspend catalog closure.
+    // This is a forward-looking placeholder ahead of the purchase-UI
+    // wiring that calls BillingClient.launchBillingFlow (not yet
+    // landed) — kept as implementation, not api, so it doesn't push
+    // Play Billing onto every :foundation consumer's classpath before
+    // anything here actually needs it.
+    implementation(libs.play.billing)
 
     // Unit tests: plain JUnit4. The tests reach BouncyCastle (test key
     // generation / provider registration) through the implementation

@@ -197,13 +197,21 @@ class BackupArchiveReader(file: File) {
      *  framing byte itself — the header is authoritative), the
      *  declared length, and the per-record SHA-256 — all **before**
      *  [action] ever sees the bytes. Throws
-     *  [BackupError.IncompleteSnapshot] on a repeated kind (silently
+     *  [BackupError.IncompleteSnapshot] on a repeated kind for every
+     *  kind EXCEPT [BackupArchiveEntryKind.BlobCiphertext] (silently
      *  overwriting half a person's rows is exactly the bug this
-     *  guards against) or any mismatch. */
+     *  guards against for the single-entry-per-kind list records) or
+     *  any framing/length/digest mismatch. Blob ciphertext is written
+     *  one entry per attachment ([BackupArchiveWriter.appendBlob] is
+     *  called once per referenced address, unlike the list kinds'
+     *  single bundled entry), so a snapshot with two or more
+     *  attachments legitimately repeats `kind = BlobCiphertext` and
+     *  must not be refused for it. */
     fun forEachRecord(action: (BackupArchiveEntryKind, ByteArray) -> Unit) {
         val seenKinds = mutableSetOf<Int>()
+        val blobKind = BackupArchiveEntryKind.BlobCiphertext.byte.toInt()
         for (entry in header.entries) {
-            if (!seenKinds.add(entry.kind)) throw BackupError.IncompleteSnapshot
+            if (entry.kind != blobKind && !seenKinds.add(entry.kind)) throw BackupError.IncompleteSnapshot
             val kindByte = recordsInput.read()
             if (kindByte < 0 || kindByte.toByte() != entry.kind.toByte()) throw BackupError.IncompleteSnapshot
             val lengthBytes = ByteArray(LENGTH_PREFIX_BYTES)
