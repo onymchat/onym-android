@@ -12,14 +12,14 @@ import java.security.Security
 /**
  * **Cross-platform interop fixture.** Locks in derivation against the
  * canonical BIP39 test mnemonic so any change to a salt / info string
- * (HKDF for nostr, BLS, Stellar Ed25519, X25519, or the `sep-inbox-v1`
- * SHA-256 tag) breaks this test loudly.
+ * (HKDF for nostr, BLS, Stellar Ed25519, X25519, the identity id, or
+ * the `sep-inbox-v1` SHA-256 tag) breaks this test loudly.
  *
  * Mirrors `IdentityRepositoryTests.test_derivation_matchesCrossPlatformFixture`
  * in onym-ios. A user who restores `abandon × 11 + about` on any
  * platform must land on the same Stellar `G…` account, the same inbox
- * tag, and (post-FFI) the same nostr / BLS pubkeys, otherwise their
- * groups become unreachable.
+ * tag, the same [IdentityId], and (post-FFI) the same nostr / BLS
+ * pubkeys, otherwise their groups become unreachable.
  *
  * This file covers the project-specific derivation constants (Bip39
  * seed → nostr/BLS secrets → Stellar Ed25519 pubkey → StrKey + X25519
@@ -48,6 +48,14 @@ class CrossPlatformFixtureTest {
             "66ac34309b3b73163b628c2c40174ea76d58d4eb769172611e5c42f9a0cefe5f"
         private const val EXPECTED_INBOX_TAG =
             "f462ae97384bd242"
+
+        // From onym-ios `IdentityIDTests.test_derivedFromEntropy_matchesFixture`
+        // (PR #292, commit aeb3c78). This is the pinned phrase-to-id
+        // pair that is the contract between the two platforms — the
+        // string form included, upper-case as `UUID.uuidString` renders
+        // it there.
+        private const val EXPECTED_IDENTITY_ID =
+            "59B0B267-F746-46B7-AD6C-31863606156F"
 
         @JvmStatic
         @BeforeClass
@@ -111,6 +119,26 @@ class CrossPlatformFixtureTest {
         val inboxPub = IdentityRepository.inboxPublicKey(nostrSecret)
         assertEquals(EXPECTED_INBOX_PUB_HEX, inboxPub.toHex())
         assertEquals(EXPECTED_INBOX_TAG, IdentityRepository.inboxTag(inboxPub))
+    }
+
+    @Test
+    fun identity_id_derived_from_entropy_matches_ios() {
+        // Pins the `identity-id-v1` HKDF label and the `app.onym.bip39`
+        // salt behind IdentityId.derivedFromEntropy against iOS's own
+        // fixture. An identity's id is derived from its BIP39 entropy so
+        // that re-importing a recovery phrase lands on the identity that
+        // owns the backed-up rows; groups and messages are owner-scoped,
+        // so if the two platforms disagree by so much as a nibble — or a
+        // letter case — a snapshot taken on one and restored on the other
+        // lands every row and shows none of them, with no error anywhere
+        // (profile §18.18).
+        //
+        // Changing either constant silently would orphan every identity
+        // already minted under the old one, which is the same
+        // invisible-chats failure this derivation exists to remove.
+        // Break loudly instead.
+        val entropy = Bip39.entropyFromMnemonic(MNEMONIC)!!
+        assertEquals(EXPECTED_IDENTITY_ID, IdentityId.derivedFromEntropy(entropy).value)
     }
 
     private fun ByteArray.toHex(): String {

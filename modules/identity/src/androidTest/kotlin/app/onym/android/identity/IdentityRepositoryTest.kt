@@ -37,6 +37,16 @@ class IdentityRepositoryTest {
     private lateinit var repo: IdentityRepository
     private lateinit var prefsFileName: String
 
+    private companion object {
+        /** The canonical BIP39 all-zeros test vector — the same phrase
+         *  onym-ios pins its `IdentityID` fixture against. */
+        const val CANONICAL_MNEMONIC =
+            "abandon abandon abandon abandon abandon abandon abandon abandon " +
+                "abandon abandon abandon about"
+        const val OTHER_MNEMONIC =
+            "legal winner thank year wave sausage worth useful legal winner thank yellow"
+    }
+
     @Before
     fun setUp() {
         if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
@@ -179,6 +189,148 @@ class IdentityRepositoryTest {
         } catch (e: IdentityError.InvalidMnemonic) {
             // expected
         }
+    }
+
+    // ─── entropy-derived IdentityId ────────────────────────────────
+
+    /**
+     * The restore bug in one test. Groups and messages are
+     * owner-scoped, so while importing a phrase minted a fresh random
+     * `IdentityId`, the restored archive belonged to an identity that
+     * did not exist on the device: the summary counted the chats and
+     * the chat list stayed empty, across restarts. The id has to
+     * survive a wipe and a re-import of the same phrase.
+     */
+    @Test
+    fun restore_sameMnemonic_yieldsSameIdentityId() = runBlocking {
+        repo.restore(CANONICAL_MNEMONIC)
+        val first = repo.currentIdentityId.first()!!
+
+        repo.wipe()
+        repo.restore(CANONICAL_MNEMONIC)
+        val second = repo.currentIdentityId.first()!!
+
+        assertEquals(
+            "re-importing a recovery phrase must land on the identity that owns the backed-up rows",
+            first, second,
+        )
+    }
+
+    @Test
+    fun restore_differentMnemonics_yieldDifferentIdentityIds() = runBlocking {
+        repo.restore(CANONICAL_MNEMONIC)
+        val first = repo.currentIdentityId.first()!!
+
+        repo.wipe()
+        repo.restore(OTHER_MNEMONIC)
+        val second = repo.currentIdentityId.first()!!
+
+        assertNotEquals("two phrases must not collide onto one identity slot", first, second)
+    }
+
+    /** A freshly-generated identity derives too — it is the one someone
+     *  re-imports from a recovery phrase later, and that import has to
+     *  find it. */
+    @Test
+    fun bootstrap_generatedIdentity_isReachableByItsOwnPhrase() = runBlocking {
+        val generated = repo.bootstrap()
+        val id = repo.currentIdentityId.first()!!
+        val phrase = generated.recoveryPhrase!!
+
+        repo.wipe()
+        repo.restore(phrase)
+
+        assertEquals(
+            "an identity minted today must be restorable from its own phrase tomorrow",
+            id, repo.currentIdentityId.first(),
+        )
+    }
+
+    /**
+     * Once the id is a function of the entropy, importing a phrase the
+     * device already holds resolves to a slot that already exists. It
+     * must return that identity rather than re-saving over it — and
+     * specifically must not apply the caller's name, because an import
+     * is not a rename.
+     */
+    @Test
+    fun add_sameMnemonicTwice_returnsTheSameIdentityWithoutRenamingIt() = runBlocking {
+        val first = repo.add(name = "Imported", restoreMnemonic = CANONICAL_MNEMONIC)
+        val second = repo.add(name = "Renamed by a second import", restoreMnemonic = CANONICAL_MNEMONIC)
+
+        assertEquals(first, second)
+        val list = repo.identities.first()
+        assertEquals("one phrase is one identity, however many times it is imported", 1, list.size)
+        assertEquals("Imported", list.single().name)
+        assertEquals(listOf(first), store.listIds())
+    }
+
+    /**
+     * `restore` replaces the active slot, and the slot it lands on is
+     * now predictable — so re-entering the phrase you are already using
+     * would have wiped that identity (cascading through
+     * [IdentityRepository.registerRemovalListener] into the owned
+     * chats) only to re-create it empty. It must be a no-op instead.
+     */
+    @Test
+    fun restore_phraseOfTheActiveIdentity_doesNotWipeIt() = runBlocking {
+        val removed = mutableListOf<IdentityId>()
+        repo.registerRemovalListener { removed += it }
+        repo.restore(CANONICAL_MNEMONIC)
+        val id = repo.currentIdentityId.first()!!
+
+        repo.restore(CANONICAL_MNEMONIC)
+
+        assertEquals(id, repo.currentIdentityId.first())
+        assertEquals(
+            "re-entering the active identity's own phrase must not cascade-delete its chats",
+            emptyList<IdentityId>(), removed,
+        )
+    }
+
+    /**
+     * **No migration, on purpose.** Identities already on a device keep
+     * the random UUID they were persisted under — this change derives
+     * at mint time and rewrites nothing. Loading must therefore hand
+     * back the stored id untouched, even though the same entropy would
+     * now derive a different one.
+     *
+     * The visible consequence is stated in the PR: a backup taken by a
+     * pre-existing identity will not restore after a re-import, because
+     * its archived owner id is random and nothing maps it. Assert the
+     * property rather than assume it — a well-meaning "fix up the id on
+     * load" would silently orphan every row already keyed to the old
+     * one, which is the failure this whole change exists to remove.
+     */
+    @Test
+    fun bootstrap_preexistingIdentity_keepsItsPersistedRandomId() = runBlocking {
+        val entropy = app.onym.android.foundation.Bip39.entropyFromMnemonic(CANONICAL_MNEMONIC)!!
+        val legacyId = IdentityId.new()  // what the old code minted: random, unrelated to the entropy
+        assertNotEquals(legacyId, IdentityId.derivedFromEntropy(entropy))
+
+        val seed = app.onym.android.foundation.Bip39.seedFromMnemonic(CANONICAL_MNEMONIC)
+        store.save(
+            legacyId,
+            StoredSnapshot(
+                entropy = entropy,
+                nostrSecretKey = app.onym.android.foundation.Bip39.deriveNostrKey(seed),
+                blsSecretKey = app.onym.android.foundation.Bip39.deriveBlsKey(seed),
+                name = "Legacy",
+            ),
+        )
+        store.saveCurrent(legacyId)
+
+        val freshRepo = IdentityRepository(IdentitySecretStore(
+            ApplicationProvider.getApplicationContext(),
+            prefsFileName,
+        ))
+        freshRepo.bootstrap()
+
+        assertEquals(
+            "an already-persisted identity must not be re-keyed under the derived id",
+            legacyId, freshRepo.currentIdentityId.first(),
+        )
+        assertEquals("no migration: nothing is rewritten", listOf(legacyId), store.listIds())
     }
 
     // ─── wipe ──────────────────────────────────────────────────────
