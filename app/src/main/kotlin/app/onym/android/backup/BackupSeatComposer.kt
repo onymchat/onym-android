@@ -212,7 +212,19 @@ object BackupSeatComposer {
                 blobWriter = { sha256, ciphertext -> File(blobDir, sha256).writeBytes(ciphertext) },
             )
             val composer = BackupComposer(source, BackupMediaPolicy.DescriptorsOnly, workingDir)
-            val repository = BackupRepository(client, composer, stateStore, workingDir)
+            val repository = BackupRepository(
+                client,
+                composer,
+                stateStore,
+                workingDir,
+                // This operator's own declared retention limit, off
+                // the manifest already verified above — so a routine
+                // re-backup slides the window instead of piling up
+                // against `quota_exceeded`. Per-operator: this
+                // instance is exactly one vendor, and an absent limit
+                // means no pruning at all.
+                maximumRetainedSnapshots = manifest.maximumRetainedSnapshots,
+            )
             val restorer = BackupRestorer(sink)
 
             VendorRuntime(keyMaterial, client, repository, restorer)
