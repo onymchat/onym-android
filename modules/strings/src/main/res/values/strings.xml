@@ -931,4 +931,8 @@
   <string name="join_confirm_group_label">group</string>
   <string name="join_confirm_invite_key_label">invite key</string>
   <string name="join_confirm_identity_label">identity</string>
+  <string name="chat_join_request_rules_agreed">Signed the group rules</string>
+  <string name="chat_join_request_rules_other_version">Signed a different version of the rules</string>
+  <string name="chat_join_request_rules_unsigned">Didn’t sign the group rules</string>
+  <string name="chat_join_request_rules_invalid">Their signature on the rules doesn’t check out</string>
 </resources>

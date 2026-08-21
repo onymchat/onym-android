@@ -48,6 +48,27 @@ data class MemberProfile(
     @SerialName("sending_pubkey")
     @Serializable(with = Base64ByteArraySerializer::class)
     val sendingPubkey: ByteArray,
+    /**
+     * 32-byte `SHA256` of the rules this member agreed to when they
+     * asked to join, and their 64-byte Ed25519 signature over
+     * [GroupRules.statement]. Both null for a member who joined before
+     * the group had rules, or from a build that predates them.
+     *
+     * Kept on the member rather than on the request, because the request
+     * is consumed at approval and the question ("did they agree?")
+     * outlives it by the whole life of the membership.
+     *
+     * Announced alongside the rest of the profile, so any member can
+     * check any other member's agreement against the [sendingPubkey]
+     * they already hold — the founder who admitted them is not a
+     * required witness.
+     */
+    @SerialName("rules_hash")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val rulesHash: ByteArray? = null,
+    @SerialName("rules_signature")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val rulesSignature: ByteArray? = null,
 ) {
     init {
         require(inboxPublicKey.size == 32) {

@@ -23,6 +23,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.Color
+import app.onym.android.design.LocalOnymTokens
+import app.onym.android.group.JoinRequestApprover
 import app.onym.android.strings.R
 
 /**
@@ -44,6 +47,12 @@ data class ChatJoinRequestDisplay(
     val fingerprint: String,
     /** A call is in flight: spinner on, both buttons disabled. */
     val isInFlight: Boolean,
+    /** Whether this joiner agreed to the group's rules, already decided
+     *  by [app.onym.android.group.JoinRequestApprover] against the
+     *  group's own copy of the text. The row renders it and nothing
+     *  more — a screen is the wrong place to be verifying signatures. */
+    val agreement: JoinRequestApprover.RulesAgreement =
+        JoinRequestApprover.RulesAgreement.NOT_REQUIRED,
     /** This request's last failure, if any. */
     val errorText: String? = null,
 )
@@ -88,6 +97,10 @@ fun ChatJoinRequestRow(
             fontFamily = FontFamily.Monospace,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // Above the buttons on purpose: it is one of the two things this
+        // decision turns on, and a founder who has already tapped Accept
+        // is not helped by finding out underneath it.
+        AgreementLine(display.agreement)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = { onDecline(display.requestId) },
@@ -149,4 +162,50 @@ fun ChatJoinRequestRow(
             )
         }
     }
+}
+
+/**
+ * The rules verdict, or nothing at all.
+ *
+ * Nothing when the group has no rules — there is nothing to report about
+ * an agreement nobody was asked for, and an "n/a" line would be noise on
+ * every request in every group without rules.
+ *
+ * The three failing cases read differently because they *are* different,
+ * and the founder's next move differs with them: an unsigned request is
+ * usually an older app and asking again fixes it; an other-rules
+ * signature is someone who agreed to a previous wording; a signature
+ * that doesn't verify is neither, and is the only one of the three that
+ * should give a founder pause about the request itself.
+ */
+@Composable
+private fun AgreementLine(agreement: JoinRequestApprover.RulesAgreement) {
+    val tokens = LocalOnymTokens.current
+    val text: String
+    val color: Color
+    when (agreement) {
+        JoinRequestApprover.RulesAgreement.NOT_REQUIRED -> return
+        JoinRequestApprover.RulesAgreement.AGREED -> {
+            text = stringResource(R.string.chat_join_request_rules_agreed)
+            color = tokens.green
+        }
+        JoinRequestApprover.RulesAgreement.AGREED_TO_OTHER_RULES -> {
+            text = stringResource(R.string.chat_join_request_rules_other_version)
+            color = tokens.amber
+        }
+        JoinRequestApprover.RulesAgreement.NOT_SIGNED -> {
+            text = stringResource(R.string.chat_join_request_rules_unsigned)
+            color = tokens.amber
+        }
+        JoinRequestApprover.RulesAgreement.INVALID -> {
+            text = stringResource(R.string.chat_join_request_rules_invalid)
+            color = MaterialTheme.colorScheme.error
+        }
+    }
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        color = color,
+        modifier = Modifier.testTag("chat_thread.join_request.rules"),
+    )
 }
