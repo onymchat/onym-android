@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
@@ -120,14 +121,16 @@ class MultiIdentityChatUITest {
         composeRule.onAllNodesWithText("Done").onFirst().performClick()
         composeRule.waitForIdle()
 
-        // 4. Bob joins from the deeplink. There is nothing to fill in:
-        //    the tap sends the request and opens the chat it created,
-        //    waiting until Alice lets him in. Reaching that state is
-        //    proof the request actually left the device — stronger than
-        //    the old assertion, which typed a name and dismissed a
-        //    screen.
+        // 4. Bob joins from the deeplink. The link opens a confirmation
+        //    screen — delivery is not consent, since any app on the
+        //    device can start the exported activity — and the request
+        //    goes out only on Send, under the name typed there.
         switchToIdentity("Bob")
         deliverDeeplink(inviteLink)
+        waitForTag("join_confirm.send")
+        composeRule.onNodeWithTag("join_confirm.name_field").performTextClearance()
+        composeRule.onNodeWithTag("join_confirm.name_field").performTextInput("Bob")
+        composeRule.onNodeWithTag("join_confirm.send").performClick()
         waitForTag("pending_chat.waiting")
 
         // 5. Alice approves the join request — from inside the group's

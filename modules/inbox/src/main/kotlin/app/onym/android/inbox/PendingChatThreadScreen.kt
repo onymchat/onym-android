@@ -64,6 +64,10 @@ fun PendingChatThreadScreen(
     viewModel: PendingChatsViewModel,
     rowId: String,
     onBack: () -> Unit,
+    /** Accept opens the confirmation screen rather than sending: the
+     *  same review, and the same chance to choose a name, whichever
+     *  door the invitation came through. */
+    onAccept: (String) -> Unit,
     /** Called with the hex group id once this wait is over. The screen
      *  doesn't navigate itself: the back stack belongs to the host, and
      *  a screen that pops the stack it is standing on is a rule this
@@ -146,7 +150,7 @@ fun PendingChatThreadScreen(
                 InvitationCard(message)
             }
             Spacer(Modifier.height(20.dp))
-            StateBlock(row = row, viewModel = viewModel)
+            StateBlock(row = row, viewModel = viewModel, onAccept = onAccept)
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -193,6 +197,7 @@ private fun InvitationCard(message: String) {
 private fun StateBlock(
     row: PendingChatsViewModel.Row,
     viewModel: PendingChatsViewModel,
+    onAccept: (String) -> Unit,
 ) {
     when (row.state) {
         PendingChatsViewModel.State.Offered -> {
@@ -204,7 +209,7 @@ private fun StateBlock(
             )
             Spacer(Modifier.height(12.dp))
             Button(
-                onClick = { viewModel.accept(row.id) },
+                onClick = { onAccept(row.id) },
                 enabled = !row.isSending,
                 modifier = Modifier.fillMaxWidth().testTag("pending_chat.accept"),
             ) {

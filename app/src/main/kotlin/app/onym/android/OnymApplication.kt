@@ -1010,7 +1010,15 @@ class OnymApplication : Application() {
                 applicationContext,
                 app.onym.android.inbox.PendingChatDatabase::class.java,
                 "app.onym.android.pending_chats",
-            ).fallbackToDestructiveMigration().build()
+            )
+                .addMigrations(
+                    app.onym.android.inbox.PendingChatDatabaseMigrations.MIGRATION_1_2,
+                )
+                // No destructive fallback: these rows are what someone
+                // is waiting on, and a future missed version bump should
+                // fail loudly here — the catch below degrades to memory
+                // for this run — rather than quietly deleting them.
+                .build()
             app.onym.android.inbox.RoomPendingChatStore(
                 dao = db.pendingChatDao(),
                 encryption = storageEncryption,

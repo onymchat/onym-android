@@ -64,7 +64,7 @@ class PendingChatsViewModelTest {
         val chat = h.chat()
         h.repository.record(chat)
 
-        h.viewModel.accept(chat.id)
+        h.acceptThroughTheScreen(chat.id)
 
         assertEquals(1, h.sender.calls.size)
         assertEquals(
@@ -83,7 +83,7 @@ class PendingChatsViewModelTest {
         h.repository.record(chat)
         h.repository.markRequested(chat.id)
 
-        h.viewModel.accept(chat.id)
+        h.acceptThroughTheScreen(chat.id)
 
         assertTrue(h.sender.calls.isEmpty())
     }
@@ -98,7 +98,7 @@ class PendingChatsViewModelTest {
         val chat = h.chat()
         h.repository.record(chat)
 
-        h.viewModel.accept(chat.id)
+        h.acceptThroughTheScreen(chat.id)
 
         assertEquals(
             PendingChatsViewModel.State.SendFailed(PendingChat.SendFailure.TRANSPORT),
@@ -121,7 +121,7 @@ class PendingChatsViewModelTest {
         val chat = h.chat()
         h.repository.record(chat)
 
-        h.viewModel.accept(chat.id)
+        h.acceptThroughTheScreen(chat.id)
 
         assertEquals(
             PendingChatsViewModel.State.SendFailed(PendingChat.SendFailure.NO_IDENTITY),
@@ -139,7 +139,7 @@ class PendingChatsViewModelTest {
         val malformed = h.chat(introPublicKey = ByteArray(1))
         h.repository.record(malformed)
 
-        h.viewModel.accept(malformed.id)
+        h.acceptThroughTheScreen(malformed.id)
 
         assertEquals(PendingChatError.MalformedInvite, h.viewModel.lastError.value)
         assertTrue(h.sender.calls.isEmpty())
@@ -288,16 +288,19 @@ class PendingChatsViewModelTest {
         // A request can be sent and never answered — a revoked link, or
         // one that died in a relay. Before this there was no way out but
         // swiping the row away.
+        //
+        // Seeded through the screen, because that is the only way a row
+        // reaches Requested — and the name it asked under comes with it.
         val h = harness()
         h.viewModel.start()
         val chat = h.chat()
         h.repository.record(chat)
-        h.repository.markRequested(chat.id)
+        h.acceptThroughTheScreen(chat.id)
         assertTrue(h.viewModel.rows.value.single().state.isRetryable)
 
         h.viewModel.retry(chat.id)
 
-        assertEquals(1, h.sender.calls.size)
+        assertEquals(2, h.sender.calls.size)
         assertTrue("the founder is who this wait belongs to", h.verifierRetries.isEmpty())
     }
 
@@ -354,86 +357,271 @@ class PendingChatsViewModelTest {
     // ─── Joining from a link ─────────────────────────────────────
 
     @Test
-    fun join_recordsARowAndSendsWithoutAsking() = runTest {
+    fun aTappedLink_recordsNothingAndSendsNothing() = runTest {
+        // The rule this screen exists for: MainActivity is exported, so
+        // anything on the device — or a browsable link — can deliver a
+        // capability. Delivery must not disclose this identity's name or
+        // keys, and must not leave a row behind either.
         val h = harness()
         h.viewModel.start()
 
-        val outcome = h.viewModel.join(h.capability())
+        val destination = h.viewModel.prepareJoin(h.capability())
 
-        assertEquals(PendingChatsViewModel.JoinOutcome.Waiting(h.chat().id), outcome)
-        assertEquals(1, h.sender.calls.size)
+        val confirm = destination as? PendingChatsViewModel.JoinDestination.Confirm
+        assertNotNull("a link must resolve to a screen", confirm)
+        assertEquals("Maple Garden", confirm!!.confirmation.groupName)
+        assertTrue(
+            confirm.confirmation.introPublicKey.contentEquals(h.capability().introPublicKey),
+        )
+        assertTrue(h.sender.calls.isEmpty())
+        assertTrue(
+            "nothing may be persisted before a person says so",
+            h.repository.currentChats().isEmpty(),
+        )
+        assertTrue(h.viewModel.rows.value.isEmpty())
+    }
+
+    @Test
+    fun confirmingALink_recordsTheRowAndSendsUnderTheTypedName() = runTest {
+        val h = harness()
+        h.viewModel.start()
+        val confirm = h.viewModel.prepareJoin(h.capability())
+            as PendingChatsViewModel.JoinDestination.Confirm
+        assertEquals(
+            "pre-filled with the identity's own alias",
+            "Bob",
+            confirm.confirmation.suggestedLabel,
+        )
+
+        val outcome = h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        assertEquals(PendingChatsViewModel.JoinDestination.Waiting(h.chat().id), outcome)
+        assertEquals(listOf("Bobby"), h.sender.calls.map { it.label })
         assertEquals(PendingChatsViewModel.State.Waiting, h.viewModel.rows.value.single().state)
     }
 
     @Test
-    fun join_twiceOnTheSameLink_doesNotAskTwice() = runTest {
+    fun theNameAskedUnderIsRememberedForTheNextAsk() = runTest {
+        // A re-send that fell back to the identity's alias would arrive
+        // from a stranger — the founder is deciding partly on the name.
         val h = harness()
         h.viewModel.start()
+        val confirm = h.viewModel.prepareJoin(h.capability())
+            as PendingChatsViewModel.JoinDestination.Confirm
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
 
-        h.viewModel.join(h.capability())
-        val second = h.viewModel.join(h.capability())
+        h.viewModel.retry(h.chat().id)
 
-        assertEquals(PendingChatsViewModel.JoinOutcome.Waiting(h.chat().id), second)
-        assertEquals("a second tap is not a second request", 1, h.sender.calls.size)
+        assertEquals(listOf("Bobby", "Bobby"), h.sender.calls.map { it.label })
     }
 
     @Test
-    fun join_onAnUnansweredOffer_sendsInsteadOfAskingAgain() = runTest {
-        // The dispatcher got there first. Tapping the link *is* the
-        // answer, so the row must not be left sitting at Offered asking
-        // for it a second time.
+    fun aSecondLinkAfterAsking_opensTheWaitWithoutAskingAgain() = runTest {
+        val h = harness()
+        h.viewModel.start()
+        val confirm = h.viewModel.prepareJoin(h.capability())
+            as PendingChatsViewModel.JoinDestination.Confirm
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        val second = h.viewModel.prepareJoin(h.capability())
+
+        assertEquals(PendingChatsViewModel.JoinDestination.Waiting(h.chat().id), second)
+        assertEquals("a second delivery is not a second request", 1, h.sender.calls.size)
+    }
+
+    @Test
+    fun aLinkOnAnUnansweredOffer_confirmsAgainstTheOffersDetails() = runTest {
+        // The dispatcher got there first, so the screen can name who
+        // invited and what they wrote — and confirming answers that
+        // offer rather than starting a second one.
         val h = harness()
         h.viewModel.start()
         val offered = h.chat()
         h.repository.record(offered)
 
-        val outcome = h.viewModel.join(h.capability())
+        val confirm = h.viewModel.prepareJoin(h.capability())
+            as PendingChatsViewModel.JoinDestination.Confirm
+        assertEquals("Alice", confirm.confirmation.inviterAlias)
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
 
-        assertEquals(PendingChatsViewModel.JoinOutcome.Waiting(offered.id), outcome)
         assertEquals(1, h.sender.calls.size)
+        assertEquals("one waiting room, not two", 1, h.viewModel.rows.value.size)
         assertEquals(PendingChatsViewModel.State.Waiting, h.viewModel.rows.value.single().state)
     }
 
     @Test
-    fun join_whenAlreadyAMember_opensTheChatInstead() = runTest {
+    fun aLinkIntoAChatYouAreIn_opensItWithoutDisclosingAnything() = runTest {
         val h = harness()
         val capability = h.capability()
         val hex = capability.groupId.joinToString("") { "%02x".format(it) }
         h.groups.insert(group(hex))
         h.viewModel.start()
 
-        val outcome = h.viewModel.join(capability)
+        val outcome = h.viewModel.prepareJoin(capability)
 
-        assertEquals(PendingChatsViewModel.JoinOutcome.AlreadyJoined(hex), outcome)
+        assertEquals(PendingChatsViewModel.JoinDestination.AlreadyJoined(hex), outcome)
         assertTrue(h.sender.calls.isEmpty())
     }
 
     @Test
-    fun join_withNoIdentity_saysSoRatherThanWaitingSilently() = runTest {
+    fun confirmJoin_withNoIdentity_reportsItRatherThanClosingSilently() = runTest {
+        // The person tapping the button that discloses their keys is the
+        // last one who should be told nothing.
         val h = harness(owner = null)
         h.viewModel.start()
+        val confirmation = PendingChatsViewModel.JoinConfirmation(
+            rowId = "row",
+            owner = IdentityId("owner"),
+            identityName = "Bob",
+            groupIdHex = "11".repeat(32),
+            groupName = "Maple Garden",
+            inviterAlias = "",
+            invitationMessage = null,
+            introPublicKey = ByteArray(32) { 0x44 },
+            suggestedLabel = "Bob",
+            origin = PendingChatsViewModel.JoinConfirmation.Origin.Link(h.capability()),
+        )
 
-        val outcome = h.viewModel.join(h.capability())
+        val outcome = h.viewModel.confirmJoin(confirmation, "Bobby")
 
         assertEquals(
-            PendingChatsViewModel.JoinOutcome.Failed(
+            PendingChatsViewModel.JoinDestination.Failed(
                 PendingChatsViewModel.JoinOutcome.FailureReason.NO_IDENTITY,
             ),
             outcome,
         )
         assertTrue(h.sender.calls.isEmpty())
-        assertNotNull(h.viewModel)
     }
 
     @Test
-    fun join_returnsWhileTheRelaySendIsStillInFlight() = runTest {
+    fun confirmJoin_onAnOfferThatIsGone_reportsItRatherThanSending() = runTest {
+        val h = harness()
+        h.viewModel.start()
+        val confirmation = PendingChatsViewModel.JoinConfirmation(
+            rowId = "gone",
+            owner = IdentityId("owner"),
+            identityName = "Bob",
+            groupIdHex = "11".repeat(32),
+            groupName = "Maple Garden",
+            inviterAlias = "Alice",
+            invitationMessage = null,
+            introPublicKey = ByteArray(32) { 0x44 },
+            suggestedLabel = "Bob",
+            origin = PendingChatsViewModel.JoinConfirmation.Origin.Offer("gone"),
+        )
+
+        val outcome = h.viewModel.confirmJoin(confirmation, "Bobby")
+
+        assertEquals(
+            PendingChatsViewModel.JoinDestination.Failed(
+                PendingChatsViewModel.JoinOutcome.FailureReason.NOT_SAVED,
+            ),
+            outcome,
+        )
+        assertTrue(h.sender.calls.isEmpty())
+    }
+
+    @Test
+    fun prepareAccept_onARowThatIsGone_offersNothing() = runTest {
+        // The Accept button's edge: a re-delivery or a second tap can
+        // move the row on between render and tap. The thread re-renders
+        // without the button, so a null here is the screen already
+        // telling the truth.
+        val h = harness()
+        h.viewModel.start()
+
+        assertNull(h.viewModel.prepareAccept("nobody:home"))
+    }
+
+    @Test
+    fun askAgain_afterTheLabelWriteFailed_stillAsks() = runTest {
+        // An encryption failure drops the label silently. Bailing on the
+        // missing label left an enabled button that did nothing forever;
+        // asking again under the identity's current name is the lesser
+        // wrong.
+        val h = harness(store = LabelDroppingStore())
+        h.viewModel.start()
+        val chat = h.chat()
+        h.repository.record(chat)
+        h.acceptThroughTheScreen(chat.id)
+
+        h.viewModel.retry(chat.id)
+
+        assertEquals(2, h.sender.calls.size)
+        assertEquals("Bob", h.sender.calls.last().label)
+    }
+
+    @Test
+    fun aLinkOnARowWhoseSendFailed_confirmsAgainRatherThanCallingItAsked() = runTest {
+        // A failed row has nothing outstanding, so the link is allowed
+        // to ask again — and asking again is a fresh disclosure, which
+        // means the screen, not a silent re-send.
+        val h = harness()
+        h.viewModel.start()
+        val chat = h.chat()
+        h.repository.record(chat)
+        h.repository.markFailed(chat.id, PendingChat.SendFailure.TRANSPORT)
+
+        val destination = h.viewModel.prepareJoin(h.capability())
+
+        assertTrue(
+            "a failed row is confirmable, not already-asked",
+            destination is PendingChatsViewModel.JoinDestination.Confirm,
+        )
+        assertTrue(h.sender.calls.isEmpty())
+    }
+
+    @Test
+    fun confirmingAfterTheIdentityChanged_refusesRatherThanDisclosingTheWrongKeys() = runTest {
+        // The screen was opened for one identity and agreed to for that
+        // one. Sending as whoever is selected by the time the button is
+        // tapped would disclose keys the person was never shown.
+        val h = harness()
+        h.viewModel.start()
+        val confirm = h.viewModel.prepareJoin(h.capability())
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        val outcome = h.viewModel.confirmJoin(
+            confirm.confirmation.copy(owner = IdentityId("someone-else")),
+            "Bobby",
+        )
+
+        assertEquals(
+            PendingChatsViewModel.JoinDestination.Failed(
+                PendingChatsViewModel.JoinOutcome.FailureReason.NO_IDENTITY,
+            ),
+            outcome,
+        )
+        assertTrue(h.sender.calls.isEmpty())
+    }
+
+    @Test
+    fun aLinkWithNoIdentity_saysSoRatherThanWaitingSilently() = runTest {
+        val h = harness(owner = null)
+        h.viewModel.start()
+
+        val outcome = h.viewModel.prepareJoin(h.capability())
+
+        assertEquals(
+            PendingChatsViewModel.JoinDestination.Failed(
+                PendingChatsViewModel.JoinOutcome.FailureReason.NO_IDENTITY,
+            ),
+            outcome,
+        )
+        assertTrue(h.sender.calls.isEmpty())
+    }
+
+    @Test
+    fun confirmJoin_returnsWhileTheRelaySendIsStillInFlight() = runTest {
         val h = harness()
         h.viewModel.start()
         h.sender.gate = CompletableDeferred()
+        val confirm = h.viewModel.prepareJoin(h.capability())
+            as PendingChatsViewModel.JoinDestination.Confirm
 
-        val outcome = h.viewModel.join(h.capability())
+        val outcome = h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
 
-        assertEquals(PendingChatsViewModel.JoinOutcome.Waiting(h.chat().id), outcome)
+        assertEquals(PendingChatsViewModel.JoinDestination.Waiting(h.chat().id), outcome)
         assertTrue("the send is in flight", h.viewModel.rows.value.single().isSending)
         assertEquals(1, h.sender.calls.size)
 
@@ -444,8 +632,11 @@ class PendingChatsViewModelTest {
 
     // ─── Harness ─────────────────────────────────────────────────
 
-    private suspend fun harness(owner: IdentityId? = this.owner): Harness {
-        val repository = PendingChatRepository(InMemoryPendingChatStore())
+    private suspend fun harness(
+        owner: IdentityId? = this.owner,
+        store: PendingChatStore = InMemoryPendingChatStore(),
+    ): Harness {
+        val repository = PendingChatRepository(store)
         val verifications = PendingVerificationStore()
         val groups = GroupRepository(
             store = InMemoryGroupStore(),
@@ -478,6 +669,12 @@ class PendingChatsViewModelTest {
         val viewModel: PendingChatsViewModel,
         val owner: IdentityId?,
     ) {
+        /** Accept as a person performs it: open the screen, then Send. */
+        suspend fun acceptThroughTheScreen(rowId: String, label: String = "Bob") {
+            val confirmation = viewModel.prepareAccept(rowId) ?: return
+            viewModel.confirmJoin(confirmation, label)
+        }
+
         fun capability() = IntroCapability(
             introPublicKey = ByteArray(32) { 0x44 },
             groupId = ByteArray(32) { 0x11 },
@@ -522,6 +719,17 @@ class PendingChatsViewModelTest {
         isPublishedOnChain = true,
         ownerIdentityId = owner.value,
     )
+}
+
+/**
+ * A store whose label write silently does nothing — what
+ * `RoomPendingChatStore` does when the encryption throws. The row asks,
+ * but no name sticks to it.
+ */
+private class LabelDroppingStore(
+    private val delegate: PendingChatStore = InMemoryPendingChatStore(),
+) : PendingChatStore by delegate {
+    override suspend fun setJoinerLabel(id: String, label: String) = Unit
 }
 
 /** Stands in for `JoinRequestSender`. */

@@ -99,6 +99,11 @@ class RoomPendingChatStore(
         )
     }
 
+    override suspend fun setJoinerLabel(id: String, label: String) {
+        val encrypted = runCatching { encryption.encrypt(label) }.getOrNull() ?: return
+        dao.setJoinerLabel(id = id, label = encrypted)
+    }
+
     override suspend fun refreshReplyKey(id: String, introPublicKey: ByteArray) {
         val key = try {
             encryption.encrypt(introPublicKey)
@@ -155,6 +160,7 @@ class RoomPendingChatStore(
         encryptedGroupName = chat.groupName?.let { encryption.encrypt(it) },
         encryptedInviterAlias = encryption.encrypt(chat.inviterAlias),
         encryptedInvitationMessage = chat.invitationMessage?.let { encryption.encrypt(it) },
+        encryptedJoinerLabel = chat.joinerLabel?.let { encryption.encrypt(it) },
     )
 
     /**
@@ -182,6 +188,9 @@ class RoomPendingChatStore(
             inviterAlias = runCatching {
                 encryption.decryptString(row.encryptedInviterAlias)
             }.getOrNull() ?: "",
+            joinerLabel = row.encryptedJoinerLabel?.let {
+                runCatching { encryption.decryptString(it) }.getOrNull()
+            },
             invitationMessage = row.encryptedInvitationMessage?.let {
                 runCatching { encryption.decryptString(it) }.getOrNull()
             },

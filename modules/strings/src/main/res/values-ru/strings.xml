@@ -920,4 +920,13 @@
   <string name="pending_chat_stop_waiting_title">Перестать ждать этот чат?</string>
   <string name="pending_chat_stop_waiting_body">Вы уже попросились в %1$s. Удаление ничего не сообщит основателю — а чтобы попроситься снова, понадобится ссылка или QR-код ещё раз.</string>
   <string name="pending_chat_stop_waiting_confirm">Удалить</string>
+  <string name="join_confirm_title">Присоединиться к чату</string>
+  <string name="join_confirm_ask_as">Попросить впустить как</string>
+  <string name="join_confirm_name_hint">Ваше имя в этом чате</string>
+  <string name="join_confirm_name_scope">Это имя видит только этот чат. Оно не переименовывает вашу личность.</string>
+  <string name="join_confirm_disclosure">При отправке ваше имя и открытые ключи этой личности получит тот, у кого есть это приглашение.</string>
+  <string name="join_confirm_send">Отправить запрос</string>
+  <string name="join_confirm_group_label">группа</string>
+  <string name="join_confirm_invite_key_label">ключ приглашения</string>
+  <string name="join_confirm_identity_label">личность</string>
 </resources>

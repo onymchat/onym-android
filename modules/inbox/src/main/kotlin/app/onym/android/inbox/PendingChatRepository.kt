@@ -110,6 +110,13 @@ class PendingChatRepository(
         refreshLocked()
     }
 
+    /** Remember the name this device asked under, so a re-send
+     *  introduces the same person. */
+    suspend fun attachJoinerLabel(id: String, label: String) = mutex.withLock {
+        store.setJoinerLabel(id, label)
+        refreshLocked()
+    }
+
     /** Drop a row the person swiped away. Local only — no NACK to the
      *  founder, whose outstanding intro key simply goes unused. */
     suspend fun remove(id: String) = mutex.withLock {

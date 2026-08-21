@@ -58,6 +58,11 @@ interface PendingChatStore {
         receivedAt: Instant,
     )
 
+    /** Remember the name this device asked to be let in under, so a
+     *  re-send introduces the same person — see
+     *  [PendingChat.joinerLabel]. */
+    suspend fun setJoinerLabel(id: String, label: String)
+
     /**
      * Use the capability from a link/QR the person just acted on without
      * changing sender-authenticated offer ordering or invitation copy.
@@ -127,6 +132,12 @@ class InMemoryPendingChatStore : PendingChatStore {
             receivedAt = receivedAt,
             offerReceivedAt = receivedAt,
         )
+    }
+
+    override suspend fun setJoinerLabel(id: String, label: String) {
+        val index = rows.indexOfFirst { it.id == id }
+        if (index < 0) return
+        rows[index] = rows[index].copy(joinerLabel = label)
     }
 
     override suspend fun refreshReplyKey(id: String, introPublicKey: ByteArray) {
@@ -204,6 +215,13 @@ class FailoverPendingChatStore(
         usePrimaryOrFallback(
             primaryCall = { it.setStatus(id, status) },
             fallbackCall = { it.setStatus(id, status) },
+        )
+    }
+
+    override suspend fun setJoinerLabel(id: String, label: String) = mutex.withLock {
+        usePrimaryOrFallback(
+            primaryCall = { it.setJoinerLabel(id, label) },
+            fallbackCall = { it.setJoinerLabel(id, label) },
         )
     }
 

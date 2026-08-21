@@ -921,4 +921,13 @@
   <string name="pending_chat_stop_waiting_title">Stop waiting for this chat?</string>
   <string name="pending_chat_stop_waiting_body">You already asked to join %1$s. Removing this doesn’t tell the founder anything — and to ask again you’d need the invite link or QR a second time.</string>
   <string name="pending_chat_stop_waiting_confirm">Remove</string>
+  <string name="join_confirm_title">Join this chat</string>
+  <string name="join_confirm_ask_as">Ask to join as</string>
+  <string name="join_confirm_name_hint">Your name in this chat</string>
+  <string name="join_confirm_name_scope">Only this chat sees this name. It doesn’t rename your identity.</string>
+  <string name="join_confirm_disclosure">Sending shares your name and this identity’s public keys with whoever holds this invite.</string>
+  <string name="join_confirm_send">Send join request</string>
+  <string name="join_confirm_group_label">group</string>
+  <string name="join_confirm_invite_key_label">invite key</string>
+  <string name="join_confirm_identity_label">identity</string>
 </resources>
