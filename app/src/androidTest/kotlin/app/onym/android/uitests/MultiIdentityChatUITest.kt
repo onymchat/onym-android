@@ -120,13 +120,15 @@ class MultiIdentityChatUITest {
         composeRule.onAllNodesWithText("Done").onFirst().performClick()
         composeRule.waitForIdle()
 
-        // 4. Bob accepts the invitation via the deeplink.
+        // 4. Bob joins from the deeplink. There is nothing to fill in:
+        //    the tap sends the request and opens the chat it created,
+        //    waiting until Alice lets him in. Reaching that state is
+        //    proof the request actually left the device — stronger than
+        //    the old assertion, which typed a name and dismissed a
+        //    screen.
         switchToIdentity("Bob")
         deliverDeeplink(inviteLink)
-        waitForTag("join.label_field")
-        composeRule.onNodeWithTag("join.label_field").performTextInput("Bob")
-        composeRule.onNodeWithTag("join.send_button").performClick()
-        waitForTag("join.awaiting_approval")
+        waitForTag("pending_chat.waiting")
 
         // 5. Alice approves the join request — from inside the group's
         //    chat thread, which is the whole point of the surface: there

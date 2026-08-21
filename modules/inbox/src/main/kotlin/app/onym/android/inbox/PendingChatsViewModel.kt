@@ -438,15 +438,18 @@ class PendingChatsViewModel(
         sendingIds = sendingIds + id
         _lastError.value = null
         rebuild()
+        // Any cancellation or unexpected sender failure must release the
+        // in-flight marker; otherwise the row stays at "Sending…" with
+        // Accept and Ask again disabled for the rest of the process.
         try {
             when (submitJoin(capability, displayLabel(chat.ownerIdentityId), chat.ownerIdentityId)) {
                 is JoinRequestSender.Outcome.Sent -> repository.markRequested(id)
                 is JoinRequestSender.Outcome.NoIdentityLoaded ->
                     repository.markFailed(id, PendingChat.SendFailure.NO_IDENTITY)
-                // The transport's own wording doesn't survive a translation
-                // or a re-read six months later, and it tells the reader
-                // nothing they can act on. The code carries what matters: it
-                // didn't go out.
+                // The transport's own wording doesn't survive a
+                // translation or a re-read six months later, and it
+                // tells the reader nothing they can act on. The code
+                // carries what matters: it didn't go out.
                 is JoinRequestSender.Outcome.TransportFailed ->
                     repository.markFailed(id, PendingChat.SendFailure.TRANSPORT)
             }

@@ -349,6 +349,10 @@ private fun ErrorBanner(error: PendingChatError, onDismiss: () -> Unit) {
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.fillMaxWidth(0.85f),
             )
+            // Close, not the banner's own warning glyph: the button
+            // dismisses the message, and repeating the icon beside it
+            // read as a second warning rather than a way out of the
+            // first — with nothing for a screen reader to announce.
             IconButton(onClick = onDismiss) {
                 Icon(
                     Icons.Filled.Close,
