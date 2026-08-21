@@ -13,11 +13,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.navigation.NavHostController
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -25,6 +30,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -51,9 +57,8 @@ import app.onym.android.chats.ChatsScreen
 import app.onym.android.chats.ChatsViewModel
 import app.onym.android.group.CreateGroupViewModel
 import app.onym.android.group.IntroCapability
-import app.onym.android.group.JoinScreen
-import app.onym.android.group.JoinViewModel
 import app.onym.android.group.ScanToJoinScreen
+import app.onym.android.inbox.PendingChatsViewModel
 import app.onym.android.group.ShareInviteViewModel
 import app.onym.android.group.creategroup.CreateGroupScreen
 import app.onym.android.group.creategroup.ShareInviteScreen
@@ -278,15 +283,122 @@ fun RootScreen(
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
 
-    // Forward an inbound deeplink capability to the join destination.
-    // The capability's encoded form is short and URL-safe — embed it
-    // as a path arg so the target composable can decode it without
-    // touching shared state. Acks the host immediately after the
-    // navigate() call (no need to wait for the destination to render).
-    LaunchedEffect(pendingCapability) {
-        val cap = pendingCapability ?: return@LaunchedEffect
-        navController.navigate("join_invite/${cap.encode()}")
-        onPendingCapabilityHandled()
+    // A tapped link no longer opens anything of its own. It sends the
+    // join request under the active identity's name and lands the person
+    // in the chat it created — pending until the founder lets them in.
+    //
+    // The screen it replaced asked for a display name and a Send tap
+    // before anything happened, and held the entire wait in memory: a
+    // process death erased every trace that the person had asked, while
+    // the screen's own copy told them to stay put.
+    var joinLinkError by remember { mutableStateOf<PendingChatsViewModel.JoinOutcome.FailureReason?>(null) }
+    // A scan is the same intent arriving through a different door, so it
+    // joins the same queue rather than growing a second path.
+    var scannedCapabilityEncoded by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+    val scannedCapability = remember(scannedCapabilityEncoded) {
+        scannedCapabilityEncoded?.let { encoded ->
+            runCatching { IntroCapability.decode(encoded) }.getOrNull()
+        }
+    }
+    // A scanned string that won't decode is not nothing: the camera saw
+    // *something*, and silently dropping it leaves the person staring at
+    // a screen that did nothing. The link path already says so.
+    LaunchedEffect(scannedCapabilityEncoded, scannedCapability) {
+        if (scannedCapabilityEncoded != null && scannedCapability == null) {
+            scannedCapabilityEncoded = null
+            joinLinkError = PendingChatsViewModel.JoinOutcome.FailureReason.NOT_SAVED
+        }
+    }
+    // Bumped by Try again. The capability is deliberately *not* cleared
+    // on failure — a link that failed is a link with nothing left to
+    // retry against, and the QR it came from may be long gone — so the
+    // effect needs its own reason to run twice.
+    var joinAttempt by remember { mutableIntStateOf(0) }
+    val capabilityToJoin = pendingCapability ?: scannedCapability
+    LaunchedEffect(capabilityToJoin, joinAttempt) {
+        val cap = capabilityToJoin ?: return@LaunchedEffect
+        // Acked *after* the work, not before. Clearing the capture
+        // changes this effect's key, and changing the key cancels the
+        // coroutine running under it — so acking first killed the join
+        // at its first suspension point and nothing ever navigated.
+        val outcome = dependencies.pendingChatsViewModel.join(cap)
+        // Back to the main thread explicitly: the send hops to IO on its
+        // way through the transport, and `NavController.navigate` walks
+        // the back stack's lifecycle registries, which refuse to be
+        // touched from anywhere else.
+        withContext(Dispatchers.Main) {
+            when (outcome) {
+                // Both land on the Chats tab first. A push alone isn't
+                // enough to be seen: a link tapped while the app was
+                // last on Settings would otherwise put the chat on a
+                // stack nobody is looking at — "nothing visibly
+                // happened".
+                is PendingChatsViewModel.JoinOutcome.AlreadyJoined -> {
+                    // The link is stale or double-tapped and this person
+                    // is already in: the honest answer is the chat
+                    // itself rather than a second waiting room.
+                    navController.openOnChatsTab("chat_thread/${outcome.groupIdHex}")
+                }
+                is PendingChatsViewModel.JoinOutcome.Waiting ->
+                    navController.openOnChatsTab("pending_chat/${outcome.rowId}")
+                is PendingChatsViewModel.JoinOutcome.Failed -> joinLinkError = outcome.reason
+            }
+            // Kept on failure, so Try again has something to try.
+            if (outcome !is PendingChatsViewModel.JoinOutcome.Failed) {
+                if (pendingCapability != null) {
+                    onPendingCapabilityHandled()
+                } else {
+                    scannedCapabilityEncoded = null
+                }
+            }
+        }
+    }
+
+    // Rare, and silent failure here would leave someone waiting on a
+    // request that was never recorded.
+    joinLinkError?.let { reason ->
+        val dismiss = {
+            joinLinkError = null
+            // Only now is the capability spent: the person has seen the
+            // failure and chosen not to retry it.
+            if (pendingCapability != null) {
+                onPendingCapabilityHandled()
+            } else {
+                scannedCapabilityEncoded = null
+            }
+        }
+        AlertDialog(
+            onDismissRequest = dismiss,
+            title = { Text(stringResource(R.string.join_link_failed_title)) },
+            text = {
+                Text(
+                    when (reason) {
+                        PendingChatsViewModel.JoinOutcome.FailureReason.NO_IDENTITY ->
+                            stringResource(R.string.pending_chat_no_identity)
+                        PendingChatsViewModel.JoinOutcome.FailureReason.NOT_SAVED ->
+                            stringResource(R.string.join_link_failed_not_saved)
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        joinLinkError = null
+                        joinAttempt += 1
+                    },
+                    modifier = Modifier.testTag("join_link_error.retry"),
+                ) {
+                    Text(stringResource(R.string.pending_chat_retry))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = dismiss) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 
     Scaffold(
@@ -354,8 +466,10 @@ fun RootScreen(
                     onCreateGroup = { navController.navigate(ROUTE_CREATE_GROUP) },
                     approveRequestsViewModel = dependencies.approveRequestsViewModel,
                     activeBlsPubkeyHex = dependencies.activeBlsPubkeyHex,
-                    pendingInvitesViewModel = dependencies.pendingInvitesViewModel,
-                    onOpenInvitations = { navController.navigate(ROUTE_PENDING_INVITES) },
+                    pendingChatsViewModel = dependencies.pendingChatsViewModel,
+                    onOpenPendingChat = { rowId ->
+                        navController.navigate("pending_chat/$rowId")
+                    },
                     onOpenChat = { groupId ->
                         // PR A5: chats list now opens the thread,
                         // not the members roster. Members move one
@@ -368,13 +482,14 @@ fun RootScreen(
             composable(ROUTE_SCAN_JOIN) {
                 ScanToJoinScreen(
                     onCapability = { capability ->
-                        // Route a scanned invite through the exact join
-                        // destination the tapped-link path uses; drop the
-                        // scanner from the back stack so Back from Join
-                        // returns to Chats, not the live camera.
-                        navController.navigate("join_invite/${capability.encode()}") {
-                            popUpTo(ROUTE_SCAN_JOIN) { inclusive = true }
-                        }
+                        // A scan does exactly what a tapped link does —
+                        // the two entry points can't drift apart if they
+                        // are the same code. Handing it back through
+                        // `pendingCapability` also drops the scanner
+                        // from the back stack, so Back from the pending
+                        // chat returns to Chats, not the live camera.
+                        navController.popBackStack()
+                        scannedCapabilityEncoded = capability.encode()
                     },
                     onCancel = { navController.popBackStack() },
                 )
@@ -432,10 +547,35 @@ fun RootScreen(
                     },
                 )
             }
-            composable(ROUTE_PENDING_INVITES) {
-                app.onym.android.inbox.PendingInvitesScreen(
-                    viewModel = dependencies.pendingInvitesViewModel,
-                    onClose = { navController.popBackStack() },
+            composable("pending_chat/{rowId}") { entry ->
+                val rowId = entry.arguments?.getString("rowId").orEmpty()
+                app.onym.android.inbox.PendingChatThreadScreen(
+                    viewModel = dependencies.pendingChatsViewModel,
+                    rowId = rowId,
+                    onBack = { navController.popBackStack() },
+                    onMaterialized = { groupId ->
+                        // The founder let this person in while they were
+                        // watching the wait: swap this screen for the
+                        // real thread rather than leaving them to find
+                        // it. `popUpTo` the pending route so Back from
+                        // the chat goes to the list, not to a screen
+                        // whose subject no longer exists.
+                        //
+                        // Guarded on *this row* still being on top, by
+                        // its argument rather than by the route pattern
+                        // — the pattern is identical for every instance,
+                        // so with two pending chats stacked the buried
+                        // one's swap would pop the screen the person is
+                        // actually reading and drop them into the other
+                        // chat.
+                        if (navController.currentBackStackEntry
+                                ?.arguments?.getString("rowId") == rowId
+                        ) {
+                            navController.navigate("chat_thread/$groupId") {
+                                popUpTo("pending_chat/{rowId}") { inclusive = true }
+                            }
+                        }
+                    },
                 )
             }
             composable(Tab.Settings.route) {
@@ -615,48 +755,6 @@ fun RootScreen(
                     groupId = groupId,
                     viewModel = vm,
                     onDone = { navController.popBackStack() },
-                )
-            }
-            // Inbound deeplink destination. Path arg carries the
-            // url-safe-base64-of-JSON capability — re-decoded here
-            // (rather than threading the value type through nav args)
-            // so the screen survives process death: the system
-            // rebuilds the back stack from the saved route strings,
-            // and re-decoding from the path arg restores the same
-            // capability without round-tripping through a Parcelable.
-            composable("join_invite/{capability}") { entry ->
-                val encoded = entry.arguments?.getString("capability")
-                    ?: return@composable
-                val capability = try {
-                    IntroCapability.decode(encoded)
-                } catch (_: Throwable) {
-                    return@composable
-                }
-                val vm: JoinViewModel = viewModel(
-                    factory = viewModelFactory {
-                        initializer { dependencies.makeJoinViewModel(capability) }
-                    },
-                )
-                JoinScreen(
-                    viewModel = vm,
-                    onBackClick = { navController.popBackStack() },
-                    onOpenChat = { group ->
-                        // Open the chat itself. This used to land on the
-                        // Chats tab instead, because no chat-detail
-                        // destination existed when the join flow was
-                        // written; `chat_thread/{groupId}` arrived later
-                        // (PR A5) and the Chats list has been using it
-                        // since. Dropping the user on a list one tap
-                        // after "You're in" read as a dead button.
-                        //
-                        // popUpTo start drops join_invite, so Back from
-                        // the thread lands on Chats, not back on the
-                        // just-completed join screen.
-                        navController.navigate("chat_thread/${group.id}") {
-                            popUpTo(navController.graph.findStartDestination().id)
-                            launchSingleTop = true
-                        }
-                    },
                 )
             }
             composable(Tab.Search.route) {
@@ -1245,6 +1343,22 @@ private const val ROUTE_RUN_BLOSSOM = "run_blossom_server"
 private const val ROUTE_RUN_RELAYER = "run_relayer"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
-private const val ROUTE_PENDING_INVITES = "pending_invites"
 private const val ROUTE_SCAN_JOIN = "scan_join"
 private val TAB_ROUTES = setOf(Tab.Chats.route, Tab.Settings.route, Tab.Search.route)
+
+/**
+ * Push [route] with the Chats tab underneath it.
+ *
+ * Used by the invite-link path, which is handled above the tab bar while
+ * what it produces lives inside the Chats tab. Without the tab move the
+ * destination lands on whichever stack happened to be showing, and the
+ * person comes back from Messages to the Settings screen they left.
+ */
+private fun NavHostController.openOnChatsTab(route: String) {
+    navigate(Tab.Chats.route) {
+        popUpTo(graph.findStartDestination().id) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
+    navigate(route)
+}

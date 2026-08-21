@@ -68,18 +68,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.offset
-import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.draw.alpha
 import app.onym.android.strings.R
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.ApproveRequestsViewModel
 import app.onym.android.group.ChatGroup
 import app.onym.android.design.OnymAccent
 import app.onym.android.design.OnymGroupAvatar
-import app.onym.android.inbox.PendingInvitesToolbarBadge
-import app.onym.android.inbox.PendingInvitesViewModel
+import app.onym.android.inbox.PendingChatsViewModel
 
 /**
  * Chats tab — root list of groups the user has created. PR-C only
@@ -100,19 +98,34 @@ fun ChatsScreen(
     /** Active identity's lowercase BLS pubkey hex, for the admin gate
      *  on the join-request signal. */
     activeBlsPubkeyHex: kotlinx.coroutines.flow.StateFlow<String?>? = null,
-    pendingInvitesViewModel: PendingInvitesViewModel? = null,
-    onOpenInvitations: (() -> Unit)? = null,
+    pendingChatsViewModel: PendingChatsViewModel? = null,
     onOpenChat: (groupId: String) -> Unit = {},
+    /** Open the thread behind a chat that hasn't opened yet. */
+    onOpenPendingChat: (rowId: String) -> Unit = {},
     onScanToJoin: () -> Unit = {},
 ) {
     val chatItems by viewModel.items.collectAsStateWithLifecycle()
     val pending by (approveRequestsViewModel?.pending?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(emptyList<app.onym.android.group.JoinRequestApprover.PendingRequest>()) })
-    val pendingInvites by (pendingInvitesViewModel?.pending?.collectAsStateWithLifecycle()
-        ?: remember { mutableStateOf(emptyList<app.onym.android.inbox.PendingInvite>()) })
-    val verifyingInvites by (pendingInvitesViewModel?.verifying?.collectAsStateWithLifecycle()
-        ?: remember { mutableStateOf(emptyList<app.onym.android.inbox.PendingGroupVerification>()) })
-    val inviteBadgeCount = pendingInvites.size + verifyingInvites.size
+    val pendingChats by (pendingChatsViewModel?.rows?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf(emptyList<PendingChatsViewModel.Row>()) })
+    val groups by viewModel.groups.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingChatsViewModel) { pendingChatsViewModel?.start() }
+
+    // The two kinds of row this list holds, merged and ordered together.
+    // Merging here rather than inside `ChatsViewModel` keeps each fact
+    // with its owner: the chats VM knows about groups and messages, the
+    // pending VM knows about waits, and neither has to learn the
+    // other's vocabulary to be sorted next to it.
+    val rows: List<ChatsListRow> = remember(chatItems, pendingChats) {
+        (chatItems.map(ChatsListRow::Chat) + pendingChats.map(ChatsListRow::Pending))
+            .sortedByDescending { it.sortKey }
+    }
+    // `groups`, not `chatItems`: the enriched list is rebuilt behind an
+    // await per group, so gating on it showed the "start your first
+    // chat" pitch for a frame or two *after* the first group landed,
+    // and hid the compose button for the same beat.
+    val hasAnyChats = groups.isNotEmpty() || pendingChats.isNotEmpty()
 
     // Pending join requests per group id, for the chat-list signal.
     //
@@ -146,6 +159,9 @@ fun ChatsScreen(
 
     // The chat awaiting a swipe-to-delete confirmation, if any.
     var pendingDelete by remember { mutableStateOf<ChatListItem?>(null) }
+    // The waiting room awaiting the same, for a row that has already
+    // asked to join.
+    var pendingDismiss by remember { mutableStateOf<PendingChatsViewModel.Row?>(null) }
 
     Scaffold(
         topBar = {
@@ -171,36 +187,16 @@ fun ChatsScreen(
                     // group's own thread, surfaced on the list row
                     // itself (see `joinRequestCounts`), so there is no
                     // separate surface to discover.
-                    // Invitations received by this identity (push offers).
-                    // Same always-rendered + badge-on-nonempty treatment as
-                    // the join-requests button.
-                    if (pendingInvitesViewModel != null && onOpenInvitations != null) {
-                        Box(modifier = Modifier.padding(end = 4.dp)) {
-                            IconButton(
-                                onClick = onOpenInvitations,
-                                modifier = Modifier.testTag("pending_invites.toolbar_button"),
-                            ) {
-                                Icon(
-                                    Icons.Filled.MailOutline,
-                                    contentDescription = stringResource(R.string.invitations_cd),
-                                )
-                            }
-                            if (inviteBadgeCount > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .offset(x = (-4).dp, y = 6.dp),
-                                ) {
-                                    PendingInvitesToolbarBadge(inviteBadgeCount)
-                                }
-                            }
-                        }
-                    }
+                    // Invitations used to live behind a badged envelope
+                    // here, opening a modal list of offers. There is no
+                    // such surface any more: an offer, and a join we
+                    // have asked for, are rows in the list below like
+                    // any other chat.
                     // Plus button mirrors Mail / Messages — useful
                     // once the user has at least one chat. Hidden in
                     // the empty state because the central CTA already
                     // covers it.
-                    if (chatItems.isNotEmpty()) {
+                    if (hasAnyChats) {
                         IconButton(
                             onClick = onCreateGroup,
                             modifier = Modifier.testTag("chats.create_group_toolbar"),
@@ -216,7 +212,11 @@ fun ChatsScreen(
         },
         containerColor = MaterialTheme.colorScheme.surface,
     ) { padding ->
-        if (chatItems.isEmpty()) {
+        // The pitch only stands in for an empty list. A chat the person
+        // is waiting to be let into is not an empty list — it is the
+        // first chat, mid-arrival — so a pending row keeps the pitch
+        // away.
+        if (!hasAnyChats) {
             EmptyState(
                 padding = padding,
                 onCreateGroup = onCreateGroup,
@@ -228,17 +228,64 @@ fun ChatsScreen(
                     .padding(padding)
                     .fillMaxSize(),
             ) {
-                items(chatItems, key = { it.id }) { item ->
-                    SwipeableChatRow(
-                        item = item,
-                        onClick = { onOpenChat(item.group.id) },
-                        onRequestDelete = { pendingDelete = item },
-                        joinRequestCount = joinRequestCounts[item.group.id] ?: 0,
-                    )
+                items(rows, key = { it.key }) { row ->
+                    when (row) {
+                        is ChatsListRow.Chat -> SwipeableChatRow(
+                            item = row.item,
+                            onClick = { onOpenChat(row.item.group.id) },
+                            onRequestDelete = { pendingDelete = row.item },
+                            joinRequestCount = joinRequestCounts[row.item.group.id] ?: 0,
+                        )
+                        is ChatsListRow.Pending -> SwipeablePendingChatRow(
+                            row = row.row,
+                            onClick = { onOpenPendingChat(row.row.id) },
+                            onDismiss = {
+                                // An unanswered offer destroys nothing:
+                                // it drops a local row and sends the
+                                // founder nothing, whose outstanding
+                                // intro key simply goes unused. A row
+                                // that has *asked* is the only local
+                                // evidence of that asking, and there is
+                                // no way back to it without the link
+                                // again — so that one asks first.
+                                if (row.row.state == PendingChatsViewModel.State.Offered) {
+                                    pendingChatsViewModel?.dismiss(row.row.id)
+                                } else {
+                                    pendingDismiss = row.row
+                                }
+                            },
+                        )
+                    }
                     HorizontalDivider(thickness = 0.5.dp)
                 }
             }
         }
+    }
+
+    pendingDismiss?.let { row ->
+        val name = row.name?.takeIf { it.isNotBlank() }
+            ?: stringResource(R.string.pending_chat_unnamed)
+        AlertDialog(
+            onDismissRequest = { pendingDismiss = null },
+            title = { Text(stringResource(R.string.pending_chat_stop_waiting_title)) },
+            text = { Text(stringResource(R.string.pending_chat_stop_waiting_body, name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingChatsViewModel?.dismiss(row.id)
+                        pendingDismiss = null
+                    },
+                    modifier = Modifier.testTag("chats.pending.dismiss.confirm"),
+                ) {
+                    Text(stringResource(R.string.pending_chat_stop_waiting_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDismiss = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 
     // Swipe-to-delete confirmation. Deleting wipes the chat + all its
@@ -272,6 +319,130 @@ fun ChatsScreen(
             },
         )
     }
+}
+
+/**
+ * One entry in the chats list: a chat, or one on its way in.
+ *
+ * Ordered together — a pending chat sorts by when the wait started,
+ * exactly as a real chat sorts by its newest message, so a join
+ * happening right now lands at the top, which is where the person who
+ * just tapped the link will look for it.
+ */
+private sealed interface ChatsListRow {
+    val key: String
+    val sortKey: Long
+
+    data class Chat(val item: ChatListItem) : ChatsListRow {
+        override val key: String get() = "chat:${item.id}"
+        override val sortKey: Long get() = item.sortKey
+    }
+
+    data class Pending(val row: PendingChatsViewModel.Row) : ChatsListRow {
+        override val key: String get() = "pending:${row.id}"
+        override val sortKey: Long get() = row.receivedAt.toEpochMilli()
+    }
+}
+
+/**
+ * A pending row with the same swipe affordance as a chat, minus the
+ * confirmation: dropping an offer destroys nothing and sends nothing.
+ *
+ * A row synthesised from a verification alone has no stored offer under
+ * it to drop, so it doesn't swipe at all — a gesture that silently did
+ * nothing would be worse than no gesture.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeablePendingChatRow(
+    row: PendingChatsViewModel.Row,
+    onClick: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (!row.isDismissable) {
+        PendingChatRow(row = row, onClick = onClick)
+        return
+    }
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) onDismiss()
+            false
+        },
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = { ChatRowDeleteBackground() },
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
+        modifier = Modifier.testTag("chats.pending.swipe.${row.id}"),
+    ) {
+        PendingChatRow(row = row, onClick = onClick)
+    }
+}
+
+/**
+ * Chat-list row for a chat the person is waiting to be let into. Reads
+ * as a chat, muted: the same avatar and title layout, no unread badge
+ * (no messages exist), and a subtitle that says what is being waited on.
+ */
+@Composable
+private fun PendingChatRow(
+    row: PendingChatsViewModel.Row,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .testTag("chats.pending.${row.id}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.alpha(0.6f)) {
+            OnymGroupAvatar(size = 44.dp, accent = OnymAccent.Blue.color())
+        }
+        Spacer(Modifier.size(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = row.name?.takeIf { it.isNotBlank() }
+                    ?: stringResource(R.string.pending_chat_unnamed),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            Text(
+                // One line, and it has to answer "why isn't this a chat
+                // yet?" from the list alone — someone scanning past it
+                // should not have to open the row to learn that it is
+                // stuck rather than merely slow.
+                text = pendingSubtitle(row),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                modifier = Modifier.testTag("chats.pending.subtitle.${row.id}"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun pendingSubtitle(row: PendingChatsViewModel.Row): String = when (row.state) {
+    PendingChatsViewModel.State.Offered -> {
+        val alias = row.inviterAlias.trim()
+        if (alias.isEmpty()) {
+            stringResource(R.string.pending_chat_invited_you_generic)
+        } else {
+            stringResource(R.string.pending_chat_invited_you, alias)
+        }
+    }
+    PendingChatsViewModel.State.Waiting ->
+        stringResource(R.string.pending_chat_subtitle_waiting)
+    PendingChatsViewModel.State.ChainSettling ->
+        stringResource(R.string.pending_chat_almost_in)
+    is PendingChatsViewModel.State.SendFailed ->
+        stringResource(R.string.pending_chat_subtitle_send_failed)
+    else -> stringResource(R.string.pending_chat_subtitle_stuck)
 }
 
 /**

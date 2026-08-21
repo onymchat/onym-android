@@ -84,20 +84,21 @@ class IncomingMessageDispatcher(
     private val chainState: ChainStateReading? = null,
     /** Receive-side sink for decoded [GroupInviteOfferPayload]s — the
      *  push counterpart to the deeplink join flow. An offer lands here
-     *  as a [PendingInvite] awaiting the user's explicit Accept (which
+     *  as a [PendingChat] awaiting the user's explicit Accept (which
      *  ships a [app.onym.android.group.JoinRequestPayload]) or dismiss.
      *  It grants nothing and never materializes a group: membership
      *  only follows the invitee's accept + the admin's explicit
-     *  on-chain approve. Defaulted to a fresh store so the many
-     *  existing dispatcher tests that don't exercise the offer path
-     *  keep their construction sites unchanged; production
-     *  ([app.onym.android.OnymApplication]) passes the shared store. */
-    private val pendingInvites: PendingInvitesRecording = PendingInvitesStore(),
+     *  on-chain approve. Defaulted to a no-op so the many existing
+     *  dispatcher tests that don't exercise the offer path keep their
+     *  construction sites unchanged; production
+     *  ([app.onym.android.OnymApplication]) passes the shared
+     *  repository. */
+    private val pendingChats: PendingChatRecording = NoopPendingChatRecorder(),
     /** Seam for the verify-at-current state machine (Option 2, PR 159).
      *  A stale Tyranny snapshot (chain advanced past its epoch) is
      *  deferred here on the invitee side; inbound
      *  [GroupStateRefreshRequest]s are answered here on the admin side.
-     *  Defaulted to a no-op for the same reason as [pendingInvites]. */
+     *  Defaulted to a no-op for the same reason as [pendingChats]. */
     private val groupStateRefresher: GroupStateRefreshing = NoopGroupStateRefresher(),
     /** Ships a delivered receipt back to a chat message's sender the
      *  moment we persist it. Defaulted to a no-op so existing
@@ -149,7 +150,7 @@ class IncomingMessageDispatcher(
         // as one.
         val offer = tryDecodeOffer(envelope.plaintext)
         if (offer != null) {
-            recordOffer(offer, messageId, ownerIdentityId, receivedAt)
+            recordOffer(offer, ownerIdentityId, receivedAt)
             return
         }
 
@@ -455,28 +456,49 @@ class IncomingMessageDispatcher(
     }
 
     /**
-     * Queue a decoded push offer for the user's explicit Accept. Keyed
-     * by the inbound Nostr event id so a re-delivered offer (replaceable
-     * events are re-fetched on every relaunch) is idempotent in the
-     * store. Never materializes a group — that only follows the
-     * invitee's accept + the admin's explicit on-chain approve.
+     * Record a decoded push offer as a chat the person has been offered
+     * a seat in — a row in their chats list, awaiting the explicit
+     * Accept that ships the join request. Never materializes a group:
+     * that only follows the accept + the admin's on-chain approve.
+     *
+     * Keyed by `(group, owner)` rather than by the inbound event id: a
+     * replaceable offer is re-fetched on every relaunch, and a row the
+     * person has already accepted must not come back asking to be
+     * accepted again. The store's dedup handles that.
+     *
+     * The dedup cannot cover the replay that arrives *after* the group
+     * materialized, though — by then there is no row left to collapse
+     * onto, and the sweep that would clear a fresh one only runs on a
+     * group emission. That row is durable now and renders in the chats
+     * list beside the real chat, offering to send a join request for a
+     * group the person is already in. So the check is here, at the only
+     * point that knows the offer is new.
      */
     private suspend fun recordOffer(
         offer: GroupInviteOfferPayload,
-        messageId: String,
         ownerIdentityId: IdentityId,
         receivedAt: Instant,
     ) {
-        pendingInvites.record(
-            PendingInvite(
-                id = messageId,
+        val groupIdHex = offer.groupId.joinToString("") { "%02x".format(it) }
+        // Scoped to the invited identity: another identity on this
+        // device being in the group says nothing about whether this one
+        // was invited to it.
+        val alreadyJoined = groupRepository.findForOwner(
+            ownerIdentityId = ownerIdentityId.value,
+            groupId = groupIdHex,
+        ) != null
+        if (alreadyJoined) return
+        pendingChats.record(
+            PendingChat(
+                groupId = offer.groupId,
                 ownerIdentityId = ownerIdentityId,
                 introPublicKey = offer.introPublicKey,
-                groupId = offer.groupId,
                 groupName = offer.groupName,
                 inviterAlias = offer.inviterAlias,
                 invitationMessage = offer.invitationMessage,
                 receivedAt = receivedAt,
+                status = PendingChat.Status.Offered,
+                offerReceivedAt = receivedAt,
             ),
         )
     }

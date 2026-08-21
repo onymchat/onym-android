@@ -1,6 +1,7 @@
 package app.onym.android.group
 
 import app.onym.android.identity.IdentityRepository
+import app.onym.android.identity.IdentityId
 import app.onym.android.transport.InboxTransport
 import app.onym.android.transport.TransportInboxId
 import kotlinx.coroutines.CoroutineDispatcher
@@ -21,7 +22,8 @@ import kotlinx.serialization.json.Json
  *     the joiner's long-term key).
  *  3. POST the sealed bytes to the Nostr inbox tag derived from
  *     intro_pub.
- *  4. Surface success/failure to the JoinScreen UI (PR-7).
+ *  4. Report the outcome to the caller, which records it on the
+ *     pending chat row — the screen that used to ask for this is gone.
  */
 class JoinRequestSender(
     private val identity: IdentityRepository,
@@ -45,38 +47,40 @@ class JoinRequestSender(
     suspend fun send(
         capability: IntroCapability,
         joinerDisplayLabel: String,
+        ownerIdentityId: IdentityId,
     ): Outcome = withContext(ioDispatcher) {
-        val activeIdentity = identity.currentIdentity() ?: return@withContext Outcome.NoIdentityLoaded()
+        val ownerIdentity = identity.identities.value.firstOrNull { it.id == ownerIdentityId }
+            ?: return@withContext Outcome.NoIdentityLoaded()
         // PR 88: ship the Poseidon leaf hash so the admin can run
         // Tyranny.proveUpdate without having to derive it again.
         // Computation goes through the FFI; pull the BLS secret only
         // for the duration of the call, never retain.
         val leafHash = try {
             // onym:allow-secret-read
-            val sk = identity.blsSecretKey()
+            val sk = identity.blsSecretKey(ownerIdentityId)
             GroupCommitmentBuilder.computeLeafHash(sk)
         } catch (_: Throwable) {
             null
         }
         val payload = JoinRequestPayload(
-            joinerInboxPublicKey = activeIdentity.inboxPublicKey,
+            joinerInboxPublicKey = ownerIdentity.inboxPublicKey,
             // Stable cross-device identifier — the admin keys the
             // joiner into the local roster under this. Pre-PR-78
             // joiners shipped without it; post-PR-78 ships it always.
-            joinerBlsPublicKey = activeIdentity.blsPublicKey,
+            joinerBlsPublicKey = ownerIdentity.blsPublicKey,
             joinerLeafHash = leafHash,
             // PR A3: 32-byte Ed25519 envelope-signing pubkey. Hard-
             // cutover required; PR A4's chat dispatcher needs this on
             // every join request to verify the joiner's future chat
             // envelope signatures.
-            joinerSendingPublicKey = activeIdentity.stellarPublicKey,
+            joinerSendingPublicKey = ownerIdentity.sendingPublicKey,
             joinerDisplayLabel = joinerDisplayLabel,
             groupId = capability.groupId,
         )
         val payloadBytes = jsonFormat.encodeToString(JoinRequestPayload.serializer(), payload)
             .toByteArray(Charsets.UTF_8)
         val sealed = try {
-            identity.sealInvitation(payloadBytes, capability.introPublicKey)
+            identity.sealInvitationAs(ownerIdentityId, payloadBytes, capability.introPublicKey)
         } catch (e: Throwable) {
             return@withContext Outcome.TransportFailed("seal: ${e.message ?: e.javaClass.simpleName}")
         }
