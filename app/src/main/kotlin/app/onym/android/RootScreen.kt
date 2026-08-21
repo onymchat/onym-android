@@ -283,14 +283,12 @@ fun RootScreen(
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route
 
-    // A tapped link no longer opens anything of its own. It sends the
-    // join request under the active identity's name and lands the person
-    // in the chat it created — pending until the founder lets them in.
-    //
-    // The screen it replaced asked for a display name and a Send tap
-    // before anything happened, and held the entire wait in memory: a
-    // process death erased every trace that the person had asked, while
-    // the screen's own copy told them to stay put.
+    // A tapped link resolves to a screen and nothing else. The activity
+    // that receives it is exported — any app on the device can start it,
+    // and so can a browsable link — so delivery is a request to show
+    // something, never permission to introduce this identity to a
+    // stranger. `prepareJoin` reads; only the Send on the confirmation
+    // screen sends.
     var joinLinkError by remember { mutableStateOf<PendingChatsViewModel.JoinOutcome.FailureReason?>(null) }
     // A scan is the same intent arriving through a different door, so it
     // joins the same queue rather than growing a second path.
@@ -323,7 +321,7 @@ fun RootScreen(
         // changes this effect's key, and changing the key cancels the
         // coroutine running under it — so acking first killed the join
         // at its first suspension point and nothing ever navigated.
-        val outcome = dependencies.pendingChatsViewModel.join(cap)
+        val outcome = dependencies.pendingChatsViewModel.prepareJoin(cap)
         // Back to the main thread explicitly: the send hops to IO on its
         // way through the transport, and `NavController.navigate` walks
         // the back stack's lifecycle registries, which refuse to be
@@ -335,15 +333,22 @@ fun RootScreen(
                 // last on Settings would otherwise put the chat on a
                 // stack nobody is looking at — "nothing visibly
                 // happened".
-                is PendingChatsViewModel.JoinOutcome.AlreadyJoined -> {
+                is PendingChatsViewModel.JoinDestination.AlreadyJoined -> {
                     // The link is stale or double-tapped and this person
                     // is already in: the honest answer is the chat
                     // itself rather than a second waiting room.
                     navController.openOnChatsTab("chat_thread/${outcome.groupIdHex}")
                 }
-                is PendingChatsViewModel.JoinOutcome.Waiting ->
+                is PendingChatsViewModel.JoinDestination.Waiting ->
                     navController.openOnChatsTab("pending_chat/${outcome.rowId}")
-                is PendingChatsViewModel.JoinOutcome.Failed -> joinLinkError = outcome.reason
+                is PendingChatsViewModel.JoinDestination.Confirm -> {
+                    // Delivery got us this far and no further: the
+                    // confirmation is held in memory and rendered, and
+                    // only its Send sends.
+                    dependencies.pendingChatsViewModel.holdConfirmation(outcome.confirmation)
+                    navController.openOnChatsTab(ROUTE_JOIN_CONFIRM)
+                }
+                is PendingChatsViewModel.JoinDestination.Failed -> joinLinkError = outcome.reason
             }
             // Kept on failure, so Try again has something to try.
             if (outcome !is PendingChatsViewModel.JoinOutcome.Failed) {
@@ -547,12 +552,124 @@ fun RootScreen(
                     },
                 )
             }
+            composable(ROUTE_JOIN_CONFIRM) {
+                val confirmation by dependencies.pendingChatsViewModel
+                    .confirmation.collectAsStateWithLifecycle()
+                val scope = rememberCoroutineScope()
+                val pending = confirmation
+                if (pending == null) {
+                    // The confirmation is memory-only, deliberately —
+                    // it is the state of something not agreed to yet —
+                    // but the back stack survives process death, so
+                    // returning to a killed app can land here with
+                    // nothing to render. Leave rather than show an empty
+                    // screen whose only exit is system back.
+                    //
+                    // Guarded on this still being the current
+                    // destination: Cancel and the Accept-side Send clear
+                    // the confirmation while this entry is mid-exit, and
+                    // an unguarded pop here would take the screen
+                    // *underneath* with it — two screens back from one
+                    // tap.
+                    LaunchedEffect(Unit) {
+                        if (navController.currentBackStackEntry
+                                ?.destination?.route == ROUTE_JOIN_CONFIRM
+                        ) {
+                            navController.popBackStack()
+                        }
+                    }
+                    return@composable
+                }
+                // Whichever way this screen goes — Send, Cancel, system
+                // back, or a gesture — the capability and intro key it
+                // was holding stop being held.
+                DisposableEffect(Unit) {
+                    onDispose { dependencies.pendingChatsViewModel.holdConfirmation(null) }
+                }
+                app.onym.android.inbox.JoinConfirmScreen(
+                    confirmation = pending,
+                    onSend = { label ->
+                        scope.launch {
+                            val outcome = dependencies.pendingChatsViewModel
+                                .confirmJoin(pending, label)
+                            // Back to the main thread explicitly: the
+                            // write goes through Room on IO, and
+                            // `NavController` walks the back stack's
+                            // lifecycle registries, which refuse to be
+                            // touched from anywhere else.
+                            withContext(Dispatchers.Main) {
+                                when (outcome) {
+                                    is PendingChatsViewModel.JoinDestination.Waiting ->
+                                        // Accept came *from* the waiting
+                                        // screen, so returning to it is
+                                        // a pop, not a push — pushing
+                                        // would stack a second copy and
+                                        // make Back re-show it.
+                                        if (
+                                            pending.origin is
+                                                PendingChatsViewModel.JoinConfirmation.Origin.Offer
+                                        ) {
+                                            navController.popBackStack()
+                                        } else {
+                                            navController.navigate(
+                                                "pending_chat/${outcome.rowId}",
+                                            ) {
+                                                popUpTo(ROUTE_JOIN_CONFIRM) { inclusive = true }
+                                            }
+                                        }
+                                    is PendingChatsViewModel.JoinDestination.Failed -> {
+                                        // The person who just tapped the
+                                        // button that discloses their
+                                        // keys is the last one who
+                                        // should be told nothing.
+                                        joinLinkError = outcome.reason
+                                        navController.popBackStack()
+                                    }
+                                    else -> navController.popBackStack()
+                                }
+                                dependencies.pendingChatsViewModel.holdConfirmation(null)
+                            }
+                        }
+                    },
+                    onCancel = { navController.popBackStack() },
+                )
+            }
             composable("pending_chat/{rowId}") { entry ->
                 val rowId = entry.arguments?.getString("rowId").orEmpty()
+                val scope = rememberCoroutineScope()
                 app.onym.android.inbox.PendingChatThreadScreen(
                     viewModel = dependencies.pendingChatsViewModel,
                     rowId = rowId,
                     onBack = { navController.popBackStack() },
+                    onAccept = { acceptRowId ->
+                        // Accept opens the same screen a link does. One
+                        // path, so what a person is shown before their
+                        // name and keys leave the device doesn't depend
+                        // on which door the invitation came through.
+                        scope.launch {
+                            val prepared = dependencies.pendingChatsViewModel
+                                .prepareAccept(acceptRowId)
+                            // Null means the row is gone or has already
+                            // asked — a re-delivery, or a second tap
+                            // landing behind the first. The thread
+                            // re-renders from the same state and the
+                            // Accept button goes with it, so there is
+                            // nothing to say that the screen isn't
+                            // already saying.
+                            if (prepared != null) {
+                                withContext(Dispatchers.Main) {
+                                    dependencies.pendingChatsViewModel.holdConfirmation(prepared)
+                                    // A double-tapped Accept must not
+                                    // stack a second confirmation whose
+                                    // Back re-asks for something already
+                                    // sent.
+                                    navController.navigate(ROUTE_JOIN_CONFIRM) {
+                                        launchSingleTop = true
+                                    }
+                                }
+                            }
+                        }
+                    },
                     onMaterialized = { groupId ->
                         // The founder let this person in while they were
                         // watching the wait: swap this screen for the
@@ -1344,6 +1461,8 @@ private const val ROUTE_RUN_RELAYER = "run_relayer"
 private const val ROUTE_ANCHORS_ROOT = "anchors_root"
 private const val ROUTE_CREATE_GROUP = "create_group"
 private const val ROUTE_SCAN_JOIN = "scan_join"
+private const val ROUTE_JOIN_CONFIRM = "join_confirm"
+
 private val TAB_ROUTES = setOf(Tab.Chats.route, Tab.Settings.route, Tab.Search.route)
 
 /**
@@ -1360,5 +1479,8 @@ private fun NavHostController.openOnChatsTab(route: String) {
         launchSingleTop = true
         restoreState = true
     }
-    navigate(route)
+    // Single-top for the same reason: a link re-delivered while its
+    // confirmation is already open re-uses that screen rather than
+    // stacking another one behind it.
+    navigate(route) { launchSingleTop = true }
 }

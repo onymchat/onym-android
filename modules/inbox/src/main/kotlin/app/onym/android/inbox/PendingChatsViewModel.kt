@@ -139,6 +139,102 @@ class PendingChatsViewModel(
         val isDismissable: Boolean,
     )
 
+    /**
+     * What a tapped invite link (or scanned QR) resolves to.
+     *
+     * Note what is *not* here: sending. A link arrives through an
+     * exported entry point — any app on the device can open it, and so
+     * can a page in a browser — so the arrival is a request to show
+     * something, never permission to speak. Every case below is
+     * therefore a screen; the request goes out from [confirmJoin],
+     * which only a person can reach.
+     */
+    sealed interface JoinDestination {
+        /** Already a member — the link was an old one, or a second tap. */
+        data class AlreadyJoined(val groupIdHex: String) : JoinDestination
+
+        /** This device has already asked. Nothing more to send, and
+         *  nothing more to disclose: open the wait. */
+        data class Waiting(val rowId: String) : JoinDestination
+
+        /** Show the confirmation screen. */
+        data class Confirm(val confirmation: JoinConfirmation) : JoinDestination
+
+        /** Nothing could be resolved, and the caller has to say so. */
+        data class Failed(val reason: JoinOutcome.FailureReason) : JoinDestination
+    }
+
+    /**
+     * Everything the confirmation screen shows, and everything
+     * [confirmJoin] needs to act on it.
+     *
+     * It exists so the screen can name *who* is about to learn *what*
+     * before anything leaves the device: the group, the person who
+     * invited (when one did), and the invite key the request would be
+     * sealed to.
+     */
+    data class JoinConfirmation(
+        /** The row this will create or act on — `<group hex>:<owner>`. */
+        val rowId: String,
+        /**
+         * The identity this screen was opened for.
+         *
+         * Carried rather than re-resolved at Send, because the identity
+         * can be switched while the screen is open — and Send would then
+         * disclose a *different* identity's keys than the ones the
+         * person was shown and agreed to.
+         */
+        val owner: IdentityId,
+        /** That identity's own alias, for the disclosure. It is the one
+         *  fact the screen otherwise doesn't show: whose keys these are. */
+        val identityName: String,
+        val groupIdHex: String,
+        val groupName: String?,
+        /** Empty for a link: nobody introduced themselves. */
+        val inviterAlias: String,
+        val invitationMessage: String?,
+        /** The invite key the request is sealed to, for display. Whoever
+         *  holds its private half is who this discloses to, and that is
+         *  worth showing rather than describing. */
+        val introPublicKey: ByteArray,
+        /** Pre-filled into the name field: the identity's own alias, or
+         *  the name a previous attempt on this row used. */
+        val suggestedLabel: String,
+        val origin: Origin,
+    ) {
+        /** Where the confirmation came from — a link this device just
+         *  received, or an offer already sitting in the list. */
+        sealed interface Origin {
+            data class Link(val capability: IntroCapability) : Origin
+            data class Offer(val rowId: String) : Origin
+        }
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is JoinConfirmation) return false
+            return rowId == other.rowId &&
+                groupIdHex == other.groupIdHex &&
+                groupName == other.groupName &&
+                inviterAlias == other.inviterAlias &&
+                invitationMessage == other.invitationMessage &&
+                introPublicKey.contentEquals(other.introPublicKey) &&
+                suggestedLabel == other.suggestedLabel &&
+                origin == other.origin
+        }
+
+        override fun hashCode(): Int {
+            var h = rowId.hashCode()
+            h = 31 * h + groupIdHex.hashCode()
+            h = 31 * h + (groupName?.hashCode() ?: 0)
+            h = 31 * h + inviterAlias.hashCode()
+            h = 31 * h + (invitationMessage?.hashCode() ?: 0)
+            h = 31 * h + introPublicKey.contentHashCode()
+            h = 31 * h + suggestedLabel.hashCode()
+            h = 31 * h + origin.hashCode()
+            return h
+        }
+    }
+
     /** Where a tapped invite link (or scanned QR) leaves the person. */
     sealed interface JoinOutcome {
         /** Already a member — the link was an old one, or a second tap.
@@ -174,6 +270,16 @@ class PendingChatsViewModel(
      */
     private val _materialized = MutableStateFlow<Map<String, String>>(emptyMap())
     val materialized: StateFlow<Map<String, String>> = _materialized.asStateFlow()
+
+    /**
+     * The confirmation currently on screen, if any.
+     *
+     * In memory only, and deliberately: it is the state of something
+     * that has *not* been agreed to yet. Nothing about it is written
+     * until [confirmJoin].
+     */
+    private val _confirmation = MutableStateFlow<JoinConfirmation?>(null)
+    val confirmation: StateFlow<JoinConfirmation?> = _confirmation.asStateFlow()
 
     private val _lastError = MutableStateFlow<PendingChatError?>(null)
     val lastError: StateFlow<PendingChatError?> = _lastError.asStateFlow()
@@ -284,22 +390,25 @@ class PendingChatsViewModel(
     fun groupHasLanded(groupIdHex: String): Boolean =
         groupRepository.snapshots.value.any { it.id == groupIdHex }
 
-    /**
-     * Take a capability from a tapped link or a scanned QR and turn it
-     * into a chat that is on its way.
-     *
-     * This is what replaced the join screen. That screen asked for a
-     * display name and a Send tap before anything happened, and held the
-     * entire wait in memory. Tapping the link *is* the intent, so the
-     * request goes out with the active identity's name and the wait
-     * becomes a row — which survives process death, unlike the screen.
-     */
-    suspend fun join(capability: IntroCapability): JoinOutcome =
-        viewModelScope.async { performJoin(capability) }.await()
+    /** Hold a confirmation for the screen that is about to render it,
+     *  and drop it when that screen goes away. */
+    fun holdConfirmation(confirmation: JoinConfirmation?) {
+        _confirmation.value = confirmation
+    }
 
-    private suspend fun performJoin(capability: IntroCapability): JoinOutcome {
+    /**
+     * Resolve a capability into the next screen. Records nothing, sends
+     * nothing — see [JoinDestination].
+     */
+    suspend fun prepareJoin(capability: IntroCapability): JoinDestination =
+        // Wrapped so a cancelled caller can't abandon the read halfway:
+        // the composable that asks is torn down by the very navigation
+        // this answer triggers.
+        viewModelScope.async { performPrepareJoin(capability) }.await()
+
+    private suspend fun performPrepareJoin(capability: IntroCapability): JoinDestination {
         val owner = currentIdentityId()
-            ?: return JoinOutcome.Failed(JoinOutcome.FailureReason.NO_IDENTITY)
+            ?: return JoinDestination.Failed(JoinOutcome.FailureReason.NO_IDENTITY)
         val groupIdHex = capability.groupId.joinToString("") { "%02x".format(it) }
         // Already in? Then the link is stale or double-tapped, and the
         // honest answer is the chat itself rather than a second wait.
@@ -310,55 +419,154 @@ class PendingChatsViewModel(
             ownerIdentityId = owner.value,
             groupId = groupIdHex,
         ) != null
-        if (alreadyJoined) return JoinOutcome.AlreadyJoined(groupIdHex)
+        if (alreadyJoined) return JoinDestination.AlreadyJoined(groupIdHex)
 
-        val chat = PendingChat(
-            groupId = capability.groupId,
-            ownerIdentityId = owner,
-            introPublicKey = capability.introPublicKey,
-            groupName = capability.groupName,
-            // Nobody introduced themselves over a link — the row shows
-            // the group, not a person who never said their name.
-            inviterAlias = "",
-            invitationMessage = null,
-            receivedAt = Instant.now(),
-            status = PendingChat.Status.Offered,
-            // A local clock is suitable for list ordering but cannot be
-            // compared with an authenticated Nostr event timestamp.
-            offerReceivedAt = null,
+        val rowId = "$groupIdHex:${owner.value}"
+        val existing = repository.currentChats().firstOrNull { it.id == rowId }
+        // Already asked and still waiting: one tap, one request, and the
+        // wait is the whole answer. A row whose send *failed* is not
+        // that — it has nothing outstanding, so it gets the screen and
+        // a chance to go out again.
+        if (existing != null &&
+            existing.status != PendingChat.Status.Offered &&
+            existing.status !is PendingChat.Status.Failed
+        ) {
+            return JoinDestination.Waiting(rowId)
+        }
+        return JoinDestination.Confirm(
+            JoinConfirmation(
+                rowId = rowId,
+                owner = owner,
+                identityName = displayLabel(owner),
+                groupIdHex = groupIdHex,
+                groupName = capability.groupName ?: existing?.groupName,
+                inviterAlias = existing?.inviterAlias.orEmpty(),
+                invitationMessage = existing?.invitationMessage,
+                introPublicKey = capability.introPublicKey,
+                suggestedLabel = existing?.joinerLabel ?: displayLabel(owner),
+                origin = JoinConfirmation.Origin.Link(capability),
+            ),
         )
-        val outcome = when (repository.record(chat)) {
-            PendingChatWriteOutcome.INSERTED -> {
-                viewModelScope.launch { send(chat) }
-                JoinOutcome.Waiting(chat.id)
+    }
+
+    /**
+     * The same screen, reached from the Accept on a pushed offer.
+     *
+     * One path for both, so what a person is shown before their name and
+     * keys leave the device does not depend on which door the invitation
+     * came through.
+     */
+    suspend fun prepareAccept(rowId: String): JoinConfirmation? {
+        val chat = pending.firstOrNull { it.id == rowId } ?: return null
+        if (chat.status != PendingChat.Status.Offered) return null
+        return JoinConfirmation(
+            rowId = chat.id,
+            owner = chat.ownerIdentityId,
+            identityName = displayLabel(chat.ownerIdentityId),
+            groupIdHex = chat.groupIdHex,
+            groupName = chat.groupName,
+            inviterAlias = chat.inviterAlias,
+            invitationMessage = chat.invitationMessage,
+            introPublicKey = chat.introPublicKey,
+            suggestedLabel = chat.joinerLabel ?: displayLabel(chat.ownerIdentityId),
+            origin = JoinConfirmation.Origin.Offer(chat.id),
+        )
+    }
+
+    /**
+     * The one place a join request is sent, and the only one a person
+     * can reach: the Send on the confirmation screen.
+     *
+     * [label] is what they typed. It rides with this join and does not
+     * touch the identity — one identity can introduce itself differently
+     * to different rooms — and it is stored on the row so a later
+     * re-send says the same thing.
+     */
+    suspend fun confirmJoin(confirmation: JoinConfirmation, label: String): JoinDestination =
+        // Wrapped for the same reason the read is: the screen that
+        // called this is torn down by the navigation that follows, and a
+        // cancelled caller must not abandon a half-written row or an
+        // unsent request.
+        viewModelScope.async { performConfirmJoin(confirmation, label) }.await()
+
+    private suspend fun performConfirmJoin(
+        confirmation: JoinConfirmation,
+        label: String,
+    ): JoinDestination {
+        val trimmed = label.trim()
+        val outcome = when (val origin = confirmation.origin) {
+            is JoinConfirmation.Origin.Offer -> {
+                val chat = pending.firstOrNull { it.id == origin.rowId }
+                    ?: return JoinDestination.Failed(JoinOutcome.FailureReason.NOT_SAVED)
+                repository.attachJoinerLabel(chat.id, trimmed)
+                viewModelScope.launch { send(chat, trimmed) }
+                JoinDestination.Waiting(chat.id)
             }
-            PendingChatWriteOutcome.ALREADY_PRESENT -> {
-                // A pushed offer for this group arrived first and is
-                // still unanswered. Tapping the link *is* the answer —
-                // leaving the row at Offered would land the person on a
-                // screen asking for the intent they just expressed,
-                // which is the whole thing this change removes. An
-                // already-requested row is left alone: one tap, one
-                // request.
-                val existing = repository.currentChats().firstOrNull { it.id == chat.id }
-                if (
-                    existing != null &&
-                    (existing.status == PendingChat.Status.Offered ||
-                        existing.status is PendingChat.Status.Failed)
-                ) {
-                    viewModelScope.launch { send(existing) }
+            is JoinConfirmation.Origin.Link -> {
+                // The identity the screen was opened for, not whichever
+                // is selected now: switching identities mid-screen must
+                // not silently disclose a different one's keys. If the
+                // switch happened, this Send is not the one that was
+                // agreed to.
+                val owner = confirmation.owner
+                if (currentIdentityId() != owner) {
+                    return JoinDestination.Failed(JoinOutcome.FailureReason.NO_IDENTITY)
                 }
-                JoinOutcome.Waiting(chat.id)
+                val chat = PendingChat(
+                    groupId = origin.capability.groupId,
+                    ownerIdentityId = owner,
+                    introPublicKey = origin.capability.introPublicKey,
+                    groupName = origin.capability.groupName,
+                    // Nobody introduced themselves over a link — the row
+                    // shows the group, not a person who never said their
+                    // name.
+                    inviterAlias = "",
+                    invitationMessage = null,
+                    receivedAt = Instant.now(),
+                    status = PendingChat.Status.Offered,
+                    // A local clock is suitable for list ordering but
+                    // cannot be compared with an authenticated Nostr
+                    // event timestamp.
+                    offerReceivedAt = null,
+                    joinerLabel = trimmed,
+                )
+                when (repository.record(chat)) {
+                    PendingChatWriteOutcome.INSERTED -> {
+                        viewModelScope.launch { send(chat, trimmed) }
+                        JoinDestination.Waiting(chat.id)
+                    }
+                    PendingChatWriteOutcome.ALREADY_PRESENT -> {
+                        // A pushed offer for this group arrived first
+                        // and is still unanswered — this Send is the
+                        // answer to it.
+                        repository.attachJoinerLabel(chat.id, trimmed)
+                        val existing = repository.currentChats()
+                            .firstOrNull { it.id == chat.id }
+                        // A row whose send failed has nothing
+                        // outstanding either, so this Send is its
+                        // answer too.
+                        if (existing != null &&
+                            (
+                                existing.status == PendingChat.Status.Offered ||
+                                    existing.status is PendingChat.Status.Failed
+                                )
+                        ) {
+                            viewModelScope.launch { send(existing, trimmed) }
+                        }
+                        JoinDestination.Waiting(chat.id)
+                    }
+                    PendingChatWriteOutcome.FAILED,
+                    PendingChatWriteOutcome.NOT_RECORDED,
+                    PendingChatWriteOutcome.NOT_ENCRYPTABLE,
+                    ->
+                        // All three leave the person with nothing to
+                        // come back to, which is the only distinction
+                        // this caller needs; which of them it was
+                        // matters one layer down, where the store
+                        // decides whether to keep using the disk.
+                        JoinDestination.Failed(JoinOutcome.FailureReason.NOT_SAVED)
+                }
             }
-            PendingChatWriteOutcome.FAILED,
-            PendingChatWriteOutcome.NOT_RECORDED,
-            PendingChatWriteOutcome.NOT_ENCRYPTABLE,
-            ->
-                // All three leave the person with nothing to come back
-                // to, which is the only distinction this caller needs;
-                // which of them it was matters one layer down, where the
-                // store decides whether to keep using the disk.
-                JoinOutcome.Failed(JoinOutcome.FailureReason.NOT_SAVED)
         }
         // Navigation may happen immediately after this return. Shape the
         // latest repository value synchronously so the pending screen
@@ -367,17 +575,6 @@ class PendingChatsViewModel(
         observedWaitingIds = observedWaitingIds + pending.map { it.id }
         rebuild()
         return outcome
-    }
-
-    /**
-     * Explicit Accept on a pushed offer: ship a join request to the
-     * offer's intro key. No-op once something is in flight, or once the
-     * row has moved past Offered.
-     */
-    fun accept(id: String) {
-        val chat = pending.firstOrNull { it.id == id } ?: return
-        if (chat.status != PendingChat.Status.Offered) return
-        viewModelScope.launch { send(chat) }
     }
 
     /**
@@ -401,7 +598,22 @@ class PendingChatsViewModel(
                     viewModelScope.launch { retryVerification(row.groupIdHex) }
                 } else {
                     val chat = pending.firstOrNull { it.id == id } ?: return
-                    viewModelScope.launch { send(chat) }
+                    viewModelScope.launch {
+                        // Under the name this row already asked under —
+                        // a re-send that renamed the asker would arrive
+                        // from a stranger, and the founder is deciding
+                        // partly on that name.
+                        //
+                        // The fallback is for the row whose label write
+                        // failed (an encryption error drops it
+                        // silently): bailing there left an enabled
+                        // button that did nothing, forever. Asking again
+                        // under the identity's current name is worse
+                        // than asking under the same name, and far
+                        // better than a button that lies.
+                        val label = chat.joinerLabel ?: displayLabel(chat.ownerIdentityId)
+                        send(chat, label)
+                    }
                 }
             }
             State.Offered, State.ChainSettling -> Unit
@@ -420,9 +632,15 @@ class PendingChatsViewModel(
 
     // ---- private ----
 
-    /** The one send path, shared by Accept, Ask again, and the link.
-     *  Debounced on [sendingIds] so a double tap ships one request. */
-    private suspend fun send(chat: PendingChat) {
+    /**
+     * The one send path, shared by the confirmation screen's Send and by
+     * a re-send. Debounced on [sendingIds] so a double tap ships one
+     * request.
+     *
+     * [label] is always supplied by a caller a person reached: there is
+     * no path from an inbound link or event to here.
+     */
+    private suspend fun send(chat: PendingChat, label: String) {
         val id = chat.id
         if (id in sendingIds) return
         val capability = try {
@@ -442,7 +660,7 @@ class PendingChatsViewModel(
         // in-flight marker; otherwise the row stays at "Sending…" with
         // Accept and Ask again disabled for the rest of the process.
         try {
-            when (submitJoin(capability, displayLabel(chat.ownerIdentityId), chat.ownerIdentityId)) {
+            when (submitJoin(capability, label, chat.ownerIdentityId)) {
                 is JoinRequestSender.Outcome.Sent -> repository.markRequested(id)
                 is JoinRequestSender.Outcome.NoIdentityLoaded ->
                     repository.markFailed(id, PendingChat.SendFailure.NO_IDENTITY)

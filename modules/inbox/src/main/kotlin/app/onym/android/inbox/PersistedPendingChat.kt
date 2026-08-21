@@ -51,6 +51,10 @@ data class PersistedPendingChat(
     val encryptedGroupName: ByteArray?,
     val encryptedInviterAlias: ByteArray,
     val encryptedInvitationMessage: ByteArray?,
+    /** The name typed on the confirmation screen. Encrypted with the
+     *  rest of the person-supplied text; null means nothing has been
+     *  sent for this row yet. */
+    val encryptedJoinerLabel: ByteArray? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -69,6 +73,9 @@ data class PersistedPendingChat(
             encryptedInviterAlias.contentEquals(other.encryptedInviterAlias) &&
             (encryptedInvitationMessage ?: ByteArray(0)).contentEquals(
                 other.encryptedInvitationMessage ?: ByteArray(0),
+            ) &&
+            (encryptedJoinerLabel ?: ByteArray(0)).contentEquals(
+                other.encryptedJoinerLabel ?: ByteArray(0),
             )
     }
 
@@ -84,6 +91,7 @@ data class PersistedPendingChat(
         h = 31 * h + (encryptedGroupName?.contentHashCode() ?: 0)
         h = 31 * h + encryptedInviterAlias.contentHashCode()
         h = 31 * h + (encryptedInvitationMessage?.contentHashCode() ?: 0)
+        h = 31 * h + (encryptedJoinerLabel?.contentHashCode() ?: 0)
         return h
     }
 }
@@ -130,6 +138,9 @@ interface PendingChatDao {
         receivedAtMillis: Long,
     )
 
+    @Query("UPDATE pending_chats SET encryptedJoinerLabel = :label WHERE id = :id")
+    suspend fun setJoinerLabel(id: String, label: ByteArray)
+
     @Query("UPDATE pending_chats SET encryptedIntroPublicKey = :introPublicKey WHERE id = :id")
     suspend fun refreshReplyKey(id: String, introPublicKey: ByteArray)
 
@@ -161,7 +172,28 @@ interface PendingChatDao {
  * between would leave someone waiting on something their device has no
  * record of.
  */
-@Database(entities = [PersistedPendingChat::class], version = 1, exportSchema = false)
+@Database(entities = [PersistedPendingChat::class], version = 2, exportSchema = false)
 abstract class PendingChatDatabase : RoomDatabase() {
     abstract fun pendingChatDao(): PendingChatDao
+}
+
+/**
+ * Hand-rolled migrations for [PendingChatDatabase].
+ *
+ * v1 → v2 adds `encryptedJoinerLabel`. Room validates the schema hash on
+ * open and throws when the entity has moved without the version, and
+ * `fallbackToDestructiveMigration` only rescues a *version* mismatch —
+ * so shipping the column without this bump crashes every device
+ * carrying the previous build, on launch, until its data is cleared.
+ *
+ * Additive and nullable: existing rows decode to "no name asked under
+ * yet", which is what a row written before the confirmation screen
+ * existed means anyway.
+ */
+object PendingChatDatabaseMigrations {
+    val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE pending_chats ADD COLUMN encryptedJoinerLabel BLOB")
+        }
+    }
 }

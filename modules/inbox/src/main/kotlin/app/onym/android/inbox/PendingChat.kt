@@ -48,6 +48,19 @@ data class PendingChat(
      * clock and must never be compared with a Nostr `created_at` value.
      */
     val offerReceivedAt: Instant? = null,
+    /**
+     * The name this device asked to be let in under, as typed on the
+     * confirmation screen.
+     *
+     * Kept because a re-send has to introduce the same person. Falling
+     * back to the identity's current alias would quietly change the name
+     * the founder is looking at between the first request and the
+     * second — and they are deciding partly on that name.
+     *
+     * Null until the person has confirmed a join, which is also the
+     * marker that nothing has been sent for this row yet.
+     */
+    val joinerLabel: String? = null,
 ) {
     /** Lowercase hex of [groupId] — how [PendingVerificationStore] names
      *  a group, and how the materialized sweep matches rows. */
@@ -112,6 +125,7 @@ data class PendingChat(
             inviterAlias == other.inviterAlias &&
             invitationMessage == other.invitationMessage &&
             receivedAt == other.receivedAt &&
+            joinerLabel == other.joinerLabel &&
             status == other.status &&
             offerReceivedAt == other.offerReceivedAt
     }
@@ -124,6 +138,7 @@ data class PendingChat(
         h = 31 * h + inviterAlias.hashCode()
         h = 31 * h + (invitationMessage?.hashCode() ?: 0)
         h = 31 * h + receivedAt.hashCode()
+        h = 31 * h + (joinerLabel?.hashCode() ?: 0)
         h = 31 * h + status.hashCode()
         h = 31 * h + (offerReceivedAt?.hashCode() ?: 0)
         return h
