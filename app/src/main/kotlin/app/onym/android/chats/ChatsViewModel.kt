@@ -63,6 +63,16 @@ class ChatsViewModel(
 ) : ViewModel() {
 
     /**
+     * The raw group snapshot, unenriched.
+     *
+     * The chats screen gates its empty state on this rather than on
+     * [items]: enrichment happens behind a suspend call per group, so a
+     * gate on [items] showed the "start your first chat" pitch for a
+     * frame or two *after* the first group landed.
+     */
+    val groups: StateFlow<List<ChatGroup>> = repository.snapshots
+
+    /**
      * Enriched + sorted chat-list rows. Recomputes whenever the group set
      * changes OR the messages table changes (via
      * [MessageRepository.changeToken]) — so a new/received message re-sorts

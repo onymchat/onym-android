@@ -41,6 +41,9 @@ import app.onym.android.transport.nostr.NostrInboxTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -988,13 +991,39 @@ class OnymApplication : Application() {
                 makeContractTransport = contractTransportFactory,
             ),
         )
-        // PR 158: invitee-side push invitations. The dispatcher records
-        // decoded GroupInviteOfferPayloads here (never materializing a
-        // group); the PendingInvitesViewModel drives the Chats
-        // "Invitations" surface and, on explicit Accept, ships a
-        // JoinRequestPayload to the offer's intro key via the same
-        // JoinRequestSender the deeplink join path uses.
-        val pendingInvitesStore = app.onym.android.inbox.PendingInvitesStore()
+        // Invitee-side push invitations. The dispatcher records decoded
+        // GroupInviteOfferPayloads here (never materializing a group);
+        // the PendingChatsViewModel renders them as rows in the chats
+        // list and, on explicit Accept, ships a JoinRequestPayload to
+        // the offer's intro key via the same JoinRequestSender the
+        // deeplink join path uses.
+        //
+        // Durable, unlike the in-memory store it replaces. A pushed
+        // offer is a retained Nostr event the fan-out re-delivers on
+        // every launch, but a join asked for through a link is replayed
+        // by nothing — and since it now shows as a row in the chats list
+        // rather than a screen of its own, that row is the only evidence
+        // the person ever asked. Same degrade-to-memory posture as the
+        // groups DB: a corrupt file must not refuse the launch.
+        val diskPendingChatStore: app.onym.android.inbox.PendingChatStore? = try {
+            val db = androidx.room.Room.databaseBuilder(
+                applicationContext,
+                app.onym.android.inbox.PendingChatDatabase::class.java,
+                "app.onym.android.pending_chats",
+            ).fallbackToDestructiveMigration().build()
+            app.onym.android.inbox.RoomPendingChatStore(
+                dao = db.pendingChatDao(),
+                encryption = storageEncryption,
+            )
+        } catch (_: Throwable) {
+            null
+        }
+        val pendingChatStore: app.onym.android.inbox.PendingChatStore =
+            app.onym.android.inbox.FailoverPendingChatStore(diskPendingChatStore)
+        val pendingChatRepository = app.onym.android.inbox.PendingChatRepository(
+            store = pendingChatStore,
+        )
+        applicationScope.launch { pendingChatRepository.reload() }
         // PR 159 verify-at-current: a stale Tyranny snapshot defers here;
         // the verifier asks the admin for the current state and surfaces
         // a "couldn't verify" state if the admin is offline.
@@ -1048,7 +1077,7 @@ class OnymApplication : Application() {
             messageRepository = messageRepository,
             identitiesFlow = identityRepository.identities,
             chainState = chainStateReader,
-            pendingInvites = pendingInvitesStore,
+            pendingChats = pendingChatRepository,
             groupStateRefresher = groupStateVerifier,
             receiptSender = chatReceiptSender,
             readReceiptsEnabled = { readReceiptsPreference.current() },
@@ -1076,12 +1105,12 @@ class OnymApplication : Application() {
         // GroupRepository / IncomingInvitationsRepository already do.
         applicationScope.launch {
             identityRepository.currentIdentityId.collect { id ->
-                pendingInvitesStore.setCurrentIdentity(id)
+                pendingChatRepository.setCurrentIdentity(id)
                 pendingVerificationStore.setCurrentIdentity(id)
             }
         }
         identityRepository.registerRemovalListener { id ->
-            pendingInvitesStore.removeForOwner(id)
+            pendingChatRepository.removeForOwner(id)
             pendingVerificationStore.removeForOwner(id)
         }
         val invitationsInteractor = app.onym.android.inbox.IncomingInvitationsInteractor(
@@ -1208,9 +1237,9 @@ class OnymApplication : Application() {
             )
         }
 
-        // Joiner-side ship affordance for the deeplink-tap flow
-        // (PR-7). Single shared instance — JoinViewModel-per-tap
-        // captures the IntroCapability, the sender stays stateless.
+        // Joiner-side ship affordance for the link/QR join flow. Single
+        // shared instance: the capability travels with each request, and
+        // the sender stays stateless.
         val joinRequestSender = app.onym.android.group.JoinRequestSender(
             identity = identityRepository,
             inboxTransport = inboxTransport,
@@ -1251,26 +1280,47 @@ class OnymApplication : Application() {
         // the chats screen isn't open still drive the badge count.
         approveRequestsViewModel.start()
 
-        // Invitee-side counterpart (PR 158). On explicit Accept it ships
-        // a JoinRequestPayload to the offer's intro key via the same
+        // Invitee-side counterpart. On explicit Accept it ships a
+        // JoinRequestPayload to the offer's intro key via the same
         // shared JoinRequestSender; the admin still has to explicitly
-        // approve before anyone is anchored. Started eagerly so the
-        // Chats "Invitations" badge reflects offers from app start.
-        val pendingInvitesViewModel = app.onym.android.inbox.PendingInvitesViewModel(
-            store = pendingInvitesStore,
+        // approve before anyone is anchored. Started eagerly so a chat
+        // someone is waiting on is in the list from app start, including
+        // one approved while the app was closed.
+        val pendingChatsViewModel = app.onym.android.inbox.PendingChatsViewModel(
+            repository = pendingChatRepository,
             verificationStore = pendingVerificationStore,
             groupRepository = groupRepository,
             submitJoin = joinRequestSender::send,
-            displayLabel = {
-                val activeId = identityRepository.currentIdentityId.value
+            displayLabel = { ownerId ->
+                // Same cold-start window as `currentIdentityId` below:
+                // an empty list there would have introduced the joiner
+                // to the founder as nobody.
+                if (identityRepository.identities.value.isEmpty()) {
+                    withTimeoutOrNull(IDENTITY_READY_TIMEOUT_MS) {
+                        identityRepository.identities.first { it.isNotEmpty() }
+                    }
+                }
                 identityRepository.identities.value
-                    .firstOrNull { it.id == activeId }
+                    .firstOrNull { it.id == ownerId }
                     ?.name
                     .orEmpty()
             },
             retryVerification = { groupIdHex -> groupStateVerifier.retry(groupIdHex) },
+            currentIdentityId = {
+                // Waits, rather than reading a flow that may not have
+                // been filled yet. `bootstrap()` runs in
+                // `applicationScope`, and the onboarding gate is a
+                // DataStore flag — so a link that *launches* the app can
+                // reach this before the identity has loaded, and a plain
+                // `.value` read told a signed-in person to sign in. The
+                // old screen was immune only because Send came later.
+                identityRepository.currentIdentityId.value
+                    ?: withTimeoutOrNull(IDENTITY_READY_TIMEOUT_MS) {
+                        identityRepository.currentIdentityId.filterNotNull().first()
+                    }
+            },
         )
-        pendingInvitesViewModel.start()
+        pendingChatsViewModel.start()
 
         // Onboarding bundle (PR 3): the gate decision RootScreen
         // collects, the flow factory, and the step contents' seat
@@ -1894,7 +1944,7 @@ class OnymApplication : Application() {
             },
             approveRequestsViewModel = approveRequestsViewModel,
             activeBlsPubkeyHex = activeBlsPubkeyHex,
-            pendingInvitesViewModel = pendingInvitesViewModel,
+            pendingChatsViewModel = pendingChatsViewModel,
             makeNostrRelaySettingsViewModel = { writeScope ->
                 app.onym.android.settings.NostrRelaySettingsViewModel(
                     repository = nostrRelaysRepository,
@@ -1912,26 +1962,6 @@ class OnymApplication : Application() {
             clearAllMessages = { messageRepository.clearAll() },
             discovery = discoveryUi,
             onboarding = onboardingUi,
-            makeJoinViewModel = { capability ->
-                // PR 92: prefill the display-name field from the
-                // active identity's alias. Empty when the identity
-                // hasn't resolved yet — the field renders its
-                // placeholder rather than a stale or hardcoded
-                // default. (Bob's report: tapping the deeplink used
-                // to show "alice" because the field defaulted to a
-                // hardcoded value.)
-                val activeId = identityRepository.currentIdentityId.value
-                val suggested = identityRepository.identities.value
-                    .firstOrNull { it.id == activeId }
-                    ?.name
-                    .orEmpty()
-                app.onym.android.group.JoinViewModel(
-                    capability = capability,
-                    submitRequest = joinRequestSender::send,
-                    groupRepository = groupRepository,
-                    suggestedDisplayLabel = suggested,
-                )
-            },
         )
     }
 
@@ -1943,6 +1973,16 @@ class OnymApplication : Application() {
         resumedActivity?.get() as? FragmentActivity
             ?: error("No resumed FragmentActivity to host BiometricPrompt")
 }
+
+/**
+ * How long a link that launched the app waits for the identity to load
+ * before giving up on it.
+ *
+ * Generous, because the alternative is telling a signed-in person to
+ * sign in; bounded, because a device that genuinely has no identity must
+ * still get an answer rather than a spinner.
+ */
+private const val IDENTITY_READY_TIMEOUT_MS = 5_000L
 
 /** Fallback Blossom base URL when the configured list is empty (the
  *  user explicitly cleared it). Matches the seeded

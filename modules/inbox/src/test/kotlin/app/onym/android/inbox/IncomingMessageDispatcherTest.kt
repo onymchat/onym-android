@@ -517,9 +517,10 @@ class IncomingMessageDispatcherTest {
     @Test
     fun offer_isQueuedForAcceptAndDoesNotMaterializeGroup() = runTest {
         // A push offer must NOT materialize a group or land in the
-        // opaque invitations queue — it's queued as a structured
-        // PendingInvite for the user's explicit Accept. Membership only
-        // follows accept + the admin's explicit approve.
+        // opaque invitations queue — it becomes a structured
+        // PendingChat row awaiting the person's explicit Accept.
+        // Membership only follows accept + the admin's explicit
+        // approve.
         val offerGroupId = ByteArray(32) { 0x42 }
         val offer = GroupInviteOfferPayload(
             introPublicKey = ByteArray(32) { 0x44 },
@@ -529,12 +530,12 @@ class IncomingMessageDispatcherTest {
         )
         val plaintext = Json.encodeToString(GroupInviteOfferPayload.serializer(), offer)
             .toByteArray(Charsets.UTF_8)
-        val spy = SpyPendingInvites()
+        val spy = SpyPendingChats()
         val dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter = StubDecrypter(plaintext, senderPub = ByteArray(32)),
             groupRepository = groupRepository,
             invitationsRepository = invitationsRepository,
-            pendingInvites = spy,
+            pendingChats = spy,
         )
 
         dispatcher.dispatch("msg-offer", ownerIdentity, byteArrayOf(), Instant.EPOCH)
@@ -549,10 +550,13 @@ class IncomingMessageDispatcherTest {
         // Not an opaque invitation either.
         invitationsRepository.bootstrap()
         assertTrue(invitationsRepository.invitations.value.isEmpty())
-        // Queued as a structured pending invite.
+        // Recorded as a structured pending chat, keyed by
+        // (group, owner) rather than by the delivery: the same offer
+        // replayed on the next reconnect is the same waiting room.
         assertEquals(1, spy.recorded.size)
         val rec = spy.recorded.single()
-        assertEquals("msg-offer", rec.id)
+        assertEquals("42".repeat(32) + ":" + ownerIdentity.value, rec.id)
+        assertEquals(PendingChat.Status.Offered, rec.status)
         assertEquals(ownerIdentity, rec.ownerIdentityId)
         assertEquals("Alice", rec.inviterAlias)
         assertEquals("Maple Garden", rec.groupName)
@@ -835,10 +839,11 @@ private class ConstantIdentity(private val id: IdentityId) : ActiveIdentityProvi
     override fun registerRemovalListener(listener: (suspend (IdentityId) -> Unit)?) {}
 }
 
-private class SpyPendingInvites : PendingInvitesRecording {
-    val recorded = mutableListOf<PendingInvite>()
-    override suspend fun record(invite: PendingInvite) {
-        recorded.add(invite)
+private class SpyPendingChats : PendingChatRecording {
+    val recorded = mutableListOf<PendingChat>()
+    override suspend fun record(chat: PendingChat): PendingChatWriteOutcome {
+        recorded.add(chat)
+        return PendingChatWriteOutcome.INSERTED
     }
 }
 

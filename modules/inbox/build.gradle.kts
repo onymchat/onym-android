@@ -10,8 +10,10 @@ plugins {
     alias(libs.plugins.kotlin.android)
     // @Serializable DecryptedInvitation (parsed BootstrapPayload subset).
     alias(libs.plugins.kotlin.serialization)
-    // Compose UI: PendingInvitesScreen + PendingInvitesToolbarBadge.
+    // Compose UI: the pending-chat thread screen.
     alias(libs.plugins.compose.compiler)
+    // Room codegen for the durable pending-chat store.
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -109,6 +111,13 @@ dependencies {
     // IncomingMessageDispatcher's identitiesFlow); CoroutineScope is a
     // public constructor parameter.
     api(libs.kotlinx.coroutines.core)
+
+    // api: PendingChatDao / PendingChatDatabase are public types the
+    // app module builds and hands to RoomPendingChatStore.
+    api(libs.androidx.room.runtime)
+    // implementation: DAO bodies + the suspend query extensions.
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
 
     // implementation: Json encode/decode inside dispatcher/verifier/
     // decryptor bodies; the only @Serializable type here

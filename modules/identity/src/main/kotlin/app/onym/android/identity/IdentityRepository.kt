@@ -137,6 +137,13 @@ class IdentityRepository(
         store.load(id)?.blsSecretKey ?: throw IdentityError.IdentityNotLoaded
     }
 
+    /** Owner-specific counterpart used by work that may outlive a UI
+     *  identity selection, such as an asynchronous join request. */
+    suspend fun blsSecretKey(id: IdentityId): ByteArray = withContext(ioDispatcher) {
+        // onym:allow-secret-read
+        store.load(id)?.blsSecretKey ?: throw IdentityError.IdentityNotLoaded
+    }
+
     /**
      * One-shot HKDF-SHA256 derivation from the current identity's
      * BIP39 seed — `salt = "app.onym.bip39"`, the same root every
@@ -604,6 +611,32 @@ class IdentityRepository(
         }
         val id = store.loadCurrent() ?: throw InvitationSealError.IdentityNotLoaded
         val snapshot = store.load(id) ?: throw InvitationSealError.IdentityNotLoaded
+        sealInvitationLocked(snapshot, payload, recipientPub)
+    }
+
+    /**
+     * Seal as [ownerIdentityId] without consulting or mutating the active
+     * identity. This prevents a selection change during an asynchronous
+     * operation from mixing one identity's payload with another one's
+     * signing key.
+     */
+    suspend fun sealInvitationAs(
+        ownerIdentityId: IdentityId,
+        payload: ByteArray,
+        recipientInboxPublicKey: ByteArray,
+    ): ByteArray = withContext(ioDispatcher) {
+        if (recipientInboxPublicKey.size != 32) {
+            throw InvitationSealError.InvalidRecipientPublicKey(
+                "expected 32 bytes, got ${recipientInboxPublicKey.size}",
+            )
+        }
+        val recipientPub = try {
+            X25519PublicKeyParameters(recipientInboxPublicKey, 0)
+        } catch (e: IllegalArgumentException) {
+            throw InvitationSealError.InvalidRecipientPublicKey(e.message ?: "parse failed")
+        }
+        val snapshot = store.load(ownerIdentityId)
+            ?: throw InvitationSealError.IdentityNotLoaded
         sealInvitationLocked(snapshot, payload, recipientPub)
     }
 

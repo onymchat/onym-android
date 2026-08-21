@@ -383,19 +383,6 @@
     <string name="retry">Повторить</string>
 
     <!-- ─── Join chat (deeplink landing) ───────────────────────── -->
-    <string name="join_screen_title">Присоединиться к чату</string>
-    <string name="join_invite_fallback_title">Приглашение в чат</string>
-    <string name="join_invite_from">от %1$s</string>
-    <string name="join_label_field_label">Как пригласившему вас видеть?</string>
-    <string name="join_label_field_helper">Пригласивший увидит это имя в запросе на подтверждение. Он может отклонить запрос, если имя не совпадает с ожидаемым.</string>
-    <string name="join_send_request">Отправить запрос</string>
-    <string name="join_sending_request">Отправка запроса…</string>
-    <string name="join_awaiting_title">Ожидание подтверждения</string>
-    <string name="join_awaiting_body">Чат появится в списке, как только пригласивший нажмёт «Подтвердить». Этот экран можно закрыть — мы добавим чат в список автоматически.</string>
-    <string name="join_back_to_chats">Назад к чатам</string>
-    <string name="join_approved_title">Готово!</string>
-    <string name="join_approved_body">Вы участник %1$s.</string>
-    <string name="join_open_chat">Открыть чат</string>
 
     <!-- ─── Share invite (post-create) ─────────────────────────── -->
     <string name="share_invite_title">Приглашение</string>
@@ -539,7 +526,6 @@
   <string name="members_you_suffix">(вы)</string>
   <string name="share_invite_cd">Поделиться приглашением</string>
   <string name="group_photo_cd">Фото группы</string>
-  <string name="invitations_cd">Приглашения</string>
   <!-- In-thread membership notices (ChatSystemNotice). -->
   <string name="chat_system_member_joined">Теперь в группе: %1$s</string>
   <string name="chat_system_you_joined">Вы присоединились к %1$s</string>
@@ -573,12 +559,6 @@
   <string name="chats_join_request_many">Хотят присоединиться: %1$d</string>
   <string name="chats_join_request_badge_cd">Запросов на вступление: %1$d</string>
   <string name="approve_generating_proof">Генерируется доказательство и обновляется обязательство в блокчейне. Обычно это занимает несколько секунд.</string>
-  <string name="invitations_title">Приглашения</string>
-  <string name="invitations_empty_title">Нет приглашений</string>
-  <string name="invitations_empty_body">Приглашения в группы, которые вы получаете, появляются здесь для принятия.</string>
-  <string name="invite_invited_you_to">пригласил(а) вас в «%1$s»</string>
-  <string name="invite_fallback_group">группу</string>
-  <string name="invite_verifying_state">Проверка состояния группы…</string>
   <string name="invite_chain_settling">Ожидаем подтверждения группы в сети… Обычно это занимает несколько секунд.</string>
   <string name="invite_chain_unreachable">Не удалось обратиться к сети для проверки группы. Проверьте подключение и повторите попытку.</string>
   <string name="invite_chain_not_configured">Подключение этого устройства к сети ещё настраивается. Нажмите «Повторить» через мгновение.</string>
@@ -906,11 +886,7 @@
   <string name="share_invite_direct_title">Персональные приглашения</string>
   <string name="share_invite_direct_body">Отправлены при создании группы. По каждому из них всё ещё можно запросить вступление.</string>
   <string name="share_invite_revoke">Отозвать</string>
-  <string name="join_unanswered_title">Пока нет ответа</string>
-  <string name="join_unanswered_body">Возможно, владелец группы не в сети или это приглашение больше не действует. Попросите новую ссылку.</string>
-  <string name="join_unanswered_hint">Можно не закрывать этот экран — если заявку одобрят, чат появится сам.</string>
   <string name="share_invite_older_link">Старая ссылка</string>
-  <string name="join_unanswered_retry">Повторить</string>
   <string name="share_invite_rotate_confirm_title">Создать новую ссылку?</string>
   <string name="share_invite_rotate_confirm_body">Текущая ссылка перестанет работать сразу. Тех, у кого она осталась — включая тех, кому вы её уже отправили — об этом не уведомят, и им понадобится новая.</string>
   <string name="share_invite_rotate_confirm_action">Создать новую ссылку</string>
@@ -922,4 +898,26 @@
   <string name="moderation_settings_open_case_appeal">Подать апелляцию</string>
   <string name="moderation_settings_open_case_class">Класс: %1$s</string>
   <string name="moderation_settings_open_cases_footnote">Против вас открыто дело. Работу приложения оно не ограничивает; апелляция подаётся инстанции и подписывается вашим ключом личности.</string>
+  <string name="pending_chat_waiting_title">Ждём, когда вас впустят</string>
+  <string name="pending_chat_waiting_body">Чат откроется, когда основатель впустит вас. Он появится здесь сразу — держать этот экран открытым не нужно.</string>
+  <string name="pending_chat_almost_in">Почти внутри</string>
+  <string name="pending_chat_offer_body">Принятие отправит запрос. Основатель решает, кого впускать, — вы войдёте, как только он одобрит.</string>
+  <string name="pending_chat_accept">Принять</string>
+  <string name="pending_chat_ask_again">Спросить ещё раз</string>
+  <string name="pending_chat_sending">Отправка…</string>
+  <string name="pending_chat_retry">Повторить</string>
+  <string name="pending_chat_send_failed">Ваш запрос не ушёл. Нажмите «Повторить», чтобы отправить снова.</string>
+  <string name="pending_chat_no_identity">Сначала войдите.</string>
+  <string name="pending_chat_malformed">Это приглашение повреждено и не может быть принято.</string>
+  <string name="pending_chat_invited_you">Приглашение от %1$s</string>
+  <string name="pending_chat_invited_you_generic">Вас пригласили</string>
+  <string name="pending_chat_subtitle_waiting">Ждём, когда вас впустят</string>
+  <string name="pending_chat_subtitle_stuck">Не удалось проверить — нажмите, чтобы повторить</string>
+  <string name="pending_chat_subtitle_send_failed">Запрос не отправлен — нажмите, чтобы повторить</string>
+  <string name="pending_chat_unnamed">(Без названия)</string>
+  <string name="join_link_failed_title">Не удалось использовать это приглашение</string>
+  <string name="join_link_failed_not_saved">Не удалось сохранить это приглашение на устройстве.</string>
+  <string name="pending_chat_stop_waiting_title">Перестать ждать этот чат?</string>
+  <string name="pending_chat_stop_waiting_body">Вы уже попросились в %1$s. Удаление ничего не сообщит основателю — а чтобы попроситься снова, понадобится ссылка или QR-код ещё раз.</string>
+  <string name="pending_chat_stop_waiting_confirm">Удалить</string>
 </resources>

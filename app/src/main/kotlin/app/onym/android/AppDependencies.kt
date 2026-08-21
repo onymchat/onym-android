@@ -65,10 +65,6 @@ class AppDependencies(
     val makeIdentitiesViewModel: () -> app.onym.android.identity.IdentitiesViewModel,
     /** Post-create deeplink invite share (deeplink-invite PR-5). */
     val makeShareInviteViewModel: () -> app.onym.android.group.ShareInviteViewModel,
-    /** Joiner-side post-deeplink-tap surface (deeplink-invite PR-7).
-     *  Takes the decoded capability so the same factory works for
-     *  both `https://onym.app/join` and `onym://join` intents. */
-    val makeJoinViewModel: (app.onym.android.group.IntroCapability) -> app.onym.android.group.JoinViewModel,
     /** Approver UI for incoming join requests. Single shared
      *  instance — the toolbar badge on the chats screen and the
      *  modal screen both consume the same flow so a request that
@@ -78,11 +74,12 @@ class AppDependencies(
     /** Lowercase BLS pubkey hex of the active identity. Surfaces gate
      *  "am I this group's admin" on it — see `ChatGroup.isAdmin`. */
     val activeBlsPubkeyHex: kotlinx.coroutines.flow.StateFlow<String?>,
-    /** Invitee-side push-invitation surface (PR 158). Single shared
-     *  instance — the Chats toolbar "Invitations" badge and the modal
-     *  list both consume the same flow, so an offer that lands on the
-     *  relay shows up in the badge before the modal is opened. */
-    val pendingInvitesViewModel: app.onym.android.inbox.PendingInvitesViewModel,
+    /** The chats a person is waiting to be let into. Single shared
+     *  instance — the pending rows in the chats list and the thread
+     *  behind them read the same flow, and its watcher runs for the
+     *  app's lifetime, so a chat approved while the app was closed is in
+     *  the list on the first render. */
+    val pendingChatsViewModel: app.onym.android.inbox.PendingChatsViewModel,
     /** Settings → Transport → Nostr Relays. */
     /** `writeScope`: see [makeRelayerSettingsViewModel]. */
     val makeNostrRelaySettingsViewModel: (writeScope: kotlinx.coroutines.CoroutineScope?) -> app.onym.android.settings.NostrRelaySettingsViewModel,

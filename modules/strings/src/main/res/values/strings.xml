@@ -391,19 +391,6 @@
     <string name="retry">Retry</string>
 
     <!-- ─── Join chat (deeplink landing) ───────────────────────── -->
-    <string name="join_screen_title">Join chat</string>
-    <string name="join_invite_fallback_title">Invite to join a chat</string>
-    <string name="join_invite_from">from %1$s</string>
-    <string name="join_label_field_label">How should the inviter see you?</string>
-    <string name="join_label_field_helper">The inviter sees this name in their approval prompt. They can decline if it doesn\'t match what they expect.</string>
-    <string name="join_send_request">Send join request</string>
-    <string name="join_sending_request">Sending request…</string>
-    <string name="join_awaiting_title">Waiting for approval</string>
-    <string name="join_awaiting_body">You\'ll see this chat appear in your list as soon as the inviter taps Approve. You can close this screen — we\'ll add it to Chats automatically.</string>
-    <string name="join_back_to_chats">Back to chats</string>
-    <string name="join_approved_title">Joined!</string>
-    <string name="join_approved_body">You\'re a member of %1$s.</string>
-    <string name="join_open_chat">Open chat</string>
 
     <!-- ─── Share invite (post-create) ─────────────────────────── -->
     <string name="share_invite_title">Invite</string>
@@ -543,7 +530,6 @@
   <string name="members_you_suffix">(you)</string>
   <string name="share_invite_cd">Share invite</string>
   <string name="group_photo_cd">Group photo</string>
-  <string name="invitations_cd">Invitations</string>
   <!-- In-thread membership notices (ChatSystemNotice). -->
   <string name="chat_system_member_joined">%1$s joined</string>
   <string name="chat_system_you_joined">You joined %1$s</string>
@@ -577,12 +563,6 @@
   <string name="chats_join_request_many">%1$d people want to join</string>
   <string name="chats_join_request_badge_cd">%1$d join requests</string>
   <string name="approve_generating_proof">Generating proof and updating the on-chain commitment. This usually takes a few seconds.</string>
-  <string name="invitations_title">Invitations</string>
-  <string name="invitations_empty_title">No invitations</string>
-  <string name="invitations_empty_body">Group invites you receive show up here for you to accept.</string>
-  <string name="invite_invited_you_to">invited you to “%1$s”</string>
-  <string name="invite_fallback_group">a group</string>
-  <string name="invite_verifying_state">Verifying group state…</string>
   <string name="invite_chain_settling">Waiting for the group to be confirmed on chain… This usually takes a few seconds.</string>
   <string name="invite_chain_unreachable">Couldn’t reach the chain to verify this group. Check your connection and try again.</string>
   <string name="invite_chain_not_configured">Still setting up this device’s connection to the chain. Tap Retry in a moment.</string>
@@ -907,11 +887,7 @@
   <string name="share_invite_direct_title">Direct invites</string>
   <string name="share_invite_direct_body">Sent when you created the group. Each one can still be used to request to join.</string>
   <string name="share_invite_revoke">Revoke</string>
-  <string name="join_unanswered_title">No response yet</string>
-  <string name="join_unanswered_body">The host may be offline, or this invite may no longer work. Ask them for a new link.</string>
-  <string name="join_unanswered_hint">You can leave this screen open \u2014 if they approve, the chat still appears.</string>
   <string name="share_invite_older_link">Older link</string>
-  <string name="join_unanswered_retry">Try again</string>
   <string name="share_invite_rotate_confirm_title">Generate a new link?</string>
   <string name="share_invite_rotate_confirm_body">The current link stops working immediately. Anyone still holding it — including people you already sent it to — won\'t be told, and will need the new one.</string>
   <string name="share_invite_rotate_confirm_action">Generate new link</string>
@@ -923,4 +899,26 @@
   <string name="moderation_settings_open_case_appeal">Appeal this case</string>
   <string name="moderation_settings_open_case_class">Class: %1$s</string>
   <string name="moderation_settings_open_cases_footnote">A case is open against you. It does not restrict the app; an appeal is filed with the authority and signed with your identity key.</string>
+  <string name="pending_chat_waiting_title">Waiting until you’re in</string>
+  <string name="pending_chat_waiting_body">The founder has to let you in before this chat opens. It appears here the moment they do — you don’t have to keep this screen open.</string>
+  <string name="pending_chat_almost_in">Almost in</string>
+  <string name="pending_chat_offer_body">Accepting sends a request. The founder decides who comes in, so you’ll be in once they approve.</string>
+  <string name="pending_chat_accept">Accept</string>
+  <string name="pending_chat_ask_again">Ask again</string>
+  <string name="pending_chat_sending">Sending…</string>
+  <string name="pending_chat_retry">Retry</string>
+  <string name="pending_chat_send_failed">Your request didn’t go out. Tap Retry to send it again.</string>
+  <string name="pending_chat_no_identity">Sign in first.</string>
+  <string name="pending_chat_malformed">This invite is malformed and can’t be accepted.</string>
+  <string name="pending_chat_invited_you">%1$s invited you</string>
+  <string name="pending_chat_invited_you_generic">You’ve been invited</string>
+  <string name="pending_chat_subtitle_waiting">Waiting until you’re in</string>
+  <string name="pending_chat_subtitle_stuck">Couldn’t verify — tap to retry</string>
+  <string name="pending_chat_subtitle_send_failed">Request didn’t send — tap to retry</string>
+  <string name="pending_chat_unnamed">(Unnamed)</string>
+  <string name="join_link_failed_title">Couldn’t use that invite</string>
+  <string name="join_link_failed_not_saved">Couldn’t save this invite on your device.</string>
+  <string name="pending_chat_stop_waiting_title">Stop waiting for this chat?</string>
+  <string name="pending_chat_stop_waiting_body">You already asked to join %1$s. Removing this doesn’t tell the founder anything — and to ask again you’d need the invite link or QR a second time.</string>
+  <string name="pending_chat_stop_waiting_confirm">Remove</string>
 </resources>
