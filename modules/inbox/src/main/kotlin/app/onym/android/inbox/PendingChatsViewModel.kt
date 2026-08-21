@@ -45,7 +45,15 @@ class PendingChatsViewModel(
     private val groupRepository: GroupRepository,
     /** Seals + sends a join request for the given capability — the same
      *  [JoinRequestSender] the deeplink path uses. */
-    private val submitJoin: suspend (IntroCapability, String, IdentityId) -> JoinRequestSender.Outcome,
+    /**
+     * The fourth argument is the rules text that was on screen when the
+     * person agreed, which is what their signature ends up covering. It
+     * travels from the row rather than being read back off the
+     * capability, so a request can never claim agreement to words nobody
+     * was shown.
+     */
+    private val submitJoin:
+        suspend (IntroCapability, String, IdentityId, String?) -> JoinRequestSender.Outcome,
     /**
      * The joiner's display label.
      *
@@ -203,6 +211,11 @@ class PendingChatsViewModel(
         /** Pre-filled into the name field: the identity's own alias, or
          *  the name a previous attempt on this row used. */
         val suggestedLabel: String,
+        /** The group's rules, when it has any. Shown on the screen and
+         *  signed by Send — the same string for both, because a
+         *  signature over anything other than what was read is not an
+         *  agreement. */
+        val rules: String?,
         val origin: Origin,
     ) {
         /** Where the confirmation came from — a link this device just
@@ -219,6 +232,7 @@ class PendingChatsViewModel(
                 groupIdHex == other.groupIdHex &&
                 groupName == other.groupName &&
                 inviterAlias == other.inviterAlias &&
+                rules == other.rules &&
                 invitationMessage == other.invitationMessage &&
                 introPublicKey.contentEquals(other.introPublicKey) &&
                 suggestedLabel == other.suggestedLabel &&
@@ -230,6 +244,7 @@ class PendingChatsViewModel(
             h = 31 * h + groupIdHex.hashCode()
             h = 31 * h + (groupName?.hashCode() ?: 0)
             h = 31 * h + inviterAlias.hashCode()
+            h = 31 * h + (rules?.hashCode() ?: 0)
             h = 31 * h + (invitationMessage?.hashCode() ?: 0)
             h = 31 * h + introPublicKey.contentHashCode()
             h = 31 * h + suggestedLabel.hashCode()
@@ -445,6 +460,11 @@ class PendingChatsViewModel(
                 groupName = capability.groupName ?: existing?.groupName,
                 inviterAlias = existing?.inviterAlias.orEmpty(),
                 invitationMessage = existing?.invitationMessage,
+                // The link's own copy wins over a stored offer's. Both
+                // should say the same thing, and when they don't, the
+                // rules the person is about to read have to be the ones
+                // that came with the invitation they actually opened.
+                rules = capability.rules ?: existing?.invitationMessage,
                 introPublicKey = capability.introPublicKey,
                 suggestedLabel = existing?.joinerLabel ?: displayLabel(owner),
                 origin = JoinConfirmation.Origin.Link(capability),
@@ -472,6 +492,9 @@ class PendingChatsViewModel(
             invitationMessage = chat.invitationMessage,
             introPublicKey = chat.introPublicKey,
             suggestedLabel = chat.joinerLabel ?: displayLabel(chat.ownerIdentityId),
+            // A pushed invitation carries its rules on the stored offer
+            // — there is no capability to read them from.
+            rules = chat.invitationMessage,
             origin = JoinConfirmation.Origin.Offer(chat.id),
         )
     }
@@ -524,7 +547,10 @@ class PendingChatsViewModel(
                     // shows the group, not a person who never said their
                     // name.
                     inviterAlias = "",
-                    invitationMessage = null,
+                    // The link's rules, kept on the row: "Ask again" has
+                    // to re-sign the same text, and the row is the only
+                    // place it survives once the capability is gone.
+                    invitationMessage = origin.capability.rules,
                     receivedAt = Instant.now(),
                     status = PendingChat.Status.Offered,
                     // A local clock is suitable for list ordering but
@@ -643,6 +669,12 @@ class PendingChatsViewModel(
      * [label] is always supplied by a caller a person reached: there is
      * no path from an inbound link or event to here.
      */
+    /**
+     * @param chat the row being sent for. The rules signed are its own —
+     *   the same text the screen showed, kept there for exactly this
+     *   reason, so a re-send months later still says what the first one
+     *   said.
+     */
     private suspend fun send(chat: PendingChat, label: String) {
         val id = chat.id
         if (id in sendingIds) return
@@ -663,7 +695,7 @@ class PendingChatsViewModel(
         // in-flight marker; otherwise the row stays at "Sending…" with
         // Accept and Ask again disabled for the rest of the process.
         try {
-            when (submitJoin(capability, label, chat.ownerIdentityId)) {
+            when (submitJoin(capability, label, chat.ownerIdentityId, chat.invitationMessage)) {
                 is JoinRequestSender.Outcome.Sent -> repository.markRequested(id)
                 is JoinRequestSender.Outcome.NoIdentityLoaded ->
                     repository.markFailed(id, PendingChat.SendFailure.NO_IDENTITY)

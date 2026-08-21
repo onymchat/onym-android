@@ -473,6 +473,7 @@ class PendingChatsViewModelTest {
             rowId = "row",
             owner = IdentityId("owner"),
             identityName = "Bob",
+            rules = null,
             groupIdHex = "11".repeat(32),
             groupName = "Maple Garden",
             inviterAlias = "",
@@ -501,6 +502,7 @@ class PendingChatsViewModelTest {
             rowId = "gone",
             owner = IdentityId("owner"),
             identityName = "Bob",
+            rules = null,
             groupIdHex = "11".repeat(32),
             groupName = "Maple Garden",
             inviterAlias = "Alice",
@@ -734,7 +736,12 @@ private class LabelDroppingStore(
 
 /** Stands in for `JoinRequestSender`. */
 private class SpyJoinSender {
-    data class Call(val capability: IntroCapability, val label: String)
+    data class Call(
+        val capability: IntroCapability,
+        val label: String,
+        /** The rules text the signature covers, when the group has any. */
+        val agreedRules: String? = null,
+    )
 
     val calls = mutableListOf<Call>()
     var outcome: JoinRequestSender.Outcome = JoinRequestSender.Outcome.Sent
@@ -746,8 +753,9 @@ private class SpyJoinSender {
         capability: IntroCapability,
         label: String,
         @Suppress("UNUSED_PARAMETER") owner: IdentityId,
+        agreedRules: String? = null,
     ): JoinRequestSender.Outcome {
-        calls.add(Call(capability, label))
+        calls.add(Call(capability, label, agreedRules))
         gate?.await()
         return outcome
     }

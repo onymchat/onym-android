@@ -84,6 +84,12 @@ class ShareInviteViewModel(
                     ownerIdentityId = activeIdentityId,
                     groupId = group.groupIdBytes,
                     groupName = group.name,
+                    // The group's rules as they are *now*, including
+                    // down this path, which reuses a live key: a link
+                    // handed out with rules from whenever the key was
+                    // minted would have joiners signing text the founder
+                    // had already replaced.
+                    rules = group.invitationMessage,
                 )
                 _state.value = State.Ready(
                     link = capability.toAppLink(),
@@ -112,6 +118,7 @@ class ShareInviteViewModel(
                 val capability = introducer.rotate(
                     ownerIdentityId = activeIdentityId,
                     groupId = group.groupIdBytes,
+                    rules = group.invitationMessage,
                     groupName = group.name,
                 )
                 _state.value = State.Ready(

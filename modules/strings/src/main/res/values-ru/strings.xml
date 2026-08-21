@@ -404,9 +404,9 @@
     <string name="create_group_photo_add">Добавить фото</string>
     <string name="create_group_photo_change">Изменить фото</string>
     <string name="create_group_photo_remove">Удалить</string>
-    <string name="create_group_invitation_label">Текст приглашения</string>
-    <string name="create_group_invitation_placeholder">Добавьте приветствие, правила или политику группы…</string>
-    <string name="create_group_invitation_helper">Показывается людям до того, как они примут приглашение. Необязательно.</string>
+    <string name="create_group_invitation_label">Правила группы</string>
+    <string name="create_group_invitation_placeholder">С чем здесь все соглашаются…</string>
+    <string name="create_group_invitation_helper">Каждый, кто вступает, читает их и подписывает согласие. Необязательно.</string>
     <string name="create_group_how_its_run">Как устроена</string>
     <string name="create_group_soon_badge">Скоро</string>
     <string name="create_group_next">Далее · Добавить участников</string>
@@ -934,4 +934,10 @@
   <string name="chat_join_request_rules_unknown">Подписал правила, которых нет на этом устройстве — проверить нечем</string>
   <string name="chat_join_request_rules_unsigned">Не подписал правила группы</string>
   <string name="chat_join_request_rules_invalid">Их подпись под правилами не сходится</string>
+  <string name="create_group_rules_counter">%1$d/%2$d</string>
+  <string name="join_confirm_rules_label">Правила группы</string>
+  <string name="join_confirm_agree">Я согласен с этими правилами</string>
+  <string name="join_confirm_signed_note">Ваше согласие подписывается ключом этой личности и отправляется вместе с запросом.</string>
+  <string name="join_confirm_agree_and_send">Согласиться и отправить запрос</string>
+  <string name="join_confirm_rules_disclosure">Вместе с ним отправляется ваше подписанное согласие с правилами.</string>
 </resources>

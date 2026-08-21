@@ -394,6 +394,7 @@ open class CreateGroupInteractor(
                     groupId = groupId,
                     label = IntroKeyEntry.fingerprint(inboxKey),
                     groupName = groupName,
+                    rules = invitationMessage,
                 )
             } catch (e: Throwable) {
                 throw CreateGroupError.InvitationSendFailed(index, "mint intro key: ${e.message ?: e}")
