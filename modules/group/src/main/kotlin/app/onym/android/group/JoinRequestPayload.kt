@@ -70,8 +70,39 @@ data class JoinRequestPayload(
     @SerialName("group_id")
     @Serializable(with = Base64ByteArraySerializer::class)
     val groupId: ByteArray,
+    /**
+     * 32-byte `SHA256` of the canonical rules text the joiner was shown.
+     * Absent when the invitation carried no rules, and when the joiner
+     * runs a build that predates them.
+     *
+     * Carried even though the inviter knows their own rules, because it
+     * is what separates "agreed to an older version" from "signed
+     * something that doesn't verify" — only one of those is worth asking
+     * a person to redo.
+     */
+    @SerialName("rules_hash")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val rulesHash: ByteArray? = null,
+    /** 64-byte Ed25519 signature over [GroupRules.statement]. Absent
+     *  together with [rulesHash]; see [GroupRules] for why the
+     *  envelope's own signature could not serve. */
+    @SerialName("rules_signature")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val rulesSignature: ByteArray? = null,
 ) {
     init {
+        // Absent together or present together: half an agreement is a
+        // shape neither side has a reading for, and accepting it would
+        // leave the founder deciding on evidence that cannot be checked.
+        require((rulesHash == null) == (rulesSignature == null)) {
+            "rulesHash and rulesSignature must be absent or present together"
+        }
+        require(rulesHash == null || rulesHash.size == 32) {
+            "rulesHash: expected 32 bytes, got ${rulesHash?.size}"
+        }
+        require(rulesSignature == null || rulesSignature.size == 64) {
+            "rulesSignature: expected 64 bytes, got ${rulesSignature?.size}"
+        }
         require(joinerInboxPublicKey.size == 32) {
             "joinerInboxPublicKey: expected 32 bytes, got ${joinerInboxPublicKey.size}"
         }

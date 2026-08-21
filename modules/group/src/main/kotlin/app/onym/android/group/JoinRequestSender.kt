@@ -44,10 +44,22 @@ class JoinRequestSender(
      *        (Nostr relays typically cap event size at ~64KB and
      *        we don't want to bloat the request envelope).
      */
+    /**
+     * @param agreedRules the rules text the joiner was shown and
+     *   accepted, or null when the invitation carried none.
+     *
+     *   Passed in rather than read off [capability], because the
+     *   signature has to cover what a person actually saw. The two are
+     *   the same for a link, but an invitation pushed to this device
+     *   carries its rules on the stored offer instead, and a sender that
+     *   reached for the capability's copy would sign text that was never
+     *   on screen in that case.
+     */
     suspend fun send(
         capability: IntroCapability,
         joinerDisplayLabel: String,
         ownerIdentityId: IdentityId,
+        agreedRules: String? = null,
     ): Outcome = withContext(ioDispatcher) {
         val ownerIdentity = identity.identities.value.firstOrNull { it.id == ownerIdentityId }
             ?: return@withContext Outcome.NoIdentityLoaded()
@@ -61,6 +73,35 @@ class JoinRequestSender(
             GroupCommitmentBuilder.computeLeafHash(sk)
         } catch (_: Throwable) {
             null
+        }
+        // The agreement, when there is one to make. Signed with the same
+        // long-term key the request already announces as
+        // `joinerSendingPublicKey`, so every member who is later told
+        // about this joiner can check it — not just the founder who
+        // admitted them.
+        var rulesHash: ByteArray? = null
+        var rulesSignature: ByteArray? = null
+        GroupRules.normalized(agreedRules)?.let { rules ->
+            val hash = GroupRules.hash(rules)
+            try {
+                rulesSignature = identity.signWithStellarKeyAs(
+                    ownerIdentityId,
+                    GroupRules.statement(
+                        groupId = capability.groupId,
+                        rulesHash = hash,
+                        joinerSendingPublicKey = ownerIdentity.sendingPublicKey,
+                    ),
+                )
+                rulesHash = hash
+            } catch (e: Throwable) {
+                // Nothing is sent unsigned behind the person's back: they
+                // were shown rules and told that Send agrees to them, and
+                // a request that arrives without the signature reads to
+                // the founder as someone who declined to agree.
+                return@withContext Outcome.TransportFailed(
+                    "rules signature: ${e.message ?: e.javaClass.simpleName}",
+                )
+            }
         }
         val payload = JoinRequestPayload(
             joinerInboxPublicKey = ownerIdentity.inboxPublicKey,
@@ -76,6 +117,8 @@ class JoinRequestSender(
             joinerSendingPublicKey = ownerIdentity.sendingPublicKey,
             joinerDisplayLabel = joinerDisplayLabel,
             groupId = capability.groupId,
+            rulesHash = rulesHash,
+            rulesSignature = rulesSignature,
         )
         val payloadBytes = jsonFormat.encodeToString(JoinRequestPayload.serializer(), payload)
             .toByteArray(Charsets.UTF_8)
