@@ -140,6 +140,37 @@ object Bip39 {
     /** Validate a BIP39 mnemonic (word count, known words, checksum). */
     fun isValidMnemonic(mnemonic: String): Boolean = entropyFromMnemonic(mnemonic) != null
 
+    /**
+     * Collapse every whitespace shape a pasted phrase can carry to
+     * the single-space form [entropyFromMnemonic] parses: newlines
+     * and tabs (password managers), doubled spaces (photographed
+     * word grids), and the Unicode spaces Java's `\s` does NOT match
+     * — NBSP U+00A0 (copy from web pages and iOS), narrow NBSP
+     * U+202F, figure space U+2007, ideographic space U+3000 — plus
+     * the zero-width formatting characters from the same paste
+     * sources, ZWSP U+200B and BOM/ZWNBSP U+FEFF. Entry UIs must run
+     * input through this before the word-count gate AND before
+     * validation, so the two always agree on what a "word" is (the
+     * mismatch behind the iOS onboarding sheet's newline-paste
+     * rejection).
+     */
+    fun normalizeMnemonic(text: String): String =
+        text.replace(interWordWhitespace, " ").trim(' ')
+
+    /** Word count over the [normalizeMnemonic]-normalized form — a
+     *  submit gate's 12/24 check must count exactly what the parser
+     *  will see. */
+    fun mnemonicWordCount(text: String): Int {
+        val normalized = normalizeMnemonic(text)
+        if (normalized.isEmpty()) return 0
+        return normalized.count { it == ' ' } + 1
+    }
+
+    /** See [normalizeMnemonic]: `\s` (ASCII) + `\p{Z}` (Unicode
+     *  separators) + U+200B/U+FEFF (ZWSP and BOM/ZWNBSP, category Cf
+     *  so matched by neither). */
+    private val interWordWhitespace = Regex("[\\s\\p{Z}\\u200B\\uFEFF]+")
+
     /** Whether a word exists in the BIP39 English wordlist (case-insensitive). */
     fun isKnownWord(word: String): Boolean = wordIndex.containsKey(word.lowercase())
 

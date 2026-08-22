@@ -63,6 +63,7 @@ import app.onym.android.design.SettingsHairline
 import app.onym.android.design.SettingsSectionLabel
 import app.onym.android.design.SettingsTile
 import app.onym.android.design.heroHex
+import app.onym.android.foundation.Bip39
 import app.onym.android.identity.IdentitiesViewModel
 import app.onym.android.identity.IdentityId
 
@@ -287,7 +288,17 @@ private fun AddIdentityDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSubmit(name.trim(), mnemonic.trim().ifBlank { null }) },
+                onClick = {
+                    // Normalized, not just trimmed: a phrase pasted
+                    // with newlines or Unicode spaces (NBSP from web
+                    // copy) must parse the same as a typed one — the
+                    // same input hygiene as the onboarding restore
+                    // overlay (Bip39 splits on literal spaces only).
+                    onSubmit(
+                        name.trim(),
+                        Bip39.normalizeMnemonic(mnemonic).ifBlank { null },
+                    )
+                },
                 modifier = Modifier.testTag("identities.add.confirm"),
             ) {
                 Text(stringResource(R.string.identities_add_confirm))

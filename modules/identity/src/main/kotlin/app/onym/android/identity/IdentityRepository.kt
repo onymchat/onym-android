@@ -6,6 +6,7 @@ import chat.onym.sdk.Common
 import chat.onym.sdk.OnymException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -348,29 +349,42 @@ class IdentityRepository(
      *    because they typed its recovery phrase. The keys are identical
      *    either way (the snapshot is a pure function of the same
      *    entropy), so keeping the persisted one costs nothing.
+     *
+     * The swap itself is [NonCancellable]: between wiping the
+     * outgoing identity and saving the incoming one there is a window
+     * with NO current identity, and a cancellation landing inside it
+     * (the caller's scope dying — Activity finished, task swiped)
+     * would leave the device there. Recoverable — the next
+     * [bootstrap] re-mints and the user still holds the phrase — but
+     * a UI that disables Cancel to promise "this can't be
+     * interrupted" should be telling the truth. Validation stays
+     * OUTSIDE the block: a bad phrase must still be cancellable, and
+     * it changes nothing.
      */
     suspend fun restore(mnemonic: String): Identity = mutex.withLock {
         withContext(ioDispatcher) {
             val entropy = Bip39.entropyFromMnemonic(mnemonic)
                 ?: throw IdentityError.InvalidMnemonic
-            val previousId = store.loadCurrent()
-            val newId = IdentityId.derivedFromEntropy(entropy)
-            val existing = store.load(newId)
-            if (previousId != null && previousId != newId) {
-                removalListeners.forEach { it.invoke(previousId) }
-                store.wipe(previousId)
+            withContext(NonCancellable) {
+                val previousId = store.loadCurrent()
+                val newId = IdentityId.derivedFromEntropy(entropy)
+                val existing = store.load(newId)
+                if (previousId != null && previousId != newId) {
+                    removalListeners.forEach { it.invoke(previousId) }
+                    store.wipe(previousId)
+                }
+                val snapshot = if (existing != null) {
+                    existing
+                } else {
+                    snapshotFromEntropy(entropy, name = "").also { store.save(newId, it) }
+                }
+                store.saveCurrent(newId)
+                val identity = identityFromSnapshot(snapshot)
+                _snapshots.value = identity
+                _currentIdentityId.value = newId
+                refreshIdentitiesList()
+                identity
             }
-            val snapshot = if (existing != null) {
-                existing
-            } else {
-                snapshotFromEntropy(entropy, name = "").also { store.save(newId, it) }
-            }
-            store.saveCurrent(newId)
-            val identity = identityFromSnapshot(snapshot)
-            _snapshots.value = identity
-            _currentIdentityId.value = newId
-            refreshIdentitiesList()
-            identity
         }
     }
 

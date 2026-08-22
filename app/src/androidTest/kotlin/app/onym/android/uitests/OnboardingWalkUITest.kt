@@ -2,8 +2,16 @@ package app.onym.android.uitests
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.onym.android.MainActivity
@@ -11,12 +19,9 @@ import app.onym.android.OnymApplication
 import app.onym.android.UITestRegistry
 import app.onym.android.discovery.DiscoverySource
 import app.onym.android.discovery.DiscoverySourcesConfiguration
+import app.onym.android.foundation.Bip39
+import app.onym.android.identity.IdentityId
 import app.onym.android.identity.IdentitySecretStore
-import app.onym.android.onboarding.OnboardingStep
-import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeAuthorityManifestFetcher
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
@@ -24,10 +29,13 @@ import app.onym.android.moderation.support.FakeKnownAuthoritiesFetcher
 import app.onym.android.moderation.support.InMemoryGateStateStore
 import app.onym.android.moderation.support.InMemoryMandateStore
 import app.onym.android.moderation.support.ScriptedEnforcementBackendClient
+import app.onym.android.onboarding.OnboardingStep
 import app.onym.android.support.FakeDiscoveryFetcher
 import app.onym.android.support.InMemoryDiscoveryStore
 import app.onym.android.support.InMemoryOnboardingStore
 import app.onym.android.uitests.screens.OnboardingScreenObject
+import java.security.Security
+import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Assert.assertEquals
@@ -38,8 +46,6 @@ import org.junit.Test
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 import org.junit.runner.RunWith
-import java.security.Security
-import java.time.Instant
 
 /**
  * End-to-end coverage of the redesigned first-launch onboarding walk:
@@ -602,6 +608,121 @@ class OnboardingWalkUITest {
 
         onboarding.tapPrimary(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
+        assertFalse("the walk must not have completed", onboardingStore.completed)
+    }
+
+    /**
+     * Back to Welcome RETIRES the restore entry. Once the walk has
+     * advanced, seats may be configured (and registrations signed)
+     * against the identity on the device, and
+     * `IdentityRepository.restore` would swap it out from under them
+     * — so the entry is gated on the walk never having left Welcome,
+     * not merely on standing there.
+     */
+    @Test
+    fun backToWelcome_retiresTheRestoreEntry() {
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.tapBack(OnboardingStep.Identity)
+        onboarding.awaitStep(OnboardingStep.Welcome)
+
+        assertTrue(
+            "the restore entry must not survive a walk that already advanced",
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore")
+                .fetchSemanticsNodes().isEmpty(),
+        )
+    }
+
+    // ─── (3b) welcome restore-from-phrase path ────────────────────
+
+    /**
+     * The welcome step's "I have a recovery phrase" path (iOS
+     * parity). Three gates in one walk:
+     *  - the overlay's submit is word-count gated (3 words never
+     *    enable it);
+     *  - a known-words phrase with a bad checksum surfaces the
+     *    inline error and stays on the overlay;
+     *  - the valid vector — pasted with NEWLINES, exercising the
+     *    normalization in front of the space-splitting parser —
+     *    REPLACES the auto-bootstrap identity (asserted against the
+     *    store: the derived id lands, the minted one is gone),
+     *    advances the walk, flips the identity step's title to the
+     *    restored copy, and the step's outcome gate unlocks off the
+     *    RESTORED snapshot.
+     */
+    @Test
+    fun welcomeRestorePath_replacesIdentityAndFlipsCopy() {
+        val onboarding = OnboardingScreenObject(composeRule)
+        onboarding.awaitStep(OnboardingStep.Welcome)
+
+        // The blank identity the eager bootstrap mints on a fresh
+        // install — the one restore() must wipe on its way out.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            identityStore.listIds().isNotEmpty()
+        }
+        val mintedIds = identityStore.listIds()
+
+        // The entry renders once the allow-probe answers (async).
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("onboarding.welcome.restore").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore.phrase_field")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        val field = composeRule.onNodeWithTag("onboarding.welcome.restore.phrase_field")
+        val submit = composeRule.onNodeWithTag("onboarding.welcome.restore.submit")
+
+        // Word-count gate.
+        field.performTextInput("abandon abandon abandon")
+        submit.assertIsNotEnabled()
+
+        // Known words, bad checksum → inline error, overlay stays.
+        field.performTextClearance()
+        field.performTextInput(List(12) { "abandon" }.joinToString(" "))
+        submit.assertIsEnabled()
+        submit.performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore.error")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // The all-zeros-entropy test vector, newline-separated.
+        val vector = (List(11) { "abandon" } + "about").joinToString(" ")
+        field.performTextClearance()
+        field.performTextInput(vector.replace(" ", "\n"))
+        submit.performClick()
+
+        onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.title(OnboardingStep.Identity)
+            .assertTextEquals("Restoring your identity")
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
+
+        // The destructive half, asserted rather than inferred: the id
+        // the phrase derives is what the device now holds, and the
+        // auto-bootstrap identity restore() replaced is gone.
+        val restoredId = IdentityId.derivedFromEntropy(
+            Bip39.entropyFromMnemonic(vector)!!,
+        )
+        val idsAfter = identityStore.listIds()
+        assertTrue(
+            "the restored id must be on the device, had $idsAfter",
+            restoredId in idsAfter,
+        )
+        assertTrue(
+            "the minted identity must have been wiped, had $idsAfter",
+            idsAfter.none { it in mintedIds },
+        )
         assertFalse("the walk must not have completed", onboardingStore.completed)
     }
 

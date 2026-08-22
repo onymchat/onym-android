@@ -118,4 +118,55 @@ class Bip39Test {
             assertTrue(Bip39.isValidMnemonic(m))
         }
     }
+
+    // ── normalizeMnemonic / mnemonicWordCount ─────────────────────
+
+    @Test
+    fun normalize_collapses_ascii_whitespace() {
+        assertEquals(
+            "abandon ability able",
+            Bip39.normalizeMnemonic("abandon\nability\table"),
+        )
+        assertEquals(
+            "abandon ability able",
+            Bip39.normalizeMnemonic("  abandon   ability \r\n able  "),
+        )
+        assertEquals("abandon ability able", Bip39.normalizeMnemonic("abandon ability able"))
+    }
+
+    @Test
+    fun normalize_collapses_unicode_spaces_and_bom() {
+        // NBSP (web/iOS copy), narrow NBSP, figure space,
+        // ideographic space, ZWSP and BOM — none of which Java's \s
+        // matches.
+        assertEquals(
+            "abandon ability able about more words",
+            Bip39.normalizeMnemonic(
+                "\uFEFFabandon\u00A0ability\u202Fable\u2007about\u3000more\u200Bwords",
+            ),
+        )
+    }
+
+    @Test
+    fun wordCount_agrees_with_the_normalized_form() {
+        assertEquals(0, Bip39.mnemonicWordCount(""))
+        assertEquals(0, Bip39.mnemonicWordCount(" \n\u00A0\u200B\uFEFF "))
+        assertEquals(1, Bip39.mnemonicWordCount(" abandon "))
+        assertEquals(4, Bip39.mnemonicWordCount("abandon\u00A0ability\nable\tabout"))
+        assertEquals(12, Bip39.mnemonicWordCount("word\n".repeat(12)))
+        assertEquals(24, Bip39.mnemonicWordCount("word\u00A0".repeat(24)))
+    }
+
+    @Test
+    fun normalized_paste_validates_where_the_raw_paste_does_not() {
+        val valid = "abandon abandon abandon abandon abandon abandon " +
+            "abandon abandon abandon abandon abandon about"
+        for (separator in listOf("\n", "\u00A0", "\u202F", "\u3000", "\u200B", "  ")) {
+            val pasted = valid.replace(" ", separator)
+            assertTrue(Bip39.isValidMnemonic(Bip39.normalizeMnemonic(pasted)))
+        }
+        // The raw NBSP paste is exactly what the parser rejects —
+        // the reason normalization must sit in front of it.
+        assertFalse(Bip39.isValidMnemonic(valid.replace(" ", "\u00A0")))
+    }
 }

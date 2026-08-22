@@ -20,7 +20,7 @@
     <string name="cancel">Отмена</string>
 
     <!-- ─── Intro screen ─────────────────────────────────────────── -->
-    <string name="your_identity_in_12_words">Ваша личность в 12 словах</string>
+    <string name="your_identity_in_words">Ваша личность в нескольких словах</string>
     <string name="recovery_phrase_intro_subtitle">Запишите их. Храните офлайн. Эта фраза восстанавливает ваши ключи Nostr, Stellar и BLS на любом устройстве.</string>
     <string name="before_you_start">Перед началом</string>
     <string name="rule_never_share">Никому не показывайте и не фотографируйте</string>
@@ -67,7 +67,7 @@
     <string name="search">Поиск</string>
     <string name="security">Безопасность</string>
     <string name="backup_recovery_phrase">Резервная копия фразы восстановления</string>
-    <string name="security_footer_view_recovery_phrase">Просмотрите свою фразу восстановления из 12 слов. Она понадобится для восстановления личности на новом устройстве.</string>
+    <string name="security_footer_view_recovery_phrase">Просмотрите свою фразу восстановления. Она понадобится для восстановления личности на новом устройстве.</string>
     <string name="search_placeholder_body">Поиск появится в одном из следующих обновлений.</string>
     <string name="search_field_placeholder">Поиск сообщений</string>
     <string name="search_prompt_body">Ищите сообщения во всех своих чатах.</string>
@@ -193,7 +193,7 @@
     <string name="identity_detail_backup_status_unknown">Сделайте резервную копию фразы восстановления</string>
     <string name="identity_detail_backup_status_subtitle">Без неё восстановить эту личность будет невозможно.</string>
     <string name="identity_detail_backup_action">Показать фразу восстановления</string>
-    <string name="identity_detail_backup_action_subtitle">12 слов · BIP-39</string>
+    <string name="identity_detail_backup_action_subtitle">Фраза восстановления BIP-39</string>
     <!-- Per-identity invite QR card on the Identity Detail screen. -->
     <string name="identity_detail_invite_section">Ключ-приглашение</string>
     <string name="identity_detail_invite_caption">Отсканируйте в Onym на другом устройстве, чтобы открыть приватный чат с этой личностью.</string>

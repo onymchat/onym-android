@@ -105,7 +105,7 @@ class RecoveryPhraseBackupScreenTest {
     @Test
     fun intro_renders_title_and_continue_button() {
         setContent()
-        composeRule.onNodeWithText(string(R.string.your_identity_in_12_words))
+        composeRule.onNodeWithText(string(R.string.your_identity_in_words))
             .assertIsDisplayed()
         composeRule.onNodeWithText(string(R.string.continue_with_biometrics))
             .assertIsDisplayed()
@@ -246,7 +246,7 @@ class RecoveryPhraseBackupScreenTest {
             viewModel.step.value == RecoveryPhraseBackupViewModel.Step.Done
         }
         composeRule.onNodeWithText(string(R.string.done)).performClick()
-        composeRule.onNodeWithText(string(R.string.your_identity_in_12_words))
+        composeRule.onNodeWithText(string(R.string.your_identity_in_words))
             .assertIsDisplayed()
     }
 
@@ -279,7 +279,7 @@ class RecoveryPhraseBackupScreenTest {
 
         composeRule.onNodeWithText(string(R.string.authentication_failed))
             .assertIsNotDisplayed()
-        composeRule.onNodeWithText(string(R.string.your_identity_in_12_words))
+        composeRule.onNodeWithText(string(R.string.your_identity_in_words))
             .assertIsDisplayed()
     }
 
