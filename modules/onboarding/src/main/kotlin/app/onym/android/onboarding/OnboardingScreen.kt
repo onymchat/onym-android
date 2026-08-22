@@ -63,8 +63,8 @@ fun OnboardingScreen(
 
     OnboardingScaffold(
         step = step,
-        title = stringResource(titleRes(step)),
-        subtitle = subtitleRes(step)?.let { stringResource(it) },
+        title = stringResource(titleRes(step, state.identityOrigin)),
+        subtitle = subtitleRes(step, state.identityOrigin)?.let { stringResource(it) },
         primaryTitle = stringResource(primaryTitleRes(step)),
         // Outcome-gated steps render their primary disabled until the
         // step content records a SATISFYING outcome (the identity
@@ -113,21 +113,40 @@ fun OnboardingScreen(
 
 // ── Copy ──────────────────────────────────────────────────────────
 
-private fun titleRes(step: OnboardingStep): Int = when (step) {
+private fun titleRes(
+    step: OnboardingStep,
+    origin: IdentityOrigin = IdentityOrigin.Minted,
+): Int = when (step) {
     OnboardingStep.Welcome -> R.string.onboarding_welcome_title
-    OnboardingStep.Identity -> R.string.onboarding_identity_title
+    // "Making your keys" would be a lie over an identity the user
+    // just brought here from a recovery phrase — parity with iOS's
+    // identityOrigin copy flip.
+    OnboardingStep.Identity ->
+        if (origin == IdentityOrigin.Restored) {
+            R.string.onboarding_identity_title_restored
+        } else {
+            R.string.onboarding_identity_title
+        }
     OnboardingStep.Services -> R.string.onboarding_services_title
     OnboardingStep.Moderation -> R.string.onboarding_moderation_title
     OnboardingStep.RecoveryPhrase -> R.string.onboarding_recovery_title
     OnboardingStep.Done -> R.string.onboarding_done_title
 }
 
-private fun subtitleRes(step: OnboardingStep): Int? = when (step) {
+private fun subtitleRes(
+    step: OnboardingStep,
+    origin: IdentityOrigin = IdentityOrigin.Minted,
+): Int? = when (step) {
     OnboardingStep.Welcome -> R.string.onboarding_welcome_subtitle
     OnboardingStep.Identity -> R.string.onboarding_identity_subtitle
     OnboardingStep.Services -> R.string.onboarding_services_subtitle
     OnboardingStep.Moderation -> R.string.onboarding_moderation_subtitle
-    OnboardingStep.RecoveryPhrase -> R.string.onboarding_recovery_subtitle
+    OnboardingStep.RecoveryPhrase ->
+        if (origin == IdentityOrigin.Restored) {
+            R.string.onboarding_recovery_subtitle_restored
+        } else {
+            R.string.onboarding_recovery_subtitle
+        }
     OnboardingStep.Done -> R.string.onboarding_done_subtitle
 }
 

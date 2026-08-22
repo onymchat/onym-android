@@ -15,8 +15,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -32,6 +35,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,6 +61,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -71,6 +76,8 @@ import app.onym.android.design.SettingsHairline
 import app.onym.android.design.SettingsSectionLabel
 import app.onym.android.design.SettingsTile
 import app.onym.android.discovery.AttributedCatalogEntry
+import app.onym.android.foundation.Bip39
+import app.onym.android.onboarding.IdentityOrigin
 import app.onym.android.onboarding.OnboardingFlow
 import app.onym.android.onboarding.OnboardingScreen
 import app.onym.android.onboarding.OnboardingStep
@@ -89,10 +96,11 @@ import app.onym.android.onboarding.R as OnboardingR
  * module's [OnboardingScreen] full-screen with system back blocked,
  * injects the redesigned step contents (identity checklist, services
  * recommended/custom split, recovery-phrase backup, live Done
- * summary), and hosts the two full-screen overlays above the walk:
+ * summary), and hosts the full-screen overlays above the walk:
  * the "choose services myself" hub (a nested NavHost — see
- * [OnboardingServicesHubOverlay]) and the recovery-phrase backup
- * flow.
+ * [OnboardingServicesHubOverlay]), the recovery-phrase backup
+ * flow, and the welcome step's restore-from-phrase entry
+ * ([RestoreIdentityOverlay]).
  *
  * Back-handling contract: the host's [BackHandler] swallows system
  * back so the walk can't be dismissed — but Compose dispatches back
@@ -160,7 +168,19 @@ internal fun OnboardingHost(
     // re-entry crosses the biometric gate again, which is desired).
     var hubVisible by rememberSaveable { mutableStateOf(false) }
     var backupVisible by rememberSaveable { mutableStateOf(false) }
+    var restoreVisible by rememberSaveable { mutableStateOf(false) }
     var consentEntry by remember { mutableStateOf<AttributedCatalogEntry?>(null) }
+
+    // Whether the welcome step may offer "I have a recovery phrase":
+    // wiring present AND the per-presentation probe allows it (a
+    // restart walk runs over a real identity that restore would
+    // wipe). Probed once per flow — plain `remember`, so a rotation
+    // re-probes; the answer is stable within a presentation.
+    var restoreAllowed by remember(flow) { mutableStateOf(false) }
+    LaunchedEffect(flow) {
+        restoreAllowed = onboarding.restoreIdentity != null &&
+            onboarding.restoreIdentityAllowed()
+    }
 
     // The saved flags can outlive the flow: OnboardingFlow dies with
     // the process, so after process death the restored `true` would
@@ -170,6 +190,7 @@ internal fun OnboardingHost(
     // linger.
     val hubShown = hubVisible && state.step == OnboardingStep.Services
     val backupShown = backupVisible && state.step == OnboardingStep.RecoveryPhrase
+    val restoreShown = restoreVisible && state.step == OnboardingStep.Welcome
 
     // Hoisted ABOVE the hubShown conditional: were the controller
     // created inside the overlay, closing the hub would drop the
@@ -193,6 +214,7 @@ internal fun OnboardingHost(
     LaunchedEffect(state.step) {
         if (state.step != OnboardingStep.Services) closeHub()
         if (state.step != OnboardingStep.RecoveryPhrase) backupVisible = false
+        if (state.step != OnboardingStep.Welcome) restoreVisible = false
     }
 
     // PIN-ON-ACCEPT: accepting the recommendation is the explicit
@@ -235,7 +257,12 @@ internal fun OnboardingHost(
                 flow = flow,
                 stepContent = { step ->
                     when (step) {
-                        OnboardingStep.Welcome -> ({ WelcomeStepContent() })
+                        OnboardingStep.Welcome -> ({
+                            WelcomeStepContent(
+                                restoreAvailable = restoreAllowed,
+                                onRestore = { restoreVisible = true },
+                            )
+                        })
                         OnboardingStep.Identity -> ({
                             IdentityStepContent(
                                 flow = flow,
@@ -336,6 +363,17 @@ internal fun OnboardingHost(
                 )
             }
 
+            if (restoreShown) {
+                onboarding.restoreIdentity?.let { restore ->
+                    RestoreIdentityOverlay(
+                        flow = flow,
+                        restoreIdentity = restore,
+                        writeScope = hostViewModel.viewModelScope,
+                        onDismiss = { restoreVisible = false },
+                    )
+                }
+            }
+
             consentEntry?.let { entry ->
                 val discovery = dependencies.discovery
                 if (discovery != null) {
@@ -390,10 +428,20 @@ internal fun OnboardingHost(
 
 // ── Welcome ───────────────────────────────────────────────────────
 
-/** Brand framing: the OnymMark over three "yours, not ours" bullets.
- *  No restore-from-phrase entry yet (deferred, parity with iOS). */
+/**
+ * Brand framing: the OnymMark over three "yours, not ours" bullets,
+ * plus — iOS parity — the "I have a recovery phrase" entry beneath
+ * the card. [restoreAvailable] gates the entry: it is hidden when the
+ * wiring is absent or the walk runs over an identity that
+ * [app.onym.android.identity.IdentityRepository.restore] would wipe
+ * (restart walks, grandfathered users — see
+ * [OnboardingUiDependencies.restoreIdentityAllowed]).
+ */
 @Composable
-private fun WelcomeStepContent() {
+private fun WelcomeStepContent(
+    restoreAvailable: Boolean,
+    onRestore: () -> Unit,
+) {
     Column(Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
@@ -423,7 +471,220 @@ private fun WelcomeStepContent() {
                 )
             }
         }
+
+        if (restoreAvailable) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                TextButton(
+                    onClick = onRestore,
+                    modifier = Modifier.testTag("onboarding.welcome.restore"),
+                ) {
+                    Text(
+                        text = stringResource(
+                            OnboardingR.string.onboarding_welcome_restore_entry,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                }
+            }
+        }
     }
+}
+
+/**
+ * The welcome step's restore flow as a full-screen overlay above the
+ * walk — the Android shape of iOS's `OnboardingRestoreSheet`: one
+ * multiline phrase field, a 12/24 word-count gate on the submit, and
+ * inline errors. The phrase is normalized ([normalizeMnemonic])
+ * before validation so a phrase pasted with newlines or doubled
+ * spaces — password managers, photographed word grids — parses the
+ * same as a typed one.
+ *
+ * Submit pre-validates with [Bip39.isValidMnemonic] (the exact check
+ * the repository applies — its typed InvalidMnemonic error is
+ * internal to :identity, so the distinction must be drawn before the
+ * call) and runs the restore on [writeScope], the host-retained
+ * scope: a rotation mid-restore must not cancel an identity swap
+ * half-way through. On success the flow records
+ * [IdentityOrigin.Restored] (copy flips on the later steps) and
+ * advances off Welcome — no step is skipped; the walk still
+ * configures services and still offers the backup reveal, now of the
+ * restored phrase.
+ */
+@Composable
+private fun RestoreIdentityOverlay(
+    flow: OnboardingFlow,
+    restoreIdentity: suspend (String) -> Unit,
+    writeScope: kotlinx.coroutines.CoroutineScope,
+    onDismiss: () -> Unit,
+) {
+    // Plain `remember`, NEVER rememberSaveable: the typed phrase is
+    // secret material, and saveable state lands in the Activity's
+    // saved-instance Bundle — persisted to disk across process death.
+    // A rotation drops the input; re-pasting is cheaper than a
+    // mnemonic at rest in savedState. Same posture as the backup
+    // overlay's scrub-on-exit.
+    var phrase by remember { mutableStateOf("") }
+    var errorRes by remember { mutableStateOf<Int?>(null) }
+    var restoring by remember { mutableStateOf(false) }
+
+    val wordCount = mnemonicWordCount(phrase)
+    val canRestore = (wordCount == 12 || wordCount == 24) && !restoring
+
+    // Back closes the overlay (never the walk), except mid-restore —
+    // the identity swap must not look cancelable once it's running.
+    BackHandler(enabled = true) { if (!restoring) onDismiss() }
+
+    val submit = submit@{
+        if (!canRestore) return@submit
+        errorRes = null
+        restoring = true
+        val normalized = normalizeMnemonic(phrase)
+        writeScope.launch {
+            try {
+                if (!Bip39.isValidMnemonic(normalized)) {
+                    errorRes = OnboardingR.string.onboarding_restore_error_invalid
+                    return@launch
+                }
+                restoreIdentity(normalized)
+                flow.recordIdentityOrigin(IdentityOrigin.Restored)
+                // advance() moves to the CURRENT step's neighbor —
+                // same guard every async call site carries.
+                if (flow.state.value.step == OnboardingStep.Welcome) {
+                    flow.advance()
+                }
+                onDismiss()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                errorRes = OnboardingR.string.onboarding_restore_error_failed
+            } finally {
+                restoring = false
+            }
+        }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(OnboardingR.string.onboarding_restore_title),
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = onDismiss,
+                    enabled = !restoring,
+                    modifier = Modifier.testTag("onboarding.welcome.restore.cancel"),
+                ) {
+                    Text(stringResource(OnboardingR.string.onboarding_restore_cancel))
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(OnboardingR.string.onboarding_restore_explainer),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = phrase,
+                onValueChange = { phrase = it },
+                enabled = !restoring,
+                placeholder = {
+                    Text(stringResource(OnboardingR.string.onboarding_restore_hint))
+                },
+                minLines = 3,
+                isError = errorRes != null,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                ),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrect = false,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onboarding.welcome.restore.phrase_field"),
+            )
+
+            errorRes?.let { res ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(res),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("onboarding.welcome.restore.error"),
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource(OnboardingR.string.onboarding_restore_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(Modifier.height(20.dp))
+            androidx.compose.material3.Button(
+                onClick = submit,
+                enabled = canRestore,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("onboarding.welcome.restore.submit"),
+            ) {
+                Text(
+                    stringResource(
+                        if (restoring) {
+                            OnboardingR.string.onboarding_restore_submitting
+                        } else {
+                            OnboardingR.string.onboarding_restore_submit
+                        },
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Collapse ALL whitespace (newlines, tabs, doubled spaces — password
+ * managers and photographed word grids produce them) to the
+ * single-space form [Bip39.entropyFromMnemonic] parses, which splits
+ * on a literal space only. Fixes the paste-with-newlines rejection
+ * the iOS sheet still has.
+ */
+internal fun normalizeMnemonic(text: String): String =
+    text.trim().replace(Regex("\\s+"), " ")
+
+/** Word count over the normalized phrase — the submit gate's 12/24
+ *  check must agree with what [Bip39] will actually see. */
+internal fun mnemonicWordCount(text: String): Int {
+    val normalized = normalizeMnemonic(text)
+    if (normalized.isEmpty()) return 0
+    return normalized.count { it == ' ' } + 1
 }
 
 @Composable
@@ -464,6 +725,12 @@ private fun IdentityStepContent(
     var phase by remember { mutableStateOf(IdentityPhase.Checking) }
     var attempt by remember { mutableIntStateOf(0) }
 
+    // Copy flip for a restored identity (iOS identityOrigin parity):
+    // "created"/"generated" would be a lie over keys the user just
+    // brought here from a recovery phrase.
+    val state by flow.state.collectAsState()
+    val restored = state.identityOrigin == IdentityOrigin.Restored
+
     LaunchedEffect(attempt) {
         phase = IdentityPhase.Checking
         if (identityReady()) {
@@ -484,15 +751,31 @@ private fun IdentityStepContent(
         SettingsCard(modifier = Modifier.testTag("onboarding.identity.checklist")) {
             IdentityChecklistRow(
                 phase = phase,
-                title = stringResource(OnboardingR.string.onboarding_identity_row_key_title),
+                title = stringResource(
+                    if (restored) {
+                        OnboardingR.string.onboarding_identity_row_key_title_restored
+                    } else {
+                        OnboardingR.string.onboarding_identity_row_key_title
+                    },
+                ),
                 subtitle = stringResource(OnboardingR.string.onboarding_identity_row_key_subtitle),
             )
             SettingsHairline(insetStart = 52.dp)
             IdentityChecklistRow(
                 phase = phase,
-                title = stringResource(OnboardingR.string.onboarding_identity_row_phrase_title),
+                title = stringResource(
+                    if (restored) {
+                        OnboardingR.string.onboarding_identity_row_phrase_title_restored
+                    } else {
+                        OnboardingR.string.onboarding_identity_row_phrase_title
+                    },
+                ),
                 subtitle = stringResource(
-                    OnboardingR.string.onboarding_identity_row_phrase_subtitle,
+                    if (restored) {
+                        OnboardingR.string.onboarding_identity_row_phrase_subtitle_restored
+                    } else {
+                        OnboardingR.string.onboarding_identity_row_phrase_subtitle
+                    },
                 ),
             )
         }

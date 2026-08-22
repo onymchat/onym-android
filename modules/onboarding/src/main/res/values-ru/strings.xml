@@ -30,11 +30,30 @@
     <string name="onboarding_welcome_bullet_transport">Вы сами выбираете, кто доставляет ваши сообщения, — и можете заменить их в любой момент в Настройках.</string>
     <string name="onboarding_welcome_bullet_reports">Вы сами выбираете, кто разбирает жалобы, и до согласия точно видите, что они могут делать.</string>
 
+    <!-- Welcome: restore from recovery phrase -->
+    <string name="onboarding_welcome_restore_entry">У меня есть фраза восстановления</string>
+    <string name="onboarding_restore_title">Фраза восстановления</string>
+    <string name="onboarding_restore_explainer">Введите фразу восстановления из 12 или 24 слов для личности, которую вы переносите на это устройство.</string>
+    <string name="onboarding_restore_hint">слово слово слово …</string>
+    <string name="onboarding_restore_warning">Это заменит личность, которую Onym только что создал на этом устройстве, той, что описана этими словами. Больше здесь ничего не затрагивается.</string>
+    <string name="onboarding_restore_submit">Восстановить личность</string>
+    <string name="onboarding_restore_submitting">Восстанавливаем…</string>
+    <string name="onboarding_restore_cancel">Отмена</string>
+    <string name="onboarding_restore_error_invalid">Это не похоже на корректную фразу из 12 или 24 слов.</string>
+    <string name="onboarding_restore_error_failed">Не удалось восстановить эту личность. Проверьте фразу и попробуйте ещё раз.</string>
+
+    <!-- Restored-identity copy flips -->
+    <string name="onboarding_identity_title_restored">Восстанавливаем вашу личность</string>
+    <string name="onboarding_recovery_subtitle_restored">Это фраза, которую вы только что ввели. Потеряете это устройство без её копии — даже Onym не сможет вернуть вам доступ.</string>
+
     <!-- Identity step -->
     <string name="onboarding_identity_row_key_title">Ключ личности создан</string>
     <string name="onboarding_identity_row_key_subtitle">Надёжно хранится на этом устройстве</string>
     <string name="onboarding_identity_row_phrase_title">Фраза восстановления создана</string>
     <string name="onboarding_identity_row_phrase_subtitle">12 слов — вы сохраните их через минуту</string>
+    <string name="onboarding_identity_row_key_title_restored">Ключ личности восстановлен</string>
+    <string name="onboarding_identity_row_phrase_title_restored">Фраза восстановления подтверждена</string>
+    <string name="onboarding_identity_row_phrase_subtitle_restored">Введённые слова теперь и есть личность этого устройства</string>
     <string name="onboarding_identity_failed">Не удалось создать ключи. Никуда ничего не отправлялось — попробуйте ещё раз.</string>
     <string name="onboarding_identity_retry">Повторить</string>
     <string name="onboarding_identity_footnote">Только ваш ключ доказывает, что этот аккаунт ваш. Ни один сервер не хранит его копию.</string>

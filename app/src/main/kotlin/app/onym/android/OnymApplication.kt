@@ -1685,6 +1685,41 @@ class OnymApplication : Application() {
                 onboardingGeneration.value += 1
                 onboardingPending.value = true
             },
+            // Welcome-step restore (iOS parity): replaces the fresh
+            // auto-bootstrap identity with the one the phrase
+            // describes. IdentityRepository.restore wipes the
+            // identity it replaces — on a first run that cascade
+            // covers an empty chat set, which is exactly why the
+            // entry is gated below.
+            restoreIdentity = { mnemonic ->
+                identityRepository.restore(mnemonic)
+            },
+            restoreIdentityAllowed = {
+                // Never over a restart walk (the device holds a real
+                // identity with real chats that restore would wipe),
+                // and never for a user the grandfathering probe reads
+                // as existing — the same signal iOS gates on
+                // (`!OnboardingLaunch.isExistingUser()`). Probe
+                // errors read as "existing": fail closed, hide the
+                // entry. Under the harness the probe pins fresh,
+                // matching the gate resolution above.
+                val restarted = runCatching {
+                    onboardingStore.isRestartRequested()
+                }.getOrDefault(true)
+                when {
+                    restarted -> false
+                    onboardingDrivenByHarness -> true
+                    else -> runCatching {
+                        !OnboardingGateProbe.isExistingUser(
+                            relayer = relayerRepository.snapshots.value.configuration,
+                            nostr = nostrRelaysStore.load(),
+                            blossom = blossomServersRepository.snapshots.value,
+                            identityInteracted =
+                            identityRepository.hasNamedOrMultipleIdentities(),
+                        )
+                    }.getOrDefault(false)
+                }
+            },
         )
 
         // Device backup (storage.backup seat) — one entry per

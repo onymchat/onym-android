@@ -124,6 +124,23 @@ enum class ServicesChoice {
 }
 
 /**
+ * Where the identity on the device came from. Lives on the flow (not
+ * any composable) so the copy that depends on it — the identity
+ * step's "Making your keys" vs "Restoring your identity", the
+ * recovery step's "these 12 words" vs "the phrase you just entered"
+ * — survives navigation. Mirrors `IdentityOrigin` from onym-ios.
+ */
+enum class IdentityOrigin {
+    /** The keys were freshly generated on this device (the default —
+     *  the eager bootstrap mints them before the walk even shows). */
+    Minted,
+
+    /** The user brought a recovery phrase on the welcome step and the
+     *  identity was restored from it. */
+    Restored,
+}
+
+/**
  * State machine for the first-launch onboarding sequence. A plain
  * class publishing one immutable [State] through a [StateFlow]
  * (the repository/ViewModel convention); every collaborator is
@@ -199,6 +216,14 @@ class OnboardingFlow(
          * stays verified across navigation and re-reveals.
          */
         val recoveryBackupState: RecoveryBackupState = RecoveryBackupState.None,
+        /**
+         * Where the active identity came from, written by the welcome
+         * step's restore overlay via [recordIdentityOrigin]. Only
+         * changes copy on the later steps — no step is skipped for a
+         * restored identity: the walk still configures services and
+         * still offers the backup reveal (of the restored phrase).
+         */
+        val identityOrigin: IdentityOrigin = IdentityOrigin.Minted,
         /** Set by [complete] after the flag is persisted, so the
          *  presenter can dismiss and hand control back. */
         val completed: Boolean = false,
@@ -408,6 +433,12 @@ class OnboardingFlow(
             if (state.ordinal <= current.recoveryBackupState.ordinal) return@update current
             current.copy(recoveryBackupState = state)
         }
+    }
+
+    /** The welcome step's restore overlay reports that the identity
+     *  was replaced with one restored from a recovery phrase. */
+    fun recordIdentityOrigin(origin: IdentityOrigin) {
+        _state.update { it.copy(identityOrigin = origin) }
     }
 
     /**

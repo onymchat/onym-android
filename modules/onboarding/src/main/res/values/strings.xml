@@ -30,11 +30,30 @@
     <string name="onboarding_welcome_bullet_transport">You pick who carries your messages — and can swap them any time in Settings.</string>
     <string name="onboarding_welcome_bullet_reports">You pick who handles reports, and see exactly what they can do before you agree.</string>
 
+    <!-- Welcome: restore from recovery phrase -->
+    <string name="onboarding_welcome_restore_entry">I have a recovery phrase</string>
+    <string name="onboarding_restore_title">Recovery phrase</string>
+    <string name="onboarding_restore_explainer">Enter the 12 or 24-word recovery phrase for the identity you\'re bringing to this device.</string>
+    <string name="onboarding_restore_hint">word word word …</string>
+    <string name="onboarding_restore_warning">This replaces the identity Onym just created on this device with the one these words describe. Nothing else here is touched.</string>
+    <string name="onboarding_restore_submit">Restore identity</string>
+    <string name="onboarding_restore_submitting">Restoring…</string>
+    <string name="onboarding_restore_cancel">Cancel</string>
+    <string name="onboarding_restore_error_invalid">That doesn\'t look like a valid 12 or 24-word phrase.</string>
+    <string name="onboarding_restore_error_failed">Couldn\'t restore that identity. Check the phrase and try again.</string>
+
+    <!-- Restored-identity copy flips -->
+    <string name="onboarding_identity_title_restored">Restoring your identity</string>
+    <string name="onboarding_recovery_subtitle_restored">This is the phrase you just entered. Lose this device without a copy of it, and even Onym can\'t get you back in.</string>
+
     <!-- Identity step -->
     <string name="onboarding_identity_row_key_title">Identity key created</string>
     <string name="onboarding_identity_row_key_subtitle">Held securely on this device</string>
     <string name="onboarding_identity_row_phrase_title">Recovery phrase generated</string>
     <string name="onboarding_identity_row_phrase_subtitle">12 words — you\'ll back these up in a moment</string>
+    <string name="onboarding_identity_row_key_title_restored">Identity key restored</string>
+    <string name="onboarding_identity_row_phrase_title_restored">Recovery phrase confirmed</string>
+    <string name="onboarding_identity_row_phrase_subtitle_restored">The words you entered are now this device\'s identity</string>
     <string name="onboarding_identity_failed">Your keys couldn\'t be created. Nothing was sent anywhere — try again.</string>
     <string name="onboarding_identity_retry">Try again</string>
     <string name="onboarding_identity_footnote">Your key is the only thing that proves this account is yours. No server holds a copy of it.</string>

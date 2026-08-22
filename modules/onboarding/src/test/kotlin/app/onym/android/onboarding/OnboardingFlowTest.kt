@@ -364,6 +364,27 @@ class OnboardingFlowTest {
         assertEquals(RecoveryBackupState.Revealed, flow.state.value.recoveryBackupState)
     }
 
+    // ── Identity origin (welcome-step restore) ────────────────────
+
+    @Test
+    fun identityOrigin_defaultsToMinted() {
+        assertEquals(IdentityOrigin.Minted, flow().state.value.identityOrigin)
+    }
+
+    @Test
+    fun identityOrigin_recordedRestored_survivesNavigation() {
+        val flow = flow()
+        flow.recordIdentityOrigin(IdentityOrigin.Restored)
+        assertEquals(IdentityOrigin.Restored, flow.state.value.identityOrigin)
+
+        // The copy that depends on it renders on the identity and
+        // recovery steps — it must survive the whole walk, Back
+        // included.
+        flow.walkTo(OnboardingStep.Done)
+        flow.back()
+        assertEquals(IdentityOrigin.Restored, flow.state.value.identityOrigin)
+    }
+
     // ── Outcomes across navigation ────────────────────────────────
 
     @Test

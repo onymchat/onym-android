@@ -312,6 +312,25 @@ class OnboardingUiDependencies(
      * selections re-run, and the steps render current state.
      */
     val requestRestart: suspend () -> Unit = {},
+    /**
+     * Replace the active identity with one restored from a 12/24-word
+     * BIP39 recovery phrase — the welcome step's "I have a recovery
+     * phrase" path (iOS parity). Wired to
+     * `IdentityRepository.restore`, which wipes the fresh-install
+     * auto-bootstrap identity it replaces (its removal cascade runs
+     * over an empty chat set on a first run). null — the default, and
+     * the UI-test harness posture — hides the entry entirely.
+     */
+    val restoreIdentity: (suspend (String) -> Unit)? = null,
+    /**
+     * Whether the welcome step may OFFER the restore entry — probed
+     * per walk presentation, because the answer changes at runtime: a
+     * Settings → Restart Onboarding walk runs over a real identity
+     * with real chats, and [restoreIdentity] would wipe them. Mirrors
+     * iOS's `identityRestoreAllowed: !OnboardingLaunch.isExistingUser()`.
+     * Fail-closed default: no wiring, no entry.
+     */
+    val restoreIdentityAllowed: suspend () -> Boolean = { false },
 )
 
 /**
