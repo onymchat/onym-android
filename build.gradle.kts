@@ -7,4 +7,8 @@ plugins {
     alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.compose.compiler) apply false
+    // Declared here (never applied at root) so :app can apply it
+    // CONDITIONALLY — only when the operator-provided
+    // app/google-services.json exists. See app/build.gradle.kts.
+    alias(libs.plugins.google.services) apply false
 }

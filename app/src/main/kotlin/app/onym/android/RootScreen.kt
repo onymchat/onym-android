@@ -5,6 +5,8 @@ package app.onym.android
 // android.nonTransitiveRClass.
 import app.onym.android.strings.R
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -744,6 +746,27 @@ fun RootScreen(
                     dependencies.refreshBackupVendors()
                     backupVendors.forEach { it.settingsFlow.refresh() }
                 }
+                // Push seat (NOTIFICATIONS section). The toggle's
+                // checked state binds to the PERSISTED preference, so
+                // a permission denial — which never calls enable() —
+                // snaps the switch back without bookkeeping.
+                val pushDeps = dependencies.push
+                val pushEnabled by (pushDeps?.enabledFlow
+                    ?: kotlinx.coroutines.flow.flowOf(false))
+                    .collectAsStateWithLifecycle(initialValue = false)
+                val pushRegistered by (pushDeps?.registeredFlow
+                    ?: kotlinx.coroutines.flow.flowOf(false))
+                    .collectAsStateWithLifecycle(initialValue = false)
+                val settingsContext = LocalContext.current
+                val notificationsPermissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission(),
+                ) { granted ->
+                    if (granted && pushDeps != null) {
+                        coroutineScope.launch { pushDeps.enable() }
+                    }
+                    // Denied: nothing was persisted; the toggle stays
+                    // off on its own.
+                }
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
@@ -765,6 +788,30 @@ fun RootScreen(
                             dependencies.readReceiptsPreferenceProvider.set(on)
                         }
                     },
+                    onTogglePush = pushDeps?.let { push ->
+                        { on: Boolean ->
+                            if (!on) {
+                                coroutineScope.launch { push.disable() }
+                            } else if (
+                                android.os.Build.VERSION.SDK_INT >= 33 &&
+                                androidx.core.content.ContextCompat.checkSelfPermission(
+                                    settingsContext,
+                                    android.Manifest.permission.POST_NOTIFICATIONS,
+                                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                            ) {
+                                // enable() runs from the launcher's
+                                // grant callback; a denial leaves the
+                                // preference (and so the switch) off.
+                                notificationsPermissionLauncher.launch(
+                                    android.Manifest.permission.POST_NOTIFICATIONS,
+                                )
+                            } else {
+                                coroutineScope.launch { push.enable() }
+                            }
+                        }
+                    },
+                    pushEnabled = pushEnabled,
+                    pushRegistered = pushRegistered,
                     onNostrRelaysClick = { navController.navigate(ROUTE_NOSTR_RELAYS) },
                     nostrRelaysCount = nostrRelays.endpoints.size,
                     onBlossomRelaysClick = { navController.navigate(ROUTE_BLOSSOM_RELAYS) },
