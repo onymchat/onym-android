@@ -54,10 +54,12 @@ class GroupRulesTest {
 
     @Test
     fun clamped_stopsAtWhicheverCapComesFirst() {
-        // Latin text runs out of characters first; a script that costs
-        // more per character runs out of bytes first. Both have to hold,
-        // because the byte cap decides whether a link is valid and the
-        // character cap is what the field counts.
+        // On this platform the character cap is always the one that
+        // binds: no UTF-16 unit costs more than three UTF-8 bytes, so
+        // 500 units never exceeds 1500 bytes and `clamped`'s byte loop
+        // doesn't run. Both are asserted anyway, because the byte cap is
+        // what decides whether a link is valid and is the cap the other
+        // platform hits first.
         assertEquals(GroupRules.MAX_LENGTH, GroupRules.clamped("x".repeat(9_000)).length)
         val cjk = GroupRules.clamped("字".repeat(9_000))
         assertTrue(cjk.toByteArray(Charsets.UTF_8).size <= GroupRules.MAX_BYTES)
@@ -65,13 +67,23 @@ class GroupRulesTest {
     }
 
     @Test
-    fun clamped_trimsCharactersRatherThanBytes() {
-        // A family emoji is one grapheme cluster and 25 bytes; slicing
-        // the byte array would cut a codepoint in half and leave text no
-        // font can draw and no hash either side agrees on.
-        val clamped = GroupRules.clamped("👨‍👩‍👧‍👦".repeat(200))
+    fun clamped_neverEndsOnHalfACharacter() {
+        // The cut lands on a UTF-16 boundary, which is not a character
+        // boundary. One 'x' offsets the text so the 500th unit falls
+        // inside an emoji — and a lone high surrogate is a broken glyph
+        // on screen and a `?` once anything encodes it to UTF-8, in
+        // storage and in the bytes both platforms hash.
+        val clamped = GroupRules.clamped("x" + "🙂".repeat(300))
+
+        assertFalse("no dangling surrogate", clamped.last().isHighSurrogate())
         assertEquals(clamped, String(clamped.toByteArray(Charsets.UTF_8), Charsets.UTF_8))
         assertTrue(clamped.toByteArray(Charsets.UTF_8).size <= GroupRules.MAX_BYTES)
+
+        // And the family emoji, whose 11 units per cluster put the
+        // boundary somewhere else again.
+        val family = GroupRules.clamped("👨‍👩‍👧‍👦".repeat(200))
+        assertFalse(family.last().isHighSurrogate())
+        assertEquals(family, String(family.toByteArray(Charsets.UTF_8), Charsets.UTF_8))
     }
 
     @Test
@@ -100,8 +112,9 @@ class GroupRulesTest {
     fun fits_isMeasuredInBytesNotCharacters() {
         assertTrue(GroupRules.fits("x".repeat(GroupRules.MAX_BYTES)))
         assertFalse(GroupRules.fits("x".repeat(GroupRules.MAX_BYTES + 1)))
-        // 500 characters, and far past the cap the character count would
-        // have called safe.
+        // 500 characters by Swift's grapheme counting — 5500 UTF-16
+        // units here, which is the mismatch the byte cap exists to
+        // route around — and far past the byte cap either way.
         assertFalse(GroupRules.fits("👨‍👩‍👧‍👦".repeat(500)))
     }
 

@@ -12,6 +12,7 @@ import app.onym.android.group.GroupRepository
 import app.onym.android.group.GroupStateRefreshRequest
 import app.onym.android.group.GroupStore
 import app.onym.android.group.MemberAnnouncementPayload
+import app.onym.android.group.GroupRules
 import app.onym.android.group.MemberProfile
 import app.onym.android.identity.ActiveIdentityProvider
 import app.onym.android.identity.DecryptedEnvelope
@@ -749,7 +750,7 @@ class IncomingMessageDispatcherTest {
         // signature scheme exists to avoid.
         groupStore.replaceForTest(makeGroup(groupId).copy(adminEd25519PubkeyHex = adminHex))
         groupRepository.reload()
-        val hash = ByteArray(32) { 0x04 }
+        val hash = GroupRules.hash("Be kind.")
         val signature = ByteArray(64) { 0x05 }
         val payload = announcementPayload().let {
             it.copy(
@@ -784,6 +785,51 @@ class IncomingMessageDispatcherTest {
         assertTrue(hash.contentEquals(member.rulesHash))
         assertTrue(signature.contentEquals(member.rulesSignature))
         assertEquals("Be kind.", member.rulesText)
+    }
+
+    @Test
+    fun announcement_dropsAnAnnouncedTextThatIsNotTheOneItsHashNames() = runTest {
+        // The sender announces its own copy of the rules whatever the
+        // verdict was — iOS does — so a mismatch is an ordinary
+        // signed-something-else case, not a malformed announcement. The
+        // member still lands, with the bytes; the words don't, because
+        // storing them here would leave this device checking a signature
+        // against text it was never made over.
+        groupStore.replaceForTest(makeGroup(groupId).copy(adminEd25519PubkeyHex = adminHex))
+        groupRepository.reload()
+        val hash = GroupRules.hash("What the joiner signed.")
+        val payload = announcementPayload().let {
+            it.copy(
+                newMember = MemberAnnouncementPayload.AnnouncedMember(
+                    blsPub = newMemberBlsPub,
+                    inboxPub = newMemberInbox,
+                    alias = "Bob",
+                    sendingPub = ByteArray(32) { 0x77 },
+                    rulesHash = hash,
+                    rulesSignature = ByteArray(64) { 0x05 },
+                    rulesText = "What the founder holds.",
+                ),
+            )
+        }
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
+            .toByteArray(Charsets.UTF_8)
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = admin),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+        )
+
+        dispatcher.dispatch(
+            messageId = "m1",
+            ownerIdentityId = ownerIdentity,
+            payload = byteArrayOf(),
+            receivedAt = Instant.EPOCH,
+        )
+
+        val key = newMemberBlsPub.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val member = groupRepository.snapshots.value.single().memberProfiles[key]!!
+        assertTrue(hash.contentEquals(member.rulesHash))
+        assertNull(member.rulesText)
     }
 
     private fun announcementPayload() = MemberAnnouncementPayload(

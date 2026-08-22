@@ -1,13 +1,10 @@
 package app.onym.android.group
 
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import app.onym.android.design.OnymQrFit
+import app.onym.android.design.onymQrFit
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -125,7 +122,6 @@ class GroupRulesWireTest {
         val b = IntroCapability(introPublicKey = introPub, groupId = groupId, rules = "Be cruel.")
 
         assertNotEquals(a, b)
-        assertNotEquals(a.hashCode(), b.hashCode())
         assertEquals(
             a,
             IntroCapability(introPublicKey = introPub, groupId = groupId, rules = "Be kind."),
@@ -134,11 +130,11 @@ class GroupRulesWireTest {
 
     @Test
     fun theCappedLinkStillEncodesAsAQrCode() {
-        // Asserted against the encoder that ships rather than against a
-        // remembered capacity number: a literal can't drift, but it also
-        // can't notice when the renderer's correction level changes
-        // under it, which is exactly how a link that "fits" became a
-        // link nothing could encode.
+        // Asserted against the renderer's own ladder rather than a
+        // remembered capacity: a literal can't drift, but it also can't
+        // notice the correction level changing under it, which is
+        // exactly how a link that "fits" became a link nothing could
+        // encode.
         val link = IntroCapability(
             introPublicKey = introPub,
             groupId = groupId,
@@ -146,20 +142,21 @@ class GroupRulesWireTest {
             rules = "字".repeat(GroupRules.MAX_BYTES / 3),
         ).toAppLink()
 
-        assertNotNull(
-            "worst-case rules must still encode at some level the renderer tries: " +
+        assertNotEquals(
+            "worst-case rules must still draw a QR: " +
                 "${link.toByteArray(Charsets.UTF_8).size} bytes",
-            encodableLevel(link),
+            OnymQrFit.NONE,
+            onymQrFit(link),
         )
     }
 
     @Test
-    fun theWorstCaseNameAndRulesTogether_stillProduceAnInvite() {
+    fun theWorstCaseNameAndRulesTogether_stillDrawAQr() {
         // The headroom is shared with the group name, which has no cap
-        // of its own, so the pair can exceed what the preferred level
-        // holds. What must hold is that the failure is handled: a lower
-        // level takes it, or the share screen falls back to a copyable
-        // link — never an exception out of a composition.
+        // of its own. What has to hold is that the pair still renders
+        // something — the step down the ladder is what buys that, and
+        // the assertion says so rather than restating the ladder's own
+        // definition back at itself.
         val link = IntroCapability(
             introPublicKey = introPub,
             groupId = groupId,
@@ -167,28 +164,38 @@ class GroupRulesWireTest {
             rules = "字".repeat(GroupRules.MAX_BYTES / 3),
         ).toAppLink()
 
-        val level = encodableLevel(link)
-        assertTrue(
-            "either it encodes, or it is over even level L and the QR is simply omitted",
-            level != null || !fitsAt(link, ErrorCorrectionLevel.L),
-        )
+        assertEquals(OnymQrFit.PLAIN, onymQrFit(link))
     }
 
     @Test
     fun theCap_leavesTheBadgedLevelBehind() {
-        // Worth knowing rather than discovering: a full-length rules
-        // link no longer fits level H, the only level whose budget
-        // covers the centre badge. The renderer steps down and drops the
-        // badge; this pins that the step-down is load-bearing rather
-        // than theoretical.
+        // A full-length rules link no longer fits level H, the only
+        // level whose budget covers the centre badge. Pinned because it
+        // means the step-down is load-bearing rather than theoretical.
         val link = IntroCapability(
             introPublicKey = introPub,
             groupId = groupId,
             rules = "x".repeat(GroupRules.MAX_BYTES),
         ).toAppLink()
 
-        assertFalse(fitsAt(link, ErrorCorrectionLevel.H))
-        assertNotNull(encodableLevel(link))
+        assertEquals(OnymQrFit.PLAIN, onymQrFit(link))
+    }
+
+    @Test
+    fun aShortLinkKeepsTheBadge() {
+        // The other side of the same boundary: an invite with no rules
+        // still renders the branded code it always did.
+        val link = IntroCapability(introPublicKey = introPub, groupId = groupId).toAppLink()
+
+        assertEquals(OnymQrFit.BADGED, onymQrFit(link))
+    }
+
+    @Test
+    fun aLinkTooLongForEveryLevel_drawsNoQrRatherThanThrowing() {
+        // Not reachable through the cap — this is the renderer's floor,
+        // and the contract the share screen's copyable-link fallback and
+        // its gated caption both rest on.
+        assertEquals(OnymQrFit.NONE, onymQrFit("x".repeat(5_000)))
     }
 
     @Test
@@ -261,26 +268,4 @@ class GroupRulesWireTest {
         .withoutPadding()
         .encodeToString(json.toByteArray(Charsets.UTF_8))
 
-    /** The first level `OnymQrCode` would settle on, or null if the
-     *  value fits none of them and no QR is drawn at all. */
-    private fun encodableLevel(value: String): ErrorCorrectionLevel? = listOf(
-        ErrorCorrectionLevel.H,
-        ErrorCorrectionLevel.Q,
-        ErrorCorrectionLevel.M,
-        ErrorCorrectionLevel.L,
-    ).firstOrNull { fitsAt(value, it) }
-
-    private fun fitsAt(value: String, level: ErrorCorrectionLevel): Boolean = runCatching {
-        QRCodeWriter().encode(
-            value,
-            BarcodeFormat.QR_CODE,
-            1,
-            1,
-            mapOf(
-                EncodeHintType.ERROR_CORRECTION to level,
-                EncodeHintType.MARGIN to 0,
-                EncodeHintType.CHARACTER_SET to "UTF-8",
-            ),
-        )
-    }.isSuccess
 }

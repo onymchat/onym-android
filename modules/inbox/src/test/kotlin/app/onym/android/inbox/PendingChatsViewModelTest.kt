@@ -19,6 +19,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -498,6 +499,42 @@ class PendingChatsViewModelTest {
 
         assertEquals("House rules.", confirmation?.rules)
         assertNull(confirmation?.invitationMessage)
+    }
+
+    @Test
+    fun theCapabilityHandedToTheSender_carriesTheRulesBeingSigned() = runTest {
+        // Not decoration: the sender refuses a capability that carries
+        // rules with no agreement, and rebuilding it without them made
+        // that guard unreachable from every path here.
+        val h = harness()
+        h.viewModel.start()
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Be kind."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        assertEquals("Be kind.", h.sender.calls.single().capability.rules)
+    }
+
+    @Test
+    fun aSendThatNeverGotAnAgreement_isNotWorthAskingAgain() = runTest {
+        // The one send failure retrying cannot fix: nothing left the
+        // device and nothing will until the caller passes what the
+        // person agreed to.
+        val h = harness()
+        h.viewModel.start()
+        h.sender.outcome = JoinRequestSender.Outcome.RulesAgreementMissing
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Be kind."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        val row = h.viewModel.rows.value.single()
+        assertEquals(
+            PendingChatsViewModel.State.SendFailed(PendingChat.SendFailure.RULES_MISSING),
+            row.state,
+        )
+        assertFalse("Ask again would ship the same nothing", row.state.isRetryable)
     }
 
     @Test
