@@ -62,15 +62,23 @@ class GroupRulesProof private constructor(
          */
         fun of(group: ChatGroup, blsHex: String): GroupRulesProof? {
             val member = group.memberProfiles[blsHex] ?: return null
-            val standing = group.rulesStanding(blsHex) ?: return null
+            val standing = group.rulesStanding(member, blsHex)
+            // The gate lives on the standing, and this is one of the
+            // three things its KDoc says it gates — the one that puts
+            // plaintext on disk. Building a document for a group that
+            // asks nothing of anyone left that decision to whichever
+            // screen happened to call this.
+            if (!standing.hasSomethingToShow) return null
             val currentRules = GroupRules.normalized(group.invitationMessage)
             val proven = standing.isProven
             return GroupRulesProof(
                 // Re-hexed from the bytes signing actually used rather
-                // than echoing `group.id`: the hex parser is lenient,
-                // and the `_readme` tells the reader this field is 32
-                // bytes, so a malformed id would ship instructions that
-                // cannot be followed.
+                // than echoing `group.id`, so the field and the
+                // signature can't disagree about spelling. It is not a
+                // length guarantee — the parser is lenient — but a
+                // short id fails `statement`'s size check, so the
+                // standing lands on `DOES_NOT_VERIFY` and no signature
+                // is exported beside it.
                 groupIdHex = group.groupIdBytes.toHexLowercase(),
                 groupName = group.name,
                 memberAlias = member.alias,
@@ -107,7 +115,8 @@ class GroupRulesProof private constructor(
             "The rules text here is the wording this member signed. When",
             "matches_current_rules is false, the group has changed its rules",
             "since — the signature still covers the text in this file, and",
-            "current_text carries what the group says now, to compare.",
+            "current_text carries what the group says now, to compare —",
+            "and is absent when the group has no rules at all any more.",
             "",
             "What the signature does NOT cover, and what you must not read",
             "out of it: alias and bls_public_key. Neither is inside the",
@@ -162,8 +171,17 @@ class GroupRulesProof private constructor(
             // prefix of a raw key and scrubbing that could collapse a
             // non-hex key to a few characters, or to none, putting back
             // the collision the suffix exists to prevent.
+            // Hashed whenever scrubbing changed anything, not merely
+            // when it shortened the result past a threshold. Roster
+            // keys are arbitrary JSON object keys, so
+            // `../../../Documents/xy` and `../../../Documents/xyz`
+            // both scrub to something long enough *and* share their
+            // first twelve characters — same stem, same suffix, one
+            // export overwriting the other. That is the collision this
+            // suffix exists to prevent, in the adversarial case the
+            // rest of this doc is about.
             val scrubbed = fileSafe(memberBlsHex)
-            val key = if (scrubbed.length >= KEY_LENGTH) {
+            val key = if (scrubbed == memberBlsHex && scrubbed.length >= KEY_LENGTH) {
                 scrubbed.take(KEY_LENGTH)
             } else {
                 MessageDigest.getInstance("SHA-256")

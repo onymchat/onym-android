@@ -137,39 +137,48 @@ val SepGroupType.collectsRulesAgreements: Boolean
  */
 fun ChatGroup.rulesStanding(blsHex: String): GroupRulesStanding? {
     val member = memberProfiles[blsHex] ?: return null
-    return standing(member, blsHex)
+    return rulesStanding(member, blsHex)
 }
 
 /**
- * The stored bytes are read *before* the group's current state, because
- * they outlive it.
+ * The same answer for a member already in hand.
  *
- * `invitationMessage` can change. A founder who clears the rules would
- * otherwise turn every agreement ever made into "this group asks
- * nothing of anyone", and drop the signature, key and text from every
- * export — deleting the evidence by editing a text field. What somebody
- * signed happened; the group's present wording doesn't get a vote.
+ * Public so a caller that has just read the profile — building a roster
+ * row, or a proof — doesn't look it up twice and give the two lookups a
+ * chance to disagree later.
+ *
+ * The stored bytes are read *before* the group's current state, because
+ * they outlive it. `invitationMessage` can change: a founder who clears
+ * the rules would otherwise turn every agreement ever made into "this
+ * group asks nothing of anyone", deleting the evidence by editing a
+ * text field. What somebody signed happened; the group's present
+ * wording doesn't get a vote.
  */
-private fun ChatGroup.standing(
+fun ChatGroup.rulesStanding(
     member: MemberProfile,
     blsHex: String,
 ): GroupRulesStanding {
-    val current = GroupRules.normalized(invitationMessage)
-    val signature = member.rulesSignature
-    if (signature != null) {
-        val signedText = member.rulesText ?: return GroupRulesStanding.UNKNOWN_RULES
-        if (!member.agreedToRules(groupIdBytes)) return GroupRulesStanding.DOES_NOT_VERIFY
-        return if (signedText == current) {
-            GroupRulesStanding.SIGNED
-        } else {
-            GroupRulesStanding.SIGNED_EARLIER_VERSION
+    // One reading of the stored bytes, from the function whose KDoc
+    // calls itself "the only place that answers it" — rather than a
+    // second `?:` ladder here re-deriving the same four outcomes.
+    when (member.storedAgreement(groupIdBytes)) {
+        MemberProfile.StoredAgreement.UNCHECKABLE -> return GroupRulesStanding.UNKNOWN_RULES
+        MemberProfile.StoredAgreement.NOT_VERIFIED -> return GroupRulesStanding.DOES_NOT_VERIFY
+        MemberProfile.StoredAgreement.VERIFIED -> {
+            return if (member.rulesText == GroupRules.normalized(invitationMessage)) {
+                GroupRulesStanding.SIGNED
+            } else {
+                GroupRulesStanding.SIGNED_EARLIER_VERSION
+            }
         }
+        MemberProfile.StoredAgreement.NONE -> Unit
     }
-    if (current == null) return GroupRulesStanding.NO_RULES
+    if (GroupRules.normalized(invitationMessage) == null) return GroupRulesStanding.NO_RULES
     // Asked after the stored bytes, so a signature made under a
     // governance type that later changed still reads honestly.
     if (!groupType.collectsRulesAgreements) return GroupRulesStanding.NOT_COLLECTED
-    val admin = adminPubkeyHex?.lowercase()
-    if (admin != null && admin == blsHex.lowercase()) return GroupRulesStanding.AUTHOR
+    // `ChatGroup.isAdmin` rather than a fourth hand-rolled comparison —
+    // its KDoc exists because the copies on iOS had started to drift.
+    if (isAdmin(blsHex)) return GroupRulesStanding.AUTHOR
     return GroupRulesStanding.DID_NOT_SIGN
 }
