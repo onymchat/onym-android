@@ -26,11 +26,22 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
  * Brand-anchored QR rendering of [value], with the broken-ring Onym
  * mark badged over the centre.
  *
- * Encoder: ZXing core's [QRCodeWriter] at error-correction level
- * **H (~30%)**. The high ECC budget is what makes the centre logo
+ * Encoder: ZXing core's [QRCodeWriter], preferring error-correction
+ * level **H (~30%)**. The high ECC budget is what makes the centre logo
  * cutout safe — up to ~30% of modules can be obscured (or otherwise
  * unreadable) while the QR still decodes cleanly. We obscure ~22% by
  * area (the white badge), well inside the budget.
+ *
+ * H also has the smallest payload: 1273 bytes at version 40, and an
+ * invite link carrying a group's rules can exceed that (`GroupRules`
+ * budgets 1500 bytes of rules for a ~2273-byte link, measured against
+ * level M). So the level steps down — H, Q, M, L — until the data fits,
+ * and the centre badge is drawn only at H, where the budget covers it.
+ * A link too long even for L renders no QR at all rather than throwing:
+ * `QRCodeWriter` reports over-capacity data by exception, this runs
+ * inside composition, and the share screen's copyable link is still a
+ * working way to send an invite. Losing the QR is a worse invite;
+ * crashing is no invite.
  *
  * Renderer: hand-drawn on a Compose [Canvas] so we can match the
  * iOS prototype's chunky **rounded modules** + white centre badge
@@ -55,7 +66,10 @@ fun OnymQrCode(
     foreground: Color = Color(0xFF0A0A0C),
     background: Color = Color.White,
 ) {
-    val matrix = remember(value) { encodeQrMatrix(value) }
+    // Null when the value fits no level: the caller's copyable link is
+    // still a working invite, and nothing is drawn here.
+    val rendering = remember(value) { encodeQrMatrix(value) } ?: return
+    val matrix = rendering.matrix
     Box(
         modifier = modifier
             .size(size)
@@ -84,7 +98,10 @@ fun OnymQrCode(
         }
         // Centre badge — ~22% of the QR side. White rounded square,
         // OnymMark sits on top in the foreground colour. Matches the
-        // iOS prototype proportions exactly.
+        // iOS prototype proportions exactly. Skipped below level H,
+        // whose error-correction budget is what makes covering a fifth
+        // of the code safe to begin with.
+        if (!rendering.badged) return@Box
         val badgeSize = size * 0.22f
         Box(
             modifier = Modifier
@@ -115,27 +132,54 @@ private class QrBitMatrix(
     fun isOn(x: Int, y: Int): Boolean = bits[y * dimension + x]
 }
 
-private fun encodeQrMatrix(value: String): QrBitMatrix {
-    // Hint the highest error-correction level so the centre logo
-    // cutout doesn't break decode. Margin = 0 because the Compose
-    // surface around the QR provides its own padding (the iOS
-    // design wraps the QR in a 12-pt white card, mirrored here).
-    val hints = mapOf(
-        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
-        EncodeHintType.MARGIN to 0,
-        EncodeHintType.CHARACTER_SET to "UTF-8",
-    )
-    // Pass size 1 → ZXing returns the smallest BitMatrix that
-    // satisfies the encoded version's module count. We then scale
-    // it ourselves on the canvas, so the input "pixel" size is
-    // immaterial.
-    val matrix = QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 1, 1, hints)
-    val dim = matrix.width
-    val bits = BooleanArray(dim * dim)
-    for (y in 0 until dim) {
-        for (x in 0 until dim) {
-            bits[y * dim + x] = matrix.get(x, y)
+/** A matrix that fits, and whether its level can carry the badge. */
+private class QrRendering(val matrix: QrBitMatrix, val badged: Boolean)
+
+/**
+ * The best level this value fits in, or null if it fits none.
+ *
+ * Ordered by preference, not by capacity: H first because the centre
+ * badge needs its budget, then down until the bytes fit. Only H is
+ * badged — obscuring ~22% of a level-M code is how a QR that encodes
+ * fine still fails to scan.
+ */
+private fun encodeQrMatrix(value: String): QrRendering? {
+    for (level in listOf(
+        ErrorCorrectionLevel.H,
+        ErrorCorrectionLevel.Q,
+        ErrorCorrectionLevel.M,
+        ErrorCorrectionLevel.L,
+    )) {
+        // Margin = 0 because the Compose surface around the QR provides
+        // its own padding (the iOS design wraps the QR in a 12-pt white
+        // card, mirrored here).
+        val hints = mapOf(
+            EncodeHintType.ERROR_CORRECTION to level,
+            EncodeHintType.MARGIN to 0,
+            EncodeHintType.CHARACTER_SET to "UTF-8",
+        )
+        // Pass size 1 → ZXing returns the smallest BitMatrix that
+        // satisfies the encoded version's module count. We then scale
+        // it ourselves on the canvas, so the input "pixel" size is
+        // immaterial.
+        val matrix = try {
+            QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 1, 1, hints)
+        } catch (_: Throwable) {
+            // Over-capacity for this level (and anything else ZXing
+            // refuses). Try the next one down.
+            continue
         }
+        val dim = matrix.width
+        val bits = BooleanArray(dim * dim)
+        for (y in 0 until dim) {
+            for (x in 0 until dim) {
+                bits[y * dim + x] = matrix.get(x, y)
+            }
+        }
+        return QrRendering(
+            matrix = QrBitMatrix(dimension = dim, bits = bits),
+            badged = level == ErrorCorrectionLevel.H,
+        )
     }
-    return QrBitMatrix(dimension = dim, bits = bits)
+    return null
 }

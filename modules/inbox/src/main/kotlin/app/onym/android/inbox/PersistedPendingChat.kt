@@ -141,6 +141,9 @@ interface PendingChatDao {
     @Query("UPDATE pending_chats SET encryptedJoinerLabel = :label WHERE id = :id")
     suspend fun setJoinerLabel(id: String, label: ByteArray)
 
+    @Query("UPDATE pending_chats SET encryptedInvitationMessage = :rules WHERE id = :id")
+    suspend fun setRules(id: String, rules: ByteArray?)
+
     @Query("UPDATE pending_chats SET encryptedIntroPublicKey = :introPublicKey WHERE id = :id")
     suspend fun refreshReplyKey(id: String, introPublicKey: ByteArray)
 

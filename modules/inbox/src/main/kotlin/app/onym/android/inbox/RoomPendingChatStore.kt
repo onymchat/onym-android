@@ -104,6 +104,19 @@ class RoomPendingChatStore(
         dao.setJoinerLabel(id = id, label = encrypted)
     }
 
+    override suspend fun setRules(id: String, rules: String?) {
+        val encrypted = if (rules == null) {
+            null
+        } else {
+            // An encrypt that fails leaves the stored text alone rather
+            // than clearing it: the row's old copy is still something a
+            // re-send can sign, and null here would mean the next "Ask
+            // again" silently agreed to nothing.
+            runCatching { encryption.encrypt(rules) }.getOrNull() ?: return
+        }
+        dao.setRules(id = id, rules = encrypted)
+    }
+
     override suspend fun refreshReplyKey(id: String, introPublicKey: ByteArray) {
         val key = try {
             encryption.encrypt(introPublicKey)

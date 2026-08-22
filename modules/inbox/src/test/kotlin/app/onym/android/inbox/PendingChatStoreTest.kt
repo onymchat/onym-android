@@ -405,6 +405,8 @@ private class FailingPendingChatDao(
 
     override suspend fun setJoinerLabel(id: String, label: ByteArray) = Unit
 
+    override suspend fun setRules(id: String, rules: ByteArray?) = Unit
+
     override suspend fun refreshReplyKey(id: String, introPublicKey: ByteArray) = Unit
 
     override suspend fun delete(id: String) = Unit
@@ -433,6 +435,8 @@ private class RecordingPendingChatDao : PendingChatDao {
     }
 
     override suspend fun setJoinerLabel(id: String, label: ByteArray) = Unit
+
+    override suspend fun setRules(id: String, rules: ByteArray?) = Unit
 
     override suspend fun refreshReplyKey(id: String, introPublicKey: ByteArray) = Unit
 

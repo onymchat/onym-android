@@ -3,6 +3,7 @@ package app.onym.android.inbox
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.onym.android.group.GroupRepository
+import app.onym.android.group.GroupRules
 import app.onym.android.identity.IdentityId
 import app.onym.android.group.IntroCapability
 import app.onym.android.group.JoinRequestSender
@@ -451,6 +452,12 @@ class PendingChatsViewModel(
         ) {
             return JoinDestination.Waiting(rowId)
         }
+        // Normalized rather than trusted: rules that are only whitespace
+        // are no rules, and passing "   " through would draw an empty
+        // card, demand a tick for it, and then sign nothing, because the
+        // sender normalizes before signing.
+        val resolvedRules =
+            GroupRules.normalized(capability.rules ?: existing?.invitationMessage)
         return JoinDestination.Confirm(
             JoinConfirmation(
                 rowId = rowId,
@@ -459,12 +466,18 @@ class PendingChatsViewModel(
                 groupIdHex = groupIdHex,
                 groupName = capability.groupName ?: existing?.groupName,
                 inviterAlias = existing?.inviterAlias.orEmpty(),
-                invitationMessage = existing?.invitationMessage,
+                // Only a greeting that says something the rules don't
+                // earns its own card. Since the rename, a group's
+                // invitation message *is* its rules, so the two fields
+                // usually hold one string — drawn twice, it reads as the
+                // founder having said it twice.
+                invitationMessage = existing?.invitationMessage
+                    ?.takeIf { GroupRules.normalized(it) != resolvedRules },
                 // The link's own copy wins over a stored offer's. Both
                 // should say the same thing, and when they don't, the
                 // rules the person is about to read have to be the ones
                 // that came with the invitation they actually opened.
-                rules = capability.rules ?: existing?.invitationMessage,
+                rules = resolvedRules,
                 introPublicKey = capability.introPublicKey,
                 suggestedLabel = existing?.joinerLabel ?: displayLabel(owner),
                 origin = JoinConfirmation.Origin.Link(capability),
@@ -489,12 +502,17 @@ class PendingChatsViewModel(
             groupIdHex = chat.groupIdHex,
             groupName = chat.groupName,
             inviterAlias = chat.inviterAlias,
-            invitationMessage = chat.invitationMessage,
+            // Always null here, and deliberately: a pushed offer keeps
+            // one string, which the rules card below draws. Setting both
+            // showed the founder's words twice — once as a greeting and
+            // once as the rules they are.
+            invitationMessage = null,
             introPublicKey = chat.introPublicKey,
             suggestedLabel = chat.joinerLabel ?: displayLabel(chat.ownerIdentityId),
             // A pushed invitation carries its rules on the stored offer
-            // — there is no capability to read them from.
-            rules = chat.invitationMessage,
+            // — there is no capability to read them from. Normalized for
+            // the same reason as the link path's.
+            rules = GroupRules.normalized(chat.invitationMessage),
             origin = JoinConfirmation.Origin.Offer(chat.id),
         )
     }
@@ -525,7 +543,7 @@ class PendingChatsViewModel(
                 val chat = pending.firstOrNull { it.id == origin.rowId }
                     ?: return JoinDestination.Failed(JoinOutcome.FailureReason.NOT_SAVED)
                 repository.attachJoinerLabel(chat.id, trimmed)
-                viewModelScope.launch { send(chat, trimmed) }
+                viewModelScope.launch { send(chat, trimmed, confirmation.rules) }
                 JoinDestination.Waiting(chat.id)
             }
             is JoinConfirmation.Origin.Link -> {
@@ -547,10 +565,12 @@ class PendingChatsViewModel(
                     // shows the group, not a person who never said their
                     // name.
                     inviterAlias = "",
-                    // The link's rules, kept on the row: "Ask again" has
-                    // to re-sign the same text, and the row is the only
-                    // place it survives once the capability is gone.
-                    invitationMessage = origin.capability.rules,
+                    // The rules the screen showed, kept on the row: "Ask
+                    // again" has to re-sign the same text, and the row is
+                    // the only place it survives once the capability is
+                    // gone. The screen's copy, not the capability's, so
+                    // the two cannot drift.
+                    invitationMessage = confirmation.rules,
                     receivedAt = Instant.now(),
                     status = PendingChat.Status.Offered,
                     // A local clock is suitable for list ordering but
@@ -561,7 +581,7 @@ class PendingChatsViewModel(
                 )
                 when (repository.record(chat)) {
                     PendingChatWriteOutcome.INSERTED -> {
-                        viewModelScope.launch { send(chat, trimmed) }
+                        viewModelScope.launch { send(chat, trimmed, confirmation.rules) }
                         JoinDestination.Waiting(chat.id)
                     }
                     PendingChatWriteOutcome.ALREADY_PRESENT -> {
@@ -580,7 +600,16 @@ class PendingChatsViewModel(
                                     existing.status is PendingChat.Status.Failed
                                 )
                         ) {
-                            viewModelScope.launch { send(existing, trimmed) }
+                            // The stored offer's text may differ from the
+                            // link's, and the screen resolved the link's
+                            // ahead of it. So the row is brought up to
+                            // what was actually read before anything is
+                            // signed — otherwise this send, and every
+                            // "Ask again" after it, would attest to words
+                            // nobody saw.
+                            repository.attachRules(chat.id, confirmation.rules)
+                            val shown = existing.copy(invitationMessage = confirmation.rules)
+                            viewModelScope.launch { send(shown, trimmed, confirmation.rules) }
                         }
                         JoinDestination.Waiting(chat.id)
                     }
@@ -641,7 +670,7 @@ class PendingChatsViewModel(
                         // than asking under the same name, and far
                         // better than a button that lies.
                         val label = chat.joinerLabel ?: displayLabel(chat.ownerIdentityId)
-                        send(chat, label)
+                        send(chat, label, GroupRules.normalized(chat.invitationMessage))
                     }
                 }
             }
@@ -668,14 +697,15 @@ class PendingChatsViewModel(
      *
      * [label] is always supplied by a caller a person reached: there is
      * no path from an inbound link or event to here.
+     *
+     * [rules] is passed rather than read off [chat], because the two can
+     * disagree and only one of them is the agreement: the screen
+     * resolves a link's rules ahead of a stored offer's, so a row whose
+     * text differs would otherwise be signed instead of the words that
+     * were on screen. A re-send passes the row's own copy, which is the
+     * same text, kept for exactly that.
      */
-    /**
-     * @param chat the row being sent for. The rules signed are its own —
-     *   the same text the screen showed, kept there for exactly this
-     *   reason, so a re-send months later still says what the first one
-     *   said.
-     */
-    private suspend fun send(chat: PendingChat, label: String) {
+    private suspend fun send(chat: PendingChat, label: String, rules: String?) {
         val id = chat.id
         if (id in sendingIds) return
         val capability = try {
@@ -695,7 +725,7 @@ class PendingChatsViewModel(
         // in-flight marker; otherwise the row stays at "Sending…" with
         // Accept and Ask again disabled for the rest of the process.
         try {
-            when (submitJoin(capability, label, chat.ownerIdentityId, chat.invitationMessage)) {
+            when (submitJoin(capability, label, chat.ownerIdentityId, rules)) {
                 is JoinRequestSender.Outcome.Sent -> repository.markRequested(id)
                 is JoinRequestSender.Outcome.NoIdentityLoaded ->
                     repository.markFailed(id, PendingChat.SendFailure.NO_IDENTITY)

@@ -164,6 +164,34 @@ object GroupRules {
     fun fits(rules: String): Boolean =
         canonical(rules).toByteArray(Charsets.UTF_8).size <= MAX_BYTES
 
+    /**
+     * The rules clamped to what an invite can carry, in both units that
+     * bound it — what a compose field applies as someone types.
+     *
+     * Bytes are the cap that decides whether a link is valid, and
+     * characters are what the counter shows; one character can cost four
+     * bytes, so trimming proceeds a character at a time rather than
+     * slicing bytes and risking a cut mid-codepoint.
+     */
+    fun clamped(rules: String): String {
+        var clamped = rules.take(MAX_LENGTH)
+        while (clamped.toByteArray(Charsets.UTF_8).size > MAX_BYTES) {
+            clamped = clamped.dropLast(1)
+        }
+        return clamped
+    }
+
+    /**
+     * How much room is left, in whichever unit is closer: Latin text
+     * runs out of characters first, and scripts that cost more per
+     * character run out of bytes first. Counting down the larger of the
+     * two would keep moving after typing had stopped having any effect.
+     */
+    fun remaining(rules: String): Int = minOf(
+        MAX_LENGTH - rules.length,
+        MAX_BYTES - rules.toByteArray(Charsets.UTF_8).size,
+    )
+
     /** Null for rules that are absent or blank — a group with no rules
      *  asks for no agreement, and an empty string must not become a
      *  thing to sign. */

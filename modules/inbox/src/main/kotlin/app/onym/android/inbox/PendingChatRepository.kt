@@ -117,6 +117,14 @@ class PendingChatRepository(
         refreshLocked()
     }
 
+    /** Bring a row's rules up to the text the person was actually shown,
+     *  so a send and every re-send after it attest to the same words.
+     *  See [PendingChatStore.setRules]. */
+    suspend fun attachRules(id: String, rules: String?) = mutex.withLock {
+        store.setRules(id, rules)
+        refreshLocked()
+    }
+
     /** Drop a row the person swiped away. Local only — no NACK to the
      *  founder, whose outstanding intro key simply goes unused. */
     suspend fun remove(id: String) = mutex.withLock {

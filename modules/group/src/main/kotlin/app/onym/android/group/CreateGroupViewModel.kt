@@ -235,9 +235,7 @@ class CreateGroupViewModel(
         // invite QR code's, and letting someone type past it into a
         // field that will refuse to mint a link at the end is the worse
         // failure.
-        _state.value = _state.value.copy(
-            invitationMessage = text.take(GroupRules.MAX_LENGTH),
-        )
+        _state.value = _state.value.copy(invitationMessage = GroupRules.clamped(text))
     }
 
     /**

@@ -934,9 +934,9 @@
   <string name="chat_join_request_rules_unknown">Подписал правила, которых нет на этом устройстве — проверить нечем</string>
   <string name="chat_join_request_rules_unsigned">Не подписал правила группы</string>
   <string name="chat_join_request_rules_invalid">Их подпись под правилами не сходится</string>
-  <string name="create_group_rules_counter">%1$d/%2$d</string>
+  <string name="create_group_rules_counter">осталось %1$d</string>
   <string name="join_confirm_rules_label">Правила группы</string>
-  <string name="join_confirm_agree">Я согласен с этими правилами</string>
+  <string name="join_confirm_agree">Я принимаю эти правила</string>
   <string name="join_confirm_signed_note">Ваше согласие подписывается ключом этой личности и отправляется вместе с запросом.</string>
   <string name="join_confirm_agree_and_send">Согласиться и отправить запрос</string>
   <string name="join_confirm_rules_disclosure">Вместе с ним отправляется ваше подписанное согласие с правилами.</string>

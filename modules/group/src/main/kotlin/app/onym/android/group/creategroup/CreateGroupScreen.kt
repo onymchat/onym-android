@@ -246,15 +246,17 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                     },
                 )
             }
-            // The counter appears at the last hundred characters and not
-            // before: one sitting at 500 on an empty field reads as a
-            // demand for 500 characters.
-            if (state.invitationMessage.length > GroupRules.MAX_LENGTH - 100) {
+            // The counter appears in the last hundred and not before:
+            // one sitting at 500 on an empty field reads as a demand for
+            // 500 characters. It counts down whichever cap is closer —
+            // Latin text runs out of characters first, other scripts run
+            // out of bytes first, and a counter still moving after
+            // typing has stopped having an effect is worse than none.
+            if (GroupRules.remaining(state.invitationMessage) < 100) {
                 Text(
                     text = stringResource(
                         R.string.create_group_rules_counter,
-                        state.invitationMessage.length,
-                        GroupRules.MAX_LENGTH,
+                        GroupRules.remaining(state.invitationMessage),
                     ),
                     color = LocalOnymTokens.current.text3,
                     style = TextStyle(fontSize = 11.5.sp),
