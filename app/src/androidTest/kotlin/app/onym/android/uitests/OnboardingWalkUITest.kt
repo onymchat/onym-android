@@ -13,10 +13,14 @@ import app.onym.android.discovery.DiscoverySource
 import app.onym.android.discovery.DiscoverySourcesConfiguration
 import app.onym.android.identity.IdentitySecretStore
 import app.onym.android.onboarding.OnboardingStep
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeAuthorityManifestFetcher
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
@@ -602,6 +606,65 @@ class OnboardingWalkUITest {
 
         onboarding.tapPrimary(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
+        assertFalse("the walk must not have completed", onboardingStore.completed)
+    }
+
+    // ─── (3b) welcome restore-from-phrase path ────────────────────
+
+    /**
+     * The welcome step's "I have a recovery phrase" path (iOS
+     * parity). Three gates in one walk:
+     *  - the overlay's submit is word-count gated (3 words never
+     *    enable it);
+     *  - a known-words phrase with a bad checksum surfaces the
+     *    inline error and stays on the overlay;
+     *  - the valid vector — pasted with NEWLINES, exercising the
+     *    normalization in front of the space-splitting parser —
+     *    replaces the auto-bootstrap identity, advances the walk,
+     *    flips the identity step's title to the restored copy, and
+     *    the step's outcome gate unlocks off the RESTORED snapshot.
+     */
+    @Test
+    fun welcomeRestorePath_replacesIdentityAndFlipsCopy() {
+        val onboarding = OnboardingScreenObject(composeRule)
+        onboarding.awaitStep(OnboardingStep.Welcome)
+
+        // The entry renders once the allow-probe answers (async).
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("onboarding.welcome.restore").performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore.phrase_field")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        val field = composeRule.onNodeWithTag("onboarding.welcome.restore.phrase_field")
+        val submit = composeRule.onNodeWithTag("onboarding.welcome.restore.submit")
+
+        // Word-count gate.
+        field.performTextInput("abandon abandon abandon")
+        submit.assertIsNotEnabled()
+
+        // Known words, bad checksum → inline error, overlay stays.
+        field.performTextClearance()
+        field.performTextInput(List(12) { "abandon" }.joinToString(" "))
+        submit.assertIsEnabled()
+        submit.performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore.error")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // The all-zeros-entropy test vector, newline-separated.
+        field.performTextClearance()
+        field.performTextInput((List(11) { "abandon" } + "about").joinToString("\n"))
+        submit.performClick()
+
+        onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.title(OnboardingStep.Identity)
+            .assertTextEquals("Restoring your identity")
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
         assertFalse("the walk must not have completed", onboardingStore.completed)
     }
 

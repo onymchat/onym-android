@@ -139,6 +139,8 @@
     <string name="onboarding_recovery_body_none">Откройте 12 слов, запишите их и подтвердите несколько из них. Около минуты.</string>
     <string name="onboarding_recovery_body_revealed">Вы увидели 12 слов. Проверка нескольких из них убедит, что ваша запись верна.</string>
     <string name="onboarding_recovery_body_verified">Вы открыли и подтвердили фразу. Храните её в надёжном месте — не в скриншотах и не в чатах.</string>
+    <string name="onboarding_recovery_body_none_restored">Откройте свою фразу восстановления, запишите её и подтвердите несколько её слов. Около минуты.</string>
+    <string name="onboarding_recovery_body_revealed_restored">Вы увидели свою фразу восстановления. Проверка нескольких её слов убедит, что ваша запись верна.</string>
     <string name="onboarding_recovery_reveal">Показать фразу восстановления</string>
     <string name="onboarding_recovery_view_again">Посмотреть ещё раз</string>
     <string name="onboarding_recovery_footnote">Любой, у кого есть эти слова, сможет читать ваши будущие сообщения. Не храните их в скриншотах и чатах.</string>
@@ -150,8 +152,10 @@
     <string name="onboarding_done_footnote">Всё это можно изменить позже в Настройках. Здесь нет ничего окончательного, кроме фразы восстановления.</string>
     <string name="onboarding_done_nudge_full_title">Сделайте резервную копию фразы восстановления</string>
     <string name="onboarding_done_nudge_full_body">Ключ вашей личности создан на этом устройстве и больше нигде не существует. Сделайте резервную копию (Настройки → Резервная копия ключей), чтобы можно было восстановить аккаунт.</string>
+    <string name="onboarding_done_nudge_full_body_restored">Вы восстановили эту личность из её фразы восстановления. Храните эту фразу в надёжном месте — она по-прежнему единственный способ вернуть доступ к аккаунту.</string>
     <string name="onboarding_done_nudge_revealed_title">Завершите проверку фразы восстановления</string>
     <string name="onboarding_done_nudge_revealed_body">Вы увидели 12 слов. Подтвердите несколько из них в Настройки → Резервная копия ключей, чтобы убедиться, что запись верна.</string>
+    <string name="onboarding_done_nudge_revealed_body_restored">Вы увидели свою фразу восстановления. Подтвердите несколько её слов в Настройки → Резервная копия ключей, чтобы убедиться, что запись верна.</string>
     <plurals name="onboarding_done_services_count">
         <item quantity="one">%d сервис</item>
         <item quantity="few">%d сервиса</item>

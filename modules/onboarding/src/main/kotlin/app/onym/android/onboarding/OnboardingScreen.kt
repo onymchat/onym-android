@@ -113,10 +113,7 @@ fun OnboardingScreen(
 
 // ── Copy ──────────────────────────────────────────────────────────
 
-private fun titleRes(
-    step: OnboardingStep,
-    origin: IdentityOrigin = IdentityOrigin.Minted,
-): Int = when (step) {
+private fun titleRes(step: OnboardingStep, origin: IdentityOrigin): Int = when (step) {
     OnboardingStep.Welcome -> R.string.onboarding_welcome_title
     // "Making your keys" would be a lie over an identity the user
     // just brought here from a recovery phrase — parity with iOS's
@@ -133,10 +130,7 @@ private fun titleRes(
     OnboardingStep.Done -> R.string.onboarding_done_title
 }
 
-private fun subtitleRes(
-    step: OnboardingStep,
-    origin: IdentityOrigin = IdentityOrigin.Minted,
-): Int? = when (step) {
+private fun subtitleRes(step: OnboardingStep, origin: IdentityOrigin): Int? = when (step) {
     OnboardingStep.Welcome -> R.string.onboarding_welcome_subtitle
     OnboardingStep.Identity -> R.string.onboarding_identity_subtitle
     OnboardingStep.Services -> R.string.onboarding_services_subtitle
@@ -221,7 +215,7 @@ private fun DoneStepContent(state: OnboardingFlow.State) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = stringResource(titleRes(step)),
+                    text = stringResource(titleRes(step, state.identityOrigin)),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
@@ -267,7 +261,9 @@ private fun PlaceholderStepContent(step: OnboardingStep) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = stringResource(titleRes(step)),
+                // The placeholder only ever labels middle steps in
+                // module previews/tests — origin-neutral by design.
+                text = stringResource(titleRes(step, IdentityOrigin.Minted)),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

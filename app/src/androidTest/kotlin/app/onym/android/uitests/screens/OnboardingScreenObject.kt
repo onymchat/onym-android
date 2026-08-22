@@ -41,6 +41,9 @@ import kotlin.time.Duration.Companion.seconds
  *                `.confirm/.fingerprint/.pin/.added`; configured rows
  *                `.configured.<url>`; published notary rows
  *                `onboarding.services.groupIntegrity.published.<url>`
+ *  - welcome:    restore entry `onboarding.welcome.restore` +
+ *                overlay `onboarding.welcome.restore.{phrase_field,
+ *                error,submit,cancel}` (iOS a11y-id parity)
  *  - recovery:   `onboarding.recoveryPhrase.{status,reveal}` <!-- onym:allow-secret-read -->
  *  - done:       `onboarding.done.{summary,backup_nudge}`
  *
