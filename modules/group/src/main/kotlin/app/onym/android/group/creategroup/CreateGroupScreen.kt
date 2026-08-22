@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.onym.android.group.GroupRules
 import app.onym.android.strings.R
 import app.onym.android.group.CreateCtaLabel
 import app.onym.android.group.CreateGroupProgress
@@ -243,6 +244,26 @@ private fun Step1Screen(viewModel: CreateGroupViewModel) {
                             inner()
                         }
                     },
+                )
+            }
+            // The counter appears in the last hundred and not before:
+            // one sitting at 500 on an empty field reads as a demand for
+            // 500 characters. It counts down whichever cap is closer —
+            // Latin text runs out of characters first, other scripts run
+            // out of bytes first, and a counter still moving after
+            // typing has stopped having an effect is worse than none.
+            if (GroupRules.remaining(state.invitationMessage) < 100) {
+                Text(
+                    text = stringResource(
+                        R.string.create_group_rules_counter,
+                        GroupRules.remaining(state.invitationMessage),
+                    ),
+                    color = LocalOnymTokens.current.text3,
+                    style = TextStyle(fontSize = 11.5.sp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 4.dp, top = 6.dp)
+                        .testTag("create_group.rules_counter"),
                 )
             }
             Text(

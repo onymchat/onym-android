@@ -60,6 +60,11 @@ class InviteIntroducer(
         ownerIdentityId: IdentityId,
         groupId: ByteArray,
         groupName: String? = null,
+        /** The group's rules *as they are now*. A link is a pointer to
+         *  the group, so a reused key handed out with rules from
+         *  whenever it was minted would have joiners signing text the
+         *  founder had already replaced. */
+        rules: String? = null,
         label: String? = null,
     ): IntroCapability = withContext(ioDispatcher) {
         require(groupId.size == 32) {
@@ -88,6 +93,7 @@ class InviteIntroducer(
             introPublicKey = publicKey,
             groupId = groupId,
             groupName = groupName,
+            rules = GroupRules.normalized(rules),
         )
     }
 
@@ -99,6 +105,11 @@ class InviteIntroducer(
         ownerIdentityId: IdentityId,
         groupId: ByteArray,
         groupName: String? = null,
+        /** The group's rules *as they are now*. A link is a pointer to
+         *  the group, so a reused key handed out with rules from
+         *  whenever it was minted would have joiners signing text the
+         *  founder had already replaced. */
+        rules: String? = null,
     ): IntroCapability = withContext(ioDispatcher) {
         // Ahead of the store read so the throw is the same whichever
         // branch would have run.
@@ -115,12 +126,13 @@ class InviteIntroducer(
                 .firstOrNull {
                     it.groupId.contentEquals(groupId) && it.label == null && !it.isLegacy
                 }
-                ?: return@withContext mint(ownerIdentityId, groupId, groupName)
+                ?: return@withContext mint(ownerIdentityId, groupId, groupName, rules)
 
             IntroCapability(
                 introPublicKey = live.introPublicKey,
                 groupId = groupId,
                 groupName = groupName,
+                rules = GroupRules.normalized(rules),
             )
         }
     }
@@ -133,6 +145,11 @@ class InviteIntroducer(
         ownerIdentityId: IdentityId,
         groupId: ByteArray,
         groupName: String? = null,
+        /** The group's rules *as they are now*. A link is a pointer to
+         *  the group, so a reused key handed out with rules from
+         *  whenever it was minted would have joiners signing text the
+         *  founder had already replaced. */
+        rules: String? = null,
     ): IntroCapability = withContext(ioDispatcher) {
         require(groupId.size == 32) {
             "groupId: expected 32 bytes, got ${groupId.size}"
@@ -148,7 +165,7 @@ class InviteIntroducer(
                 }
                 .map { it.introPublicKey }
 
-            val fresh = mint(ownerIdentityId, groupId, groupName)
+            val fresh = mint(ownerIdentityId, groupId, groupName, rules)
 
             for (pub in superseded) {
                 if (!pub.contentEquals(fresh.introPublicKey)) store.revoke(pub)

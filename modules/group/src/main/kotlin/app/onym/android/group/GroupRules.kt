@@ -164,6 +164,52 @@ object GroupRules {
     fun fits(rules: String): Boolean =
         canonical(rules).toByteArray(Charsets.UTF_8).size <= MAX_BYTES
 
+    /**
+     * The rules clamped to what an invite can carry, in both units that
+     * bound it — what a compose field applies as someone types.
+     *
+     * Bytes are the cap that decides whether a link is valid, and
+     * characters are what the counter shows; one character can cost four
+     * bytes, so trimming proceeds a character at a time rather than
+     * slicing bytes and risking a cut mid-codepoint.
+     */
+    fun clamped(rules: String): String {
+        var clamped = rules.take(MAX_LENGTH).dropDanglingSurrogate()
+        // Unreachable on this platform as the two caps stand — no UTF-16
+        // unit costs more than three UTF-8 bytes, so 500 units is never
+        // more than 1500 bytes. Kept because it is the cap that decides
+        // whether a link is valid, and because the character cap is the
+        // advisory one: a change to either constant must not silently
+        // start minting links the wire rejects.
+        while (clamped.toByteArray(Charsets.UTF_8).size > MAX_BYTES) {
+            clamped = clamped.dropLast(1).dropDanglingSurrogate()
+        }
+        return clamped
+    }
+
+    /**
+     * Drop a trailing high surrogate left by cutting between the halves
+     * of one character.
+     *
+     * `take` and `dropLast` count UTF-16 units, so a cut can land inside
+     * an emoji — and the leftover half is not a character: it draws as a
+     * replacement glyph and `toByteArray` silently transcodes it to `?`,
+     * in the field, in storage, and in the bytes both platforms hash.
+     */
+    private fun String.dropDanglingSurrogate(): String =
+        if (isNotEmpty() && last().isHighSurrogate()) dropLast(1) else this
+
+    /**
+     * How much room is left, in whichever unit is closer: Latin text
+     * runs out of characters first, and scripts that cost more per
+     * character run out of bytes first. Counting down the larger of the
+     * two would keep moving after typing had stopped having any effect.
+     */
+    fun remaining(rules: String): Int = minOf(
+        MAX_LENGTH - rules.length,
+        MAX_BYTES - rules.toByteArray(Charsets.UTF_8).size,
+    )
+
     /** Null for rules that are absent or blank — a group with no rules
      *  asks for no agreement, and an empty string must not become a
      *  thing to sign. */

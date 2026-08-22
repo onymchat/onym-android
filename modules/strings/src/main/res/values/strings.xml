@@ -412,9 +412,9 @@
     <string name="create_group_photo_add">Add photo</string>
     <string name="create_group_photo_change">Change photo</string>
     <string name="create_group_photo_remove">Remove</string>
-    <string name="create_group_invitation_label">Invitation message</string>
-    <string name="create_group_invitation_placeholder">Add a greeting, group rules, or policy…</string>
-    <string name="create_group_invitation_helper">Shown to people before they accept your invite. Optional.</string>
+    <string name="create_group_invitation_label">Group rules</string>
+    <string name="create_group_invitation_placeholder">What everyone here agrees to…</string>
+    <string name="create_group_invitation_helper">Anyone joining reads these and signs that they agree. Optional.</string>
     <string name="create_group_how_its_run">How it\'s run</string>
     <string name="create_group_soon_badge">Soon</string>
     <string name="create_group_next">Next · Add people</string>
@@ -935,4 +935,10 @@
   <string name="chat_join_request_rules_unknown">Signed rules this device doesn’t have — can’t be checked</string>
   <string name="chat_join_request_rules_unsigned">Didn’t sign the group rules</string>
   <string name="chat_join_request_rules_invalid">Their signature on the rules doesn’t check out</string>
+  <string name="create_group_rules_counter">%1$d left</string>
+  <string name="join_confirm_rules_label">Group rules</string>
+  <string name="join_confirm_agree">I agree to these rules</string>
+  <string name="join_confirm_signed_note">Your agreement is signed with this identity’s key and sent with your request.</string>
+  <string name="join_confirm_agree_and_send">Agree and send request</string>
+  <string name="join_confirm_rules_disclosure">Your signed agreement to the rules goes with it.</string>
 </resources>

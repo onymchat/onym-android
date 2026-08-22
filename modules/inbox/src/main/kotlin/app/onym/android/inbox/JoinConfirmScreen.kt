@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,6 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -69,7 +74,21 @@ fun JoinConfirmScreen(
         mutableStateOf(confirmation.suggestedLabel)
     }
     var isSending by remember { mutableStateOf(false) }
-    val canSend = !isSending && label.isNotBlank()
+    // Unticked until the person ticks it. Only ever gates Send for a
+    // group that has rules — see below.
+    // Keyed on the text as well as the row: the row id is
+    // "<group>:<owner>" and survives a founder rewriting the rules, so a
+    // tick restored across that change would enable Send over words
+    // nobody read.
+    var agreedToRules by rememberSaveable(confirmation.rowId, confirmation.rules) {
+        mutableStateOf(false)
+    }
+    // A group that asks nothing of its joiners keeps the one-tap join
+    // the pre-filled name bought: there is nothing to affirm, and a tick
+    // standing for nothing is friction that teaches people to tick
+    // without reading.
+    val canSend = !isSending && label.isNotBlank() &&
+        (confirmation.rules == null || agreedToRules)
     val title = confirmation.groupName?.takeIf { it.isNotBlank() }
         ?: stringResource(R.string.pending_chat_unnamed)
 
@@ -133,6 +152,15 @@ fun JoinConfirmScreen(
                 }
             }
 
+            confirmation.rules?.let { rules ->
+                Spacer(Modifier.height(16.dp))
+                RulesCard(
+                    rules = rules,
+                    agreed = agreedToRules,
+                    onAgreedChange = { agreedToRules = it },
+                )
+            }
+
             Spacer(Modifier.height(20.dp))
             OutlinedTextField(
                 value = label,
@@ -170,14 +198,78 @@ fun JoinConfirmScreen(
                     .testTag("join_confirm.send"),
             ) {
                 Text(
-                    if (isSending) {
-                        stringResource(R.string.pending_chat_sending)
-                    } else {
-                        stringResource(R.string.join_confirm_send)
+                    when {
+                        isSending -> stringResource(R.string.pending_chat_sending)
+                        confirmation.rules != null ->
+                            stringResource(R.string.join_confirm_agree_and_send)
+                        else -> stringResource(R.string.join_confirm_send)
                     },
                 )
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/**
+ * The rules, and the tick that turns reading them into agreeing.
+ *
+ * Send signs this exact text, so it is shown in full rather than
+ * truncated behind a "more": a signature over words that were folded
+ * away is not much of an agreement. The text is founder-supplied and
+ * untrusted, hence rendered plain — no markdown, no links to follow.
+ */
+@Composable
+private fun RulesCard(
+    rules: String,
+    agreed: Boolean,
+    onAgreedChange: (Boolean) -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().testTag("join_confirm.rules"),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.join_confirm_rules_label),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = rules,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.testTag("join_confirm.rules_text"),
+            )
+            HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = agreed,
+                        role = Role.Checkbox,
+                        onValueChange = onAgreedChange,
+                    )
+                    .testTag("join_confirm.agree_toggle"),
+            ) {
+                Checkbox(checked = agreed, onCheckedChange = null)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.join_confirm_agree),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            // Said plainly, because it is the part that outlives the
+            // tap: the founder keeps this, and can show it.
+            Text(
+                text = stringResource(R.string.join_confirm_signed_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -209,6 +301,13 @@ private fun Disclosure(confirmation: PendingChatsViewModel.JoinConfirmation) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Start,
                     modifier = Modifier.padding(start = 10.dp),
+                )
+            }
+            if (confirmation.rules != null) {
+                Text(
+                    text = stringResource(R.string.join_confirm_rules_disclosure),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             DisclosureRow(

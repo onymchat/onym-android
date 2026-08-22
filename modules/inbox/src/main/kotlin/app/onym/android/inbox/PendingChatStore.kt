@@ -64,6 +64,19 @@ interface PendingChatStore {
     suspend fun setJoinerLabel(id: String, label: String)
 
     /**
+     * Replace the rules kept on a row with the ones a person was
+     * actually shown.
+     *
+     * Separate from [refreshOffer] because it is not an offer: it
+     * carries no authenticated timestamp and must not reorder anything.
+     * It exists because a link's rules win over a stored offer's on the
+     * confirmation screen, so the row has to be brought up to what was
+     * read before anything is signed — otherwise this send, and every
+     * "Ask again" after it, would attest to words nobody saw.
+     */
+    suspend fun setRules(id: String, rules: String?)
+
+    /**
      * Use the capability from a link/QR the person just acted on without
      * changing sender-authenticated offer ordering or invitation copy.
      * Link capabilities carry no authenticated timestamp, so they must
@@ -138,6 +151,12 @@ class InMemoryPendingChatStore : PendingChatStore {
         val index = rows.indexOfFirst { it.id == id }
         if (index < 0) return
         rows[index] = rows[index].copy(joinerLabel = label)
+    }
+
+    override suspend fun setRules(id: String, rules: String?) {
+        val index = rows.indexOfFirst { it.id == id }
+        if (index < 0) return
+        rows[index] = rows[index].copy(invitationMessage = rules)
     }
 
     override suspend fun refreshReplyKey(id: String, introPublicKey: ByteArray) {
@@ -222,6 +241,13 @@ class FailoverPendingChatStore(
         usePrimaryOrFallback(
             primaryCall = { it.setJoinerLabel(id, label) },
             fallbackCall = { it.setJoinerLabel(id, label) },
+        )
+    }
+
+    override suspend fun setRules(id: String, rules: String?) = mutex.withLock {
+        usePrimaryOrFallback(
+            primaryCall = { it.setRules(id, rules) },
+            fallbackCall = { it.setRules(id, rules) },
         )
     }
 
