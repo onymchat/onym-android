@@ -2,8 +2,16 @@ package app.onym.android.uitests
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.onym.android.MainActivity
@@ -14,15 +22,6 @@ import app.onym.android.discovery.DiscoverySourcesConfiguration
 import app.onym.android.foundation.Bip39
 import app.onym.android.identity.IdentityId
 import app.onym.android.identity.IdentitySecretStore
-import app.onym.android.onboarding.OnboardingStep
-import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performTextClearance
-import androidx.compose.ui.test.performTextInput
 import app.onym.android.moderation.support.FakeAuthorityClient
 import app.onym.android.moderation.support.FakeAuthorityManifestFetcher
 import app.onym.android.moderation.support.FakeDeviceAttestationProvider
@@ -30,10 +29,13 @@ import app.onym.android.moderation.support.FakeKnownAuthoritiesFetcher
 import app.onym.android.moderation.support.InMemoryGateStateStore
 import app.onym.android.moderation.support.InMemoryMandateStore
 import app.onym.android.moderation.support.ScriptedEnforcementBackendClient
+import app.onym.android.onboarding.OnboardingStep
 import app.onym.android.support.FakeDiscoveryFetcher
 import app.onym.android.support.InMemoryDiscoveryStore
 import app.onym.android.support.InMemoryOnboardingStore
 import app.onym.android.uitests.screens.OnboardingScreenObject
+import java.security.Security
+import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Assert.assertEquals
@@ -44,8 +46,6 @@ import org.junit.Test
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 import org.junit.runner.RunWith
-import java.security.Security
-import java.time.Instant
 
 /**
  * End-to-end coverage of the redesigned first-launch onboarding walk:
@@ -609,6 +609,36 @@ class OnboardingWalkUITest {
         onboarding.tapPrimary(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
         assertFalse("the walk must not have completed", onboardingStore.completed)
+    }
+
+    /**
+     * Back to Welcome RETIRES the restore entry. Once the walk has
+     * advanced, seats may be configured (and registrations signed)
+     * against the identity on the device, and
+     * `IdentityRepository.restore` would swap it out from under them
+     * — so the entry is gated on the walk never having left Welcome,
+     * not merely on standing there.
+     */
+    @Test
+    fun backToWelcome_retiresTheRestoreEntry() {
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.tapBack(OnboardingStep.Identity)
+        onboarding.awaitStep(OnboardingStep.Welcome)
+
+        assertTrue(
+            "the restore entry must not survive a walk that already advanced",
+            composeRule.onAllNodesWithTag("onboarding.welcome.restore")
+                .fetchSemanticsNodes().isEmpty(),
+        )
     }
 
     // ─── (3b) welcome restore-from-phrase path ────────────────────

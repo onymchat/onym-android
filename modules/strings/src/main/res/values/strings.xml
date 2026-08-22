@@ -29,7 +29,7 @@
     <string name="cancel">Cancel</string>
 
     <!-- ─── Intro screen ─────────────────────────────────────────── -->
-    <string name="your_identity_in_12_words">Your identity, in 12 words</string>
+    <string name="your_identity_in_words">Your identity, in a handful of words</string>
     <string name="recovery_phrase_intro_subtitle">Write them down. Keep them offline. This phrase restores your Nostr, Stellar, and BLS keys on any device.</string>
     <string name="before_you_start">Before you start</string>
     <string name="rule_never_share">Never share or photograph</string>
@@ -70,7 +70,7 @@
     <string name="search">Search</string>
     <string name="security">Security</string>
     <string name="backup_recovery_phrase">Backup Recovery Phrase</string>
-    <string name="security_footer_view_recovery_phrase">View your 12-word recovery phrase. You will need it to restore your identity on a new device.</string>
+    <string name="security_footer_view_recovery_phrase">View your recovery phrase. You will need it to restore your identity on a new device.</string>
     <string name="search_placeholder_body">Search lands in a later chunk.</string>
     <string name="search_field_placeholder">Search messages</string>
     <string name="search_prompt_body">Find messages across all your chats.</string>
@@ -198,7 +198,7 @@
     <string name="identity_detail_backup_status_unknown">Back up your recovery phrase</string>
     <string name="identity_detail_backup_status_subtitle">Without your phrase you can\'t restore this identity.</string>
     <string name="identity_detail_backup_action">View recovery phrase</string>
-    <string name="identity_detail_backup_action_subtitle">12 words · BIP-39</string>
+    <string name="identity_detail_backup_action_subtitle">BIP-39 recovery phrase</string>
     <!-- Per-identity invite QR card on the Identity Detail screen. -->
     <string name="identity_detail_invite_section">Invite key</string>
     <string name="identity_detail_invite_caption">Scan with Onym on another device to open a private chat with this identity.</string>

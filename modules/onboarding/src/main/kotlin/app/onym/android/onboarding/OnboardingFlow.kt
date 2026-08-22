@@ -244,6 +244,27 @@ class OnboardingFlow(
          *  progress state on the moderation step while this is false. */
         val moderationProbeResolved: Boolean
             get() = moderationDirectoryHasEntries != null
+
+        /**
+         * Whether the walk has never advanced past
+         * [OnboardingStep.Welcome]. [advance] backfills Welcome's
+         * outcome on the way out and [back] preserves outcomes, so
+         * this stays false once the user has moved on — Back to
+         * Welcome included.
+         *
+         * The welcome step's restore entry gates on this: restoring
+         * REPLACES the active identity and fires the repository's
+         * removal cascade, which is only safe while nothing
+         * downstream has been configured against the identity being
+         * replaced. Walking to the services hub, configuring seats
+         * (or signing a moderation registration) and coming BACK to
+         * Welcome is exactly that unsafe case.
+         *
+         * Deliberately not `outcomes.isEmpty()`: the services outcome
+         * is SEEDED at construction, so the map is never empty.
+         */
+        val neverLeftWelcome: Boolean
+            get() = outcomes[OnboardingStep.Welcome] == null
     }
 
     /** The walk order: all steps, minus the reserved moderation slot

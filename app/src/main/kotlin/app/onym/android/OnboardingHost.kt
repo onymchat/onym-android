@@ -165,6 +165,37 @@ internal class OnboardingHostViewModel(val flow: OnboardingFlow) : ViewModel() {
     }
 
     /**
+     * Whether the welcome step may offer restore — null while the
+     * probe is in flight. VM-held, not composition-held: a rotation
+     * would otherwise restart the probe at "unknown", and since the
+     * overlay's mount gates on this, an open (possibly mid-restore)
+     * overlay would blink away and back. The VM outlives the
+     * configuration change, so the answer does too.
+     *
+     * NOT saveable, deliberately: a process death restarts the walk
+     * with seat state from the lost walk still persisted, and the
+     * probe is what notices that. Re-probing after process death is
+     * the fail-closed answer; restoring a stale `true` is not.
+     */
+    val restoreAllowed = kotlinx.coroutines.flow.MutableStateFlow<Boolean?>(null)
+    private var restoreProbeStarted = false
+
+    /** Resolve [restoreAllowed] once per retained VM. */
+    fun probeRestoreAllowed(probe: suspend () -> Boolean) {
+        if (restoreProbeStarted) return
+        restoreProbeStarted = true
+        viewModelScope.launch {
+            restoreAllowed.value = try {
+                probe()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                false
+            }
+        }
+    }
+
+    /**
      * Validate and run the restore. The phrase is normalized
      * ([Bip39.normalizeMnemonic]) so a paste carrying newlines, NBSP
      * or other Unicode spaces parses the same as a typed one, then
@@ -252,15 +283,23 @@ internal fun OnboardingHost(
     var consentEntry by remember { mutableStateOf<AttributedCatalogEntry?>(null) }
 
     // Whether the welcome step may offer "I have a recovery phrase":
-    // wiring present AND the per-presentation probe allows it (a
-    // restart walk runs over a real identity that restore would
-    // wipe). Probed once per flow — plain `remember`, so a rotation
-    // re-probes; the answer is stable within a presentation.
-    var restoreAllowed by remember(flow) { mutableStateOf(false) }
-    LaunchedEffect(flow) {
-        restoreAllowed = onboarding.restoreIdentity != null &&
-            onboarding.restoreIdentityAllowed()
+    // wiring present AND the probe allows it (a restart walk runs
+    // over a real identity that restore would wipe). Resolved once
+    // per retained VM — see [OnboardingHostViewModel.restoreAllowed]
+    // for why the answer lives there rather than in the composition.
+    val restoreAllowedState by hostViewModel.restoreAllowed
+        .collectAsStateWithLifecycle()
+    LaunchedEffect(hostViewModel) {
+        hostViewModel.probeRestoreAllowed {
+            onboarding.restoreIdentity != null &&
+                onboarding.restoreIdentityAllowed()
+        }
     }
+    // Unresolved reads as "not allowed" for the ENTRY (fail-closed:
+    // never offer a door we haven't checked) — the mount gate below
+    // is what must not flap, and it can't: the resolved answer is
+    // VM-held across rotation.
+    val restoreAllowed = restoreAllowedState == true
 
     // The saved flags can outlive the flow: OnboardingFlow dies with
     // the process, so after process death the restored `true` would
@@ -270,13 +309,17 @@ internal fun OnboardingHost(
     // linger.
     val hubShown = hubVisible && state.step == OnboardingStep.Services
     val backupShown = backupVisible && state.step == OnboardingStep.RecoveryPhrase
-    // The restore overlay carries the allow-gate in its mount
-    // condition too, not just in the entry that opens it: the saved
-    // flag survives process death while [restoreAllowed] re-probes
-    // from false, and this guard is what stands between a stale flag
-    // and a restore() that cascade-wipes chats.
+    // The restore overlay carries the full gate in its mount
+    // condition, not just the entry that opens it: the saved flag
+    // survives process death while the probe re-answers, and this
+    // guard is what stands between a stale flag and a restore() that
+    // cascade-wipes chats. `neverLeftWelcome` is the other half —
+    // Back from a configured services hub returns to Welcome, and
+    // swapping the identity out from under seats already configured
+    // (and registrations already signed) against it is exactly what
+    // the gating rationale assumes never happens.
     val restoreShown = restoreVisible && restoreAllowed &&
-        state.step == OnboardingStep.Welcome
+        state.neverLeftWelcome && state.step == OnboardingStep.Welcome
 
     // Hoisted ABOVE the hubShown conditional: were the controller
     // created inside the overlay, closing the hub would drop the
@@ -345,7 +388,11 @@ internal fun OnboardingHost(
                     when (step) {
                         OnboardingStep.Welcome -> ({
                             WelcomeStepContent(
-                                restoreAvailable = restoreAllowed,
+                                // Same two-part gate as the overlay's
+                                // mount: allowed AND the walk has
+                                // never moved past Welcome.
+                                restoreAvailable = restoreAllowed &&
+                                    state.neverLeftWelcome,
                                 onRestore = { restoreVisible = true },
                             )
                         })
@@ -522,10 +569,12 @@ internal fun OnboardingHost(
  * Brand framing: the OnymMark over three "yours, not ours" bullets,
  * plus — iOS parity — the "I have a recovery phrase" entry beneath
  * the card. [restoreAvailable] gates the entry: it is hidden when the
- * wiring is absent or the walk runs over an identity that
+ * wiring is absent, when the walk runs over an identity that
  * [app.onym.android.identity.IdentityRepository.restore] would wipe
  * (restart walks, grandfathered users — see
- * [OnboardingUiDependencies.restoreIdentityAllowed]).
+ * [OnboardingUiDependencies.restoreIdentityAllowed]), and once the
+ * walk has advanced past Welcome even if the user comes Back
+ * ([OnboardingFlow.State.neverLeftWelcome]).
  */
 @Composable
 private fun WelcomeStepContent(

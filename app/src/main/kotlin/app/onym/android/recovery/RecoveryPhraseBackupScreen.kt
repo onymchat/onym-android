@@ -265,7 +265,7 @@ private fun HeroCard(modifier: Modifier = Modifier) {
             )
         }
         Text(
-            stringResource(R.string.your_identity_in_12_words),
+            stringResource(R.string.your_identity_in_words),
             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
             textAlign = TextAlign.Center,
         )

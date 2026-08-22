@@ -372,6 +372,25 @@ class OnboardingFlowTest {
     }
 
     @Test
+    fun neverLeftWelcome_isFalseOnceAdvanced_evenAfterBack() {
+        val flow = flow()
+        // Seeded outcomes make `outcomes.isEmpty()` useless as this
+        // signal — the property must key off Welcome specifically.
+        assertFalse(flow.state.value.outcomes.isEmpty())
+        assertTrue(flow.state.value.neverLeftWelcome)
+
+        flow.advance() // welcome → identity, backfills Welcome
+        assertFalse(flow.state.value.neverLeftWelcome)
+
+        // The case the restore gate exists for: the user walks on,
+        // configures seats, and comes BACK to Welcome. The identity
+        // is no longer safe to swap out from under that state.
+        flow.back()
+        assertEquals(OnboardingStep.Welcome, flow.step)
+        assertFalse(flow.state.value.neverLeftWelcome)
+    }
+
+    @Test
     fun identityOrigin_recordedRestored_survivesNavigation() {
         val flow = flow()
         flow.recordIdentityOrigin(IdentityOrigin.Restored)
