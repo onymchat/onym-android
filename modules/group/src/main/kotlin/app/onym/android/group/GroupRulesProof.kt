@@ -176,15 +176,16 @@ class GroupRulesProof private constructor(
      * two exports can share, across groups as well as within one.
      *
      * The readable part is the group and the alias, which is what a
-     * person recognises. The key after it is what keeps two members
+     * person recognises. The suffix after it is what keeps two exports
      * apart, and it is not decoration: aliases are self-asserted and
      * explicitly non-unique, and the ASCII-only stem collapses entirely
-     * for a group named in Cyrillic or CJK, so every member of such a
-     * group would otherwise land on one name. It also survives leaving
-     * this app, where the filename is all the context there is.
+     * for a group named in Cyrillic or CJK — so every member of such a
+     * group, and every such group holding a member in common, would
+     * otherwise land on one name. It also survives leaving this app,
+     * where the filename is all the context there is.
      *
-     * The readable part is scrubbed and clamped, and the key after it
-     * is a digest, so nothing off the wire lands in the name as it
+     * The readable part is scrubbed and clamped, and the suffix after
+     * it is a digest, so nothing off the wire lands in the name as it
      * arrived. Neither the group name nor the alias is ours: they
      * arrive off the wire with no length cap and no character rules of
      * their own, and this string reaches a filesystem. A roster key of
@@ -228,11 +229,11 @@ class GroupRulesProof private constructor(
             // and the second export overwrites the first. `groupIdHex`
             // is in hand, is always hex, and is already in the
             // document.
-            val key = MessageDigest.getInstance("SHA-256")
+            val suffix = MessageDigest.getInstance("SHA-256")
                 .digest((groupIdHex + memberBlsHex).toByteArray(Charsets.UTF_8))
                 .copyOfRange(0, 6)
                 .toHexLowercase()
-            return "onym-rules-proof-$named-$key.json"
+            return "onym-rules-proof-$named-$suffix.json"
         }
 
     /**
