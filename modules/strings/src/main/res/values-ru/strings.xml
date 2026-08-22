@@ -908,6 +908,7 @@
   <string name="pending_chat_retry">Повторить</string>
   <string name="pending_chat_send_failed">Ваш запрос не ушёл. Нажмите «Повторить», чтобы отправить снова.</string>
   <string name="pending_chat_no_identity">Сначала войдите.</string>
+  <string name="pending_chat_rules_missing">Это приглашение требует согласия с правилами группы. Откройте приглашение ещё раз, чтобы прочитать их.</string>
   <string name="pending_chat_malformed">Это приглашение повреждено и не может быть принято.</string>
   <string name="pending_chat_invited_you">Приглашение от %1$s</string>
   <string name="pending_chat_invited_you_generic">Вас пригласили</string>

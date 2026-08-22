@@ -241,17 +241,16 @@ class IdentityRepository(
      *
      * @throws IdentityError.IdentityNotLoaded before [bootstrap].
      */
-    override suspend fun signWithStellarKey(message: ByteArray): ByteArray =
-        // The selected-identity lookup stays on the IO dispatcher it was
-        // on before this delegation existed: `loadCurrent` reads
+    override suspend fun signWithStellarKey(message: ByteArray): ByteArray {
+        // Only the lookup needs wrapping — `loadCurrent` reads
         // EncryptedSharedPreferences, which blocks, and every existing
-        // caller signs from wherever it happens to be.
-        withContext(ioDispatcher) {
-            signWithStellarKeyAs(
-                store.loadCurrent() ?: throw IdentityError.IdentityNotLoaded,
-                message,
-            )
-        }
+        // caller signs from wherever it happens to be. The signing below
+        // does its own `withContext`, so wrapping the whole thing would
+        // nest two of them for one blocking read.
+        val current = withContext(ioDispatcher) { store.loadCurrent() }
+            ?: throw IdentityError.IdentityNotLoaded
+        return signWithStellarKeyAs(current, message)
+    }
 
     /**
      * Sign as a *named* identity rather than as whichever one is

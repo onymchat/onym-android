@@ -108,6 +108,17 @@ data class PendingChat(
 
         /** The request never reached a relay. */
         TRANSPORT("transport"),
+
+        /**
+         * The invitation carries rules and the send carried no
+         * agreement to them.
+         *
+         * Its own value because it is the one send failure that retrying
+         * cannot fix: nothing left the device and nothing will until the
+         * caller passes what the person agreed to. Kept out of
+         * [TRANSPORT] so the row doesn't offer "Ask again" forever.
+         */
+        RULES_MISSING("rulesMissing"),
         ;
 
         companion object {

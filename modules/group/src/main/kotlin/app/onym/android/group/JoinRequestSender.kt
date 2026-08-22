@@ -35,6 +35,17 @@ class JoinRequestSender(
         object Sent : Outcome()
         class NoIdentityLoaded : Outcome()
         class TransportFailed(val reason: String) : Outcome()
+
+        /**
+         * The invitation carries rules and the caller passed no
+         * agreement — a wiring mistake, not a person who declined.
+         *
+         * Its own outcome rather than a [TransportFailed], because the
+         * two differ in what the row should then offer: nothing left the
+         * device and nothing will, so "Ask again" would retry a call
+         * that cannot start succeeding.
+         */
+        object RulesAgreementMissing : Outcome()
     }
 
     /**
@@ -92,9 +103,7 @@ class JoinRequestSender(
         // indistinguishable by the time they reach the founder. Fail
         // here, where it is still a bug report.
         if (capability.rules != null && GroupRules.normalized(agreedRules) == null) {
-            return@withContext Outcome.TransportFailed(
-                "rules agreement missing for an invite that carries rules",
-            )
+            return@withContext Outcome.RulesAgreementMissing
         }
         var rulesHash: ByteArray? = null
         var rulesSignature: ByteArray? = null

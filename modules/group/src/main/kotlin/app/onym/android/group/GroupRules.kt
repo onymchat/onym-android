@@ -93,8 +93,8 @@ object GroupRules {
      * cap of its own: 1500 bytes of rules alongside a 30-character CJK
      * name overruns. The failure is soft — the share screen falls back to
      * a copyable link with no QR — but it is why this number should not
-     * be raised without re-measuring the pair. `GroupRulesWireTest` pins
-     * both sides of that boundary, against the encoder that ships.
+     * be raised without re-measuring the pair. `GroupRulesVectorTest`
+     * pins both sides of that boundary against a real encoder.
      */
     const val MAX_BYTES = 1500
 

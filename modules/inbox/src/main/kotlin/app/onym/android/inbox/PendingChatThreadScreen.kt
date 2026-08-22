@@ -298,6 +298,8 @@ private fun Stuck(
         is PendingChatsViewModel.State.SendFailed -> when (state.failure) {
             PendingChat.SendFailure.NO_IDENTITY -> stringResource(R.string.pending_chat_no_identity)
             PendingChat.SendFailure.TRANSPORT -> stringResource(R.string.pending_chat_send_failed)
+            PendingChat.SendFailure.RULES_MISSING ->
+                stringResource(R.string.pending_chat_rules_missing)
         }
         else -> stringResource(R.string.invite_verify_failed)
     }

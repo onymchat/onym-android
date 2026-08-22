@@ -1,5 +1,9 @@
 package app.onym.android.group
 
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.junit.Assert.assertEquals
@@ -101,6 +105,80 @@ class GroupRulesVectorTest {
         }.generateSignature()
         assertFalse(GroupRules.isAgreement(signature, rules, groupId, publicKey))
     }
+
+    @Test
+    fun aSignatureForAnotherGroup_doesNotVerifyHere() {
+        // `group_id` is in the statement so an acceptance collected for
+        // a permissive group can't be shown as agreement to a stricter
+        // one whose rules happen to read the same. Dropping the field
+        // would leave every positive vector green.
+        val other = ByteArray(32) { (it + 1).toByte() }
+        val statement = GroupRules.statement(other, GroupRules.hash(rules), publicKey)
+        val signature = Ed25519Signer().apply {
+            init(true, privateKey)
+            update(statement, 0, statement.size)
+        }.generateSignature()
+
+        assertTrue(GroupRules.isAgreement(signature, rules, other, publicKey))
+        assertFalse(GroupRules.isAgreement(signature, rules, groupId, publicKey))
+    }
+
+    @Test
+    fun aSignatureCannotBeReAttributedToAnotherJoiner() {
+        // `joiner_sending_pub` names the signer inside the signed bytes.
+        // Without it, this signature would verify for whoever presented
+        // it — the lift-and-reuse the doc says the field prevents.
+        val statement = GroupRules.statement(groupId, GroupRules.hash(rules), publicKey)
+        val signature = Ed25519Signer().apply {
+            init(true, privateKey)
+            update(statement, 0, statement.size)
+        }.generateSignature()
+        val someoneElse = Ed25519PrivateKeyParameters(ByteArray(32) { 0x09 }, 0)
+            .generatePublicKey().encoded
+
+        assertFalse(GroupRules.isAgreement(signature, rules, groupId, someoneElse))
+    }
+
+    // ---- The budget the rules share with the group name ----
+
+    @Test
+    fun theRulesBudget_isSharedWithTheGroupName() {
+        // The doc's "1500 bytes of rules alongside a 30-character CJK
+        // name overruns" — the reason `MAX_BYTES` can't be raised
+        // without re-measuring the pair. Asserted against a real
+        // encoder, at the level the budget was measured for.
+        val atCap = "則".repeat(GroupRules.MAX_BYTES / 3)
+        val latinName = IntroCapability(
+            introPublicKey = ByteArray(32) { 0x44 },
+            groupId = groupId,
+            groupName = "x".repeat(30),
+            rules = atCap,
+        ).toAppLink()
+        val cjkName = IntroCapability(
+            introPublicKey = ByteArray(32) { 0x44 },
+            groupId = groupId,
+            groupName = "則".repeat(30),
+            rules = atCap,
+        ).toAppLink()
+
+        assertTrue("the budget holds for a Latin name", encodesAtLevelM(latinName))
+        assertFalse("and is spent by a CJK one", encodesAtLevelM(cjkName))
+    }
+
+    /** Level M, which is the level `MAX_BYTES` was measured against. */
+    private fun encodesAtLevelM(value: String): Boolean = runCatching {
+        QRCodeWriter().encode(
+            value,
+            BarcodeFormat.QR_CODE,
+            1,
+            1,
+            mapOf(
+                EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+                EncodeHintType.MARGIN to 0,
+                EncodeHintType.CHARACTER_SET to "UTF-8",
+            ),
+        )
+    }.isSuccess
 
     // ---- Canonicalization across platforms ----
 
