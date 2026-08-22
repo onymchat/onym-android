@@ -171,10 +171,18 @@ internal fun summarize(statuses: List<DeviceBackupStatus>): BackupVendorsSummary
     if (enrolled == 0) return BackupVendorsSummary.Off
     // No attention and no running here, so every enrolled operator is
     // Idle — the oldest completed copy is the pessimistic read of how
-    // much history is actually held everywhere.
-    val oldest = statuses
-        .mapNotNull { (it as? DeviceBackupStatus.Idle)?.lastSuccessAt }
-        .minOrNull()
+    // much history is actually held everywhere. An Idle operator with
+    // NO completed backup is strictly older than any instant: it
+    // forces the "no backup has completed yet" read instead of a
+    // green summary that hides the operator holding nothing.
+    val idleTimes = statuses
+        .filterIsInstance<DeviceBackupStatus.Idle>()
+        .map { it.lastSuccessAt }
+    val oldest = if (idleTimes.any { it == null }) {
+        null
+    } else {
+        idleTimes.filterNotNull().minOrNull()
+    }
     return BackupVendorsSummary.On(
         enrolled = enrolled,
         oldestCopy = oldest,

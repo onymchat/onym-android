@@ -79,6 +79,17 @@ class BackupVendorsSummaryTest {
     }
 
     @Test
+    fun one_operator_holding_nothing_forces_the_no_completed_read() {
+        // An Idle operator with no completed backup is strictly older
+        // than any instant — a green "oldest copy <t2>" would hide
+        // that one operator holds nothing at all.
+        assertEquals(
+            BackupVendorsSummary.On(enrolled = 2, oldestCopy = null, notSetUp = 0),
+            summarize(listOf(DeviceBackupStatus.Idle(t2), DeviceBackupStatus.Idle(null))),
+        )
+    }
+
+    @Test
     fun changed_terms_or_operator_need_attention_not_quiet_off() {
         // Both statuses mean "no valid enrolment right now", but unlike
         // plain Off the holder has something to act on — burying them

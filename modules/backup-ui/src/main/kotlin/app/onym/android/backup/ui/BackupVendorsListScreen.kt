@@ -58,12 +58,14 @@ data class BackupVendorRow(
 fun BackupVendorsListScreen(
     vendors: List<BackupVendorRow>,
     onVendorClick: (componentId: String) -> Unit,
-    /** Called with the componentIds of the operators the row's own
-     *  count and subtitle describe — the ENROLLED ones. Running
+    /** Called with the componentIds of the operators a backup can
+     *  actually run to right now: enrolled AND not already running.
      *  `backUpNow` on an un-enrolled operator would only flip it from
      *  "not set up" to a failure state (`runBackUpNowIfEnrolled`
-     *  reports not-enrolled as a failure), so the screen hands the
-     *  caller exactly the set it advertised. */
+     *  reports not-enrolled as a failure), and re-running an operator
+     *  mid-upload would double it — so the screen hands the caller
+     *  exactly the set the tap can serve, and one slow operator never
+     *  blocks backing up to the others. */
     onBackUpAll: (componentIds: List<String>) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -77,8 +79,10 @@ fun BackupVendorsListScreen(
     catalogSection: (@Composable () -> Unit)? = null,
 ) {
     val summary = summarize(vendors.map { it.status })
-    val enrolledIds = vendors.filter { !needsEnrolment(it.status) }.map { it.componentId }
-    val enrolledCount = enrolledIds.size
+    val enrolledCount = vendors.count { !needsEnrolment(it.status) }
+    val actionableIds = vendors
+        .filter { !needsEnrolment(it.status) && it.status !is DeviceBackupStatus.Running }
+        .map { it.componentId }
 
     Scaffold(
         modifier = modifier,
@@ -120,7 +124,10 @@ fun BackupVendorsListScreen(
                 if (enrolledCount > 0) {
                     item {
                         SettingsCard {
-                            val running = summary is BackupVendorsSummary.Running
+                            // Disabled only when NOTHING can run — an
+                            // operator already mid-upload is skipped,
+                            // not a reason to block the others.
+                            val nothingToRun = actionableIds.isEmpty()
                             SettingsRow(
                                 leading = { SettingsTileBox(Icons.Filled.CloudUpload, SettingsTile.Blue) },
                                 title = if (enrolledCount > 1) {
@@ -137,12 +144,12 @@ fun BackupVendorsListScreen(
                                 } else {
                                     stringResource(R.string.backup_back_up_now_subtitle)
                                 },
-                                titleColor = if (running) {
+                                titleColor = if (nothingToRun) {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 } else {
                                     MaterialTheme.colorScheme.onSurface
                                 },
-                                onClick = if (running) null else ({ onBackUpAll(enrolledIds) }),
+                                onClick = if (nothingToRun) null else ({ onBackUpAll(actionableIds) }),
                                 showChevron = false,
                                 isLast = true,
                                 modifier = Modifier.testTag("backup.vendors.back_up_all"),

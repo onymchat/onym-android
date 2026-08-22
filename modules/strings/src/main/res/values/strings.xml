@@ -753,6 +753,10 @@
   <string name="backup_enrolment_unavailable_note">Backup cannot be turned on without them.</string>
 
   <!-- Device backup — settings screen -->
+  <string name="backup_setup_row_title">Set Up Backup</string>
+  <string name="backup_setup_review_terms_title">Review New Terms</string>
+  <string name="backup_setup_new_operator_title">Set Up With New Operator</string>
+  <string name="backup_setup_row_subtitle">Read what it does before turning it on</string>
   <string name="backup_settings_back_up_now">Back Up Now</string>
   <string name="backup_back_up_now_operator_subtitle">Uploads your whole history to this operator</string>
   <string name="backup_footnote_full_upload">Each backup uploads everything, not just what changed — there is no incremental upload yet.</string>
@@ -845,7 +849,7 @@
   <string name="backup_restore_failed_title">Restore did not complete</string>
   <string name="backup_restore_untouched">Nothing on this phone was changed.</string>
   <string name="backup_restore_unavailable">Restore is not available right now.</string>
-  <string name="backup_restore_generic_failed">Restore failed. Nothing on this device was changed.</string>
+  <string name="backup_restore_generic_failed">Restore failed.</string>
   <string name="backup_restore_interrupted_default">Restore was interrupted partway through.</string>
   <string name="backup_restore_partial">Restore was interrupted. Some messages and chats may already have been added — restoring again is safe and won\'t duplicate anything. %1$s</string>
   <string name="backup_restore_nothing_found">Nothing found for this backup. If you expected history here, check that this is the same operator and identity the backup was made under.</string>

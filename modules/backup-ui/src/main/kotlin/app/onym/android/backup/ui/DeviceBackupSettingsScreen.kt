@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteForever
@@ -52,6 +53,13 @@ fun DeviceBackupSettingsScreen(
     flow: DeviceBackupSettingsFlow,
     canRestore: Boolean,
     onBackUpNow: () -> Unit,
+    /** Pushes the enrolment disclosure. Shown in place of Back Up Now
+     *  whenever [needsEnrolment] holds — Off, TermsChanged, and
+     *  OperatorChanged all need the disclosure re-accepted before a
+     *  backup can run, but this screen stays reachable in those
+     *  states because it holds the only Restore and Erase entry
+     *  points, and the operator may still hold a copy. */
+    onSetUp: () -> Unit,
     onRestoreFromBackup: () -> Unit,
     onErase: () -> Unit,
     onBack: () -> Unit,
@@ -107,26 +115,50 @@ fun DeviceBackupSettingsScreen(
                 )
             }
 
-            item {
-                val running = status is DeviceBackupStatus.Running
-                SettingsCard {
-                    SettingsRow(
-                        leading = { SettingsTileBox(Icons.Filled.CloudUpload, SettingsTile.Blue) },
-                        title = stringResource(R.string.backup_settings_back_up_now),
-                        subtitle = stringResource(R.string.backup_back_up_now_operator_subtitle),
-                        titleColor = if (running) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                        onClick = if (running) null else onBackUpNow,
-                        showChevron = false,
-                        isLast = true,
-                        modifier = Modifier.testTag("backup.settings.back_up_now"),
-                    )
+            if (needsEnrolment(status)) {
+                // iOS shows the setup row ON the settings screen so
+                // Restore/Erase stay reachable while enrolment is
+                // pending — same here.
+                item {
+                    SettingsCard {
+                        SettingsRow(
+                            leading = { SettingsTileBox(Icons.Filled.Backup, SettingsTile.Green) },
+                            title = when (status) {
+                                is DeviceBackupStatus.TermsChanged ->
+                                    stringResource(R.string.backup_setup_review_terms_title)
+                                is DeviceBackupStatus.OperatorChanged ->
+                                    stringResource(R.string.backup_setup_new_operator_title)
+                                else -> stringResource(R.string.backup_setup_row_title)
+                            },
+                            subtitle = stringResource(R.string.backup_setup_row_subtitle),
+                            onClick = onSetUp,
+                            isLast = true,
+                            modifier = Modifier.testTag("backup.settings.setup_row"),
+                        )
+                    }
                 }
+            } else {
+                item {
+                    val running = status is DeviceBackupStatus.Running
+                    SettingsCard {
+                        SettingsRow(
+                            leading = { SettingsTileBox(Icons.Filled.CloudUpload, SettingsTile.Blue) },
+                            title = stringResource(R.string.backup_settings_back_up_now),
+                            subtitle = stringResource(R.string.backup_back_up_now_operator_subtitle),
+                            titleColor = if (running) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            onClick = if (running) null else onBackUpNow,
+                            showChevron = false,
+                            isLast = true,
+                            modifier = Modifier.testTag("backup.settings.back_up_now"),
+                        )
+                    }
+                }
+                item { SettingsFootnote(stringResource(R.string.backup_footnote_full_upload)) }
             }
-            item { SettingsFootnote(stringResource(R.string.backup_footnote_full_upload)) }
 
             if (canRestore) {
                 item {

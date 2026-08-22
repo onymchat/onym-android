@@ -753,6 +753,10 @@
   <string name="backup_enrolment_unavailable_note">Без них резервное копирование включить нельзя.</string>
 
   <!-- Резервное копирование устройства — экран настроек -->
+  <string name="backup_setup_row_title">Настроить резервное копирование</string>
+  <string name="backup_setup_review_terms_title">Прочитать новые условия</string>
+  <string name="backup_setup_new_operator_title">Настроить с новым оператором</string>
+  <string name="backup_setup_row_subtitle">Прочитайте, что это делает, прежде чем включать</string>
   <string name="backup_settings_back_up_now">Создать резервную копию</string>
   <string name="backup_back_up_now_operator_subtitle">Загружает всю вашу историю этому оператору</string>
   <string name="backup_footnote_full_upload">Каждая резервная копия загружает всё, а не только изменения — инкрементальной загрузки пока нет.</string>
@@ -853,7 +857,7 @@
   <string name="backup_restore_failed_title">Восстановление не завершилось</string>
   <string name="backup_restore_untouched">На этом телефоне ничего не изменилось.</string>
   <string name="backup_restore_unavailable">Восстановление сейчас недоступно.</string>
-  <string name="backup_restore_generic_failed">Восстановление не удалось. Ничего на этом устройстве не изменилось.</string>
+  <string name="backup_restore_generic_failed">Восстановление не удалось.</string>
   <string name="backup_restore_interrupted_default">Восстановление было прервано.</string>
   <string name="backup_restore_partial">Восстановление было прервано. Часть сообщений и чатов могла уже быть добавлена — повторное восстановление безопасно и не создаст дублей. %1$s</string>
   <string name="backup_restore_nothing_found">Для этой резервной копии ничего не найдено. Если вы ожидали увидеть историю, проверьте, что это тот же оператор и та же личность, под которыми делалась резервная копия.</string>
