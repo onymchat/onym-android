@@ -48,10 +48,16 @@ dependencies {
     // via stringResource/pluralStringResource inside this module's
     // own Composables — no :strings type escapes a public signature.
     implementation(project(":strings"))
+    // implementation: the shared Settings atoms (SettingsCard/Row/
+    // TileBox/SectionLabel/Footnote) — the same visual language every
+    // other Settings surface uses; no :design type escapes a public
+    // signature.
+    implementation(project(":design"))
 
     api(platform(libs.androidx.compose.bom))
     api(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.activity.compose)
     implementation(libs.kotlinx.coroutines.android)
 

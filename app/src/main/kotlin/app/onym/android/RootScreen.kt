@@ -839,7 +839,6 @@ fun RootScreen(
                         } else {
                             null
                         },
-                    deviceBackupVendorCount = backupVendors.size,
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -1068,6 +1067,18 @@ fun RootScreen(
                     onVendorClick = { componentId ->
                         navController.navigate(deviceBackupSettingsRoute(componentId))
                     },
+                    onBackUpAll = { enrolledIds ->
+                        // Fire-and-forget per operator, same as each
+                        // operator screen's own Back Up Now — the runs
+                        // survive navigating off this screen. Only the
+                        // ids the screen advertised: backUpNow on an
+                        // un-enrolled operator would report a failure
+                        // instead of quietly doing nothing.
+                        backupVendors
+                            .filter { vendor -> vendor.componentId in enrolledIds }
+                            .forEach { vendor -> vendor.backUpNow() }
+                    },
+                    onBack = { navController.popBackStack() },
                     catalogSection = {
                         if (backupEntries.isNotEmpty()) {
                             androidx.compose.foundation.layout.Column {
@@ -1090,76 +1101,87 @@ fun RootScreen(
                 val componentId = entry.arguments?.getString("componentId") ?: return@composable
                 val backup = backupVendors.firstOrNull { it.componentId == componentId }
                     ?: return@composable
-                val status by backup.settingsFlow.status.collectAsStateWithLifecycle()
+                // Always the settings screen, whatever the status:
+                // it holds the ONLY Restore and Erase entry points,
+                // and an operator whose terms changed (or that was
+                // never set up on this install) may still hold a
+                // restorable, erasable copy. When enrolment is needed
+                // the screen swaps Back Up Now for a setup row that
+                // pushes the disclosure — iOS's "Set Up Backup" /
+                // "Review New Terms" / "Set Up With New Operator"
+                // rows live on the settings screen for the same
+                // reason.
+                app.onym.android.backup.ui.DeviceBackupSettingsScreen(
+                    flow = backup.settingsFlow,
+                    canRestore = true,
+                    onBackUpNow = backup.backUpNow,
+                    onSetUp = {
+                        navController.navigate(deviceBackupEnrolmentRoute(componentId))
+                    },
+                    onRestoreFromBackup = {
+                        navController.navigate(deviceBackupRestoreRoute(componentId))
+                    },
+                    onErase = backup.erase,
+                    onBack = { navController.popBackStack() },
+                    operatorName = backup.displayName,
+                )
+            }
+            composable(ROUTE_DEVICE_BACKUP_ENROLMENT) { entry ->
+                val componentId = entry.arguments?.getString("componentId") ?: return@composable
+                val backup = backupVendors.firstOrNull { it.componentId == componentId }
+                    ?: return@composable
                 val coroutineScope = rememberCoroutineScope()
-
-                if (status is app.onym.android.backup.ui.DeviceBackupStatus.Off) {
-                    var disclosure by remember {
-                        mutableStateOf<Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>?>(null)
-                    }
-                    // Distinct from `disclosure == null` before the
-                    // first attempt returns, so a genuinely unreachable
-                    // terms URL gets a retry affordance instead of a
-                    // permanent, indistinguishable-from-loading blank
-                    // screen.
-                    var fetchAttempts by remember { mutableStateOf(0) }
-                    var isFetching by remember { mutableStateOf(true) }
-                    LaunchedEffect(componentId, fetchAttempts) {
-                        isFetching = true
-                        disclosure = backup.makeEnrolmentDisclosure()
-                        isFetching = false
-                    }
-                    val resolved = disclosure
-                    if (resolved == null) {
-                        androidx.compose.foundation.layout.Column(
-                            modifier = Modifier.testTag("backup.enrolment.loading"),
-                        ) {
-                            if (isFetching) {
-                                androidx.compose.material3.Text(stringResource(R.string.backup_enrolment_fetching))
-                            } else {
-                                androidx.compose.material3.Text(
-                                    stringResource(R.string.backup_enrolment_fetch_failed),
-                                    modifier = Modifier.testTag("backup.enrolment.fetch_failed"),
-                                )
-                                androidx.compose.material3.Button(
-                                    onClick = { fetchAttempts += 1 },
-                                    modifier = Modifier.testTag("backup.enrolment.retry"),
-                                ) {
-                                    androidx.compose.material3.Text(stringResource(R.string.backup_enrolment_retry))
-                                }
-                            }
-                        }
-                    } else {
-                        val (items, scheduleSentence) = resolved
-                        app.onym.android.backup.ui.BackupEnrolmentScreen(
-                            items = items,
-                            scheduleSentence = scheduleSentence,
-                            onAccept = {
-                                val termsId = items.first { it.id == "termsId" }.value
-                                coroutineScope.launch {
-                                    // acceptEnrolment is a fast local
-                                    // state write, awaited so the
-                                    // subsequent backUpNow (which
-                                    // reads the just-pinned terms) never
-                                    // races it. backUpNow itself is
-                                    // fire-and-forget — it survives
-                                    // navigating off this screen.
-                                    backup.acceptEnrolment(termsId)
-                                    backup.backUpNow()
-                                }
-                            },
-                            onDecline = { navController.popBackStack() },
-                        )
-                    }
+                var disclosure by remember {
+                    mutableStateOf<Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>?>(null)
+                }
+                // Distinct from `disclosure == null` before the
+                // first attempt returns, so a genuinely unreachable
+                // terms URL gets a retry affordance instead of a
+                // permanent, indistinguishable-from-loading blank
+                // screen.
+                var fetchAttempts by remember { mutableStateOf(0) }
+                var isFetching by remember { mutableStateOf(true) }
+                LaunchedEffect(componentId, fetchAttempts) {
+                    isFetching = true
+                    disclosure = backup.makeEnrolmentDisclosure()
+                    isFetching = false
+                }
+                val resolved = disclosure
+                if (resolved == null) {
+                    app.onym.android.backup.ui.BackupEnrolmentLoadingScreen(
+                        isFetching = isFetching,
+                        onRetry = { fetchAttempts += 1 },
+                        onBack = { navController.popBackStack() },
+                    )
                 } else {
-                    app.onym.android.backup.ui.DeviceBackupSettingsScreen(
-                        flow = backup.settingsFlow,
-                        canRestore = true,
-                        onBackUpNow = backup.backUpNow,
-                        onRestoreFromBackup = {
-                            navController.navigate(deviceBackupRestoreRoute(componentId))
+                    val (items, scheduleSentence) = resolved
+                    app.onym.android.backup.ui.BackupEnrolmentScreen(
+                        operatorName = backup.displayName,
+                        items = items,
+                        scheduleSentence = scheduleSentence,
+                        onAccept = {
+                            val termsId = items.first { it.id == "termsId" }.value
+                            coroutineScope.launch {
+                                // acceptEnrolment is a fast local
+                                // state write, awaited so the
+                                // subsequent backUpNow (which
+                                // reads the just-pinned terms) never
+                                // races it. backUpNow itself is
+                                // fire-and-forget — it survives
+                                // navigating off this screen. No
+                                // refresh here: acceptEnrolment
+                                // already refreshes, and backUpNow's
+                                // runBackup does markRunning() +
+                                // refresh() itself — a third one
+                                // could land after markRunning() and
+                                // overwrite Running.
+                                backup.acceptEnrolment(termsId)
+                                backup.backUpNow()
+                                navController.popBackStack()
+                            }
                         },
-                        onErase = backup.erase,
+                        onDecline = { navController.popBackStack() },
+                        onBack = { navController.popBackStack() },
                     )
                 }
             }
@@ -1170,6 +1192,7 @@ fun RootScreen(
                 app.onym.android.backup.ui.BackupRestoreScreen(
                     makeRestoreFlow = backup.makeRestoreFlow,
                     onDone = { navController.popBackStack() },
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable("moderation_case_appeal/{caseId}") { entry ->
@@ -1445,10 +1468,14 @@ private const val ROUTE_MODERATION_SWITCH_CONSENT = "moderation_switch_consent"
 private const val ROUTE_MODERATION_TERMS = "moderation_terms"
 private const val ROUTE_DEVICE_BACKUP_VENDORS = "device_backup_vendors"
 private const val ROUTE_DEVICE_BACKUP_SETTINGS = "device_backup_settings/{componentId}"
+private const val ROUTE_DEVICE_BACKUP_ENROLMENT = "device_backup_enrolment/{componentId}"
 private const val ROUTE_DEVICE_BACKUP_RESTORE = "device_backup_restore/{componentId}"
 
 private fun deviceBackupSettingsRoute(componentId: String) =
     "device_backup_settings/${android.net.Uri.encode(componentId)}"
+
+private fun deviceBackupEnrolmentRoute(componentId: String) =
+    "device_backup_enrolment/${android.net.Uri.encode(componentId)}"
 
 private fun deviceBackupRestoreRoute(componentId: String) =
     "device_backup_restore/${android.net.Uri.encode(componentId)}"

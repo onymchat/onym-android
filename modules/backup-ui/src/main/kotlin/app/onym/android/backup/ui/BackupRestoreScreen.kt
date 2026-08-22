@@ -1,24 +1,51 @@
 package app.onym.android.backup.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.onym.android.backup.BackupError
 import app.onym.android.backup.BackupRestoreSummary
 import app.onym.android.backup.LocalFailureReason
+import app.onym.android.design.SettingsCard
+import app.onym.android.design.SettingsRow
+import app.onym.android.design.SettingsTile
+import app.onym.android.design.SettingsTileBox
 import app.onym.android.foundation.AndroidStringProvider
 import app.onym.android.foundation.StringProvider
 import app.onym.android.strings.R
@@ -53,13 +80,16 @@ internal sealed class RestoreScreenState {
  * Mirrors `BackupRestoreView`/`BackupRestoreFlow` in onym-ios
  * OnymBackupUI (PR #281).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupRestoreScreen(
     makeRestoreFlow: (suspend () -> BackupRestoreSummary)?,
     onDone: () -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var state by remember { mutableStateOf<RestoreScreenState>(RestoreScreenState.Idle) }
+    var confirming by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val strings = remember(context) { AndroidStringProvider(context) }
@@ -67,87 +97,224 @@ fun BackupRestoreScreen(
     val interruptedDefaultMessage = stringResource(R.string.backup_restore_interrupted_default)
     val unavailableMessage = stringResource(R.string.backup_restore_unavailable)
 
-    Scaffold(modifier = modifier) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
-            when (val current = state) {
-                is RestoreScreenState.Idle -> {
-                    Text(
-                        stringResource(R.string.backup_restore_intro),
-                        modifier = Modifier.testTag("backup.restore.intro"),
+    fun startRestore() {
+        state = RestoreScreenState.Running
+        scope.launch {
+            state = try {
+                val summary = makeRestoreFlow?.invoke()
+                if (summary == null) {
+                    RestoreScreenState.Failed(unavailableMessage)
+                } else {
+                    RestoreScreenState.Done(summary)
+                }
+            } catch (e: BackupError.LocalFailure) {
+                if (e.reason == LocalFailureReason.RestoreInterrupted) {
+                    // Gate 3 (write) failed partway — earlier rows in
+                    // this attempt are already committed (writes are
+                    // idempotent insertOrUpdate).
+                    RestoreScreenState.PartiallyRestored(e.message ?: interruptedDefaultMessage)
+                } else {
+                    RestoreScreenState.Failed(e.message ?: genericFailedMessage)
+                }
+            } catch (e: Exception) {
+                // Gates 1 (verify) and 2 (decode) never write — a
+                // failure here genuinely leaves the device untouched.
+                RestoreScreenState.Failed(e.message ?: genericFailedMessage)
+            }
+        }
+    }
+
+    Scaffold(
+        modifier = modifier,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(stringResource(R.string.backup_restore_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("backup.restore.back")) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        when (val current = state) {
+            is RestoreScreenState.Idle -> Column(modifier = Modifier.padding(padding)) {
+                // Body copy, not a footnote: this is the one
+                // explanation of what restoring does, and the
+                // confirmation dialog assumes it was read.
+                Text(
+                    stringResource(R.string.backup_restore_intro),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .testTag("backup.restore.intro"),
+                )
+                Spacer(Modifier.height(4.dp))
+                SettingsCard {
+                    SettingsRow(
+                        leading = { SettingsTileBox(Icons.Filled.CloudDownload, SettingsTile.Green) },
+                        title = stringResource(R.string.backup_settings_restore_row_title),
+                        subtitle = stringResource(R.string.backup_restore_row_subtitle),
+                        onClick = { confirming = true },
+                        showChevron = false,
+                        isLast = true,
+                        modifier = Modifier.testTag("backup.restore.start"),
                     )
-                    Button(
-                        onClick = {
-                            state = RestoreScreenState.Running
-                            scope.launch {
-                                state = try {
-                                    val summary = makeRestoreFlow?.invoke()
-                                    if (summary == null) {
-                                        RestoreScreenState.Failed(unavailableMessage)
-                                    } else {
-                                        RestoreScreenState.Done(summary)
-                                    }
-                                } catch (e: BackupError.LocalFailure) {
-                                    if (e.reason == LocalFailureReason.RestoreInterrupted) {
-                                        // Gate 3 (write) failed partway —
-                                        // earlier rows in this attempt are
-                                        // already committed (writes are
-                                        // idempotent insertOrUpdate).
-                                        RestoreScreenState.PartiallyRestored(e.message ?: interruptedDefaultMessage)
-                                    } else {
-                                        RestoreScreenState.Failed(e.message ?: genericFailedMessage)
-                                    }
-                                } catch (e: Exception) {
-                                    // Gates 1 (verify) and 2 (decode)
-                                    // never write — a failure here
-                                    // genuinely leaves the device
-                                    // untouched.
-                                    RestoreScreenState.Failed(e.message ?: genericFailedMessage)
-                                }
-                            }
-                        },
-                        modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.start"),
-                    ) {
-                        Text(stringResource(R.string.backup_settings_restore_row_title))
-                    }
                 }
-                is RestoreScreenState.Running -> {
-                    Text(stringResource(R.string.backup_restore_running), modifier = Modifier.testTag("backup.restore.running"))
+            }
+            is RestoreScreenState.Running -> CenteredState(padding = padding) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    stringResource(R.string.backup_restore_running),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("backup.restore.running"),
+                )
+            }
+            is RestoreScreenState.Done -> CenteredState(padding = padding) {
+                // An empty result is an ordinary answer, not a
+                // success to celebrate — a green check over "nothing
+                // found" would misread the situation.
+                val empty = wroteNothing(current.summary)
+                Icon(
+                    if (empty) Icons.Filled.Inbox else Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint = if (empty) MaterialTheme.colorScheme.onSurfaceVariant else SettingsTile.Green,
+                    modifier = Modifier.size(44.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(
+                        if (empty) R.string.backup_restore_nothing_found_title
+                        else R.string.backup_restore_done_title,
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    restoreSummaryText(current.summary, strings),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag("backup.restore.summary"),
+                )
+                Spacer(Modifier.height(20.dp))
+                Button(onClick = onDone, modifier = Modifier.testTag("backup.restore.done")) {
+                    Text(stringResource(R.string.backup_restore_done))
                 }
-                is RestoreScreenState.Done -> {
-                    Text(restoreSummaryText(current.summary, strings), modifier = Modifier.testTag("backup.restore.summary"))
-                    Button(onClick = onDone, modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.done")) {
-                        Text(stringResource(R.string.backup_restore_done))
-                    }
+            }
+            is RestoreScreenState.Failed -> CenteredState(padding = padding) {
+                FailureHeader()
+                Text(
+                    stringResource(R.string.backup_restore_untouched),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    current.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag("backup.restore.failed"),
+                )
+                Spacer(Modifier.height(20.dp))
+                Button(onClick = onDone, modifier = Modifier.testTag("backup.restore.close")) {
+                    Text(stringResource(R.string.backup_restore_close))
                 }
-                is RestoreScreenState.Failed -> {
-                    Text(
-                        stringResource(R.string.backup_restore_failed_prefix, current.message),
-                        modifier = Modifier.testTag("backup.restore.failed"),
-                    )
-                    Button(onClick = onDone, modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.close")) {
-                        Text(stringResource(R.string.backup_restore_close))
-                    }
-                }
-                is RestoreScreenState.PartiallyRestored -> {
-                    Text(
-                        stringResource(R.string.backup_restore_partial, current.message),
-                        modifier = Modifier.testTag("backup.restore.partial"),
-                    )
-                    Button(onClick = onDone, modifier = Modifier.padding(top = 16.dp).testTag("backup.restore.close_partial")) {
-                        Text(stringResource(R.string.backup_restore_close))
-                    }
+            }
+            is RestoreScreenState.PartiallyRestored -> CenteredState(padding = padding) {
+                FailureHeader()
+                Text(
+                    // Deliberately no "nothing changed" line here —
+                    // some rows were already committed, so that claim
+                    // would be false.
+                    stringResource(R.string.backup_restore_partial, current.message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag("backup.restore.partial"),
+                )
+                Spacer(Modifier.height(20.dp))
+                Button(onClick = onDone, modifier = Modifier.testTag("backup.restore.close_partial")) {
+                    Text(stringResource(R.string.backup_restore_close))
                 }
             }
         }
     }
+
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text(stringResource(R.string.backup_restore_confirm_title)) },
+            text = { Text(stringResource(R.string.backup_restore_confirm_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirming = false
+                        startRestore()
+                    },
+                    modifier = Modifier.testTag("backup.restore.confirm"),
+                ) {
+                    Text(stringResource(R.string.backup_restore_confirm_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
 }
+
+@Composable
+private fun CenteredState(
+    padding: androidx.compose.foundation.layout.PaddingValues,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .padding(padding)
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) { content() }
+}
+
+@Composable
+private fun FailureHeader() {
+    Icon(
+        Icons.Filled.WarningAmber,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.size(44.dp),
+    )
+    Spacer(Modifier.height(12.dp))
+    Text(
+        stringResource(R.string.backup_restore_failed_title),
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+    )
+    Spacer(Modifier.height(8.dp))
+}
+
+/** True when the restore wrote nothing at all — the ordinary-answer
+ *  case that gets the neutral glyph/title instead of the green
+ *  check. */
+internal fun wroteNothing(summary: BackupRestoreSummary): Boolean =
+    summary.groups + summary.messages + summary.invitations + summary.consents + summary.blobs == 0
 
 /** Pure — testable with a fake [StringProvider] without composing
  *  anything (see `RecoveryPhraseBackupViewModel`'s use of the same
  *  seam elsewhere in this codebase for the precedent). */
 internal fun restoreSummaryText(summary: BackupRestoreSummary, strings: StringProvider): String {
-    val totalWritten = summary.groups + summary.messages + summary.invitations + summary.consents + summary.blobs
-    if (totalWritten == 0) {
+    if (wroteNothing(summary)) {
         // Deliberately not framed as a failure or a warning — an
         // empty result under a different operator or identity is
         // exactly what this looks like when nothing is wrong.

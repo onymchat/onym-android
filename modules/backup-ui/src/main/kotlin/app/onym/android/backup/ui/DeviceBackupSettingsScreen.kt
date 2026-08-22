@@ -1,9 +1,20 @@
 package app.onym.android.backup.ui
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -16,11 +27,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import app.onym.android.design.SettingsCard
+import app.onym.android.design.SettingsFootnote
+import app.onym.android.design.SettingsRow
+import app.onym.android.design.SettingsSectionLabel
+import app.onym.android.design.SettingsTile
+import app.onym.android.design.SettingsTileBox
 import app.onym.android.strings.R
 
 /**
- * Settings → Device Backup.
+ * Settings → Device Backup → one operator.
  *
  * [canRestore] gates the "Restore From Backup" row's presence — true
  * whenever backup is already enrolled, independent of its current
@@ -30,13 +49,23 @@ import app.onym.android.strings.R
  *
  * Mirrors `DeviceBackupSettingsView` in onym-ios OnymBackupUI.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceBackupSettingsScreen(
     flow: DeviceBackupSettingsFlow,
     canRestore: Boolean,
     onBackUpNow: () -> Unit,
+    /** Pushes the enrolment disclosure. Shown in place of Back Up Now
+     *  whenever [needsEnrolment] holds — Off, TermsChanged, and
+     *  OperatorChanged all need the disclosure re-accepted before a
+     *  backup can run, but this screen stays reachable in those
+     *  states because it holds the only Restore and Erase entry
+     *  points, and the operator may still hold a copy. */
+    onSetUp: () -> Unit,
     onRestoreFromBackup: () -> Unit,
     onErase: () -> Unit,
+    onBack: () -> Unit,
+    operatorName: String,
     modifier: Modifier = Modifier,
 ) {
     val status by flow.status.collectAsState()
@@ -47,36 +76,134 @@ fun DeviceBackupSettingsScreen(
     var showEraseConfirm1 by remember { mutableStateOf(false) }
     var showEraseConfirm2 by remember { mutableStateOf(false) }
 
-    Scaffold(modifier = modifier) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
-            Text(statusText(status), modifier = Modifier.testTag("backup.settings.status"))
+    Scaffold(
+        modifier = modifier,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(operatorName) },
+                navigationIcon = {
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("backup.settings.back")) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        LazyColumn(contentPadding = padding) {
+            item { SettingsSectionLabel(stringResource(R.string.backup_section_status)) }
+            item {
+                val presentation = statusPresentation(status)
+                SettingsCard {
+                    SettingsRow(
+                        leading = { SettingsTileBox(presentation.icon, presentation.tint) },
+                        title = presentation.title,
+                        subtitle = presentation.subtitle,
+                        isLast = true,
+                        modifier = Modifier.testTag("backup.settings.status"),
+                    )
+                }
+            }
+            item {
+                SettingsFootnote(
+                    when (status) {
+                        is DeviceBackupStatus.Stale -> stringResource(R.string.backup_footnote_manual)
+                        is DeviceBackupStatus.CheckingEarlierBackup ->
+                            stringResource(R.string.backup_footnote_checking)
+                        else -> stringResource(R.string.backup_footnote_sealed)
+                    },
+                )
+            }
 
-            Button(
-                onClick = onBackUpNow,
-                enabled = status !is DeviceBackupStatus.Running,
-                modifier = Modifier.padding(top = 16.dp).testTag("backup.settings.back_up_now"),
-            ) {
-                Text(stringResource(R.string.backup_settings_back_up_now))
+            if (needsEnrolment(status)) {
+                // iOS shows the setup row ON the settings screen so
+                // Restore/Erase stay reachable while enrolment is
+                // pending — same here.
+                item {
+                    SettingsCard {
+                        SettingsRow(
+                            leading = { SettingsTileBox(Icons.Filled.Backup, SettingsTile.Green) },
+                            title = when (status) {
+                                is DeviceBackupStatus.TermsChanged ->
+                                    stringResource(R.string.backup_setup_review_terms_title)
+                                is DeviceBackupStatus.OperatorChanged ->
+                                    stringResource(R.string.backup_setup_new_operator_title)
+                                else -> stringResource(R.string.backup_setup_row_title)
+                            },
+                            subtitle = stringResource(R.string.backup_setup_row_subtitle),
+                            onClick = onSetUp,
+                            isLast = true,
+                            modifier = Modifier.testTag("backup.settings.setup_row"),
+                        )
+                    }
+                }
+            } else {
+                item {
+                    val running = status is DeviceBackupStatus.Running
+                    SettingsCard {
+                        SettingsRow(
+                            leading = { SettingsTileBox(Icons.Filled.CloudUpload, SettingsTile.Blue) },
+                            title = stringResource(R.string.backup_settings_back_up_now),
+                            // The subtitle says WHY the row is inert
+                            // while an upload runs; the semantics flag
+                            // tells TalkBack it is a disabled action,
+                            // not a static label.
+                            subtitle = if (running) {
+                                stringResource(R.string.backup_back_up_now_running_subtitle)
+                            } else {
+                                stringResource(R.string.backup_back_up_now_operator_subtitle)
+                            },
+                            titleColor = if (running) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            onClick = if (running) null else onBackUpNow,
+                            showChevron = false,
+                            isLast = true,
+                            modifier = Modifier
+                                .testTag("backup.settings.back_up_now")
+                                .then(if (running) Modifier.semantics { disabled() } else Modifier),
+                        )
+                    }
+                }
+                item { SettingsFootnote(stringResource(R.string.backup_footnote_full_upload)) }
             }
 
             if (canRestore) {
-                Button(
-                    onClick = onRestoreFromBackup,
-                    modifier = Modifier.padding(top = 8.dp).testTag("backup.settings.restore_row"),
-                ) {
-                    Column {
-                        Text(stringResource(R.string.backup_settings_restore_row_title))
-                        Text(stringResource(R.string.backup_settings_restore_row_subtitle))
+                item {
+                    SettingsCard {
+                        SettingsRow(
+                            leading = { SettingsTileBox(Icons.Filled.CloudDownload, SettingsTile.Green) },
+                            title = stringResource(R.string.backup_settings_restore_row_title),
+                            subtitle = stringResource(R.string.backup_settings_restore_row_subtitle),
+                            onClick = onRestoreFromBackup,
+                            isLast = true,
+                            modifier = Modifier.testTag("backup.settings.restore_row"),
+                        )
                     }
                 }
             }
 
-            Button(
-                onClick = { showEraseConfirm1 = true },
-                modifier = Modifier.padding(top = 8.dp).testTag("backup.settings.erase"),
-            ) {
-                Text(stringResource(R.string.backup_settings_erase))
+            item { Spacer(Modifier.height(12.dp)) }
+            item {
+                SettingsCard {
+                    SettingsRow(
+                        leading = { SettingsTileBox(Icons.Filled.DeleteForever, SettingsTile.Red) },
+                        title = stringResource(R.string.backup_settings_erase),
+                        subtitle = stringResource(R.string.backup_settings_erase_subtitle),
+                        titleColor = MaterialTheme.colorScheme.error,
+                        onClick = { showEraseConfirm1 = true },
+                        showChevron = false,
+                        isLast = true,
+                        modifier = Modifier.testTag("backup.settings.erase"),
+                    )
+                }
             }
+            item { SettingsFootnote(stringResource(R.string.backup_footnote_erase)) }
+            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 
@@ -122,25 +249,4 @@ fun DeviceBackupSettingsScreen(
             },
         )
     }
-}
-
-/** Localized rendering of [DeviceBackupStatus] — `@Composable` so it
- *  can call `stringResource`. Every call site is already inside
- *  composition (this screen, and `BackupVendorsListScreen`'s row
- *  list). */
-@Composable
-fun statusText(status: DeviceBackupStatus): String = when (status) {
-    is DeviceBackupStatus.Off -> stringResource(R.string.backup_status_off)
-    is DeviceBackupStatus.Idle -> if (status.lastSuccessAt != null) {
-        stringResource(R.string.backup_status_backed_up)
-    } else {
-        stringResource(R.string.backup_status_no_backup_yet)
-    }
-    is DeviceBackupStatus.Running -> stringResource(R.string.backup_status_backing_up)
-    is DeviceBackupStatus.Stale -> stringResource(R.string.backup_status_stale)
-    is DeviceBackupStatus.PaymentRequired -> stringResource(R.string.backup_status_payment_required)
-    is DeviceBackupStatus.TermsChanged -> stringResource(R.string.backup_status_terms_changed)
-    is DeviceBackupStatus.OperatorChanged -> stringResource(R.string.backup_status_operator_changed)
-    is DeviceBackupStatus.CheckingEarlierBackup -> stringResource(R.string.backup_status_checking_earlier)
-    is DeviceBackupStatus.Failed -> stringResource(R.string.backup_status_failed, status.message)
 }

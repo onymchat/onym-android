@@ -74,12 +74,12 @@ fun SettingsSectionLabel(text: String) {
 }
 
 @Composable
-fun SettingsFootnote(text: String) {
+fun SettingsFootnote(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+        modifier = modifier.padding(horizontal = 32.dp, vertical = 8.dp),
     )
 }
 
