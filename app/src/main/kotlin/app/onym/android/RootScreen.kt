@@ -839,7 +839,6 @@ fun RootScreen(
                         } else {
                             null
                         },
-                    deviceBackupVendorCount = backupVendors.size,
                 )
             }
             composable(ROUTE_CREATE_GROUP) {
@@ -1068,6 +1067,13 @@ fun RootScreen(
                     onVendorClick = { componentId ->
                         navController.navigate(deviceBackupSettingsRoute(componentId))
                     },
+                    onBackUpAll = {
+                        // Fire-and-forget per operator, same as each
+                        // operator screen's own Back Up Now — the runs
+                        // survive navigating off this screen.
+                        backupVendors.forEach { vendor -> vendor.backUpNow() }
+                    },
+                    onBack = { navController.popBackStack() },
                     catalogSection = {
                         if (backupEntries.isNotEmpty()) {
                             androidx.compose.foundation.layout.Column {
@@ -1111,27 +1117,15 @@ fun RootScreen(
                     }
                     val resolved = disclosure
                     if (resolved == null) {
-                        androidx.compose.foundation.layout.Column(
-                            modifier = Modifier.testTag("backup.enrolment.loading"),
-                        ) {
-                            if (isFetching) {
-                                androidx.compose.material3.Text(stringResource(R.string.backup_enrolment_fetching))
-                            } else {
-                                androidx.compose.material3.Text(
-                                    stringResource(R.string.backup_enrolment_fetch_failed),
-                                    modifier = Modifier.testTag("backup.enrolment.fetch_failed"),
-                                )
-                                androidx.compose.material3.Button(
-                                    onClick = { fetchAttempts += 1 },
-                                    modifier = Modifier.testTag("backup.enrolment.retry"),
-                                ) {
-                                    androidx.compose.material3.Text(stringResource(R.string.backup_enrolment_retry))
-                                }
-                            }
-                        }
+                        app.onym.android.backup.ui.BackupEnrolmentLoadingScreen(
+                            isFetching = isFetching,
+                            onRetry = { fetchAttempts += 1 },
+                            onBack = { navController.popBackStack() },
+                        )
                     } else {
                         val (items, scheduleSentence) = resolved
                         app.onym.android.backup.ui.BackupEnrolmentScreen(
+                            operatorName = backup.displayName,
                             items = items,
                             scheduleSentence = scheduleSentence,
                             onAccept = {
@@ -1149,6 +1143,7 @@ fun RootScreen(
                                 }
                             },
                             onDecline = { navController.popBackStack() },
+                            onBack = { navController.popBackStack() },
                         )
                     }
                 } else {
@@ -1160,6 +1155,8 @@ fun RootScreen(
                             navController.navigate(deviceBackupRestoreRoute(componentId))
                         },
                         onErase = backup.erase,
+                        onBack = { navController.popBackStack() },
+                        operatorName = backup.displayName,
                     )
                 }
             }
@@ -1170,6 +1167,7 @@ fun RootScreen(
                 app.onym.android.backup.ui.BackupRestoreScreen(
                     makeRestoreFlow = backup.makeRestoreFlow,
                     onDone = { navController.popBackStack() },
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable("moderation_case_appeal/{caseId}") { entry ->

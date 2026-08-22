@@ -734,12 +734,8 @@
   <string name="settings_moderation_row_title">Модерация</string>
   <string name="settings_section_device_backup">Резервное копирование</string>
   <string name="settings_device_backup_row_title">Резервная копия устройства</string>
-  <plurals name="backup_vendor_count">
-    <item quantity="one">%1$d поставщик резервного копирования</item>
-    <item quantity="few">%1$d поставщика резервного копирования</item>
-    <item quantity="many">%1$d поставщиков резервного копирования</item>
-    <item quantity="other">%1$d поставщика резервного копирования</item>
-  </plurals>
+  <string name="settings_device_backup_row_subtitle">Запечатанные копии истории этого телефона</string>
+  <string name="settings_device_backup_footnote">Резервная копия запечатывается на этом телефоне до отправки. Оператор хранит байты, которые не может прочитать, и открыть их может только ваша фраза восстановления.</string>
 
   <!-- Резервное копирование устройства — экран согласия -->
   <string name="backup_enrolment_accept">Включить резервное копирование</string>
@@ -747,37 +743,118 @@
   <string name="backup_enrolment_fetching">Получение условий этого оператора…</string>
   <string name="backup_enrolment_fetch_failed">Не удалось получить условия этого оператора. Резервное копирование нельзя включить без их ознакомления.</string>
   <string name="backup_enrolment_retry">Повторить</string>
+  <string name="backup_enrolment_backing_up_to">Резервное копирование к оператору</string>
+  <string name="backup_enrolment_third_party_title">Это копирует и чужие сообщения</string>
+  <string name="backup_enrolment_no_reset_title">Никто не сможет восстановить это за вас</string>
+  <string name="backup_enrolment_schedule_title">Когда создаются резервные копии</string>
+  <string name="backup_section_promises">Что обещает оператор</string>
+  <string name="backup_footnote_terms_pinned">Эти условия закрепляются за каждой резервной копией, которую вы делаете под ними. Если оператор позднее опубликует другие условия, резервное копирование остановится, пока вы их не просмотрите.</string>
+  <string name="backup_enrolment_unavailable_title">Условия оператора не удалось проверить</string>
+  <string name="backup_enrolment_unavailable_note">Без них резервное копирование включить нельзя.</string>
 
   <!-- Резервное копирование устройства — экран настроек -->
   <string name="backup_settings_back_up_now">Создать резервную копию</string>
+  <string name="backup_back_up_now_operator_subtitle">Загружает всю вашу историю этому оператору</string>
+  <string name="backup_footnote_full_upload">Каждая резервная копия загружает всё, а не только изменения — инкрементальной загрузки пока нет.</string>
   <string name="backup_settings_restore_row_title">Восстановить из резервной копии</string>
   <string name="backup_settings_restore_row_subtitle">Добавляет сообщения и чаты — ничего не удаляется</string>
   <string name="backup_settings_erase">Удалить резервную копию</string>
+  <string name="backup_settings_erase_subtitle">Просит этого оператора уничтожить хранимую им копию</string>
+  <string name="backup_footnote_erase">Другие ваши операторы не затрагиваются. Удаление просит этого оператора уничтожить то, что он хранит, и сохраняет его подписанную квитанцию — оно не может затронуть копии, которые уже есть у других участников ваших чатов.</string>
 
-  <!-- Резервное копирование устройства — статус -->
+  <!-- Резервное копирование устройства — карточка статуса (пары
+       заголовок/подзаголовок, по одной на случай DeviceBackupStatus) -->
   <string name="backup_status_off">Выключено</string>
-  <string name="backup_status_backed_up">Резервная копия создана</string>
-  <string name="backup_status_no_backup_yet">Включено — резервной копии ещё нет</string>
+  <string name="backup_status_on_title">Включено</string>
+  <string name="backup_status_off_subtitle">Ваша история остаётся только на этом телефоне</string>
+  <string name="backup_status_last_backup">Последняя резервная копия: %1$s</string>
+  <string name="backup_status_none_completed">Ни одна резервная копия ещё не завершена</string>
   <string name="backup_status_backing_up">Создание резервной копии…</string>
-  <string name="backup_status_stale">Резервная копия устарела</string>
-  <string name="backup_status_payment_required">Для продолжения резервного копирования требуется оплата</string>
-  <string name="backup_status_terms_changed">Условия оператора изменились — просмотрите и примите их заново</string>
-  <string name="backup_status_operator_changed">Оператор резервного копирования изменился — проверьте настройки</string>
-  <string name="backup_status_checking_earlier">Проверка более ранней резервной копии…</string>
-  <string name="backup_status_failed">Ошибка резервного копирования: %1$s</string>
+  <string name="backup_status_uploading">Загрузка</string>
+  <string name="backup_status_out_of_date_title">Устарела</string>
+  <string name="backup_status_payment_title">Требуется оплата</string>
+  <string name="backup_status_payment_subtitle">Оператору нужна подписка, прежде чем он будет хранить резервную копию</string>
+  <string name="backup_status_terms_title">Условия изменились</string>
+  <string name="backup_status_terms_subtitle">Прочитайте новые условия, чтобы продолжить резервное копирование</string>
+  <string name="backup_status_operator_title">Оператор резервного копирования изменился</string>
+  <string name="backup_status_operator_subtitle">Настройте резервное копирование заново с выбранным вами оператором</string>
+  <string name="backup_status_checking_title">Проверка более ранней резервной копии</string>
+  <string name="backup_status_checking_subtitle">Более ранняя резервная копия ещё не подтверждена</string>
+  <string name="backup_status_failed_title">Что-то пошло не так</string>
+  <string name="backup_footnote_sealed">Открыть резервную копию может только ваша фраза восстановления. Оператор хранит байты, которые не может прочитать.</string>
+  <string name="backup_footnote_manual">Резервные копии создаются при открытии приложения или по нажатию «Создать резервную копию» — в фоне ничего не выполняется само по себе, так что если вы давно не делали резервную копию, её и нет.</string>
+  <string name="backup_footnote_checking">Ничего нового не загружается, пока не разрешится более ранняя копия, — так вы не платите за хранение одной и той же истории дважды.</string>
 
-  <!-- Резервное копирование устройства — список поставщиков -->
-  <string name="backup_vendors_empty">Ни один поставщик резервного копирования пока не подтверждён.</string>
+  <!-- Резервное копирование устройства — обзор всех операторов -->
+  <string name="backup_vendors_empty">Ни один оператор резервного копирования пока не настроен. Резервная копия запечатывается на этом телефоне до отправки — оператор хранит байты, которые не может прочитать, и открыть их может только ваша фраза восстановления.</string>
+  <string name="backup_section_status">Статус</string>
+  <string name="backup_section_operators">Операторы</string>
+  <string name="backup_summary_off_consented_subtitle">Пока ничего не копируется — вы всё ещё можете восстановить более раннюю резервную копию у оператора ниже</string>
+  <plurals name="backup_summary_operators_set_up">
+    <item quantity="one">Настроен %1$d оператор</item>
+    <item quantity="few">Настроено %1$d оператора</item>
+    <item quantity="many">Настроено %1$d операторов</item>
+    <item quantity="other">Настроено %1$d оператора</item>
+  </plurals>
+  <string name="backup_summary_oldest_copy">старейшая копия: %1$s</string>
+  <string name="backup_summary_none_completed">ни одна резервная копия ещё не завершена</string>
+  <plurals name="backup_summary_more_not_set_up">
+    <item quantity="one">ещё %1$d не настроен</item>
+    <item quantity="few">ещё %1$d не настроены</item>
+    <item quantity="many">ещё %1$d не настроены</item>
+    <item quantity="other">ещё %1$d не настроены</item>
+  </plurals>
+  <string name="backup_summary_attention_title">Требует внимания</string>
+  <plurals name="backup_summary_attention_count">
+    <item quantity="one">%1$d оператор требует внимания</item>
+    <item quantity="few">%1$d оператора требуют внимания</item>
+    <item quantity="many">%1$d операторов требуют внимания</item>
+    <item quantity="other">%1$d оператора требуют внимания</item>
+  </plurals>
+  <plurals name="backup_summary_healthy_prefix">
+    <item quantity="one">%1$d в актуальном состоянии</item>
+    <item quantity="few">%1$d в актуальном состоянии</item>
+    <item quantity="many">%1$d в актуальном состоянии</item>
+    <item quantity="other">%1$d в актуальном состоянии</item>
+  </plurals>
+  <string name="backup_footnote_attention">Оператор с устаревшей копией не хранит вашу недавнюю историю. Откройте его ниже, чтобы увидеть, чего он ждёт.</string>
+  <string name="backup_back_up_all_title">Скопировать ко всем</string>
+  <string name="backup_back_up_now_subtitle">Загружает всю вашу историю</string>
+  <plurals name="backup_back_up_all_subtitle">
+    <item quantity="one">Загружает всю вашу историю %1$d оператору</item>
+    <item quantity="few">Загружает всю вашу историю всем %1$d операторам</item>
+    <item quantity="many">Загружает всю вашу историю всем %1$d операторам</item>
+    <item quantity="other">Загружает всю вашу историю всем %1$d операторам</item>
+  </plurals>
+  <string name="backup_operator_row_title">Оператор</string>
+  <string name="backup_phrase_not_set_up">не настроен</string>
+  <string name="backup_phrase_backed_up">копия от %1$s</string>
+  <string name="backup_phrase_nothing_uploaded">настроен, ещё ничего не загружено</string>
+  <string name="backup_phrase_backing_up">создаётся резервная копия…</string>
+  <string name="backup_phrase_out_of_date">устарела</string>
+  <string name="backup_phrase_payment_needed">требуется оплата</string>
+  <string name="backup_phrase_new_terms">новые условия для прочтения</string>
+  <string name="backup_phrase_needs_setup_again">требует повторной настройки</string>
+  <string name="backup_phrase_checking_earlier">проверка более ранней копии</string>
+  <string name="backup_phrase_something_wrong">что-то пошло не так</string>
+  <string name="backup_footnote_operators">Каждый настроенный вами оператор хранит собственную отдельную копию, запечатанную собственным ключом и оплачиваемую отдельно. Если один из них закроется или потеряет ваши данные, остальные не пострадают.</string>
 
   <!-- Резервное копирование устройства — экран восстановления -->
-  <string name="backup_restore_intro">Добавляет сообщения и чаты из последней резервной копии — ничего на этом устройстве не удаляется.</string>
+  <string name="backup_restore_title">Восстановление</string>
+  <string name="backup_restore_intro">Восстановление добавляет сообщения и чаты из этой резервной копии к тому, что уже есть на этом телефоне. Ничего не удаляется, и ваша личность не затрагивается.</string>
+  <string name="backup_restore_row_subtitle">Самая свежая резервная копия у этого оператора</string>
+  <string name="backup_restore_confirm_title">Восстановить эту резервную копию?</string>
+  <string name="backup_restore_confirm_body">Сообщения и чаты из этой резервной копии будут добавлены на этот телефон.</string>
+  <string name="backup_restore_confirm_action">Восстановить</string>
   <string name="backup_restore_running">Восстановление…</string>
   <string name="backup_restore_done">Готово</string>
+  <string name="backup_restore_done_title">Восстановлено</string>
   <string name="backup_restore_close">Закрыть</string>
+  <string name="backup_restore_failed_title">Восстановление не завершилось</string>
+  <string name="backup_restore_untouched">На этом телефоне ничего не изменилось.</string>
   <string name="backup_restore_unavailable">Восстановление сейчас недоступно.</string>
   <string name="backup_restore_generic_failed">Восстановление не удалось. Ничего на этом устройстве не изменилось.</string>
   <string name="backup_restore_interrupted_default">Восстановление было прервано.</string>
-  <string name="backup_restore_failed_prefix">Ничего не изменилось. %1$s</string>
   <string name="backup_restore_partial">Восстановление было прервано. Часть сообщений и чатов могла уже быть добавлена — повторное восстановление безопасно и не создаст дублей. %1$s</string>
   <string name="backup_restore_nothing_found">Для этой резервной копии ничего не найдено. Если вы ожидали увидеть историю, проверьте, что это тот же оператор и та же личность, под которыми делалась резервная копия.</string>
   <plurals name="backup_restore_chats_count">

@@ -147,10 +147,6 @@ fun SettingsScreen(
      *  phrase) — the section is omitted entirely, same posture as
      *  Discovery/Moderation. */
     onDeviceBackupClick: (() -> Unit)? = null,
-    /** Count of consented backup vendors — a holder may back up to
-     *  several at once — driving the row's "{n} vendor(s)" subtitle.
-     *  Only meaningful when [onDeviceBackupClick] is non-null. */
-    deviceBackupVendorCount: Int = 0,
 ) {
     // Two gates of the "clear message cache" double-confirm.
     var showClearConfirm1 by remember { mutableStateOf(false) }
@@ -306,17 +302,14 @@ fun SettingsScreen(
                                 SettingsTileBox(Icons.Filled.Backup, SettingsTile.Indigo)
                             },
                             title = stringResource(R.string.settings_device_backup_row_title),
-                            subtitle = androidx.compose.ui.res.pluralStringResource(
-                                R.plurals.backup_vendor_count,
-                                deviceBackupVendorCount,
-                                deviceBackupVendorCount,
-                            ),
+                            subtitle = stringResource(R.string.settings_device_backup_row_subtitle),
                             onClick = onDeviceBackupClick,
                             isLast = true,
                             modifier = Modifier.testTag("settings.device_backup_row"),
                         )
                     }
                 }
+                item { SettingsFootnote(stringResource(R.string.settings_device_backup_footnote)) }
             }
 
             // ─── ANCHORS ───────────────────────────────────────────

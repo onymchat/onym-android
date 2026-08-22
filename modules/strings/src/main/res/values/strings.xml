@@ -734,10 +734,8 @@
   <string name="settings_moderation_row_title">Moderation</string>
   <string name="settings_section_device_backup">Backup</string>
   <string name="settings_device_backup_row_title">Device Backup</string>
-  <plurals name="backup_vendor_count">
-    <item quantity="one">%1$d backup vendor</item>
-    <item quantity="other">%1$d backup vendors</item>
-  </plurals>
+  <string name="settings_device_backup_row_subtitle">Sealed copies of this phone\'s history</string>
+  <string name="settings_device_backup_footnote">A backup is sealed on this phone before it leaves. The operator keeps bytes it cannot read, and only your recovery phrase can open them.</string>
 
   <!-- Device backup — enrolment screen -->
   <string name="backup_enrolment_accept">Turn On Backup</string>
@@ -745,37 +743,110 @@
   <string name="backup_enrolment_fetching">Fetching this operator\'s terms…</string>
   <string name="backup_enrolment_fetch_failed">Couldn\'t fetch this operator\'s terms. Backup can\'t be turned on without reviewing them first.</string>
   <string name="backup_enrolment_retry">Retry</string>
+  <string name="backup_enrolment_backing_up_to">Backing up to</string>
+  <string name="backup_enrolment_third_party_title">This copies other people\'s messages too</string>
+  <string name="backup_enrolment_no_reset_title">Nobody can recover this for you</string>
+  <string name="backup_enrolment_schedule_title">When backups happen</string>
+  <string name="backup_section_promises">What the operator promises</string>
+  <string name="backup_footnote_terms_pinned">These terms are pinned to every backup you make under them. If the operator publishes different terms later, backups stop until you have seen them.</string>
+  <string name="backup_enrolment_unavailable_title">The operator\'s terms could not be verified</string>
+  <string name="backup_enrolment_unavailable_note">Backup cannot be turned on without them.</string>
 
   <!-- Device backup — settings screen -->
   <string name="backup_settings_back_up_now">Back Up Now</string>
+  <string name="backup_back_up_now_operator_subtitle">Uploads your whole history to this operator</string>
+  <string name="backup_footnote_full_upload">Each backup uploads everything, not just what changed — there is no incremental upload yet.</string>
   <string name="backup_settings_restore_row_title">Restore From Backup</string>
   <string name="backup_settings_restore_row_subtitle">Adds messages and chats — nothing is deleted</string>
   <string name="backup_settings_erase">Erase Backup</string>
+  <string name="backup_settings_erase_subtitle">Asks this operator to destroy the copy it holds</string>
+  <string name="backup_footnote_erase">Your other operators are not affected. Erasing asks this operator to destroy what it holds and keeps its signed receipt — it cannot reach copies other people in your chats already have.</string>
 
-  <!-- Device backup — status text, one entry per DeviceBackupStatus case -->
+  <!-- Device backup — per-operator status card (title/subtitle pairs,
+       one per DeviceBackupStatus case; iOS DeviceBackupSettingsView
+       parity) -->
   <string name="backup_status_off">Off</string>
-  <string name="backup_status_backed_up">Backed up</string>
-  <string name="backup_status_no_backup_yet">On — no backup yet</string>
+  <string name="backup_status_on_title">On</string>
+  <string name="backup_status_off_subtitle">Your history stays on this phone only</string>
+  <string name="backup_status_last_backup">Last backup %1$s</string>
+  <string name="backup_status_none_completed">No backup has completed yet</string>
   <string name="backup_status_backing_up">Backing up…</string>
-  <string name="backup_status_stale">Backup is out of date</string>
-  <string name="backup_status_payment_required">Payment required to continue backing up</string>
-  <string name="backup_status_terms_changed">The operator\'s terms changed — review and re-accept to continue</string>
-  <string name="backup_status_operator_changed">Backup operator changed — review Settings</string>
-  <string name="backup_status_checking_earlier">Checking an earlier backup…</string>
-  <string name="backup_status_failed">Backup failed: %1$s</string>
+  <string name="backup_status_uploading">Uploading</string>
+  <string name="backup_status_out_of_date_title">Out of date</string>
+  <string name="backup_status_payment_title">Payment needed</string>
+  <string name="backup_status_payment_subtitle">The operator needs a subscription before it will keep a backup</string>
+  <string name="backup_status_terms_title">Terms changed</string>
+  <string name="backup_status_terms_subtitle">Read the new terms to continue backing up</string>
+  <string name="backup_status_operator_title">Backup operator changed</string>
+  <string name="backup_status_operator_subtitle">Set up backup again with the operator you chose</string>
+  <string name="backup_status_checking_title">Checking an earlier backup</string>
+  <string name="backup_status_checking_subtitle">An earlier backup has not been confirmed yet</string>
+  <string name="backup_status_failed_title">Something went wrong</string>
+  <string name="backup_footnote_sealed">Only your recovery phrase can open a backup. The operator stores bytes it cannot read.</string>
+  <string name="backup_footnote_manual">Backups run when you open the app or when you tap Back Up Now — nothing runs in the background on its own, so if you have not backed up in a while, nothing has been backed up.</string>
+  <string name="backup_footnote_checking">Nothing new is uploaded until the earlier one is resolved, so you are not charged to store the same history twice.</string>
 
-  <!-- Device backup — vendors list -->
-  <string name="backup_vendors_empty">No backup vendor is consented yet.</string>
+  <!-- Device backup — overview of all operators (iOS
+       DeviceBackupVendorsView parity) -->
+  <string name="backup_vendors_empty">No backup operator is set up yet. A backup is sealed on this phone before it leaves — an operator keeps bytes it cannot read, and only your recovery phrase can open them.</string>
+  <string name="backup_section_status">Status</string>
+  <string name="backup_section_operators">Operators</string>
+  <string name="backup_summary_off_consented_subtitle">Nothing is being backed up yet — you can still restore an earlier backup from an operator below</string>
+  <plurals name="backup_summary_operators_set_up">
+    <item quantity="one">%1$d operator set up</item>
+    <item quantity="other">%1$d operators set up</item>
+  </plurals>
+  <string name="backup_summary_oldest_copy">oldest copy %1$s</string>
+  <string name="backup_summary_none_completed">no backup has completed yet</string>
+  <plurals name="backup_summary_more_not_set_up">
+    <item quantity="one">%1$d more not set up</item>
+    <item quantity="other">%1$d more not set up</item>
+  </plurals>
+  <string name="backup_summary_attention_title">Needs attention</string>
+  <plurals name="backup_summary_attention_count">
+    <item quantity="one">%1$d operator needs attention</item>
+    <item quantity="other">%1$d operators need attention</item>
+  </plurals>
+  <plurals name="backup_summary_healthy_prefix">
+    <item quantity="one">%1$d up to date</item>
+    <item quantity="other">%1$d up to date</item>
+  </plurals>
+  <string name="backup_footnote_attention">An operator that is out of date is not holding your recent history. Open it below to see what it is waiting for.</string>
+  <string name="backup_back_up_all_title">Back Up To All</string>
+  <string name="backup_back_up_now_subtitle">Uploads your whole history</string>
+  <plurals name="backup_back_up_all_subtitle">
+    <item quantity="one">Uploads your whole history to %1$d operator</item>
+    <item quantity="other">Uploads your whole history to all %1$d operators</item>
+  </plurals>
+  <string name="backup_operator_row_title">Operator</string>
+  <string name="backup_phrase_not_set_up">not set up</string>
+  <string name="backup_phrase_backed_up">backed up %1$s</string>
+  <string name="backup_phrase_nothing_uploaded">set up, nothing uploaded yet</string>
+  <string name="backup_phrase_backing_up">backing up…</string>
+  <string name="backup_phrase_out_of_date">out of date</string>
+  <string name="backup_phrase_payment_needed">payment needed</string>
+  <string name="backup_phrase_new_terms">new terms to read</string>
+  <string name="backup_phrase_needs_setup_again">needs setting up again</string>
+  <string name="backup_phrase_checking_earlier">checking an earlier backup</string>
+  <string name="backup_phrase_something_wrong">something went wrong</string>
+  <string name="backup_footnote_operators">Every operator you set up keeps its own separate copy, sealed with its own key and paid for separately. One of them shutting down or losing your data does not take the others with it.</string>
 
-  <!-- Device backup — restore screen -->
-  <string name="backup_restore_intro">Adds messages and chats from your most recent backup — nothing on this device is deleted.</string>
+  <!-- Device backup — restore screen (iOS BackupRestoreView parity) -->
+  <string name="backup_restore_title">Restore</string>
+  <string name="backup_restore_intro">Restoring adds this backup\'s messages and chats to what is already on this phone. Nothing is deleted, and your identity is not touched.</string>
+  <string name="backup_restore_row_subtitle">The most recent backup this operator holds</string>
+  <string name="backup_restore_confirm_title">Restore this backup?</string>
+  <string name="backup_restore_confirm_body">Messages and chats from this backup will be added to this phone.</string>
+  <string name="backup_restore_confirm_action">Restore</string>
   <string name="backup_restore_running">Restoring…</string>
   <string name="backup_restore_done">Done</string>
+  <string name="backup_restore_done_title">Restored</string>
   <string name="backup_restore_close">Close</string>
+  <string name="backup_restore_failed_title">Restore did not complete</string>
+  <string name="backup_restore_untouched">Nothing on this phone was changed.</string>
   <string name="backup_restore_unavailable">Restore is not available right now.</string>
   <string name="backup_restore_generic_failed">Restore failed. Nothing on this device was changed.</string>
   <string name="backup_restore_interrupted_default">Restore was interrupted partway through.</string>
-  <string name="backup_restore_failed_prefix">Nothing was changed. %1$s</string>
   <string name="backup_restore_partial">Restore was interrupted. Some messages and chats may already have been added — restoring again is safe and won\'t duplicate anything. %1$s</string>
   <string name="backup_restore_nothing_found">Nothing found for this backup. If you expected history here, check that this is the same operator and identity the backup was made under.</string>
   <plurals name="backup_restore_chats_count">
