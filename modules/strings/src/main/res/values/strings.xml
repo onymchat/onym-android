@@ -968,5 +968,5 @@
   <string name="rules_proof_export_note_unproven">The file records what this device knows. There is no signature in it to check.</string>
   <string name="rules_proof_write_failed">This device couldn\'t write the proof file.</string>
   <string name="rules_proof_nothing_to_show">There\'s nothing to show about this member\'s agreement any more.</string>
-  <string name="rules_proof_chooser_title">Export proof</string>
+  <string name="rules_proof_open_cd">Open this member&#8217;s agreement</string>
 </resources>

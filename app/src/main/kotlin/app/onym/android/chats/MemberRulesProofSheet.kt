@@ -274,7 +274,7 @@ private fun share(context: Context, file: File) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(
-        Intent.createChooser(send, context.getString(R.string.rules_proof_chooser_title)),
+        Intent.createChooser(send, context.getString(R.string.rules_proof_export)),
     )
 }
 

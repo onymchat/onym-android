@@ -393,13 +393,23 @@ class IncomingMessageDispatcher(
                     continue
                 }
             }
-            // Neither proves anything, and the wire has none of its
-            // own. Keep the bytes; keep the wording too when it still
-            // belongs to them. Dropping the wording unconditionally
-            // destroyed the only copy of the signed words on this
-            // device and turned a truthful "doesn't check out" into
-            // "can't be checked".
-            if (wire.rulesSignature != null) continue
+            // Reached two ways, and the same answer serves both: the
+            // wire proved nothing, and either we hold bytes it doesn't
+            // or we hold a proven record whose signature no longer
+            // covers the row the admin is announcing (a rotated key).
+            //
+            // Keeping the stored bytes in both is the self row's
+            // ordering, mirrored. It used to `continue` here when the
+            // wire had a signature of its own, which meant a peer whose
+            // key the admin re-announced lost a *proven* record on a
+            // routine replay — irrecoverably, in favour of bytes that
+            // don't verify either. Nothing justified peers losing
+            // evidence where we would keep our own.
+            //
+            // The wording rides along only when it still belongs to
+            // these bytes. Dropping it unconditionally destroyed the
+            // only copy of the signed words and turned a truthful
+            // "doesn't check out" into "can't be checked".
             profiles[key] = wire.copy(
                 rulesHash = stored.rulesHash,
                 rulesSignature = stored.rulesSignature,
@@ -525,7 +535,7 @@ class IncomingMessageDispatcher(
         // Was this thread already on the device? Relays replay the inbox
         // on every reconnect, so a re-delivered invitation is routine —
         // only the first one is a "you joined" moment.
-// Answered by the snapshot already taken for the agreement
+        // Answered by the snapshot already taken for the agreement
         // merge above, rather than by a second predicate for the same
         // question — one matching bytes and one matching the hex
         // spelling would disagree on a stored id that parses but is

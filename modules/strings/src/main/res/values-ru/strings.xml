@@ -965,5 +965,5 @@
   <string name="rules_proof_export_note_unproven">Файл фиксирует то, что известно этому устройству. Подписи для проверки в нём нет.</string>
   <string name="rules_proof_write_failed">Это устройство не смогло записать файл подтверждения.</string>
   <string name="rules_proof_nothing_to_show">О согласии этого участника больше нечего показать.</string>
-  <string name="rules_proof_chooser_title">Экспортировать подтверждение</string>
+  <string name="rules_proof_open_cd">Открыть согласие участника</string>
 </resources>

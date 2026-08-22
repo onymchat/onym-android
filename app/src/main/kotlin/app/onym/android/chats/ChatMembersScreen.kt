@@ -1,6 +1,5 @@
 package app.onym.android.chats
 
-import androidx.compose.runtime.LaunchedEffect
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -8,8 +7,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,31 +18,35 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,21 +57,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.onym.android.strings.R
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.ChatGroup
+import app.onym.android.group.GroupAvatarImage
 import app.onym.android.group.GroupRulesProof
 import app.onym.android.group.GroupRulesStanding
-import app.onym.android.group.rulesStanding
-import app.onym.android.group.GroupAvatarImage
 import app.onym.android.group.MemberProfile
+import app.onym.android.group.rulesStanding
 import app.onym.android.identity.IdentitiesViewModel
+import app.onym.android.strings.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -300,8 +302,13 @@ private fun ChatMembersBody(
         group.groupType,
         activeBlsHex,
     ) {
-        group.memberProfiles.mapNotNull { (key, profile) ->
-            val standing = group.rulesStanding(key) ?: return@mapNotNull null
+        group.memberProfiles.map { (key, profile) ->
+            // The overload that takes the profile already in hand: the
+            // key-only one is nullable, and either swallowing that with
+            // a fallback (mislabelling a member) or dropping the row
+            // (losing one from the card and the count) would be a lie
+            // about a case that cannot happen here.
+            val standing = group.rulesStanding(profile, key)
             MemberRow(
                 blsHex = key,
                 blsPrefix = key.take(12),
@@ -373,6 +380,10 @@ private fun ChatMembersBody(
             group.adminPubkeyHex,
             group.groupType,
             group.id,
+            // The name too: the proof renders it and files under it, so
+            // a rename while the sheet is open would otherwise leave the
+            // written export naming the group as it used to be.
+            group.name,
             blsHex,
         ) {
             GroupRulesProof.of(group, blsHex)
@@ -418,7 +429,14 @@ private fun MemberRowView(row: MemberRow, onOpenProof: (String) -> Unit) {
             // standing keeps the two answers from drifting apart.
             .then(
                 if (mark != null) {
-                    Modifier.clickable { onOpenProof(row.blsHex) }
+                    // `Role.Button`, so TalkBack says the row opens
+                    // something. A chevron below says the same to
+                    // everyone else — before this the rows were tap
+                    // targets with no affordance at all.
+                    Modifier.clickable(
+                        role = Role.Button,
+                        onClickLabel = stringResource(R.string.rules_proof_open_cd),
+                    ) { onOpenProof(row.blsHex) }
                 } else {
                     Modifier
                 },
@@ -467,6 +485,14 @@ private fun MemberRowView(row: MemberRow, onOpenProof: (String) -> Unit) {
                     Text(text = mark.text, fontSize = 12.sp, color = mark.color)
                 }
             }
+        }
+        if (mark != null) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }
