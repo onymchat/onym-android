@@ -175,13 +175,15 @@ class GroupRulesProof private constructor(
      * group would otherwise land on one name. It also survives leaving
      * this app, where the filename is all the context there is.
      *
-     * Both parts are scrubbed and the readable part is clamped. Neither
-     * the group name nor the alias is ours: they arrive off the wire
-     * with no length cap and no character rules of their own, and this
-     * string reaches a filesystem. A roster key of `../../../x` reached
-     * outside the export directory before the scrub, and a 400-character
-     * alias pushed the name past the filesystem's limit, at which point
-     * the write failed and that member's export was broken for good.
+     * The readable part is scrubbed and clamped, and the key after it
+     * is a digest, so nothing off the wire lands in the name as it
+     * arrived. Neither the group name nor the alias is ours: they
+     * arrive off the wire with no length cap and no character rules of
+     * their own, and this string reaches a filesystem. A roster key of
+     * `../../../x` reached outside the export directory before either,
+     * and a 400-character alias pushed the name past the filesystem's
+     * limit, at which point the write failed and that member's export
+     * was broken for good.
      */
     val suggestedFileName: String
         get() {
@@ -189,11 +191,6 @@ class GroupRulesProof private constructor(
                 .take(READABLE_STEM_MAX)
                 .trim('-')
             val named = stem.ifEmpty { "group-rules" }
-            // Scrubbed first, then taken — and hashed when scrubbing
-            // left too little to tell two members apart. Taking the
-            // prefix of a raw key and scrubbing that could collapse a
-            // non-hex key to a few characters, or to none, putting back
-            // the collision the suffix exists to prevent.
             // Hashed, always. Scrubbing is not what makes a key
             // ambiguous: roster keys are unvalidated JSON object keys
             // off the wire, so two that are already lowercase hex and
