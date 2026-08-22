@@ -134,7 +134,15 @@ data class JoinRequestPayload(
                 ?: (other.joinerLeafHash == null)) &&
             joinerSendingPublicKey.contentEquals(other.joinerSendingPublicKey) &&
             joinerDisplayLabel == other.joinerDisplayLabel &&
-            groupId.contentEquals(other.groupId)
+            groupId.contentEquals(other.groupId) &&
+            // The agreement is the whole point of these two fields being
+            // unforgeable, so two requests carrying different signatures
+            // must not compare equal — a dedupe or a test that treated
+            // them as one request would be conflating exactly the
+            // evidence the founder decides on.
+            (rulesHash?.contentEquals(other.rulesHash) ?: (other.rulesHash == null)) &&
+            (rulesSignature?.contentEquals(other.rulesSignature)
+                ?: (other.rulesSignature == null))
     }
 
     override fun hashCode(): Int {
@@ -144,6 +152,8 @@ data class JoinRequestPayload(
         h = 31 * h + joinerSendingPublicKey.contentHashCode()
         h = 31 * h + joinerDisplayLabel.hashCode()
         h = 31 * h + groupId.contentHashCode()
+        h = 31 * h + (rulesHash?.contentHashCode() ?: 0)
+        h = 31 * h + (rulesSignature?.contentHashCode() ?: 0)
         return h
     }
 }

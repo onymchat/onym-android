@@ -54,39 +54,88 @@ import java.security.MessageDigest
  * agreed to and never what.
  *
  * Mirrors `GroupRules` in onym-ios — same domain string, same field
- * order, same cap, so a signature made on either platform verifies on
- * the other.
+ * order, same canonical form, same byte cap, so a signature made on
+ * either platform verifies on the other.
  */
 object GroupRules {
     /**
-     * The longest rules text an invite may carry.
+     * The most rules an invite may carry, in **UTF-8 bytes**.
      *
-     * The binding constraint is the QR code, not the screen. An invite
-     * link is `base64(JSON)` in a URL, rendered at correction level M,
-     * whose byte-mode ceiling is 2331 bytes. Measured end to end, with
-     * both 32-byte keys and a 30-character group name in the JSON:
+     * Bytes, not characters, for two reasons that both bite.
      *
-     *     500 ASCII characters     →   924-byte link
-     *     500 Cyrillic characters  →  1591-byte link
-     *     500 CJK characters       →  2258-byte link
+     * A character cap doesn't bound the payload it exists to bound. A
+     * ZWJ family emoji is one grapheme cluster, two UTF-16 units per
+     * component, and 25 UTF-8 bytes, so 500 of them is a legal
+     * 500-"character" rules text and a ~12.5 KB payload — many times the
+     * ceiling below.
      *
-     * So 500 fits even when every character costs three UTF-8 bytes,
-     * which is the case that decides the cap. A longer one would produce
-     * links that encode fine and then fail to scan — the worst way to
-     * find out.
+     * And a character cap isn't the same cap on both platforms. Swift's
+     * `String.count` counts grapheme clusters; Kotlin's `String.length`
+     * counts UTF-16 units. One non-BMP character makes them disagree,
+     * and because decode *rejects* an over-long value rather than
+     * truncating it, disagreement is an unusable link rather than a
+     * cosmetic difference. UTF-8 byte count is the only unit the two
+     * compute identically.
      *
-     * The headroom in that last row is thin, and it is shared with the
-     * group name, which has no cap of its own: 500 CJK characters of
-     * rules alongside a 30-character CJK name comes to 2338 bytes and
-     * clears the ceiling. Latin and Cyrillic names leave room to spare,
-     * which is why 500 stands, but the pair is what a future change has
-     * to re-measure.
+     * The value: a QR code at correction level M holds 2331 bytes, and
+     * the link is `base64(JSON)`, so the rules get ~1500 bytes of it.
+     * Measured end to end, with both 32-byte keys and a 30-character
+     * Latin group name:
+     *
+     *     1500 bytes as 1500 ASCII characters  →  2273-byte link
+     *     1500 bytes as  750 Cyrillic chars    →  2273-byte link
+     *     1500 bytes as  500 CJK characters    →  2273-byte link
+     *
+     * — the same link length, which is the point of measuring the budget
+     * in the unit the wire actually spends.
+     *
+     * The remaining headroom is shared with the group name, which has no
+     * cap of its own: 1500 bytes of rules alongside a 30-character CJK
+     * name overruns. The failure is soft — the share screen falls back to
+     * a copyable link with no QR — but it is why this number should not
+     * be raised without re-measuring the pair. `GroupRulesWireTest` pins
+     * both sides of that boundary, against the encoder that ships.
+     */
+    const val MAX_BYTES = 1500
+
+    /**
+     * What the compose field counts down from, in characters. A guide
+     * for the person typing, not the limit that decides whether a link
+     * is valid — [MAX_BYTES] is. Latin text hits neither before the
+     * other; scripts that cost more per character hit the byte cap
+     * first, which is correct and is why the field checks both.
      */
     const val MAX_LENGTH = 500
 
     /** Domain separator. Versioned: a change to the statement's shape
      *  must not let old signatures verify under the new reading. */
     internal const val DOMAIN = "onym-group-rules-v1"
+
+    /**
+     * Exactly the codepoints [canonical] trims from the ends, pinned
+     * rather than named.
+     *
+     * Kotlin's `String.trim()` and Foundation's
+     * `CharacterSet.whitespacesAndNewlines` are not the same set, in
+     * both directions. `Char.isWhitespace` keeps U+0085 (NEL), which
+     * Foundation trims, and trims the file/group/record/unit separators
+     * (U+001C-U+001F), which Foundation keeps. Either difference is one
+     * platform hashing a codepoint the other stripped — a genuine
+     * agreement that fails to verify, which the founder would read as a
+     * signature that doesn't check out rather than as a whitespace
+     * disagreement.
+     *
+     * So the set is written out, and it is the same one iOS writes out:
+     * the codepoints of `CharacterSet.whitespacesAndNewlines`. Spelling
+     * them here also stops a Kotlin or Foundation revision from silently
+     * changing what a signature covers.
+     */
+    val TRIMMED_CODEPOINTS: Set<Char> = setOf(
+        '\u0009', '\u000A', '\u000B', '\u000C', '\u000D', '\u0020', '\u0085', '\u00A0',
+        '\u1680', '\u2000', '\u2001', '\u2002', '\u2003', '\u2004', '\u2005', '\u2006',
+        '\u2007', '\u2008', '\u2009', '\u200A', '\u2028', '\u2029', '\u202F', '\u205F',
+        '\u3000',
+    )
 
     /**
      * The one canonical form, applied by *both* sides before hashing.
@@ -97,8 +146,14 @@ object GroupRules {
      * displayed. Trailing newlines from a text field are the one
      * difference that carries no meaning, and letting them through would
      * make agreement fail on an invisible character.
+     *
+     * See [TRIMMED_CODEPOINTS] for why the set is spelled out.
      */
-    fun canonical(rules: String): String = rules.trim()
+    fun canonical(rules: String): String = rules.trim { it in TRIMMED_CODEPOINTS }
+
+    /** Whether this text fits an invite, in the unit the wire spends. */
+    fun fits(rules: String): Boolean =
+        canonical(rules).toByteArray(Charsets.UTF_8).size <= MAX_BYTES
 
     /** Null for rules that are absent or blank — a group with no rules
      *  asks for no agreement, and an empty string must not become a
@@ -114,13 +169,29 @@ object GroupRules {
         MessageDigest.getInstance("SHA-256")
             .digest(canonical(rules).toByteArray(Charsets.UTF_8))
 
-    /** The exact bytes both sides sign and verify. See the type doc. */
+    /**
+     * The exact bytes both sides sign and verify. See the type doc.
+     *
+     * The requirements are the unambiguity argument, enforced: the
+     * concatenation needs no length prefixes *because* all three
+     * components are fixed-length, and a caller that passed a short
+     * group id would silently produce a preimage some other triple could
+     * also produce. Every caller already holds validated values, so this
+     * fires only on a programming error.
+     */
     fun statement(
         groupId: ByteArray,
         rulesHash: ByteArray,
         joinerSendingPublicKey: ByteArray,
-    ): ByteArray =
-        DOMAIN.toByteArray(Charsets.UTF_8) + groupId + rulesHash + joinerSendingPublicKey
+    ): ByteArray {
+        require(groupId.size == 32) { "groupId must be 32 bytes" }
+        require(rulesHash.size == 32) { "rulesHash must be 32 bytes" }
+        require(joinerSendingPublicKey.size == 32) {
+            "joinerSendingPublicKey must be 32 bytes"
+        }
+        return DOMAIN.toByteArray(Charsets.UTF_8) +
+            groupId + rulesHash + joinerSendingPublicKey
+    }
 
     /**
      * Whether [signature] is this joiner agreeing to exactly [rules] for
@@ -136,6 +207,10 @@ object GroupRules {
         groupId: ByteArray,
         joinerSendingPublicKey: ByteArray,
     ): Boolean = runCatching {
+        // Sizes checked before `statement`, whose requirements are for
+        // programming errors: everything here arrives from a stranger,
+        // and wrong-sized bytes are a "no" rather than a throw.
+        if (groupId.size != 32 || joinerSendingPublicKey.size != 32) return false
         val statement = statement(groupId, hash(rules), joinerSendingPublicKey)
         Ed25519Signer().apply {
             init(false, Ed25519PublicKeyParameters(joinerSendingPublicKey, 0))

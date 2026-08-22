@@ -242,10 +242,16 @@ class IdentityRepository(
      * @throws IdentityError.IdentityNotLoaded before [bootstrap].
      */
     override suspend fun signWithStellarKey(message: ByteArray): ByteArray =
-        signWithStellarKeyAs(
-            store.loadCurrent() ?: throw IdentityError.IdentityNotLoaded,
-            message,
-        )
+        // The selected-identity lookup stays on the IO dispatcher it was
+        // on before this delegation existed: `loadCurrent` reads
+        // EncryptedSharedPreferences, which blocks, and every existing
+        // caller signs from wherever it happens to be.
+        withContext(ioDispatcher) {
+            signWithStellarKeyAs(
+                store.loadCurrent() ?: throw IdentityError.IdentityNotLoaded,
+                message,
+            )
+        }
 
     /**
      * Sign as a *named* identity rather than as whichever one is

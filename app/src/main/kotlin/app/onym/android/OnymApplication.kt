@@ -1298,7 +1298,14 @@ class OnymApplication : Application() {
             repository = pendingChatRepository,
             verificationStore = pendingVerificationStore,
             groupRepository = groupRepository,
-            submitJoin = joinRequestSender::send,
+            submitJoin = { capability, label, owner ->
+                // Nothing collects an agreement yet: the screen that
+                // shows rules and the flow that carries the answer land
+                // with the joiner UI. Spelled out rather than defaulted,
+                // so this reads as a stage the stack is at and not as a
+                // caller that forgot.
+                joinRequestSender.send(capability, label, owner, agreedRules = null)
+            },
             displayLabel = { ownerId ->
                 // Same cold-start window as `currentIdentityId` below:
                 // an empty list there would have introduced the joiner
