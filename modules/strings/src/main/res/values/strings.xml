@@ -957,8 +957,8 @@
   <string name="rules_explanation_did_not_sign">Joined before this group had rules, or from an app version that predates them.</string>
   <string name="rules_explanation_unknown_rules">A signature is stored, but the wording it covers isn\'t on this device, so nothing here can check it.</string>
   <string name="rules_explanation_does_not_verify">A signature is stored and it doesn\'t check out. Nothing here can be shown as an agreement.</string>
-  <string name="rules_proof_what_signed">WHAT THEY SIGNED</string>
-  <string name="rules_proof_rules_they_set">THE RULES THEY SET</string>
+  <string name="rules_proof_what_signed">WHAT WAS SIGNED</string>
+  <string name="rules_proof_rules_they_set">THE RULES AS SET</string>
   <string name="rules_proof_changed_since">The group\'s rules have changed since. This is the wording that was agreed to.</string>
   <string name="rules_proof_member">member</string>
   <string name="rules_proof_signing_key">signing key</string>

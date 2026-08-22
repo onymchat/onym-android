@@ -1,5 +1,6 @@
 package app.onym.android.chats
 
+import androidx.compose.runtime.LaunchedEffect
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -284,12 +285,15 @@ private fun ChatMembersBody(
     onRemovePhoto: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Keyed on everything a standing reads, and nothing else. Each one
+    // Keyed on everything a standing reads — the group id included,
+    // since the signature is verified against it — and nothing else.
+    // Each one
     // is an Ed25519 verify plus a SHA-256, so re-deriving them on every
     // recomposition would put a hundred-member roster's worth of
     // verification on the frame — and the group's photo is not an input
     // worth comparing to find that out.
     val rows = remember(
+        group.id,
         group.memberProfiles,
         group.invitationMessage,
         group.adminPubkeyHex,
@@ -316,6 +320,15 @@ private fun ChatMembersBody(
         )
     }
     var proofFor by remember { mutableStateOf<String?>(null) }
+
+    // Swept from here as well as from the proof sheet: someone who
+    // opens one sheet and never another would otherwise leave that
+    // member's rules and signature in the cache until the OS evicted
+    // it. Any later visit to any group's member list clears it.
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { sweepStaleRulesProofExports(context) }
+    }
 
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
         GroupAvatarHeader(
@@ -347,11 +360,30 @@ private fun ChatMembersBody(
     // describes. A member who vanished underneath closes it rather than
     // showing an empty sheet.
     proofFor?.let { blsHex ->
-        val proof = GroupRulesProof.of(group, blsHex)
-        if (proof == null) {
-            proofFor = null
-        } else {
+        // Remembered on the same inputs the standings are, and *not*
+        // rebuilt per recomposition. `GroupRulesProof` has no `equals`,
+        // so a fresh instance on every group emission — an avatar, a
+        // name, a roster change — restarted the sheet's write effect:
+        // the Export button blinked out from under a thumb, another
+        // directory was minted, and an Ed25519 verify ran per frame,
+        // which is the cost the roster memo above exists to avoid.
+        val proof = remember(
+            group.memberProfiles,
+            group.invitationMessage,
+            group.adminPubkeyHex,
+            group.groupType,
+            group.id,
+            blsHex,
+        ) {
+            GroupRulesProof.of(group, blsHex)
+        }
+        if (proof != null) {
             MemberRulesProofSheet(proof = proof, onDismiss = { proofFor = null })
+        } else {
+            // Cleared in an effect, not during composition: writing the
+            // state this block reads is a backwards write, and it
+            // invalidates the scope that just read it.
+            LaunchedEffect(blsHex) { proofFor = null }
         }
     }
 }

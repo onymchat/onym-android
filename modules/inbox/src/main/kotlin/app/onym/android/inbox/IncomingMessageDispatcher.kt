@@ -423,7 +423,8 @@ class IncomingMessageDispatcher(
             // record, which is what taking the wire unconditionally
             // did.
             val stored = storedGroup?.memberProfiles?.get(key)
-            val wire = profiles[key]?.let {
+            val announced = profiles[key]
+            val wire = announced?.let {
                 // Verified as the row that will be *stored*, not as the
                 // one that arrived: the local keys are substituted
                 // below, so checking the wire's own key and then
@@ -438,7 +439,25 @@ class IncomingMessageDispatcher(
             val agreement = when {
                 wire?.agreedToRules(invitation.groupId) == true -> wire
                 stored?.agreedToRules(invitation.groupId) == true -> stored
-                wire?.rulesSignature != null -> wire.copy(rulesText = null)
+                // Neither proves anything and the wire has bytes.
+                // Keep the wording too, when it still belongs to them.
+                //
+                // Dropping it unconditionally was the peer loop's bug
+                // in miniature: this row is composed with our *own*
+                // sending key, so unless the admin announced a
+                // different one for us, the text is exactly what those
+                // bytes were made over — and discarding it destroyed
+                // the only copy of the signed words while turning a
+                // truthful "doesn't check out" into "can't be checked".
+                wire?.rulesSignature != null -> wire.copy(
+                    rulesText = if (
+                        announced.sendingPubkey.contentEquals(profile.sendingPubkey)
+                    ) {
+                        wire.rulesText
+                    } else {
+                        null
+                    },
+                )
                 else -> stored
             }
             profiles[key] = profile.copy(
@@ -506,9 +525,12 @@ class IncomingMessageDispatcher(
         // Was this thread already on the device? Relays replay the inbox
         // on every reconnect, so a re-delivered invitation is routine —
         // only the first one is a "you joined" moment.
-        val alreadyPresent = groupRepository.snapshots.value.any {
-            it.id == groupIdHex && it.ownerIdentityId == ownerIdentityId.value
-        }
+// Answered by the snapshot already taken for the agreement
+        // merge above, rather than by a second predicate for the same
+        // question — one matching bytes and one matching the hex
+        // spelling would disagree on a stored id that parses but is
+        // written differently.
+        val alreadyPresent = storedGroup != null
 
         groupRepository.insert(group)
 

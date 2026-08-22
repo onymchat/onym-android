@@ -92,7 +92,7 @@ fun MemberRulesProofSheet(
     // the directory this sheet is about to write is seconds old, so no
     // interleaving can reach it.
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { sweepStaleExports(context) }
+        withContext(Dispatchers.IO) { sweepStaleRulesProofExports(context) }
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -258,7 +258,7 @@ private fun writeExport(context: Context, proof: GroupRulesProof): File? = runCa
     File(directory, proof.suggestedFileName).apply { writeText(proof.json()) }
 }.getOrNull()
 
-private fun sweepStaleExports(context: Context) {
+internal fun sweepStaleRulesProofExports(context: Context) {
     val root = File(context.cacheDir, EXPORT_ROOT)
     val cutoff = System.currentTimeMillis() - STALE_EXPORT_AGE_MS
     root.listFiles().orEmpty()
