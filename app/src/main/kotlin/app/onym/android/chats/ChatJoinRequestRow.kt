@@ -208,6 +208,11 @@ private fun AgreementLine(agreement: JoinRequestApprover.RulesAgreement) {
         text = text,
         fontSize = 12.sp,
         color = color,
-        modifier = Modifier.testTag("chat_thread.join_request.rules"),
+        // Tagged by verdict, not just by "there is a verdict line": a
+        // test that can't tell agreed from doesn't-check-out is pinning
+        // the label's existence rather than what it says.
+        modifier = Modifier.testTag(
+            "chat_thread.join_request.rules.${agreement.name.lowercase()}",
+        ),
     )
 }

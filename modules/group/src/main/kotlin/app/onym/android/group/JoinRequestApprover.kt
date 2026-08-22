@@ -491,12 +491,22 @@ open class JoinRequestApprover(
     ) {
         val key = blsPub.toHexLowercase()
         // This device's own copy of the rules, as of the approval — the
-        // text the verdict was reached against. Kept whatever that
-        // verdict was: it is what the founder decided in front of, and
-        // re-reading the decision later needs the words, not a pointer
-        // to whatever the group says by then.
-        val rulesText = GroupRules.normalized(group.invitationMessage).takeIf {
-            rulesHash != null
+        // text the verdict was reached against, kept because re-reading
+        // the decision later needs the words and not a pointer to
+        // whatever the group says by then.
+        //
+        // Stored only when it is the text the joiner's own hash names.
+        // Otherwise the member would carry our words beside a hash of
+        // theirs, and anything reading the pair back would be checking a
+        // signature against text it was never made over — a stored
+        // triple that contradicts itself is worse than a missing field.
+        // The hash and signature are kept either way: they are what
+        // separates "signed something this device can't check" from
+        // "signed nothing", which is the distinction the verdict exists
+        // for.
+        val ourRules = GroupRules.normalized(group.invitationMessage)
+        val rulesText = ourRules?.takeIf { text ->
+            rulesHash != null && GroupRules.hash(text).contentEquals(rulesHash)
         }
         val updated = group.copy(
             memberProfiles = group.memberProfiles +
@@ -562,8 +572,10 @@ open class JoinRequestApprover(
                     sendingPub = joinerSendingPub,
                     rulesHash = rulesHash,
                     rulesSignature = rulesSignature,
+                    // Same rule as `recordJoiner`: our text travels only
+                    // when it is the text their hash names.
                     rulesText = GroupRules.normalized(group.invitationMessage)
-                        .takeIf { rulesHash != null },
+                        ?.takeIf { rulesHash != null && GroupRules.hash(it).contentEquals(rulesHash) },
                 ),
                 adminAlias = adminAlias,
                 // PR 88: ship the post-anchor commitment + epoch so
@@ -697,7 +709,6 @@ open class JoinRequestApprover(
             rulesHash = payload.rulesHash,
         )
     }
-
 
     /** Drop [requestId] plus every sibling that collapsed into its row;
      *  the winner alone would let one resurface. The key stays alive. */

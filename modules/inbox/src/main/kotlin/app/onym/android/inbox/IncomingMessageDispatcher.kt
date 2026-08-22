@@ -23,6 +23,7 @@ import app.onym.android.group.GroupCommitmentBuilder
 import app.onym.android.group.GroupInvitationPayload
 import app.onym.android.group.GroupInviteOfferPayload
 import app.onym.android.group.GroupRepository
+import app.onym.android.group.GroupRules
 import app.onym.android.group.GroupStateRefreshRequest
 import app.onym.android.group.MemberAnnouncementPayload
 import app.onym.android.group.MemberProfile
@@ -578,7 +579,15 @@ class IncomingMessageDispatcher(
                 // stop at whoever pressed Accept.
                 rulesHash = payload.newMember.rulesHash,
                 rulesSignature = payload.newMember.rulesSignature,
-                rulesText = payload.newMember.rulesText,
+                // The announced text is kept only when it is the text
+                // the announced hash names. A sender that admitted
+                // someone who signed a wording it doesn't hold announces
+                // its own copy anyway, and storing that beside the
+                // joiner's hash would leave this device checking a
+                // signature against words it was never made over.
+                rulesText = payload.newMember.rulesText?.takeIf { text ->
+                    payload.newMember.rulesHash?.contentEquals(GroupRules.hash(text)) == true
+                },
             )),
         )
         groupRepository.insert(updated)

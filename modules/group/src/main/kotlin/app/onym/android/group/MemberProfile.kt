@@ -84,6 +84,13 @@ data class MemberProfile(
      * request deliberately doesn't carry the text, because a joiner who
      * supplied it would be choosing what their own signature is checked
      * against.
+     *
+     * Null when the admitting device didn't hold the text
+     * [rulesHash] names — [rulesHash] and [rulesSignature] survive
+     * alone there, since they still separate a joiner who signed
+     * something uncheckable from one who signed nothing. What cannot
+     * happen is text that isn't the text the hash names; `init` refuses
+     * it.
      */
     @SerialName("rules_text")
     val rulesText: String? = null,
@@ -107,6 +114,23 @@ data class MemberProfile(
         }
         require(rulesSignature == null || rulesSignature.size == 64) {
             "rulesSignature: expected 64 bytes, got ${rulesSignature?.size}"
+        }
+        // Capped like the link that carried it. The text arrives inside
+        // a peer-announced snapshot, from the same sender the byte cap
+        // was written for one layer up, and an uncapped string here is a
+        // way to grow every recipient's stored group without bound.
+        require(rulesText == null || GroupRules.fits(rulesText)) {
+            "rulesText: expected at most ${GroupRules.MAX_BYTES} UTF-8 bytes"
+        }
+        // The text has to be the text the hash names. Storing one
+        // beside a hash of something else would have every later reader
+        // verifying a signature against words it was never made over —
+        // and `agreedToRules` would answer a question nobody asked.
+        require(
+            rulesText == null ||
+                (rulesHash != null && GroupRules.hash(rulesText).contentEquals(rulesHash)),
+        ) {
+            "rulesText must be the text rulesHash names"
         }
     }
 

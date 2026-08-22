@@ -164,6 +164,22 @@ data class MemberAnnouncementPayload(
             require(rulesSignature == null || rulesSignature.size == 64) {
                 "rulesSignature: expected 64 bytes, got ${rulesSignature?.size}"
             }
+            // Capped like the link that carried it: this arrives from a
+            // peer, and an uncapped string is a way to grow every
+            // recipient's stored group without bound.
+            require(rulesText == null || GroupRules.fits(rulesText)) {
+                "rulesText: expected at most ${GroupRules.MAX_BYTES} UTF-8 bytes"
+            }
+            // Deliberately *not* required to hash to [rulesHash]. The
+            // sender stores its own copy of the rules beside whatever
+            // the joiner signed, and iOS announces it whatever the
+            // verdict was — so a mismatch is an ordinary
+            // "signed-something-else" case, not a malformed
+            // announcement. Rejecting it here would drop the whole
+            // announcement and cost this device a member's inbox and
+            // verification keys over a field that only adds evidence.
+            // The receiver keeps the text only when it matches; see
+            // `IncomingMessageDispatcher`.
         }
 
         override fun equals(other: Any?): Boolean = this === other ||
