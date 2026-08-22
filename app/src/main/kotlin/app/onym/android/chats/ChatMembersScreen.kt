@@ -289,11 +289,10 @@ private fun ChatMembersBody(
 ) {
     // Keyed on everything a standing reads — the group id included,
     // since the signature is verified against it — and nothing else.
-    // Each one
-    // is an Ed25519 verify plus a SHA-256, so re-deriving them on every
-    // recomposition would put a hundred-member roster's worth of
-    // verification on the frame — and the group's photo is not an input
-    // worth comparing to find that out.
+    // Each standing is an Ed25519 verify plus a SHA-256, so re-deriving
+    // them on every recomposition would put a hundred-member roster's
+    // worth of verification on the frame, and the group's photo is not
+    // an input worth comparing to find that out.
     val rows = remember(
         group.id,
         group.memberProfiles,

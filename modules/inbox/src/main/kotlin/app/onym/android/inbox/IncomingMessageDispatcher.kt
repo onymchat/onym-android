@@ -361,11 +361,27 @@ class IncomingMessageDispatcher(
         // Scoped by owner as well as group — two identities on one
         // device hold two rows for the same group, and the wrong one
         // would stamp somebody else's agreements onto this roster.
-        val storedGroup = groupRepository.snapshots.value.firstOrNull {
-            it.groupIdBytes.contentEquals(invitation.groupId) &&
-                it.ownerIdentityId == ownerIdentityId.value
-        }
-        val profiles = (invitation.memberProfiles ?: emptyMap()).toMutableMap()
+        // `findForOwner`, not `snapshots`. The snapshot holds only the
+        // *active* identity's groups — it is empty when none is
+        // selected — while invitations are dispatched for every
+        // identity in parallel. Reading it here made this whole ladder
+        // a no-op for any identity that isn't the one on screen, which
+        // is exactly when a replay arrives: the roster dropped to
+        // "didn't sign", the rules fallback never fired, and
+        // `alreadyPresent` stayed false so "you joined" re-fired every
+        // time. `findForOwner` exists for this and says so.
+        val storedGroup = groupRepository
+            .findForOwner(ownerIdentityId.value, invitation.groupId.toHexLowercase())
+            ?.takeIf { it.groupIdBytes.contentEquals(invitation.groupId) }
+        // A wire with no roster at all is a sender that has nothing to
+        // say about members — an older admin's refresh reply writes
+        // `takeIf { it.isNotEmpty() }` — not an admin removing
+        // everyone. Starting from empty replaced the whole directory,
+        // agreements included, with self alone: the same version-skew
+        // erasure the rules fallback below prevents, and distinguishable
+        // in the same place.
+        val profiles = (invitation.memberProfiles ?: storedGroup?.memberProfiles ?: emptyMap())
+            .toMutableMap()
         val selfEntry = selfMemberProfileEntry(ownerIdentityId)
         for ((key, stored) in storedGroup?.memberProfiles.orEmpty()) {
             // The self row has its own, stricter precedence below.
@@ -393,19 +409,19 @@ class IncomingMessageDispatcher(
                     continue
                 }
             }
-            // Reached two ways, and the same answer serves both: the
-            // wire proved nothing, and either we hold bytes it doesn't
-            // or we hold a proven record whose signature no longer
-            // covers the row the admin is announcing (a rotated key).
+            // Neither record proves anything. The newest one wins,
+            // which is the self row's third rung and the reason both
+            // ladders now read the same way: wire-proves,
+            // stored-proves, wire-has-bytes, stored-bytes.
             //
-            // Keeping the stored bytes in both is the self row's
-            // ordering, mirrored. It used to `continue` here when the
-            // wire had a signature of its own, which meant a peer whose
-            // key the admin re-announced lost a *proven* record on a
-            // routine replay — irrecoverably, in favour of bytes that
-            // don't verify either. Nothing justified peers losing
-            // evidence where we would keep our own.
-            //
+            // The rung above already rescues the case that matters —
+            // stored bytes recomposed under the announced identity,
+            // when they still verify there. Past that, a stored record
+            // cannot be kept *as proven* under a key the admin has
+            // re-announced, so preferring it would only pin this member
+            // to whichever non-verifying record happened to land first,
+            // permanently, since the pin re-wins on every replay.
+            if (wire.rulesSignature != null) continue
             // The wording rides along only when it still belongs to
             // these bytes. Dropping it unconditionally destroyed the
             // only copy of the signed words and turned a truthful
