@@ -51,8 +51,13 @@ data class ChatJoinRequestDisplay(
      *  by [app.onym.android.group.JoinRequestApprover] against the
      *  group's own copy of the text. The row renders it and nothing
      *  more — a screen is the wrong place to be verifying signatures. */
-    val agreement: JoinRequestApprover.RulesAgreement =
-        JoinRequestApprover.RulesAgreement.NOT_REQUIRED,
+    /**
+     * No default, for the same reason [JoinRequestApprover.PendingRequest]
+     * has none: omitting it would quietly claim "this group has no
+     * rules", and a display type is the one a future call site is
+     * likelier to forget.
+     */
+    val agreement: JoinRequestApprover.RulesAgreement,
     /** This request's last failure, if any. */
     val errorText: String? = null,
 )

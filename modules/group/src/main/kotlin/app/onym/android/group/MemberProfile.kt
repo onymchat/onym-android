@@ -1,8 +1,12 @@
 package app.onym.android.group
 
 import app.onym.android.foundation.Base64ByteArraySerializer
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 /**
  * View-facing directory entry for one peer the local user has
@@ -29,7 +33,7 @@ import kotlinx.serialization.Serializable
  *
  * Mirrors `MemberProfile.swift` from onym-ios.
  */
-@Serializable
+@Serializable(with = MemberProfileSerializer::class)
 data class MemberProfile(
     val alias: String,
     @SerialName("inbox_public_key")
@@ -85,6 +89,13 @@ data class MemberProfile(
      * supplied it would be choosing what their own signature is checked
      * against.
      *
+     * Carried per member rather than once per group, because members
+     * are admitted under whatever the rules said *that day*: two people
+     * in the same roster can have agreed to different wordings, and a
+     * single hoisted copy could only be one of them. The duplication is
+     * bounded by the same cap the link is, and only rows with an
+     * agreement carry it at all.
+     *
      * Null when the admitting device didn't hold the text
      * [rulesHash] names — [rulesHash] and [rulesSignature] survive
      * alone there, since they still separate a joiner who signed
@@ -115,12 +126,21 @@ data class MemberProfile(
         require(rulesSignature == null || rulesSignature.size == 64) {
             "rulesSignature: expected 64 bytes, got ${rulesSignature?.size}"
         }
-        // Capped like the link that carried it. The text arrives inside
-        // a peer-announced snapshot, from the same sender the byte cap
-        // was written for one layer up, and an uncapped string here is a
-        // way to grow every recipient's stored group without bound.
-        require(rulesText == null || GroupRules.fits(rulesText)) {
-            "rulesText: expected at most ${GroupRules.MAX_BYTES} UTF-8 bytes"
+        // Capped like the link that carried it, and measured as
+        // *received* rather than as canonicalized: `fits` trims before
+        // measuring and `hash` trims before hashing, so a peer could
+        // otherwise send megabytes of leading whitespace in front of the
+        // real rules and have both checks pass while the raw string was
+        // persisted. Requiring the canonical form closes the same door
+        // from the other side.
+        require(
+            rulesText == null ||
+                rulesText.toByteArray(Charsets.UTF_8).size <= GroupRules.MAX_BYTES,
+        ) {
+            "rulesText: expected at most ${GroupRules.MAX_BYTES} UTF-8 bytes as sent"
+        }
+        require(rulesText == null || rulesText == GroupRules.canonical(rulesText)) {
+            "rulesText: expected canonical (ends-trimmed) text"
         }
         // The text has to be the text the hash names. Storing one
         // beside a hash of something else would have every later reader
@@ -176,5 +196,88 @@ data class MemberProfile(
         h = 31 * h + (rulesSignature?.contentHashCode() ?: 0)
         h = 31 * h + (rulesText?.hashCode() ?: 0)
         return h
+    }
+}
+
+
+/**
+ * Decodes a peer's profile without letting one bad field cost the whole
+ * message.
+ *
+ * `MemberProfile` arrives inside `GroupInvitationPayload.memberProfiles`
+ * — the snapshot a joiner materializes their group from — and the
+ * dispatcher turns any decode failure into a dropped message. So a
+ * single roster entry whose agreement bytes are wrong-sized, half
+ * present, over-cap, or not the text their hash names would otherwise
+ * take the entire invitation down with it, and the joiner would never
+ * see the group at all.
+ *
+ * Agreement bytes that don't hold up are therefore dropped to null,
+ * which is what "we can't show they agreed" already means. What is
+ * *not* relaxed is the constructor: local writes still go through the
+ * strict `init`, so nothing this device stores can hold a text beside a
+ * hash it doesn't name. Same posture as `MemberAnnouncementPayload`,
+ * and as `MemberProfile.init(from:)` on iOS.
+ */
+internal object MemberProfileSerializer : KSerializer<MemberProfile> {
+
+    @Serializable
+    @SerialName("MemberProfile")
+    private class Surrogate(
+        val alias: String,
+        @SerialName("inbox_public_key")
+        @Serializable(with = Base64ByteArraySerializer::class)
+        val inboxPublicKey: ByteArray,
+        @SerialName("sending_pubkey")
+        @Serializable(with = Base64ByteArraySerializer::class)
+        val sendingPubkey: ByteArray,
+        @SerialName("rules_hash")
+        @Serializable(with = Base64ByteArraySerializer::class)
+        val rulesHash: ByteArray? = null,
+        @SerialName("rules_signature")
+        @Serializable(with = Base64ByteArraySerializer::class)
+        val rulesSignature: ByteArray? = null,
+        @SerialName("rules_text")
+        val rulesText: String? = null,
+    )
+
+    override val descriptor: SerialDescriptor = Surrogate.serializer().descriptor
+
+    override fun deserialize(decoder: Decoder): MemberProfile {
+        val raw = decoder.decodeSerializableValue(Surrogate.serializer())
+        // Wrong-sized or half-present bytes are no agreement.
+        val keep = raw.rulesHash?.size == 32 && raw.rulesSignature?.size == 64
+        val hash = raw.rulesHash.takeIf { keep }
+        val signature = raw.rulesSignature.takeIf { keep }
+        // And the text is kept only when it is the text that hash names,
+        // measured and compared exactly as it arrived.
+        val text = raw.rulesText?.takeIf { candidate ->
+            hash != null &&
+                candidate.toByteArray(Charsets.UTF_8).size <= GroupRules.MAX_BYTES &&
+                candidate == GroupRules.canonical(candidate) &&
+                GroupRules.hash(candidate).contentEquals(hash)
+        }
+        return MemberProfile(
+            alias = raw.alias,
+            inboxPublicKey = raw.inboxPublicKey,
+            sendingPubkey = raw.sendingPubkey,
+            rulesHash = hash,
+            rulesSignature = signature,
+            rulesText = text,
+        )
+    }
+
+    override fun serialize(encoder: Encoder, value: MemberProfile) {
+        encoder.encodeSerializableValue(
+            Surrogate.serializer(),
+            Surrogate(
+                alias = value.alias,
+                inboxPublicKey = value.inboxPublicKey,
+                sendingPubkey = value.sendingPubkey,
+                rulesHash = value.rulesHash,
+                rulesSignature = value.rulesSignature,
+                rulesText = value.rulesText,
+            ),
+        )
     }
 }

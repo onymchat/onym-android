@@ -155,7 +155,13 @@ class RoomGroupStore(
                         memberProfilesSerializer,
                         bytes.toString(Charsets.UTF_8),
                     )
-                } catch (_: SerializationException) {
+                } catch (_: Throwable) {
+                    // Not only `SerializationException`: `MemberProfile`
+                    // validates its agreement fields in `init`, so a row
+                    // written before those rules — or by a build that
+                    // wrote something they now refuse — throws
+                    // `IllegalArgumentException` from inside decode. A
+                    // group whose roster won't parse still has to open.
                     emptyMap()
                 }
             }
