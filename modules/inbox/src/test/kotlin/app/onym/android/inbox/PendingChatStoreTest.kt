@@ -4,6 +4,7 @@ import app.onym.android.foundation.StorageEncryption
 import app.onym.android.identity.IdentityId
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -42,6 +43,34 @@ class PendingChatStoreTest {
         val second = store.insert(chat(group = 0x22, owner = owner))
         assertEquals(PendingChatWriteOutcome.INSERTED, second)
         assertEquals(1, disk.written.size)
+    }
+
+    @Test
+    fun setRules_replacesTheTextWithoutTouchingOfferOrdering() = runTest {
+        // The link's rules win over a stored offer's on the confirmation
+        // screen, so the row has to be brought up to what was read
+        // before anything is signed. Deliberately not `refreshOffer`,
+        // which carries an authenticated timestamp and would reorder the
+        // row on a text change.
+        val store = InMemoryPendingChatStore()
+        val row = chat(group = 0x11, owner = owner).copy(invitationMessage = "Older wording.")
+        store.insert(row)
+
+        store.setRules(row.id, "Newer wording.")
+
+        val stored = store.list().single()
+        assertEquals("Newer wording.", stored.invitationMessage)
+        assertEquals(row.offerReceivedAt, stored.offerReceivedAt)
+        assertEquals(row.receivedAt, stored.receivedAt)
+    }
+
+    @Test
+    fun setRules_onARowThatIsGone_isANoOp() = runTest {
+        val store = InMemoryPendingChatStore()
+
+        store.setRules("nobody:home", "Be kind.")
+
+        assertTrue(store.list().isEmpty())
     }
 
     @Test
@@ -274,6 +303,48 @@ class PendingChatStoreTest {
         assertEquals(listOf(2_000_000L), dao.refreshedAtMillis)
     }
 
+    @Test
+    fun setRules_onDisk_storesTheTextEncrypted() = runTest {
+        // The column is one of the encrypted ones — rules are
+        // founder-supplied text about a group this device may not have
+        // joined yet.
+        val dao = RecordingPendingChatDao()
+
+        roomStore(dao).setRules("group:owner", "Be kind.")
+
+        assertEquals(1, dao.ruleWrites.size)
+        val written = dao.ruleWrites.single()!!
+        assertFalse(
+            "stored ciphertext must not contain the plaintext",
+            String(written, Charsets.UTF_8).contains("Be kind."),
+        )
+    }
+
+    @Test
+    fun setRules_whenTheTextCannotBeEncrypted_leavesTheStoredCopyAlone() = runTest {
+        // The row's old text is still something a re-send can sign;
+        // clearing it — or writing a plaintext fallback — would make the
+        // next "Ask again" agree to nothing at all, silently.
+        val dao = RecordingPendingChatDao()
+        val store = RoomPendingChatStore(
+            dao = dao,
+            encryption = StorageEncryption(SecretKeySpec(ByteArray(5), "AES")),
+        )
+
+        store.setRules("group:owner", "Be kind.")
+
+        assertTrue("nothing reached the row", dao.ruleWrites.isEmpty())
+    }
+
+    @Test
+    fun setRules_toNothing_clearsWithoutEncrypting() = runTest {
+        val dao = RecordingPendingChatDao()
+
+        roomStore(dao).setRules("group:owner", null)
+
+        assertEquals(listOf<ByteArray?>(null), dao.ruleWrites)
+    }
+
     private fun roomStore(dao: PendingChatDao) = RoomPendingChatStore(
         dao = dao,
         encryption = StorageEncryption(
@@ -417,6 +488,7 @@ private class FailingPendingChatDao(
 /** Records what reached the guarded UPDATE. */
 private class RecordingPendingChatDao : PendingChatDao {
     val refreshedAtMillis = mutableListOf<Long>()
+    val ruleWrites = mutableListOf<ByteArray?>()
 
     override suspend fun list(): List<PersistedPendingChat> = emptyList()
     override suspend fun count(id: String): Int = 0
@@ -436,7 +508,9 @@ private class RecordingPendingChatDao : PendingChatDao {
 
     override suspend fun setJoinerLabel(id: String, label: ByteArray) = Unit
 
-    override suspend fun setRules(id: String, rules: ByteArray?) = Unit
+    override suspend fun setRules(id: String, rules: ByteArray?) {
+        ruleWrites.add(rules)
+    }
 
     override suspend fun refreshReplyKey(id: String, introPublicKey: ByteArray) = Unit
 

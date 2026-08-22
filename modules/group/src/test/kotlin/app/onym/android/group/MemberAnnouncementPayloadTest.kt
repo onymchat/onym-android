@@ -211,5 +211,77 @@ class MemberAnnouncementPayloadTest {
         assertEquals("Alice", decoded.adminAlias)
     }
 
+
+    // ---- the agreement, fanned out ----
+
+    @Test
+    fun anAnnouncementCarriesTheAgreementOnward() {
+        // Kept to the founder, the evidence would reach nobody who
+        // joined earlier — and "any member can check it" would be true
+        // only of the device that pressed Accept.
+        val hash = ByteArray(32) { 0x04 }
+        val signature = ByteArray(64) { 0x05 }
+        val payload = MemberAnnouncementPayload(
+            version = 1,
+            groupId = groupId,
+            newMember = MemberAnnouncementPayload.AnnouncedMember(
+                blsPub = blsPub,
+                inboxPub = inboxPub,
+                alias = "Bob",
+                sendingPub = sendingPub,
+                rulesHash = hash,
+                rulesSignature = signature,
+                rulesText = "Be kind.",
+            ),
+            adminAlias = "Alice",
+        )
+
+        val text = json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
+        val decoded = json.decodeFromString(MemberAnnouncementPayload.serializer(), text)
+
+        assertTrue(text.contains("\"rules_hash\""))
+        assertTrue(text.contains("\"rules_signature\""))
+        assertTrue(text.contains("\"rules_text\":\"Be kind.\""))
+        assertArrayEquals(hash, decoded.newMember.rulesHash)
+        assertArrayEquals(signature, decoded.newMember.rulesSignature)
+        assertEquals("Be kind.", decoded.newMember.rulesText)
+    }
+
+    @Test
+    fun anAnnouncementFromAnOlderBuild_carriesNoAgreement() {
+        val text = """
+            {
+              "version": 1,
+              "group_id": "${b64(groupId)}",
+              "new_member": {
+                "bls_pub": "${b64(blsPub)}",
+                "inbox_pub": "${b64(inboxPub)}",
+                "alias": "Bob",
+                "sending_pub": "${b64(sendingPub)}"
+              },
+              "admin_alias": "Alice"
+            }
+        """.trimIndent()
+
+        val decoded = json.decodeFromString(MemberAnnouncementPayload.serializer(), text)
+
+        assertNull(decoded.newMember.rulesHash)
+        assertNull(decoded.newMember.rulesSignature)
+        assertNull(decoded.newMember.rulesText)
+    }
+
+    @Test
+    fun halfAnAnnouncedAgreement_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            MemberAnnouncementPayload.AnnouncedMember(
+                blsPub = blsPub,
+                inboxPub = inboxPub,
+                alias = "Bob",
+                sendingPub = sendingPub,
+                rulesHash = ByteArray(32) { 0x04 },
+            )
+        }
+    }
+
     private fun b64(bytes: ByteArray) = Base64.getEncoder().encodeToString(bytes)
 }

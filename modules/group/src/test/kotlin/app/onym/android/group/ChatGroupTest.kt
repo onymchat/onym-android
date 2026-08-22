@@ -88,6 +88,38 @@ class ChatGroupTest {
         assertEquals(cold, decoded)
     }
 
+    @Test
+    fun linkableRules_isTheCanonicalTextWhenItFits() {
+        val group = makeGroup(id = "aa".repeat(32)).copy(invitationMessage = "  Be kind.\n")
+        assertEquals("Be kind.", group.linkableRules)
+    }
+
+    @Test
+    fun linkableRules_isNullWhenTheGroupHasNone() {
+        assertNull(makeGroup(id = "aa".repeat(32)).linkableRules)
+        assertNull(makeGroup(id = "aa".repeat(32)).copy(invitationMessage = "   ").linkableRules)
+    }
+
+    @Test
+    fun aLegacyGroupsOverLongRules_areOmittedRatherThanTruncated() {
+        // The field predates the cap, so a group created by an earlier
+        // build can hold more than a link accepts. Omitting the rules
+        // costs the link its rules; truncating would have joiners sign
+        // an abridged text whose every signature then fails against the
+        // founder's full copy.
+        val legacy = makeGroup(id = "aa".repeat(32))
+            .copy(invitationMessage = "x".repeat(GroupRules.MAX_BYTES + 1))
+
+        assertNull(legacy.linkableRules)
+        // And the group can still be shared, which is the point.
+        IntroCapability(
+            introPublicKey = ByteArray(32) { 0x44 },
+            groupId = legacy.groupIdBytes,
+            groupName = legacy.name,
+            rules = legacy.linkableRules,
+        )
+    }
+
     private fun makeGroup(id: String): ChatGroup = ChatGroup(
         id = id,
         name = "test",

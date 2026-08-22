@@ -19,6 +19,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -357,6 +358,199 @@ class PendingChatsViewModelTest {
     // ─── Joining from a link ─────────────────────────────────────
 
     @Test
+    fun aLinkWithRules_showsThemAndSignsTheOnesItShowed() = runTest {
+        // The screen shows this text and Send signs it — the same
+        // string, because a signature over anything else is not an
+        // agreement to what was read.
+        val h = harness()
+        h.viewModel.start()
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Be kind."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+        assertEquals("Be kind.", confirm.confirmation.rules)
+
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        assertEquals("Be kind.", h.sender.calls.single().agreedRules)
+    }
+
+    @Test
+    fun aLinksRulesWinOverAStoredOffers() = runTest {
+        // Both should say the same thing; when they don't, the rules the
+        // person is about to read have to be the ones that came with the
+        // invitation they actually opened.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "Older wording."))
+
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Newer wording."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        assertEquals("Newer wording.", confirm.confirmation.rules)
+    }
+
+    @Test
+    fun anOfferWithRules_carriesThemIntoItsConfirmation() = runTest {
+        // A pushed invitation has no capability to read from — the rules
+        // live on the stored offer.
+        val h = harness()
+        h.viewModel.start()
+        val offered = h.chat().copy(invitationMessage = "House rules.")
+        h.repository.record(offered)
+
+        val confirmation = h.viewModel.prepareAccept(offered.id)
+
+        assertEquals("House rules.", confirmation?.rules)
+    }
+
+    @Test
+    fun askAgain_reSignsTheSameRules() = runTest {
+        // Months later the capability is gone, and a re-send that signed
+        // different words would arrive as agreement to something the
+        // person never read.
+        val h = harness()
+        h.viewModel.start()
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Be kind."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        h.viewModel.retry(h.chat().id)
+
+        assertEquals(listOf("Be kind.", "Be kind."), h.sender.calls.map { it.agreedRules })
+    }
+
+    @Test
+    fun aLinkWithoutRules_fallsBackToAStoredOffers() = runTest {
+        // The other half of the resolution: a link that carries nothing
+        // must not erase the rules a pushed offer already delivered, or
+        // the tick disappears and the founder reads a joiner who
+        // declined.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "House rules."))
+
+        val confirm = h.viewModel.prepareJoin(h.capability())
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        assertEquals("House rules.", confirm.confirmation.rules)
+    }
+
+    @Test
+    fun aLinkOverAStoredOffer_signsWhatTheScreenShowed() = runTest {
+        // The row already exists, so the send goes down the
+        // already-present path — which used to read the rules back off
+        // the row and sign the offer's older wording instead of the
+        // words on screen.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "Older wording."))
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Newer wording."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        assertEquals("Newer wording.", h.sender.calls.single().agreedRules)
+    }
+
+    @Test
+    fun askAgainAfterALinkOverAnOffer_reSignsWhatWasRead() = runTest {
+        // And the row is brought up to it, so every later "Ask again" —
+        // which has only the row to read from — attests to the same
+        // words rather than to the draft nobody saw.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "Older wording."))
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Newer wording."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        h.viewModel.retry(h.chat().id)
+
+        assertEquals(
+            listOf("Newer wording.", "Newer wording."),
+            h.sender.calls.map { it.agreedRules },
+        )
+    }
+
+    @Test
+    fun rulesThatAreOnlyWhitespace_areNoRulesAtAll() = runTest {
+        // "   " is non-null, so it drew an empty card over a mandatory
+        // tick and then signed nothing, because the sender normalizes
+        // before signing. The screen and the send agree now.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "   \n  "))
+
+        val confirmation = h.viewModel.prepareAccept(h.chat().id)
+        assertNull(confirmation?.rules)
+        h.viewModel.confirmJoin(confirmation!!, "Bobby")
+
+        assertNull(h.sender.calls.single().agreedRules)
+    }
+
+    @Test
+    fun anOffersGreeting_isNotDrawnTwice() = runTest {
+        // A group's invitation message *is* its rules since the rename,
+        // so the confirmation must not also offer it as a greeting.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "House rules."))
+
+        val confirmation = h.viewModel.prepareAccept(h.chat().id)
+
+        assertEquals("House rules.", confirmation?.rules)
+        assertNull(confirmation?.invitationMessage)
+    }
+
+    @Test
+    fun theCapabilityHandedToTheSender_carriesTheRulesBeingSigned() = runTest {
+        // Not decoration: the sender refuses a capability that carries
+        // rules with no agreement, and rebuilding it without them made
+        // that guard unreachable from every path here.
+        val h = harness()
+        h.viewModel.start()
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Be kind."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        assertEquals("Be kind.", h.sender.calls.single().capability.rules)
+    }
+
+    @Test
+    fun aSendThatNeverGotAnAgreement_isNotWorthAskingAgain() = runTest {
+        // The one send failure retrying cannot fix: nothing left the
+        // device and nothing will until the caller passes what the
+        // person agreed to.
+        val h = harness()
+        h.viewModel.start()
+        h.sender.outcome = JoinRequestSender.Outcome.RulesAgreementMissing
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Be kind."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        val row = h.viewModel.rows.value.single()
+        assertEquals(
+            PendingChatsViewModel.State.SendFailed(PendingChat.SendFailure.RULES_MISSING),
+            row.state,
+        )
+        assertFalse("Ask again would ship the same nothing", row.state.isRetryable)
+    }
+
+    @Test
+    fun aGroupWithoutRules_signsNothing() = runTest {
+        val h = harness()
+        h.viewModel.start()
+        val confirm = h.viewModel.prepareJoin(h.capability())
+            as PendingChatsViewModel.JoinDestination.Confirm
+        assertNull(confirm.confirmation.rules)
+
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        assertNull(h.sender.calls.single().agreedRules)
+    }
+
+    @Test
     fun aTappedLink_recordsNothingAndSendsNothing() = runTest {
         // The rule this screen exists for: MainActivity is exported, so
         // anything on the device — or a browsable link — can deliver a
@@ -677,10 +871,11 @@ class PendingChatsViewModelTest {
             viewModel.confirmJoin(confirmation, label)
         }
 
-        fun capability() = IntroCapability(
+        fun capability(rules: String? = null) = IntroCapability(
             introPublicKey = ByteArray(32) { 0x44 },
             groupId = ByteArray(32) { 0x11 },
             groupName = "Maple Garden",
+            rules = rules,
         )
 
         fun chat(introPublicKey: ByteArray = ByteArray(32) { 0x44 }) = PendingChat(
