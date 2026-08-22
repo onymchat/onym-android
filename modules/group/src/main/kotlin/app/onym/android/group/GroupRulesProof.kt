@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.security.MessageDigest
+import java.text.Normalizer
 import java.util.Locale
 
 /**
@@ -83,14 +84,26 @@ class GroupRulesProof private constructor(
                 groupName = group.name,
                 memberAlias = member.alias,
                 memberBlsHex = blsHex,
-                sendingPublicKey = if (proven) member.sendingPubkey else null,
-                signature = if (proven) member.rulesSignature else null,
+                // Carried whenever they exist, not only when they
+                // verify. A document that asserts "a signature is
+                // stored and it does not verify" while withholding the
+                // signature is asking to be taken on faith, in a file
+                // whose whole thesis is that it shouldn't be. `signed`
+                // and `note` carry this device's verdict; the bytes let
+                // a reader reach their own.
+                sendingPublicKey = member.sendingPubkey,
+                signature = member.rulesSignature,
                 // The author is the one unproven standing with words
                 // worth carrying: they are the group's rules, and a
                 // document about the person who wrote them containing
                 // none of them is useless.
+                // The wording this member put their name to, when
+                // there is one: what they signed, or — for the author —
+                // what they wrote. Absent for a member who signed
+                // nothing, which is why the group's own rules are
+                // carried separately below rather than left unstated.
                 rules = when {
-                    proven -> member.rulesText
+                    member.rulesText != null -> member.rulesText
                     standing == GroupRulesStanding.AUTHOR -> currentRules
                     else -> null
                 },
@@ -105,18 +118,28 @@ class GroupRulesProof private constructor(
          * 400-column string is not something anyone reads.
          */
         internal val README = listOf(
-            "Proof that this member agreed to this group's rules.",
-            "To verify, with any Ed25519 implementation:",
+            "Proof of what this member agreed to in this group's rules.",
+            "To verify a signature, with any Ed25519 implementation:",
             "  1. message = \"onym-group-rules-v1\" (ASCII, 19 bytes)",
             "             || group.id (32 bytes, hex above)",
             "             || SHA-256(rules.text as UTF-8) (32 bytes)",
             "             || member.sending_public_key (32 bytes, hex above)",
             "  2. check member.signature against that message and that key.",
-            "The rules text here is the wording this member signed. When",
-            "matches_current_rules is false, the group has changed its rules",
-            "since — the signature still covers the text in this file, and",
-            "current_text carries what the group says now, to compare —",
-            "and is absent when the group has no rules at all any more.",
+            "",
+            "How to read the fields, including where they disagree:",
+            "  member.signed is this app's verdict, not evidence. A stored",
+            "  signature is exported whether or not it verified here, so",
+            "  you can repeat the check and disagree; member.note says what",
+            "  this device concluded.",
+            "  rules.text is the wording this member put their name to. For",
+            "  the member who wrote the rules it is their own text and",
+            "  signed is false — founders do not sign their own terms.",
+            "  rules is absent entirely when this member signed nothing, or",
+            "  when the wording their signature covers is not held by the",
+            "  device that wrote this file.",
+            "  group.current_rules is what the group asks today. Compare it",
+            "  against rules.text when matches_current_rules is false. It is",
+            "  absent only when the group has no rules at all any more.",
             "",
             "What the signature does NOT cover, and what you must not read",
             "out of it: alias and bls_public_key. Neither is inside the",
@@ -138,6 +161,10 @@ class GroupRulesProof private constructor(
          *  two phones: lowercasing under a Turkish locale maps I to a
          *  dotless ı. */
         private val FILE_LOCALE: Locale = Locale.US
+
+        /** Compiled once rather than per call — `fileSafe` runs twice
+         *  per filename. */
+        private val COMBINING_MARKS = Regex("\\p{Mn}+")
     }
 
     /**
@@ -171,31 +198,30 @@ class GroupRulesProof private constructor(
             // prefix of a raw key and scrubbing that could collapse a
             // non-hex key to a few characters, or to none, putting back
             // the collision the suffix exists to prevent.
-            // Hashed whenever scrubbing changed anything, not merely
-            // when it shortened the result past a threshold. Roster
-            // keys are arbitrary JSON object keys, so
-            // `../../../Documents/xy` and `../../../Documents/xyz`
-            // both scrub to something long enough *and* share their
-            // first twelve characters — same stem, same suffix, one
-            // export overwriting the other. That is the collision this
-            // suffix exists to prevent, in the adversarial case the
-            // rest of this doc is about.
-            val scrubbed = fileSafe(memberBlsHex)
-            val key = if (scrubbed == memberBlsHex && scrubbed.length >= KEY_LENGTH) {
-                scrubbed.take(KEY_LENGTH)
-            } else {
-                MessageDigest.getInstance("SHA-256")
-                    .digest(memberBlsHex.toByteArray(Charsets.UTF_8))
-                    .copyOfRange(0, 6)
-                    .toHexLowercase()
-            }
+            // Hashed, always. Scrubbing is not what makes a key
+            // ambiguous: roster keys are unvalidated JSON object keys
+            // off the wire, so two that are already lowercase hex and
+            // share their first twelve characters take the same prefix
+            // and, with equal aliases, produce the same filename — one
+            // export overwriting the other. That is attacker-chosen,
+            // not a birthday argument, so the suffix is a digest of the
+            // whole key rather than a slice of it.
+            //
+            // The cost is that the suffix no longer echoes the
+            // fingerprint on screen. The document carries
+            // `bls_public_key` in full, which is where an exact
+            // comparison belongs anyway.
+            val key = MessageDigest.getInstance("SHA-256")
+                .digest(memberBlsHex.toByteArray(Charsets.UTF_8))
+                .copyOfRange(0, 6)
+                .toHexLowercase()
             return "onym-rules-proof-$named-$key.json"
         }
 
     /**
-     * The file's bytes: pretty-printed, key-ordered JSON, so two
-     * exports of the same agreement are byte-identical and a diff
-     * between them means something changed.
+     * The file's bytes: pretty-printed, fields in declaration order,
+     * so two exports of the same agreement are byte-identical and a
+     * diff between them means something changed.
      */
     fun json(): String = JSON.encodeToString(document())
 
@@ -203,7 +229,16 @@ class GroupRulesProof private constructor(
         val text = rules
         return Document(
             readme = README,
-            group = Document.Group(id = groupIdHex, name = groupName),
+            group = Document.Group(
+                id = groupIdHex,
+                name = groupName,
+                // What the group asks *now*, whenever it asks anything.
+                // Without it a document about a member who signed
+                // nothing never stated what was on the table — and one
+                // about a member who signed an older wording gave the
+                // reader nothing to compare against.
+                currentRules = currentRules,
+            ),
             member = Document.Member(
                 alias = memberAlias,
                 blsPublicKey = memberBlsHex,
@@ -222,11 +257,6 @@ class GroupRulesProof private constructor(
                     text = it,
                     sha256 = GroupRules.hash(it).toHexLowercase(),
                     matchesCurrentRules = matches,
-                    // Only where it differs, and then in full: a reader
-                    // told the wording diverged has nothing to compare
-                    // against otherwise, and identical copies would be
-                    // the same paragraph twice.
-                    currentText = if (matches) null else currentRules,
                 )
             },
         )
@@ -248,7 +278,8 @@ class GroupRulesProof private constructor(
             "A signature is stored for this member, but the wording it covers is " +
                 "not on this device, so nothing here can check it."
         GroupRulesStanding.DOES_NOT_VERIFY ->
-            "A signature is stored for this member and it does not verify."
+            "A signature is stored for this member and it does not verify here. " +
+                "Both it and the wording it covers are in this file; repeat the check."
     }
 
     /**
@@ -263,8 +294,8 @@ class GroupRulesProof private constructor(
         // Diacritics folded, then ASCII only: folding leaves CJK and
         // Cyrillic untouched, so "is a letter" would let them through
         // into a name that is meant to survive being emailed around.
-        val folded = java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
-            .replace(Regex("\\p{Mn}+"), "")
+        val folded = Normalizer.normalize(value, Normalizer.Form.NFD)
+            .replace(COMBINING_MARKS, "")
             .lowercase(FILE_LOCALE)
         for (ch in folded) {
             val keep = ch.code < 128 && (ch.isLetterOrDigit())
@@ -282,7 +313,11 @@ class GroupRulesProof private constructor(
         val rules: Rules? = null,
     ) {
         @Serializable
-        internal data class Group(val id: String, val name: String)
+        internal data class Group(
+            val id: String,
+            val name: String,
+            @SerialName("current_rules") val currentRules: String?,
+        )
 
         @Serializable
         internal data class Member(
@@ -301,7 +336,6 @@ class GroupRulesProof private constructor(
             val text: String,
             val sha256: String,
             @SerialName("matches_current_rules") val matchesCurrentRules: Boolean,
-            @SerialName("current_text") val currentText: String?,
         )
     }
 }
