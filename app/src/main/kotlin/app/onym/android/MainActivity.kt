@@ -81,6 +81,12 @@ class MainActivity : FragmentActivity() {
         // with any in-flight check, so foreground thrash never
         // multiplies Play Integrity calls.
         (application as OnymApplication).dependencies.moderation?.gate?.appForegrounded()
+        // Push revocation check (cold start AND resume — onStart
+        // covers both): if the toggle is on but the OS has
+        // notifications blocked for this app, run the full disable
+        // path so the backend isn't left watching relays for wakes
+        // that can never render.
+        (application as OnymApplication).dependencies.push?.checkRevocation?.invoke()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

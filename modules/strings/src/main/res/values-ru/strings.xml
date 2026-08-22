@@ -1047,4 +1047,13 @@
   <string name="rules_proof_export_note_unproven">Файл фиксирует то, что известно этому устройству. Подписи для проверки в нём нет.</string>
   <string name="rules_proof_write_failed">Это устройство не смогло записать файл подтверждения.</string>
   <string name="rules_proof_open_cd">Открыть согласие участника</string>
+  <!-- Push notifications (the :push seat) -->
+  <string name="settings_section_notifications">УВЕДОМЛЕНИЯ</string>
+  <string name="settings_push_title">Уведомления о сообщениях</string>
+  <string name="settings_push_subtitle">Сигнал без содержимого, когда что-то приходит</string>
+  <string name="settings_push_activating">Включается\u2026 сервер уведомлений ещё не подтвердил это устройство. Попытки продолжаются автоматически.</string>
+  <string name="settings_push_footnote">По умолчанию выключено. Когда включено, сервер Onym наблюдает за настроенными вами реле и отправляет через Google сигнал без содержимого \u2014 ни сообщения, ни отправителя, ни чата. Этот сервер узнаёт коды ваших входящих ящиков и хранит ваш push-адрес только в зашифрованном виде; поскольку коды всех ваших личностей регистрируются вместе, он может понять, что они принадлежат одному устройству. Google передаёт только сигнал без содержимого. При выключении сервер получает запрос забыть это устройство, и запрос повторяется, пока сервер не подтвердит.</string>
+  <string name="push_channel_name">Сообщения</string>
+  <string name="push_notification_title">Onym</string>
+  <string name="push_notification_body">Новое сообщение</string>
 </resources>
