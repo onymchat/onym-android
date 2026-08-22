@@ -713,6 +713,16 @@ class PendingChatsViewModel(
                 introPublicKey = chat.introPublicKey,
                 groupId = chat.groupId,
                 groupName = chat.groupName,
+                // The rules this send is about, so the sender's own
+                // "carries rules but agreed to nothing" guard can
+                // actually fire. Rebuilt without them, that guard was
+                // unreachable from every path here, and a future
+                // regression would have shipped as a joiner who
+                // declined to agree — silently, which is the outcome it
+                // exists to prevent. Dropped if the stored text is over
+                // the link cap: a capability is the wrong place to
+                // discover that, and `rules` below is what gets signed.
+                rules = rules?.takeIf { GroupRules.fits(it) },
             )
         } catch (_: Throwable) {
             _lastError.value = PendingChatError.MalformedInvite

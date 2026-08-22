@@ -394,7 +394,14 @@ open class CreateGroupInteractor(
                     groupId = groupId,
                     label = IntroKeyEntry.fingerprint(inboxKey),
                     groupName = groupName,
-                    rules = invitationMessage,
+                    // Omitted if it doesn't fit a link, exactly as
+                    // `ChatGroup.linkableRules` does on the share path.
+                    // The editor clamps today, but this is `open` and a
+                    // caller passing a longer message would otherwise
+                    // fail the whole create-with-invites flow on a
+                    // `require` deep inside the capability.
+                    rules = GroupRules.normalized(invitationMessage)
+                        ?.takeIf { GroupRules.fits(it) },
                 )
             } catch (e: Throwable) {
                 throw CreateGroupError.InvitationSendFailed(index, "mint intro key: ${e.message ?: e}")

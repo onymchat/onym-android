@@ -1,5 +1,6 @@
 package app.onym.android.design
 
+import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -135,6 +136,56 @@ private class QrBitMatrix(
 /** A matrix that fits, and whether its level can carry the badge. */
 private class QrRendering(val matrix: QrBitMatrix, val badged: Boolean)
 
+/** What [OnymQrCode] can draw for a given value. */
+enum class OnymQrFit {
+    /** Encodes at level H, whose budget covers the centre badge. */
+    BADGED,
+
+    /** Encodes further down the ladder, so the badge is left off. */
+    PLAIN,
+
+    /** Fits no level: nothing is drawn, and the caller's copyable link
+     *  is the whole invite. */
+    NONE,
+}
+
+/**
+ * What this value would render as — the ladder the composable walks,
+ * without walking it.
+ *
+ * Public so a caller can gate the "scan this" caption on there being
+ * something to scan, and so tests can assert against the ladder that
+ * ships rather than re-deriving one that can drift from it.
+ */
+fun onymQrFit(value: String): OnymQrFit = when {
+    fitsAtLevel(value, ErrorCorrectionLevel.H) -> OnymQrFit.BADGED
+    LOWER_LEVELS.any { fitsAtLevel(value, it) } -> OnymQrFit.PLAIN
+    else -> OnymQrFit.NONE
+}
+
+private val LOWER_LEVELS = listOf(
+    ErrorCorrectionLevel.Q,
+    ErrorCorrectionLevel.M,
+    ErrorCorrectionLevel.L,
+)
+
+private fun fitsAtLevel(value: String, level: ErrorCorrectionLevel): Boolean =
+    try {
+        QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 1, 1, hintsFor(level))
+        true
+    } catch (_: Throwable) {
+        false
+    }
+
+private fun hintsFor(level: ErrorCorrectionLevel): Map<EncodeHintType, Any> = mapOf(
+    // Margin = 0 because the Compose surface around the QR provides its
+    // own padding (the iOS design wraps the QR in a 12-pt white card,
+    // mirrored here).
+    EncodeHintType.ERROR_CORRECTION to level,
+    EncodeHintType.MARGIN to 0,
+    EncodeHintType.CHARACTER_SET to "UTF-8",
+)
+
 /**
  * The best level this value fits in, or null if it fits none.
  *
@@ -144,26 +195,13 @@ private class QrRendering(val matrix: QrBitMatrix, val badged: Boolean)
  * fine still fails to scan.
  */
 private fun encodeQrMatrix(value: String): QrRendering? {
-    for (level in listOf(
-        ErrorCorrectionLevel.H,
-        ErrorCorrectionLevel.Q,
-        ErrorCorrectionLevel.M,
-        ErrorCorrectionLevel.L,
-    )) {
-        // Margin = 0 because the Compose surface around the QR provides
-        // its own padding (the iOS design wraps the QR in a 12-pt white
-        // card, mirrored here).
-        val hints = mapOf(
-            EncodeHintType.ERROR_CORRECTION to level,
-            EncodeHintType.MARGIN to 0,
-            EncodeHintType.CHARACTER_SET to "UTF-8",
-        )
+    for (level in listOf(ErrorCorrectionLevel.H) + LOWER_LEVELS) {
         // Pass size 1 → ZXing returns the smallest BitMatrix that
         // satisfies the encoded version's module count. We then scale
         // it ourselves on the canvas, so the input "pixel" size is
         // immaterial.
         val matrix = try {
-            QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 1, 1, hints)
+            QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 1, 1, hintsFor(level))
         } catch (_: Throwable) {
             // Over-capacity for this level (and anything else ZXing
             // refuses). Try the next one down.
@@ -181,5 +219,8 @@ private fun encodeQrMatrix(value: String): QrRendering? {
             badged = level == ErrorCorrectionLevel.H,
         )
     }
+    // A QR that silently vanishes is hard to diagnose from a bug
+    // report; the caller still has a copyable link.
+    Log.w("OnymQrCode", "value of ${value.length} chars fits no correction level; drawing no QR")
     return null
 }

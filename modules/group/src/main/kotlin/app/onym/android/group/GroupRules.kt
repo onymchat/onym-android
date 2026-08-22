@@ -174,12 +174,30 @@ object GroupRules {
      * slicing bytes and risking a cut mid-codepoint.
      */
     fun clamped(rules: String): String {
-        var clamped = rules.take(MAX_LENGTH)
+        var clamped = rules.take(MAX_LENGTH).dropDanglingSurrogate()
+        // Unreachable on this platform as the two caps stand — no UTF-16
+        // unit costs more than three UTF-8 bytes, so 500 units is never
+        // more than 1500 bytes. Kept because it is the cap that decides
+        // whether a link is valid, and because the character cap is the
+        // advisory one: a change to either constant must not silently
+        // start minting links the wire rejects.
         while (clamped.toByteArray(Charsets.UTF_8).size > MAX_BYTES) {
-            clamped = clamped.dropLast(1)
+            clamped = clamped.dropLast(1).dropDanglingSurrogate()
         }
         return clamped
     }
+
+    /**
+     * Drop a trailing high surrogate left by cutting between the halves
+     * of one character.
+     *
+     * `take` and `dropLast` count UTF-16 units, so a cut can land inside
+     * an emoji — and the leftover half is not a character: it draws as a
+     * replacement glyph and `toByteArray` silently transcodes it to `?`,
+     * in the field, in storage, and in the bytes both platforms hash.
+     */
+    private fun String.dropDanglingSurrogate(): String =
+        if (isNotEmpty() && last().isHighSurrogate()) dropLast(1) else this
 
     /**
      * How much room is left, in whichever unit is closer: Latin text

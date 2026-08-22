@@ -49,6 +49,8 @@ import app.onym.android.strings.R
 import app.onym.android.group.IntroCapability
 import app.onym.android.group.ShareInviteViewModel
 import app.onym.android.design.OnymQrCode
+import app.onym.android.design.onymQrFit
+import app.onym.android.design.OnymQrFit
 
 /**
  * Post-create surface. The just-created group is identified by hex
@@ -145,12 +147,18 @@ fun ShareInviteScreen(
                         modifier = Modifier.testTag("share_invite.qr"),
                     )
                     Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.share_invite_qr_caption),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
+                    // "Scan this" only when there is something to scan:
+                    // a link too long for any correction level draws no
+                    // QR, and the caption would otherwise sit over an
+                    // empty gap while Copy and Share still work.
+                    if (onymQrFit(s.link) != OnymQrFit.NONE) {
+                        Text(
+                            text = stringResource(R.string.share_invite_qr_caption),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                     Spacer(Modifier.height(20.dp))
                     Button(
                         onClick = {

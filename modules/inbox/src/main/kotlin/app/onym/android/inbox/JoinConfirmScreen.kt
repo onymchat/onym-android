@@ -76,7 +76,13 @@ fun JoinConfirmScreen(
     var isSending by remember { mutableStateOf(false) }
     // Unticked until the person ticks it. Only ever gates Send for a
     // group that has rules — see below.
-    var agreedToRules by rememberSaveable(confirmation.rowId) { mutableStateOf(false) }
+    // Keyed on the text as well as the row: the row id is
+    // "<group>:<owner>" and survives a founder rewriting the rules, so a
+    // tick restored across that change would enable Send over words
+    // nobody read.
+    var agreedToRules by rememberSaveable(confirmation.rowId, confirmation.rules) {
+        mutableStateOf(false)
+    }
     // A group that asks nothing of its joiners keeps the one-tap join
     // the pre-filled name bought: there is nothing to affirm, and a tick
     // standing for nothing is friction that teaches people to tick

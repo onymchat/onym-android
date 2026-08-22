@@ -158,6 +158,9 @@ data class ChatGroup(
 
     /** Group ID as the raw 32-byte payload, parsed back from [id].
      *  Used directly when building chain payloads + invitations. */
+    val groupIdBytes: ByteArray
+        get() = bytesFromHex(id)
+
     /**
      * The group's rules if a link can carry them, else null.
      *
@@ -176,9 +179,6 @@ data class ChatGroup(
      */
     val linkableRules: String?
         get() = GroupRules.normalized(invitationMessage)?.takeIf { GroupRules.fits(it) }
-
-    val groupIdBytes: ByteArray
-        get() = bytesFromHex(id)
 
     /**
      * Whether [blsPubkeyHex] is this group's admin.
