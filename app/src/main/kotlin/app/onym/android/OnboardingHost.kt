@@ -11,10 +11,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -153,6 +157,13 @@ internal class OnboardingHostViewModel(val flow: OnboardingFlow) : ViewModel() {
         restoreError.value = null
     }
 
+    /** The field's edit path: a new phrase retracts the verdict on
+     *  the old one. */
+    fun editRestorePhrase(text: String) {
+        restorePhrase.value = text
+        restoreError.value = null
+    }
+
     /**
      * Validate and run the restore. The phrase is normalized
      * ([Bip39.normalizeMnemonic]) so a paste carrying newlines, NBSP
@@ -259,7 +270,13 @@ internal fun OnboardingHost(
     // linger.
     val hubShown = hubVisible && state.step == OnboardingStep.Services
     val backupShown = backupVisible && state.step == OnboardingStep.RecoveryPhrase
-    val restoreShown = restoreVisible && state.step == OnboardingStep.Welcome
+    // The restore overlay carries the allow-gate in its mount
+    // condition too, not just in the entry that opens it: the saved
+    // flag survives process death while [restoreAllowed] re-probes
+    // from false, and this guard is what stands between a stale flag
+    // and a restore() that cascade-wipes chats.
+    val restoreShown = restoreVisible && restoreAllowed &&
+        state.step == OnboardingStep.Welcome
 
     // Hoisted ABOVE the hubShown conditional: were the controller
     // created inside the overlay, closing the hub would drop the
@@ -620,6 +637,16 @@ private fun RestoreIdentityOverlay(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // Edge-to-edge is on app-wide and this overlay sits
+                // above the walk with no inset-applying Scaffold of
+                // its own (the way OnboardingScaffold and the backup
+                // overlay have): without safeDrawing the title row
+                // draws under the status bar and cutout, and without
+                // imePadding the raised keyboard covers the submit
+                // button with no way to scroll to it — the window
+                // does not resize under edge-to-edge.
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
@@ -654,7 +681,13 @@ private fun RestoreIdentityOverlay(
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = phrase,
-                onValueChange = { hostViewModel.restorePhrase.value = it },
+                // Editing retracts the verdict: without this, deleting
+                // a word to retype it leaves the red field and "that
+                // doesn't look like a valid phrase" pinned to a phrase
+                // that no longer exists (submitRestore only clears the
+                // error AFTER its own 12/24 gate passes, which a
+                // half-typed phrase never reaches).
+                onValueChange = { hostViewModel.editRestorePhrase(it) },
                 enabled = !restoring,
                 placeholder = {
                     Text(stringResource(OnboardingR.string.onboarding_restore_hint))

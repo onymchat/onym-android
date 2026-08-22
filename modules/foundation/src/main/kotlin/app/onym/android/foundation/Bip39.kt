@@ -146,11 +146,13 @@ object Bip39 {
      * and tabs (password managers), doubled spaces (photographed
      * word grids), and the Unicode spaces Java's `\s` does NOT match
      * — NBSP U+00A0 (copy from web pages and iOS), narrow NBSP
-     * U+202F, figure space U+2007, ideographic space U+3000 — plus a
-     * stray BOM/ZWNBSP U+FEFF. Entry UIs must run input through this
-     * before the word-count gate AND before validation, so the two
-     * always agree on what a "word" is (the mismatch behind the iOS
-     * onboarding sheet's newline-paste rejection).
+     * U+202F, figure space U+2007, ideographic space U+3000 — plus
+     * the zero-width formatting characters from the same paste
+     * sources, ZWSP U+200B and BOM/ZWNBSP U+FEFF. Entry UIs must run
+     * input through this before the word-count gate AND before
+     * validation, so the two always agree on what a "word" is (the
+     * mismatch behind the iOS onboarding sheet's newline-paste
+     * rejection).
      */
     fun normalizeMnemonic(text: String): String =
         text.replace(interWordWhitespace, " ").trim(' ')
@@ -165,8 +167,9 @@ object Bip39 {
     }
 
     /** See [normalizeMnemonic]: `\s` (ASCII) + `\p{Z}` (Unicode
-     *  separators) + U+FEFF (BOM/ZWNBSP, category Cf so neither). */
-    private val interWordWhitespace = Regex("[\\s\\p{Z}\\uFEFF]+")
+     *  separators) + U+200B/U+FEFF (ZWSP and BOM/ZWNBSP, category Cf
+     *  so matched by neither). */
+    private val interWordWhitespace = Regex("[\\s\\p{Z}\\u200B\\uFEFF]+")
 
     /** Whether a word exists in the BIP39 English wordlist (case-insensitive). */
     fun isKnownWord(word: String): Boolean = wordIndex.containsKey(word.lowercase())

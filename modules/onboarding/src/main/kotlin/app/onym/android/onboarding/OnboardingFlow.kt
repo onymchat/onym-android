@@ -222,6 +222,18 @@ class OnboardingFlow(
          * changes copy on the later steps — no step is skipped for a
          * restored identity: the walk still configures services and
          * still offers the backup reveal (of the restored phrase).
+         *
+         * In-memory like the rest of this state, with one honest
+         * cost: a process death mid-walk restarts at Welcome AND
+         * reverts this to [IdentityOrigin.Minted], so a walk resumed
+         * over an already-restored 24-word identity would show the
+         * minted copy ("Recovery phrase generated", "12 words") —
+         * the very claim the flip exists to avoid. Accepted for now
+         * because the restart lands on Welcome, where the user can
+         * re-enter the phrase (a no-op restore onto the id they
+         * already hold, see `IdentityRepository.restore`); persisting
+         * it belongs with persisting the walk position, not ahead of
+         * it.
          */
         val identityOrigin: IdentityOrigin = IdentityOrigin.Minted,
         /** Set by [complete] after the flag is persisted, so the

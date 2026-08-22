@@ -11,6 +11,8 @@ import app.onym.android.OnymApplication
 import app.onym.android.UITestRegistry
 import app.onym.android.discovery.DiscoverySource
 import app.onym.android.discovery.DiscoverySourcesConfiguration
+import app.onym.android.foundation.Bip39
+import app.onym.android.identity.IdentityId
 import app.onym.android.identity.IdentitySecretStore
 import app.onym.android.onboarding.OnboardingStep
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -620,14 +622,23 @@ class OnboardingWalkUITest {
      *    inline error and stays on the overlay;
      *  - the valid vector — pasted with NEWLINES, exercising the
      *    normalization in front of the space-splitting parser —
-     *    replaces the auto-bootstrap identity, advances the walk,
-     *    flips the identity step's title to the restored copy, and
-     *    the step's outcome gate unlocks off the RESTORED snapshot.
+     *    REPLACES the auto-bootstrap identity (asserted against the
+     *    store: the derived id lands, the minted one is gone),
+     *    advances the walk, flips the identity step's title to the
+     *    restored copy, and the step's outcome gate unlocks off the
+     *    RESTORED snapshot.
      */
     @Test
     fun welcomeRestorePath_replacesIdentityAndFlipsCopy() {
         val onboarding = OnboardingScreenObject(composeRule)
         onboarding.awaitStep(OnboardingStep.Welcome)
+
+        // The blank identity the eager bootstrap mints on a fresh
+        // install — the one restore() must wipe on its way out.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            identityStore.listIds().isNotEmpty()
+        }
+        val mintedIds = identityStore.listIds()
 
         // The entry renders once the allow-probe answers (async).
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -657,14 +668,31 @@ class OnboardingWalkUITest {
         }
 
         // The all-zeros-entropy test vector, newline-separated.
+        val vector = (List(11) { "abandon" } + "about").joinToString(" ")
         field.performTextClearance()
-        field.performTextInput((List(11) { "abandon" } + "about").joinToString("\n"))
+        field.performTextInput(vector.replace(" ", "\n"))
         submit.performClick()
 
         onboarding.awaitStep(OnboardingStep.Identity)
         onboarding.title(OnboardingStep.Identity)
             .assertTextEquals("Restoring your identity")
         onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
+
+        // The destructive half, asserted rather than inferred: the id
+        // the phrase derives is what the device now holds, and the
+        // auto-bootstrap identity restore() replaced is gone.
+        val restoredId = IdentityId.derivedFromEntropy(
+            Bip39.entropyFromMnemonic(vector)!!,
+        )
+        val idsAfter = identityStore.listIds()
+        assertTrue(
+            "the restored id must be on the device, had $idsAfter",
+            restoredId in idsAfter,
+        )
+        assertTrue(
+            "the minted identity must have been wiped, had $idsAfter",
+            idsAfter.none { it in mintedIds },
+        )
         assertFalse("the walk must not have completed", onboardingStore.completed)
     }
 
