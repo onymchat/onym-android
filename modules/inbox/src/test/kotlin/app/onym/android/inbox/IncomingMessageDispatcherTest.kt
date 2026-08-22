@@ -1,5 +1,9 @@
 package app.onym.android.inbox
 
+import org.bouncycastle.crypto.signers.Ed25519Signer
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+import app.onym.android.group.rulesStanding
+import app.onym.android.group.GroupRulesStanding
 import app.onym.android.chain.ChainStateReading
 import app.onym.android.chain.SepCommitmentEntry
 import app.onym.android.chain.SepGroupType
@@ -355,6 +359,19 @@ class IncomingMessageDispatcherTest {
         val inviterBls = ByteArray(48) { 0x11 }
         val inviterInbox = ByteArray(32) { 0x22 }
         val inviterKey = inviterBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val selfBls = ByteArray(48) { 0xAA.toByte() }
+        val selfInbox = ByteArray(32) { 0xBB.toByte() }
+        val selfKeyHex = selfBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        // The joiner's own signed row, as the admitting device ships it.
+        val rules = "Be kind. No links."
+        val selfSeed = ByteArray(32) { 0x07 }
+        val selfSigning = Ed25519PrivateKeyParameters(selfSeed, 0)
+        val selfSendingPub = selfSigning.generatePublicKey().encoded
+        val selfStatement = GroupRules.statement(newGroupId, GroupRules.hash(rules), selfSendingPub)
+        val selfSignature = Ed25519Signer().apply {
+            init(true, selfSigning)
+            update(selfStatement, 0, selfStatement.size)
+        }.generateSignature()
         val invitation = GroupInvitationPayload(
             version = 1,
             groupId = newGroupId,
@@ -378,14 +395,21 @@ class IncomingMessageDispatcherTest {
                     inboxPublicKey = inviterInbox,
                     sendingPubkey = ByteArray(32) { 0x88.toByte() },
                 ),
+                selfKeyHex to MemberProfile(
+                    alias = "Bob as the admin knows them",
+                    inboxPublicKey = selfInbox,
+                    sendingPubkey = selfSendingPub,
+                    rulesHash = GroupRules.hash(rules),
+                    rulesSignature = selfSignature,
+                    rulesText = rules,
+                ),
             ),
+            invitationMessage = rules,
         )
         val plaintext = Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
             .toByteArray(Charsets.UTF_8)
 
         // Mock identitiesFlow so the dispatcher can backfill self.
-        val selfBls = ByteArray(48) { 0xAA.toByte() }
-        val selfInbox = ByteArray(32) { 0xBB.toByte() }
         val identitiesFlow = MutableStateFlow(
             listOf(
                 IdentitySummary(
@@ -393,7 +417,7 @@ class IncomingMessageDispatcherTest {
                     name = "Bob",
                     blsPublicKey = selfBls,
                     inboxPublicKey = selfInbox,
-                    sendingPublicKey = ByteArray(32) { 0x99.toByte() },
+                    sendingPublicKey = selfSendingPub,
                 ),
             ),
         )
@@ -415,10 +439,19 @@ class IncomingMessageDispatcherTest {
         assertEquals("From Wire", group!!.name)
         assertTrue(group.isPublishedOnChain)
         // Wire-shipped inviter + self both present in the directory.
-        val selfKey = selfBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val selfKey = selfKeyHex
         assertEquals(2, group.memberProfiles.size)
         assertEquals("Alice", group.memberProfiles[inviterKey]?.alias)
         assertEquals("Bob", group.memberProfiles[selfKey]?.alias)
+        // The joiner's own agreement, carried in the invitation because
+        // it is the one thing about themselves they cannot rebuild:
+        // this device signed it and kept no copy. Without it they land
+        // marked as never having signed the rules they just agreed to.
+        assertEquals(
+            "the self row's agreement must survive the identity overwrite",
+            GroupRulesStanding.SIGNED,
+            group.rulesStanding(selfKey),
+        )
         invitationsRepository.bootstrap()
         assertTrue(
             "invitation must NOT land in the legacy queue",
