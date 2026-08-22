@@ -82,19 +82,6 @@ fun MemberRulesProofSheet(
         writeFailed = exported == null
     }
 
-    // Swept on appear, by age. Not on dismiss: the share target holds a
-    // `content://` URI backed by this file and may read it lazily, so
-    // deleting when the sheet closes breaks the export at the moment it
-    // is used. And not "everything that was here when I appeared"
-    // either — on a foldable or in split screen another sheet's
-    // directory predates this one. An hour is longer than any share
-    // sheet lives and shorter than "until the cache is evicted", and
-    // the directory this sheet is about to write is seconds old, so no
-    // interleaving can reach it.
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { sweepStaleRulesProofExports(context) }
-    }
-
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
@@ -105,22 +92,13 @@ fun MemberRulesProofSheet(
                 .testTag("rules_proof.sheet"),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // A standing can lose its mark *after* presentation — a
-            // refresh reply that clears the group's rules turns an open
-            // "didn't sign" sheet into "no rules". Row-level gating can
-            // only stop the ones that start that way, and what is left
-            // without this is a blank card over a live Export button.
-            val mark = groupRulesMark(proof.standing)
-            if (mark == null) {
-                Text(
-                    text = stringResource(R.string.rules_proof_nothing_to_show),
-                    fontSize = 15.sp,
-                    color = tokens.text,
-                    modifier = Modifier.padding(vertical = 32.dp),
-                )
-                return@Column
-            }
-
+            // `of` returns null for every standing without a mark and
+            // the caller dismisses on null, so there is always one
+            // here. Asserted rather than branched: a fallback for a
+            // state that cannot arise is a fallback nobody maintains,
+            // and it was costing translators a string that could never
+            // be shown.
+            val mark = requireNotNull(groupRulesMark(proof.standing))
             Icon(mark.icon, contentDescription = null, tint = mark.color, modifier = Modifier.size(34.dp))
             Spacer(Modifier.height(8.dp))
             Text(
@@ -191,7 +169,14 @@ fun MemberRulesProofSheet(
                 // and two people can choose the same one. The
                 // fingerprint is what says which member this is about.
                 ByteRow(stringResource(R.string.rules_proof_member), shortHex(proof.memberBlsHex))
-                if (proof.standing.isProven) {
+                // Shown whenever the file carries them, which since
+                // the export began shipping unverified bytes is not the
+                // same as "proven". Gating on `isProven` hid the
+                // signature *and* claimed the file had none, over a
+                // document containing it and a note inviting the reader
+                // to re-check — in the one standing that should give
+                // someone pause.
+                if (proof.signature != null) {
                     ByteRow(
                         stringResource(R.string.rules_proof_signing_key),
                         shortHex(proof.sendingPublicKey?.toHexLowercase().orEmpty()),
@@ -222,7 +207,11 @@ fun MemberRulesProofSheet(
             Text(
                 text = when {
                     writeFailed -> stringResource(R.string.rules_proof_write_failed)
-                    proof.standing.isProven ->
+                    // Keyed on what the file contains, not on the
+                    // verdict: "there is no signature in it to check"
+                    // is a claim about the artifact, and it was false
+                    // wherever a stored signature failed to verify.
+                    proof.signature != null ->
                         stringResource(R.string.rules_proof_export_note_signed)
                     else -> stringResource(R.string.rules_proof_export_note_unproven)
                 },

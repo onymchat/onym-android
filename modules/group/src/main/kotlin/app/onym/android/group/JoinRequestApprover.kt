@@ -404,21 +404,13 @@ open class JoinRequestApprover(
         // devices, so nothing else was going to catch it.
         val invitedProfiles = anchored.memberProfiles.toMutableMap()
         if (blsPub != null) {
-            invitedProfiles[blsPub.toHexLowercase()] = MemberProfile(
+            invitedProfiles[blsPub.toHexLowercase()] = joinerMemberProfile(
                 alias = req.joinerDisplayLabel,
-                inboxPublicKey = req.joinerInboxPublicKey,
-                sendingPubkey = req.joinerSendingPublicKey,
+                inboxPub = req.joinerInboxPublicKey,
+                sendingPub = req.joinerSendingPublicKey,
                 rulesHash = req.rulesHash,
                 rulesSignature = req.rulesSignature,
-                // Only the wording this signature actually covers —
-                // pairing it with whatever the group says *now* made a
-                // founder's edit between request and approval land on
-                // the joiner as "their signature doesn't check out",
-                // red, about themselves, on their first look.
-                rulesText = MemberProfile.storableRulesText(
-                    GroupRules.normalized(anchored.invitationMessage),
-                    req.rulesHash,
-                ),
+                groupRules = anchored.invitationMessage,
             )
         }
 
@@ -561,26 +553,15 @@ open class JoinRequestApprover(
         // separates "signed something this device can't check" from
         // "signed nothing", which is the distinction the verdict exists
         // for.
-        val rulesText = MemberProfile.storableRulesText(
-            GroupRules.normalized(group.invitationMessage),
-            rulesHash,
-        )
         val updated = group.copy(
             memberProfiles = group.memberProfiles +
-                (key to MemberProfile(
+                (key to joinerMemberProfile(
                     alias = alias,
-                    inboxPublicKey = inboxPub,
-                    sendingPubkey = sendingPub,
-                    // Recorded whatever it said, including when it
-                    // didn't verify. The founder saw the verdict and
-                    // approved anyway; keeping the bytes is what lets
-                    // that decision be re-examined later, and dropping
-                    // them would make "approved someone who signed
-                    // nothing" and "approved someone whose signature was
-                    // wrong" indistinguishable after the fact.
+                    inboxPub = inboxPub,
+                    sendingPub = sendingPub,
                     rulesHash = rulesHash,
                     rulesSignature = rulesSignature,
-                    rulesText = rulesText,
+                    groupRules = group.invitationMessage,
                 )),
         )
         groupRepository.insert(updated)
@@ -1050,3 +1031,41 @@ internal fun rulesAgreementFor(
         JoinRequestApprover.RulesAgreement.UNKNOWN_RULES
     }
 }
+
+/**
+ * The row a joiner becomes, derived in one place.
+ *
+ * Used for the invitation shipped to them and for the record kept
+ * locally, because the receiver's merge assumes the two agree — and
+ * deriving them separately twice made that agreement incidental rather
+ * than structural.
+ *
+ * The wording is paired with the signature only when the hash names it:
+ * pairing it with whatever the group says *now* made a founder's edit
+ * between request and approval land on the joiner as "their signature
+ * doesn't check out" — red, about themselves, on their first look at
+ * the group.
+ */
+internal fun joinerMemberProfile(
+    alias: String,
+    inboxPub: ByteArray,
+    sendingPub: ByteArray,
+    rulesHash: ByteArray?,
+    rulesSignature: ByteArray?,
+    groupRules: String?,
+): MemberProfile = MemberProfile(
+    alias = alias,
+    inboxPublicKey = inboxPub,
+    sendingPubkey = sendingPub,
+    // Recorded whatever the verdict said, including when it didn't
+    // verify. The founder saw it and approved anyway; keeping the bytes
+    // is what lets that decision be re-examined, and dropping them
+    // would make "approved someone who signed nothing" and "approved
+    // someone whose signature was wrong" indistinguishable afterwards.
+    rulesHash = rulesHash,
+    rulesSignature = rulesSignature,
+    rulesText = MemberProfile.storableRulesText(
+        GroupRules.normalized(groupRules),
+        rulesHash,
+    ),
+)

@@ -361,6 +361,13 @@ class IncomingMessageDispatcher(
         // Scoped by owner as well as group — two identities on one
         // device hold two rows for the same group, and the wrong one
         // would stamp somebody else's agreements onto this roster.
+        // One lookup, answering both "what do we already hold" and
+        // "have we been here before" — and no byte-comparison guard on
+        // top of it: `findForOwner` matches the id this app writes,
+        // which is canonical lowercase hex of these very bytes, so a
+        // guard could only ever disagree with itself and would have
+        // re-fired "you joined" every replay when it did.
+        //
         // `findForOwner`, not `snapshots`. The snapshot holds only the
         // *active* identity's groups — it is empty when none is
         // selected — while invitations are dispatched for every
@@ -372,7 +379,6 @@ class IncomingMessageDispatcher(
         // time. `findForOwner` exists for this and says so.
         val storedGroup = groupRepository
             .findForOwner(ownerIdentityId.value, invitation.groupId.toHexLowercase())
-            ?.takeIf { it.groupIdBytes.contentEquals(invitation.groupId) }
         // A wire with no roster at all is a sender that has nothing to
         // say about members — an older admin's refresh reply writes
         // `takeIf { it.isNotEmpty() }` — not an admin removing
@@ -380,7 +386,13 @@ class IncomingMessageDispatcher(
         // agreements included, with self alone: the same version-skew
         // erasure the rules fallback below prevents, and distinguishable
         // in the same place.
+        // Keys lowercased on the way in. Every key this app writes is
+        // canonical lowercase hex, and both ladders below match on it,
+        // so a sender spelling ours in upper case would bypass them and
+        // land a second row for the same member — pre-existing, and
+        // load-bearing now that the merge keys off it.
         val profiles = (invitation.memberProfiles ?: storedGroup?.memberProfiles ?: emptyMap())
+            .mapKeys { (key, _) -> key.lowercase() }
             .toMutableMap()
         val selfEntry = selfMemberProfileEntry(ownerIdentityId)
         for ((key, stored) in storedGroup?.memberProfiles.orEmpty()) {
@@ -422,18 +434,21 @@ class IncomingMessageDispatcher(
             // to whichever non-verifying record happened to land first,
             // permanently, since the pin re-wins on every replay.
             if (wire.rulesSignature != null) continue
-            // The wording rides along only when it still belongs to
-            // these bytes. Dropping it unconditionally destroyed the
-            // only copy of the signed words and turned a truthful
-            // "doesn't check out" into "can't be checked".
+            // The wording rides along, including when the announced
+            // key has changed. Nulling it there was destructive and
+            // one-way: a row that read `SIGNED` became `UNKNOWN_RULES`,
+            // the only copy of the signed words was gone, and a later
+            // invitation re-announcing the original key could not
+            // restore it — the rung above needs `stored.rulesText` to
+            // re-verify, and replays make out-of-order key generations
+            // reachable. The key changed; the words didn't.
+            //
+            // `DOES_NOT_VERIFY` in the meantime is the honest reading
+            // and, unlike the alternative, it is recoverable.
             profiles[key] = wire.copy(
                 rulesHash = stored.rulesHash,
                 rulesSignature = stored.rulesSignature,
-                rulesText = if (stored.sendingPubkey.contentEquals(wire.sendingPubkey)) {
-                    stored.rulesText
-                } else {
-                    null
-                },
+                rulesText = stored.rulesText,
             )
         }
         selfEntry?.let { (key, profile) ->
@@ -475,15 +490,10 @@ class IncomingMessageDispatcher(
                 // bytes were made over — and discarding it destroyed
                 // the only copy of the signed words while turning a
                 // truthful "doesn't check out" into "can't be checked".
-                wire?.rulesSignature != null -> wire.copy(
-                    rulesText = if (
-                        announced.sendingPubkey.contentEquals(profile.sendingPubkey)
-                    ) {
-                        wire.rulesText
-                    } else {
-                        null
-                    },
-                )
+                // Kept whole, for the reason the peer rung keeps it:
+                // discarding the wording is the one move a later
+                // invitation cannot undo.
+                wire?.rulesSignature != null -> wire
                 else -> stored
             }
             profiles[key] = profile.copy(

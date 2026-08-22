@@ -327,10 +327,11 @@ private fun ChatMembersBody(
     }
     var proofFor by remember { mutableStateOf<String?>(null) }
 
-    // Swept from here as well as from the proof sheet: someone who
-    // opens one sheet and never another would otherwise leave that
-    // member's rules and signature in the cache until the OS evicted
-    // it. Any later visit to any group's member list clears it.
+    // The only place exports are swept. From the roster rather than
+    // from the sheet, so a sheet left open past the hour can't have its
+    // own live export deleted under it after an activity recreation —
+    // Export would have stayed enabled and failed silently. Any visit
+    // to any group's member list clears what earlier sheets left.
     val context = LocalContext.current
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { sweepStaleRulesProofExports(context) }
