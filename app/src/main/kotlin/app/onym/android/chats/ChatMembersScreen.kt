@@ -7,8 +7,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,31 +18,35 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,18 +57,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.onym.android.strings.R
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.ChatGroup
 import app.onym.android.group.GroupAvatarImage
+import app.onym.android.group.GroupRulesProof
+import app.onym.android.group.GroupRulesStanding
 import app.onym.android.group.MemberProfile
+import app.onym.android.group.rulesStanding
 import app.onym.android.identity.IdentitiesViewModel
+import app.onym.android.strings.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -253,7 +259,7 @@ private fun InvitationSection(message: String) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            text = stringResource(R.string.members_section_invitation),
+            text = stringResource(R.string.members_section_rules),
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -281,16 +287,54 @@ private fun ChatMembersBody(
     onRemovePhoto: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val rows = remember(group.memberProfiles, activeBlsHex) {
+    // Keyed on everything a standing reads — the group id included,
+    // since the signature is verified against it — and nothing else.
+    // Each standing is an Ed25519 verify plus a SHA-256, so re-deriving
+    // them on every recomposition would put a hundred-member roster's
+    // worth of verification on the frame, and the group's photo is not
+    // an input worth comparing to find that out.
+    val rows = remember(
+        group.id,
+        group.memberProfiles,
+        group.invitationMessage,
+        group.adminPubkeyHex,
+        group.groupType,
+        activeBlsHex,
+    ) {
         group.memberProfiles.map { (key, profile) ->
+            // The overload that takes the profile already in hand: the
+            // key-only one is nullable, and either swallowing that with
+            // a fallback (mislabelling a member) or dropping the row
+            // (losing one from the card and the count) would be a lie
+            // about a case that cannot happen here.
+            val standing = group.rulesStanding(profile, key)
             MemberRow(
                 blsHex = key,
                 blsPrefix = key.take(12),
                 displayAlias = profile.alias.ifEmpty { "(unnamed)" },
                 isSelf = activeBlsHex != null &&
                     key.equals(activeBlsHex, ignoreCase = true),
+                standing = standing,
             )
-        }.sortedWith(compareBy({ !it.isSelf }, { it.displayAlias.lowercase() }))
+        }.sortedWith(
+            // Self first, then alias, then the fingerprint. The last is
+            // not decoration: aliases are self-asserted and non-unique,
+            // and rows are tap targets now — two members sharing a name
+            // could otherwise swap places under a thumb already moving
+            // toward a row that then opens somebody else's agreement.
+            compareBy({ !it.isSelf }, { it.displayAlias.lowercase() }, { it.blsHex }),
+        )
+    }
+    var proofFor by remember { mutableStateOf<String?>(null) }
+
+    // The only place exports are swept. From the roster rather than
+    // from the sheet, so a sheet left open past the hour can't have its
+    // own live export deleted under it after an activity recreation —
+    // Export would have stayed enabled and failed silently. Any visit
+    // to any group's member list clears what earlier sheets left.
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { sweepStaleRulesProofExports(context) }
     }
 
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
@@ -306,7 +350,7 @@ private fun ChatMembersBody(
         if (rows.isEmpty()) {
             EmptyState(modifier = Modifier.fillMaxSize())
         } else {
-            MembersCard(rows = rows)
+            MembersCard(rows = rows, onOpenProof = { proofFor = it })
             Spacer(Modifier.height(8.dp))
             Text(
                 text = pluralStringResource(R.plurals.members_count, rows.size, rows.size),
@@ -316,10 +360,47 @@ private fun ChatMembersBody(
             )
         }
     }
+
+    // Resolved from the live group at present time rather than from a
+    // captured row: a roster update while the sheet is open would
+    // otherwise leave a proof rendered beside a group it no longer
+    // describes. A member who vanished underneath closes it rather than
+    // showing an empty sheet.
+    proofFor?.let { blsHex ->
+        // Remembered on the same inputs the standings are, and *not*
+        // rebuilt per recomposition. `GroupRulesProof` has no `equals`,
+        // so a fresh instance on every group emission — an avatar, a
+        // name, a roster change — restarted the sheet's write effect:
+        // the Export button blinked out from under a thumb, another
+        // directory was minted, and an Ed25519 verify ran per frame,
+        // which is the cost the roster memo above exists to avoid.
+        val proof = remember(
+            group.memberProfiles,
+            group.invitationMessage,
+            group.adminPubkeyHex,
+            group.groupType,
+            group.id,
+            // The name too: the proof renders it and files under it, so
+            // a rename while the sheet is open would otherwise leave the
+            // written export naming the group as it used to be.
+            group.name,
+            blsHex,
+        ) {
+            GroupRulesProof.of(group, blsHex)
+        }
+        if (proof != null) {
+            MemberRulesProofSheet(proof = proof, onDismiss = { proofFor = null })
+        } else {
+            // Cleared in an effect, not during composition: writing the
+            // state this block reads is a backwards write, and it
+            // invalidates the scope that just read it.
+            LaunchedEffect(blsHex) { proofFor = null }
+        }
+    }
 }
 
 @Composable
-private fun MembersCard(rows: List<MemberRow>) {
+private fun MembersCard(rows: List<MemberRow>, onOpenProof: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -328,7 +409,7 @@ private fun MembersCard(rows: List<MemberRow>) {
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         rows.forEachIndexed { idx, row ->
-            MemberRowView(row = row)
+            MemberRowView(row = row, onOpenProof = onOpenProof)
             if (idx != rows.lastIndex) {
                 HorizontalDivider(thickness = 0.5.dp)
             }
@@ -337,10 +418,29 @@ private fun MembersCard(rows: List<MemberRow>) {
 }
 
 @Composable
-private fun MemberRowView(row: MemberRow) {
+private fun MemberRowView(row: MemberRow, onOpenProof: (String) -> Unit) {
+    val mark = groupRulesMark(row.standing)
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // Only where there is something to hand someone. A row that
+            // opens a sheet saying "nothing to show" is an invitation to
+            // a dead end, and gating on the mark rather than on one
+            // standing keeps the two answers from drifting apart.
+            .then(
+                if (mark != null) {
+                    // `Role.Button`, so TalkBack says the row opens
+                    // something. A chevron below says the same to
+                    // everyone else — before this the rows were tap
+                    // targets with no affordance at all.
+                    Modifier.clickable(
+                        role = Role.Button,
+                        onClickLabel = stringResource(R.string.rules_proof_open_cd),
+                    ) { onOpenProof(row.blsHex) }
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp)
             .testTag("members.row.${row.blsHex}"),
         verticalAlignment = Alignment.CenterVertically,
@@ -359,11 +459,39 @@ private fun MemberRowView(row: MemberRow) {
                     SelfPill()
                 }
             }
+            // The fingerprint stays. It is the load-bearing identifier
+            // — aliases are self-asserted, so two members calling
+            // themselves the same thing are told apart by this and
+            // nothing else — and the standing is a second line rather
+            // than a replacement for it.
             Text(
                 text = "BLS ${row.blsPrefix}…",
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (mark != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.testTag("members.standing.${row.blsHex}"),
+                ) {
+                    Icon(
+                        imageVector = mark.icon,
+                        contentDescription = null,
+                        tint = mark.color,
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text(text = mark.text, fontSize = 12.sp, color = mark.color)
+                }
+            }
+        }
+        if (mark != null) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
             )
         }
     }
@@ -547,6 +675,9 @@ internal data class MemberRow(
     val blsPrefix: String,
     val displayAlias: String,
     val isSelf: Boolean,
+    /** Derived from the stored signature rather than read from a flag,
+     *  once per group snapshot. */
+    val standing: GroupRulesStanding,
 )
 
 private fun ByteArray.toHexLowercase(): String = buildString(size * 2) {

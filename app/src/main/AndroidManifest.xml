@@ -105,5 +105,20 @@
                 <data android:scheme="onym" android:host="join" />
             </intent-filter>
         </activity>
+
+        <!-- Grants a share target read access to one exported proof,
+             and nothing else: the authority is scoped to the
+             `rules-proof/` cache subdirectory. `grantUriPermissions`
+             plus the per-Intent flag means the grant dies with the
+             receiving activity rather than standing open. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.rulesproof"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/rules_proof_paths" />
+        </provider>
     </application>
 </manifest>

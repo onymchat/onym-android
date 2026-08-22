@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The only path this app shares files from: the export directories the
+  group-rules proof screen writes into the cache.
+
+  Scoped to `rules-proof/` rather than the whole cache on purpose — a
+  FileProvider grants read access to whatever it can address, and the
+  cache holds a good deal this app has no business handing to a share
+  target.
+-->
+<paths>
+    <cache-path name="rules-proof" path="rules-proof/" />
+</paths>

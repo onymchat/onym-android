@@ -1,5 +1,6 @@
 package app.onym.android.chats
 
+import app.onym.android.group.GroupRulesStanding
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -36,10 +37,16 @@ class ChatMembersSortTest {
         assertEquals("abcdef012345", key.take(12))
     }
 
-    private fun row(blsHex: String, displayAlias: String, isSelf: Boolean) = MemberRow(
+    private fun row(
+        blsHex: String,
+        displayAlias: String,
+        isSelf: Boolean,
+        standing: GroupRulesStanding = GroupRulesStanding.NO_RULES,
+    ) = MemberRow(
         blsHex = blsHex,
         blsPrefix = blsHex.take(12),
         displayAlias = displayAlias,
         isSelf = isSelf,
+        standing = standing,
     )
 }
