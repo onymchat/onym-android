@@ -759,6 +759,7 @@
   <string name="backup_setup_row_subtitle">Read what it does before turning it on</string>
   <string name="backup_settings_back_up_now">Back Up Now</string>
   <string name="backup_back_up_now_operator_subtitle">Uploads your whole history to this operator</string>
+  <string name="backup_back_up_now_running_subtitle">Already backing up</string>
   <string name="backup_footnote_full_upload">Each backup uploads everything, not just what changed — there is no incremental upload yet.</string>
   <string name="backup_settings_restore_row_title">Restore From Backup</string>
   <string name="backup_settings_restore_row_subtitle">Adds messages and chats — nothing is deleted</string>
@@ -822,7 +823,6 @@
     <item quantity="one">Uploads your whole history to %1$d operator</item>
     <item quantity="other">Uploads your whole history to all %1$d operators</item>
   </plurals>
-  <string name="backup_operator_row_title">Operator</string>
   <string name="backup_phrase_not_set_up">not set up</string>
   <string name="backup_phrase_backed_up">backed up %1$s</string>
   <string name="backup_phrase_nothing_uploaded">set up, nothing uploaded yet</string>
@@ -845,6 +845,7 @@
   <string name="backup_restore_running">Restoring…</string>
   <string name="backup_restore_done">Done</string>
   <string name="backup_restore_done_title">Restored</string>
+  <string name="backup_restore_nothing_found_title">Nothing found</string>
   <string name="backup_restore_close">Close</string>
   <string name="backup_restore_failed_title">Restore did not complete</string>
   <string name="backup_restore_untouched">Nothing on this phone was changed.</string>

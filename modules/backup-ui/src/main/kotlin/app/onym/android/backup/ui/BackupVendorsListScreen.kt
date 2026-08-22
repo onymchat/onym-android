@@ -17,6 +17,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.onym.android.design.SettingsCard
@@ -135,14 +137,21 @@ fun BackupVendorsListScreen(
                                 } else {
                                     stringResource(R.string.backup_settings_back_up_now)
                                 },
-                                subtitle = if (enrolledCount > 1) {
-                                    pluralStringResource(
+                                // The subtitle says WHY the row is
+                                // inert when every runnable operator
+                                // is already uploading; the semantics
+                                // flag tells TalkBack it is a
+                                // disabled action, not a static
+                                // label.
+                                subtitle = when {
+                                    nothingToRun ->
+                                        stringResource(R.string.backup_back_up_now_running_subtitle)
+                                    enrolledCount > 1 -> pluralStringResource(
                                         R.plurals.backup_back_up_all_subtitle,
                                         enrolledCount,
                                         enrolledCount,
                                     )
-                                } else {
-                                    stringResource(R.string.backup_back_up_now_subtitle)
+                                    else -> stringResource(R.string.backup_back_up_now_subtitle)
                                 },
                                 titleColor = if (nothingToRun) {
                                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -152,7 +161,9 @@ fun BackupVendorsListScreen(
                                 onClick = if (nothingToRun) null else ({ onBackUpAll(actionableIds) }),
                                 showChevron = false,
                                 isLast = true,
-                                modifier = Modifier.testTag("backup.vendors.back_up_all"),
+                                modifier = Modifier
+                                    .testTag("backup.vendors.back_up_all")
+                                    .then(if (nothingToRun) Modifier.semantics { disabled() } else Modifier),
                             )
                         }
                     }
@@ -166,8 +177,8 @@ fun BackupVendorsListScreen(
                             val glyph = statusGlyph(vendor.status)
                             SettingsRow(
                                 leading = { SettingsTileBox(glyph.icon, glyph.tint) },
-                                title = stringResource(R.string.backup_operator_row_title),
-                                subtitle = "${vendor.displayName} · ${statusPhrase(vendor.status)}",
+                                title = vendor.displayName,
+                                subtitle = statusPhrase(vendor.status),
                                 onClick = { onVendorClick(vendor.componentId) },
                                 isLast = index == vendors.lastIndex,
                                 modifier = Modifier.testTag("backup.vendors.row.${vendor.componentId}"),

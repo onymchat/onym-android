@@ -4,7 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Dangerous
-import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Sync
@@ -39,7 +39,7 @@ internal fun statusGlyph(status: DeviceBackupStatus): StatusGlyph = when (status
     is DeviceBackupStatus.PaymentRequired -> StatusGlyph(Icons.Filled.CreditCard, SettingsTile.Amber)
     is DeviceBackupStatus.TermsChanged -> StatusGlyph(Icons.AutoMirrored.Filled.Article, SettingsTile.Orange)
     is DeviceBackupStatus.OperatorChanged -> StatusGlyph(Icons.Filled.SwapHoriz, SettingsTile.Orange)
-    is DeviceBackupStatus.CheckingEarlierBackup -> StatusGlyph(Icons.Filled.HelpOutline, SettingsTile.Amber)
+    is DeviceBackupStatus.CheckingEarlierBackup -> StatusGlyph(Icons.AutoMirrored.Filled.HelpOutline, SettingsTile.Amber)
     is DeviceBackupStatus.Failed -> StatusGlyph(Icons.Filled.Dangerous, SettingsTile.Red)
 }
 
@@ -164,7 +164,11 @@ internal fun summarize(statuses: List<DeviceBackupStatus>): BackupVendorsSummary
     if (attention > 0) {
         return BackupVendorsSummary.NeedsAttention(
             attention = attention,
-            healthy = statuses.count { it is DeviceBackupStatus.Idle },
+            // Same pessimism as the On branch's oldest-copy read: an
+            // Idle operator with NO completed backup is set up but
+            // holds nothing — calling it "up to date" would overstate
+            // what is actually held.
+            healthy = statuses.count { it is DeviceBackupStatus.Idle && it.lastSuccessAt != null },
         )
     }
     val enrolled = statuses.count { !needsEnrolment(it) }

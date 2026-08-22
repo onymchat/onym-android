@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,7 +43,6 @@ import app.onym.android.backup.BackupError
 import app.onym.android.backup.BackupRestoreSummary
 import app.onym.android.backup.LocalFailureReason
 import app.onym.android.design.SettingsCard
-import app.onym.android.design.SettingsFootnote
 import app.onym.android.design.SettingsRow
 import app.onym.android.design.SettingsTile
 import app.onym.android.design.SettingsTileBox
@@ -142,11 +142,17 @@ fun BackupRestoreScreen(
     ) { padding ->
         when (val current = state) {
             is RestoreScreenState.Idle -> Column(modifier = Modifier.padding(padding)) {
-                SettingsFootnote(
+                // Body copy, not a footnote: this is the one
+                // explanation of what restoring does, and the
+                // confirmation dialog assumes it was read.
+                Text(
                     stringResource(R.string.backup_restore_intro),
-                    modifier = Modifier.testTag("backup.restore.intro"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .testTag("backup.restore.intro"),
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
                 SettingsCard {
                     SettingsRow(
                         leading = { SettingsTileBox(Icons.Filled.CloudDownload, SettingsTile.Green) },
@@ -170,15 +176,22 @@ fun BackupRestoreScreen(
                 )
             }
             is RestoreScreenState.Done -> CenteredState(padding = padding) {
+                // An empty result is an ordinary answer, not a
+                // success to celebrate — a green check over "nothing
+                // found" would misread the situation.
+                val empty = wroteNothing(current.summary)
                 Icon(
-                    Icons.Filled.CheckCircle,
+                    if (empty) Icons.Filled.Inbox else Icons.Filled.CheckCircle,
                     contentDescription = null,
-                    tint = SettingsTile.Green,
+                    tint = if (empty) MaterialTheme.colorScheme.onSurfaceVariant else SettingsTile.Green,
                     modifier = Modifier.size(44.dp),
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    stringResource(R.string.backup_restore_done_title),
+                    stringResource(
+                        if (empty) R.string.backup_restore_nothing_found_title
+                        else R.string.backup_restore_done_title,
+                    ),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -291,12 +304,17 @@ private fun FailureHeader() {
     Spacer(Modifier.height(8.dp))
 }
 
+/** True when the restore wrote nothing at all — the ordinary-answer
+ *  case that gets the neutral glyph/title instead of the green
+ *  check. */
+internal fun wroteNothing(summary: BackupRestoreSummary): Boolean =
+    summary.groups + summary.messages + summary.invitations + summary.consents + summary.blobs == 0
+
 /** Pure — testable with a fake [StringProvider] without composing
  *  anything (see `RecoveryPhraseBackupViewModel`'s use of the same
  *  seam elsewhere in this codebase for the precedent). */
 internal fun restoreSummaryText(summary: BackupRestoreSummary, strings: StringProvider): String {
-    val totalWritten = summary.groups + summary.messages + summary.invitations + summary.consents + summary.blobs
-    if (totalWritten == 0) {
+    if (wroteNothing(summary)) {
         // Deliberately not framed as a failure or a warning — an
         // empty result under a different operator or identity is
         // exactly what this looks like when nothing is wrong.

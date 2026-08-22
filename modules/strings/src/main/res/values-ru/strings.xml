@@ -759,6 +759,7 @@
   <string name="backup_setup_row_subtitle">Прочитайте, что это делает, прежде чем включать</string>
   <string name="backup_settings_back_up_now">Создать резервную копию</string>
   <string name="backup_back_up_now_operator_subtitle">Загружает всю вашу историю этому оператору</string>
+  <string name="backup_back_up_now_running_subtitle">Резервное копирование уже выполняется</string>
   <string name="backup_footnote_full_upload">Каждая резервная копия загружает всё, а не только изменения — инкрементальной загрузки пока нет.</string>
   <string name="backup_settings_restore_row_title">Восстановить из резервной копии</string>
   <string name="backup_settings_restore_row_subtitle">Добавляет сообщения и чаты — ничего не удаляется</string>
@@ -830,7 +831,6 @@
     <item quantity="many">Загружает всю вашу историю всем %1$d операторам</item>
     <item quantity="other">Загружает всю вашу историю всем %1$d операторам</item>
   </plurals>
-  <string name="backup_operator_row_title">Оператор</string>
   <string name="backup_phrase_not_set_up">не настроен</string>
   <string name="backup_phrase_backed_up">копия от %1$s</string>
   <string name="backup_phrase_nothing_uploaded">настроен, ещё ничего не загружено</string>
@@ -853,6 +853,7 @@
   <string name="backup_restore_running">Восстановление…</string>
   <string name="backup_restore_done">Готово</string>
   <string name="backup_restore_done_title">Восстановлено</string>
+  <string name="backup_restore_nothing_found_title">Ничего не найдено</string>
   <string name="backup_restore_close">Закрыть</string>
   <string name="backup_restore_failed_title">Восстановление не завершилось</string>
   <string name="backup_restore_untouched">На этом телефоне ничего не изменилось.</string>

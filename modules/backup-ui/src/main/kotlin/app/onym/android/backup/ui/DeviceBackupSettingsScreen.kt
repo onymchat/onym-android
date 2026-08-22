@@ -27,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.onym.android.design.SettingsCard
 import app.onym.android.design.SettingsFootnote
@@ -144,7 +146,15 @@ fun DeviceBackupSettingsScreen(
                         SettingsRow(
                             leading = { SettingsTileBox(Icons.Filled.CloudUpload, SettingsTile.Blue) },
                             title = stringResource(R.string.backup_settings_back_up_now),
-                            subtitle = stringResource(R.string.backup_back_up_now_operator_subtitle),
+                            // The subtitle says WHY the row is inert
+                            // while an upload runs; the semantics flag
+                            // tells TalkBack it is a disabled action,
+                            // not a static label.
+                            subtitle = if (running) {
+                                stringResource(R.string.backup_back_up_now_running_subtitle)
+                            } else {
+                                stringResource(R.string.backup_back_up_now_operator_subtitle)
+                            },
                             titleColor = if (running) {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             } else {
@@ -153,7 +163,9 @@ fun DeviceBackupSettingsScreen(
                             onClick = if (running) null else onBackUpNow,
                             showChevron = false,
                             isLast = true,
-                            modifier = Modifier.testTag("backup.settings.back_up_now"),
+                            modifier = Modifier
+                                .testTag("backup.settings.back_up_now")
+                                .then(if (running) Modifier.semantics { disabled() } else Modifier),
                         )
                     }
                 }

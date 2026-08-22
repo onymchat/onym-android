@@ -79,6 +79,23 @@ class BackupVendorsSummaryTest {
     }
 
     @Test
+    fun an_idle_operator_holding_nothing_is_not_counted_as_up_to_date() {
+        // Same pessimism as the oldest-copy read: set up with no
+        // completed backup means holding nothing, and "up to date"
+        // would overstate it.
+        assertEquals(
+            BackupVendorsSummary.NeedsAttention(attention = 1, healthy = 1),
+            summarize(
+                listOf(
+                    DeviceBackupStatus.Idle(t1),
+                    DeviceBackupStatus.Idle(null),
+                    DeviceBackupStatus.Failed("x"),
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun one_operator_holding_nothing_forces_the_no_completed_read() {
         // An Idle operator with no completed backup is strictly older
         // than any instant — a green "oldest copy <t2>" would hide

@@ -1168,14 +1168,15 @@ fun RootScreen(
                                 // reads the just-pinned terms) never
                                 // races it. backUpNow itself is
                                 // fire-and-forget — it survives
-                                // navigating off this screen. The
-                                // refresh re-reads the just-written
-                                // state so the settings screen below
-                                // shows the new enrolment, not the
-                                // status it was entered with.
+                                // navigating off this screen. No
+                                // refresh here: acceptEnrolment
+                                // already refreshes, and backUpNow's
+                                // runBackup does markRunning() +
+                                // refresh() itself — a third one
+                                // could land after markRunning() and
+                                // overwrite Running.
                                 backup.acceptEnrolment(termsId)
                                 backup.backUpNow()
-                                backup.settingsFlow.refresh()
                                 navController.popBackStack()
                             }
                         },
