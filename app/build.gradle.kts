@@ -8,6 +8,20 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// google-services is applied CONDITIONALLY: the plugin hard-fails the
+// build when app/google-services.json is absent, and that file is an
+// operator secret deliberately NOT in the repo — CI and fresh clones
+// must keep building (and unit-testing) without it. Firebase is then
+// unconfigured at runtime, which is fine: the push seat is dark unless
+// PUSH_BASE_URL is also set, and the coordinator guards every FCM
+// token fetch. OPERATOR TODO (push go-live): create the Firebase
+// project, download google-services.json into app/, set push.baseUrl
+// in local.properties (or ONYM_PUSH_BASE_URL in release CI), and
+// deploy the onym-push backend.
+if (file("google-services.json").exists()) {
+    apply(plugin = libs.plugins.google.services.get().pluginId)
+}
+
 android {
     namespace = "app.onym.android"
     // Android 16. `targetSdk` (below) is what Play gates on; `compileSdk`
@@ -77,6 +91,18 @@ android {
         //     (see KnownAuthoritiesFetcher's TRUST ASYMMETRY note),
         //     which is a consent-hijack surface for first-time users.
         buildConfigField("String", "MODERATION_BASE_URL", "\"${moderationBaseUrl()}\"")
+
+        // Push relay-watcher backend (the Rust `google/` service in
+        // onym-push). Sourced like MODERATION_BASE_URL: ENV
+        // `ONYM_PUSH_BASE_URL` → local.properties `push.baseUrl` →
+        // empty. EMPTY IS THE DARK-LAUNCH SWITCH: with no base URL
+        // OnymApplication builds no push dependencies at all — no
+        // Settings section, no FCM token fetch, no registration. The
+        // production value for a real build is
+        // https://push-android.onym.app. Reuses
+        // PLAY_CLOUD_PROJECT_NUMBER for the Play Integrity provider —
+        // one Cloud project, one Play pairing.
+        buildConfigField("String", "PUSH_BASE_URL", "\"${pushBaseUrl()}\"")
         // The Google Cloud project number linked in the Play Console —
         // StandardIntegrityManager.prepare needs it. ENV
         // `PLAY_CLOUD_PROJECT_NUMBER` → local.properties
@@ -181,6 +207,14 @@ androidComponents {
             "MODERATION_BASE_URL must be https in a release build (got a non-https URL the " +
                 "release client refuses at runtime)."
         }
+        // Same wall for the push backend: OkHttpPushBackendClient
+        // honors loopback only under a debug build, so a release
+        // carrying a non-https PUSH_BASE_URL would quietly fail every
+        // registration pass for every user who opts in.
+        check(pushBaseUrl().isBlank() || pushBaseUrl().startsWith("https://")) {
+            "PUSH_BASE_URL must be https in a release build (got a non-https URL the " +
+                "release client refuses at runtime)."
+        }
     }
 }
 
@@ -205,6 +239,7 @@ dependencies {
     implementation(project(":onboarding"))
     implementation(project(":moderation"))
     implementation(project(":moderation-ui"))
+    implementation(project(":push"))
     implementation(project(":backup"))
     implementation(project(":backup-ui"))
 
@@ -248,6 +283,17 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.bouncycastle)
+
+    // Firebase Cloud Messaging — the content-free push wake
+    // (PushMessagingService) + the registration token the :push
+    // reconciler seals to the backend. Messaging ONLY: no analytics,
+    // no crashlytics. All token fetching is guarded behind the
+    // PUSH_BASE_URL dark switch, so a build without
+    // google-services.json still builds, tests, and runs.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+    // Task.await() for the FirebaseMessaging token fetch.
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // ZXing core — pure-Java QR encoder. Used by `OnymQrCode` to turn
     // an invite URL into a 1-bit module grid; the Compose Canvas does
@@ -415,6 +461,15 @@ fun moderationUrlIsLoopback(): Boolean {
     if (rest == moderationBaseUrl()) return false
     val host = rest.takeWhile { it != ':' && it != '/' }
     return host == "localhost" || host == "10.0.2.2"
+}
+
+fun pushBaseUrl(): String {
+    System.getenv("ONYM_PUSH_BASE_URL")?.takeIf { it.isNotBlank() }?.let { return it }
+    val props = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    return props.getProperty("push.baseUrl").orEmpty()
 }
 
 fun playCloudProjectNumber(): Long {

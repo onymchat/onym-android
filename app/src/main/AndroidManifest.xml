@@ -42,6 +42,16 @@
         android:name="android.hardware.microphone"
         android:required="false" />
 
+    <!--
+        POST_NOTIFICATIONS (API 33+): the local, content-free "New
+        message" notification `PushMessagingService` renders on an FCM
+        wake. Requested at runtime by the Settings → Notifications
+        toggle; the push seat is opt-in and OFF by default, and a
+        denial simply leaves it off. Below API 33 the permission is
+        granted by install.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".OnymApplication"
         android:label="@string/app_name"
@@ -105,6 +115,24 @@
                 <data android:scheme="onym" android:host="join" />
             </intent-filter>
         </activity>
+
+        <!--
+            The receiving end of the content-free push wake. FCM
+            requires the MESSAGING_EVENT filter; not exported — only
+            Google Play services delivers to it. The service is
+            deliberately graph-free (see its KDoc): it renders a local
+            notification from string resources and relays token
+            rotations through PushTokenRelay, nothing else. Harmless
+            when the push seat is dark or google-services.json is
+            absent — no FCM delivery ever occurs then.
+        -->
+        <service
+            android:name=".PushMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
         <!-- Grants a share target read access to one exported proof,
              and nothing else: the authority is scoped to the

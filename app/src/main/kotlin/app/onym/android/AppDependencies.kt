@@ -114,6 +114,11 @@ class AppDependencies(
      *  and no UI-test fakes registered — in which case RootScreen and
      *  onboarding render as before the seat existed. */
     val moderation: ModerationUiDependencies? = null,
+    /** The push seat's Settings surface + lifecycle hooks. `null`
+     *  exactly when push is dark — no `PUSH_BASE_URL` configured — in
+     *  which case the NOTIFICATIONS section is omitted and nothing
+     *  Firebase-shaped runs. */
+    val push: PushUiDependencies? = null,
     /** One entry per backup vendor the holder is currently consented
      *  to — `storage.backup` consent is multi-vendor by construction
      *  (see `BackupSeat`'s doc comment), so a device can back up its
@@ -196,6 +201,31 @@ class BackupUiDependencies(
     val acceptEnrolment: suspend (termsId: String) -> Unit,
     /** History-restore surface — see Phase 8. `null` until wired. */
     val makeRestoreFlow: (suspend () -> app.onym.android.backup.BackupRestoreSummary)? = null,
+)
+
+/**
+ * Everything the Settings NOTIFICATIONS section (and MainActivity's
+ * resume-time revocation check) needs from the push seat, bundled so
+ * [AppDependencies] carries one nullable value.
+ */
+class PushUiDependencies(
+    /** The opt-in preference — the toggle's checked state. Default
+     *  OFF. */
+    val enabledFlow: kotlinx.coroutines.flow.Flow<Boolean>,
+    /** Whether the backend has confirmed a registration. `enabled &&
+     *  !registered` renders the "still activating" footnote. */
+    val registeredFlow: kotlinx.coroutines.flow.Flow<Boolean>,
+    /** Flip ON — call only once POST_NOTIFICATIONS is granted (below
+     *  API 33 it is granted by install); the Settings host owns the
+     *  permission request, and a denial simply never calls this, so
+     *  the toggle snaps back on its own. */
+    val enable: suspend () -> Unit,
+    /** Flip OFF — asks the server to forget this device, retried
+     *  until it succeeds. */
+    val disable: suspend () -> Unit,
+    /** App start / resume: if the preference is ON but the OS has
+     *  notifications blocked, runs the full disable path. */
+    val checkRevocation: () -> Unit,
 )
 
 /**

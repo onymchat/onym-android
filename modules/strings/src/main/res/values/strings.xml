@@ -1044,4 +1044,13 @@
   <string name="rules_proof_export_note_unproven">The file records what this device knows. There is no signature in it to check.</string>
   <string name="rules_proof_write_failed">This device couldn\'t write the proof file.</string>
   <string name="rules_proof_open_cd">Open this member\'s agreement</string>
+  <!-- Push notifications (the :push seat) -->
+  <string name="settings_section_notifications">NOTIFICATIONS</string>
+  <string name="settings_push_title">Message notifications</string>
+  <string name="settings_push_subtitle">A content-free nudge when something arrives</string>
+  <string name="settings_push_activating">Turning on\u2026 the notification server hasn\u2019t confirmed this device yet. It keeps retrying on its own.</string>
+  <string name="settings_push_footnote">Off by default. When on, an Onym-run server watches the relays you\u2019ve configured and sends a wake through Google that carries no content \u2014 no message, no sender, no chat. That server learns your inbox codes and holds your push address only in encrypted form; because all of your identities\u2019 inbox codes register together, it can tell they belong to one device. Google carries only the content-free wake. Turning this off asks the server to forget this device, and the request is retried until the server confirms.</string>
+  <string name="push_channel_name">Messages</string>
+  <string name="push_notification_title">Onym</string>
+  <string name="push_notification_body">New message</string>
 </resources>

@@ -40,6 +40,7 @@ import app.onym.android.settings.RelayerSettingsViewModel
 import app.onym.android.transport.nostr.NostrInboxTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.filterNotNull
@@ -123,6 +124,17 @@ private val Context.chatPreferencesDataStore: DataStore<Preferences> by preferen
  */
 private val Context.moderationDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "app.onym.android.moderation_prefs",
+)
+
+/**
+ * DataStore Preferences for the push seat: the opt-in flag and the
+ * reconciler's registration bookkeeping (fingerprint, expiry, the
+ * registered token, the pending server-side forget). The token is a
+ * capability worth keeping out of other domains' files — separate
+ * blob per the one-domain-one-blob convention.
+ */
+private val Context.pushDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "app.onym.android.push_prefs",
 )
 
 /**
@@ -1638,6 +1650,101 @@ class OnymApplication : Application() {
             )
         }
 
+        // ─── Push seat (content-free relay-watcher wakes) ───────────
+        // Dark by default, moderation's pattern: active only when the
+        // push backend is configured (PUSH_BASE_URL — see
+        // app/build.gradle.kts). Dark means NOTHING is built — no
+        // Settings section, no Firebase token fetch, no registration —
+        // so CI (which has no google-services.json) and every
+        // pre-launch build behave exactly as before the seat existed.
+        val pushUi: PushUiDependencies?
+        if (BuildConfig.PUSH_BASE_URL.isBlank()) {
+            pushUi = null
+        } else {
+            val pushBackend = app.onym.android.push.OkHttpPushBackendClient(
+                httpClient = httpClient,
+                baseUrl = BuildConfig.PUSH_BASE_URL,
+                // Emulator loopback is a debug-build convenience only;
+                // a release binary refuses any non-https base URL.
+                allowInsecureLoopback = BuildConfig.DEBUG,
+            )
+            val pushPreference = app.onym.android.push.DataStorePushPreferenceProvider(
+                applicationContext.pushDataStore,
+            )
+            val pushInteractor = app.onym.android.push.PushRegistrationInteractor(
+                backend = pushBackend,
+                signer = IdentityPushSigner(identityRepository),
+                // Reused, not forked: :moderation's provider already
+                // owns the single-flight + prepare-cap + backoff
+                // story, and its API takes exactly the requestHash
+                // the push payload computes. A second instance (not
+                // moderation's) so the two seats' backoff states
+                // don't couple; same Cloud project number.
+                attestation = PlayIntegrityPushAttestation(
+                    app.onym.android.moderation.PlayIntegrityAttestationProvider(
+                        context = applicationContext,
+                        cloudProjectNumber = BuildConfig.PLAY_CLOUD_PROJECT_NUMBER,
+                    ),
+                ),
+                preference = pushPreference,
+                scope = applicationScope,
+            )
+            // ALL identities' inbox tags register together (the
+            // footnote in Settings says so): a wake must arrive no
+            // matter which identity was messaged. `null` (never an
+            // empty set) until BOTH the identity list and the relay
+            // configuration have actually loaded — the initial empty
+            // StateFlow emissions are "not loaded yet", and
+            // registering an empty set on cold start would tell the
+            // backend to watch nothing.
+            val pushSubscriptions =
+                kotlinx.coroutines.flow.combine(
+                    identityRepository.identities,
+                    nostrRelaysRepository.snapshots,
+                ) { summaries, relays ->
+                    val urls = relays.endpoints.map { it.url }
+                    if (summaries.isEmpty() || urls.isEmpty()) {
+                        null
+                    } else {
+                        summaries.map { summary ->
+                            app.onym.android.push.PushSubscription(
+                                tag = app.onym.android.identity.IdentityRepository
+                                    .inboxTag(summary.inboxPublicKey),
+                                relays = urls,
+                            )
+                        }
+                    }
+                }
+            val pushCoordinator = PushCoordinator(
+                interactor = pushInteractor,
+                preference = pushPreference,
+                scope = applicationScope,
+                subscriptions = pushSubscriptions,
+                fetchToken = {
+                    // runCatching: Firebase is unconfigured when the
+                    // operator set PUSH_BASE_URL without shipping
+                    // google-services.json — degrade to "no token
+                    // yet", never crash the enable path.
+                    runCatching {
+                        com.google.firebase.messaging.FirebaseMessaging.getInstance()
+                            .token.await()
+                    }.getOrNull()
+                },
+                notificationsEnabled = {
+                    androidx.core.app.NotificationManagerCompat.from(applicationContext)
+                        .areNotificationsEnabled()
+                },
+            )
+            pushCoordinator.start()
+            pushUi = PushUiDependencies(
+                enabledFlow = pushPreference.enabledFlow,
+                registeredFlow = pushPreference.registeredFlow,
+                enable = { pushCoordinator.enable() },
+                disable = { pushCoordinator.disable() },
+                checkRevocation = { pushCoordinator.checkRevocation() },
+            )
+        }
+
         val onboardingUi = OnboardingUiDependencies(
             shouldOnboard = onboardingPending,
             makeFlow = {
@@ -1828,6 +1935,7 @@ class OnymApplication : Application() {
         return AppDependencies(
             nostrSignerProvider = nostrSignerProvider,
             moderation = moderationUi,
+            push = pushUi,
             backupVendors = backupVendors,
             refreshBackupVendors = refreshBackupVendors,
             makeRecoveryPhraseBackupViewModel = { activityProvider ->
