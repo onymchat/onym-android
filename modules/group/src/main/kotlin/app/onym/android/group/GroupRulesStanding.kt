@@ -145,7 +145,10 @@ fun ChatGroup.rulesStanding(blsHex: String): GroupRulesStanding? {
  *
  * Public so a caller that has just read the profile — building a roster
  * row, or a proof — doesn't look it up twice and give the two lookups a
- * chance to disagree later.
+ * chance to disagree later. The pairing is checked rather than trusted:
+ * passing one member's profile under another's key is the mistake the
+ * key-only overload exists to prevent, and leaving it merely
+ * discouraged here would put it back within reach.
  *
  * The stored bytes are read *before* the group's current state, because
  * they outlive it. `invitationMessage` can change: a founder who clears
@@ -158,6 +161,9 @@ fun ChatGroup.rulesStanding(
     member: MemberProfile,
     blsHex: String,
 ): GroupRulesStanding {
+    require(memberProfiles[blsHex] === member) {
+        "profile does not belong to $blsHex in this group's roster"
+    }
     // One reading of the stored bytes, from the function whose KDoc
     // calls itself "the only place that answers it" — rather than a
     // second `?:` ladder here re-deriving the same four outcomes.

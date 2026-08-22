@@ -28,8 +28,8 @@ import java.util.Locale
  * group says today. Those differ exactly when the founder changed the
  * wording after this member joined, and the honest export is the one
  * whose bytes verify — with `matches_current_rules` naming the
- * divergence rather than hiding it, and `current_text` carrying what
- * the group says now so the reader has something to compare.
+ * divergence rather than hiding it, and `group.current_rules` carrying
+ * what the group asks today so the reader can compare.
  *
  * ## What it deliberately doesn't carry
  *
@@ -49,7 +49,7 @@ class GroupRulesProof private constructor(
     val groupName: String,
     val memberAlias: String,
     val memberBlsHex: String,
-    val sendingPublicKey: ByteArray?,
+    val sendingPublicKey: ByteArray,
     val signature: ByteArray?,
     val rules: String?,
     val currentRules: String?,
@@ -71,15 +71,15 @@ class GroupRulesProof private constructor(
             // screen happened to call this.
             if (!standing.hasSomethingToShow) return null
             val currentRules = GroupRules.normalized(group.invitationMessage)
-            val proven = standing.isProven
             return GroupRulesProof(
                 // Re-hexed from the bytes signing actually used rather
                 // than echoing `group.id`, so the field and the
                 // signature can't disagree about spelling. It is not a
                 // length guarantee — the parser is lenient — but a
                 // short id fails `statement`'s size check, so the
-                // standing lands on `DOES_NOT_VERIFY` and no signature
-                // is exported beside it.
+                // standing lands on `DOES_NOT_VERIFY` — the signature
+                // still ships, as every stored one does, with
+                // `signed: false` beside it.
                 groupIdHex = group.groupIdBytes.toHexLowercase(),
                 groupName = group.name,
                 memberAlias = member.alias,
@@ -93,10 +93,6 @@ class GroupRulesProof private constructor(
                 // a reader reach their own.
                 sendingPublicKey = member.sendingPubkey,
                 signature = member.rulesSignature,
-                // The author is the one unproven standing with words
-                // worth carrying: they are the group's rules, and a
-                // document about the person who wrote them containing
-                // none of them is useless.
                 // The wording this member put their name to, when
                 // there is one: what they signed, or — for the author —
                 // what they wrote. Absent for a member who signed
@@ -242,17 +238,21 @@ class GroupRulesProof private constructor(
             member = Document.Member(
                 alias = memberAlias,
                 blsPublicKey = memberBlsHex,
-                sendingPublicKey = sendingPublicKey?.toHexLowercase(),
+                sendingPublicKey = sendingPublicKey.toHexLowercase(),
                 signature = signature?.toHexLowercase(),
                 signed = standing.isProven,
                 note = noteFor(standing),
             ),
             rules = text?.let {
-                // From the standing, not re-derived. `SIGNED` and
-                // `SIGNED_EARLIER_VERSION` already *are* this fact, and
-                // a type whose thesis is single-sourced derivation
-                // shouldn't answer one question twice.
-                val matches = standing != GroupRulesStanding.SIGNED_EARLIER_VERSION
+                // Compared, not inferred from the standing. The
+                // standing answers this for the two verified cases and
+                // not for the third: a stored text can diverge under
+                // `DOES_NOT_VERIFY` too — `MemberProfile` requires it
+                // to hash to `rulesHash`, not that the signature holds
+                // — so inferring "matches" there told the reader this
+                // *is* what the group asks today when it isn't. Still
+                // one source: the two values this document carries.
+                val matches = it == currentRules
                 Document.Rules(
                     text = it,
                     sha256 = GroupRules.hash(it).toHexLowercase(),
@@ -323,7 +323,7 @@ class GroupRulesProof private constructor(
         internal data class Member(
             val alias: String,
             @SerialName("bls_public_key") val blsPublicKey: String,
-            @SerialName("sending_public_key") val sendingPublicKey: String?,
+            @SerialName("sending_public_key") val sendingPublicKey: String,
             val signature: String?,
             val signed: Boolean,
             /** Present only when [signed] is false: why there is
@@ -341,7 +341,6 @@ class GroupRulesProof private constructor(
 }
 
 private const val READABLE_STEM_MAX = 60
-private const val KEY_LENGTH = 12
 
 private fun ByteArray.toHexLowercase(): String = buildString(size * 2) {
     for (b in this@toHexLowercase) append("%02x".format(b.toInt() and 0xFF))
