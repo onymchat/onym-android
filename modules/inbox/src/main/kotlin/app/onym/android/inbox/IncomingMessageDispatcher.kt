@@ -345,12 +345,107 @@ class IncomingMessageDispatcher(
             }
         }
 
-        // Wire-shipped profiles first; receiver's own entry overwrites
-        // any same-keyed wire entry (sender shouldn't be able to
-        // assert our alias).
+        // Wire-shipped profiles first, then agreements reconciled
+        // against what is already stored, then our own identity.
+        //
+        // The wire's roster is the admin's and wins on identity. It
+        // does not win on *evidence*: an invitation from a build that
+        // predates rules carries no agreements for anyone, and taking
+        // it literally dropped a whole group to "didn't sign" on the
+        // next replay. This path re-runs on every relay replay and on
+        // any later invitation for a group already here, so that is a
+        // version-skew erasure rather than an edge case. The rule, for
+        // every row: a record that proves something outranks one that
+        // doesn't.
+        //
+        // Scoped by owner as well as group — two identities on one
+        // device hold two rows for the same group, and the wrong one
+        // would stamp somebody else's agreements onto this roster.
+        val storedGroup = groupRepository.snapshots.value.firstOrNull {
+            it.groupIdBytes.contentEquals(invitation.groupId) &&
+                it.ownerIdentityId == ownerIdentityId.value
+        }
         val profiles = (invitation.memberProfiles ?: emptyMap()).toMutableMap()
-        selfMemberProfileEntry(ownerIdentityId)?.let { (key, profile) ->
-            profiles[key] = profile
+        val selfEntry = selfMemberProfileEntry(ownerIdentityId)
+        for ((key, stored) in storedGroup?.memberProfiles.orEmpty()) {
+            // The self row has its own, stricter precedence below.
+            // Running both over it made the second read the first's
+            // output as though it had arrived on the wire.
+            if (key == selfEntry?.first) continue
+            // Only rows the admin still lists: re-inserting one they
+            // dropped would make this directory permanently additive.
+            val wire = profiles[key] ?: continue
+            if (stored.rulesSignature == null) continue
+            if (wire.agreedToRules(invitation.groupId)) continue
+            if (stored.agreedToRules(invitation.groupId)) {
+                // Composed and re-verified rather than spliced on
+                // trust: if the wire announces a different sending key,
+                // the stored signature does not cover the row we would
+                // be writing, and keeping it would store a proven
+                // agreement in a form that reads back as forged.
+                val candidate = wire.copy(
+                    rulesHash = stored.rulesHash,
+                    rulesSignature = stored.rulesSignature,
+                    rulesText = stored.rulesText,
+                )
+                if (candidate.agreedToRules(invitation.groupId)) {
+                    profiles[key] = candidate
+                    continue
+                }
+            }
+            // Neither proves anything, and the wire has none of its
+            // own. Keep the bytes; keep the wording too when it still
+            // belongs to them. Dropping the wording unconditionally
+            // destroyed the only copy of the signed words on this
+            // device and turned a truthful "doesn't check out" into
+            // "can't be checked".
+            if (wire.rulesSignature != null) continue
+            profiles[key] = wire.copy(
+                rulesHash = stored.rulesHash,
+                rulesSignature = stored.rulesSignature,
+                rulesText = if (stored.sendingPubkey.contentEquals(wire.sendingPubkey)) {
+                    stored.rulesText
+                } else {
+                    null
+                },
+            )
+        }
+        selfEntry?.let { (key, profile) ->
+            // Identity wins locally; the agreement is whichever record
+            // actually proves something.
+            //
+            // Our alias and keys are ours to assert, which is what the
+            // overwrite is for. Our *agreement* is not: this device
+            // signed it and kept no copy, so the admitting device's
+            // record is the only one there is. Trusting it costs
+            // nothing — it is re-checked against our own sending key
+            // every time it is read. Trusting it *blindly* costs the
+            // record, which is what taking the wire unconditionally
+            // did.
+            val stored = storedGroup?.memberProfiles?.get(key)
+            val wire = profiles[key]?.let {
+                // Verified as the row that will be *stored*, not as the
+                // one that arrived: the local keys are substituted
+                // below, so checking the wire's own key and then
+                // persisting beside ours would accept as proven
+                // something that reads back as forged.
+                profile.copy(
+                    rulesHash = it.rulesHash,
+                    rulesSignature = it.rulesSignature,
+                    rulesText = it.rulesText,
+                )
+            }
+            val agreement = when {
+                wire?.agreedToRules(invitation.groupId) == true -> wire
+                stored?.agreedToRules(invitation.groupId) == true -> stored
+                wire?.rulesSignature != null -> wire.copy(rulesText = null)
+                else -> stored
+            }
+            profiles[key] = profile.copy(
+                rulesHash = agreement?.rulesHash,
+                rulesSignature = agreement?.rulesSignature,
+                rulesText = agreement?.rulesText,
+            )
         }
 
         // PR 84: stamp the inviting envelope's Ed25519 pubkey as the
@@ -386,7 +481,26 @@ class IncomingMessageDispatcher(
             // and the group materializes photo-less.
             avatar = invitation.avatar,
             // The group's invitation/intro, as the sender wrote it.
-            invitationMessage = invitation.invitationMessage,
+            // The stored rules stand when the wire omits them, for the
+            // same reason each member row does. The live case is an
+            // admin on a build that predates rules answering a refresh
+            // request: their reply carries none, and taking that
+            // literally flips every verified agreement on this device
+            // from "signed" to "signed an earlier version" — the signed
+            // text no longer equals "no rules" — empties the rules
+            // section, and has the proof sheet announce a change nobody
+            // made.
+            //
+            // Normalized rather than null-checked, so a sender spelling
+            // "no rules" as "" doesn't walk past the fallback.
+            //
+            // The cost, named rather than left implicit: rules can't be
+            // cleared by omission. Nothing clears them today, and when
+            // something does, the wire will need to say "cleared"
+            // rather than say nothing — those are the two cases this
+            // can't tell apart.
+            invitationMessage = GroupRules.normalized(invitation.invitationMessage)
+                ?: storedGroup?.invitationMessage,
         )
 
         // Was this thread already on the device? Relays replay the inbox

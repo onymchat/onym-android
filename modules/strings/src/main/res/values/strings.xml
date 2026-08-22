@@ -526,7 +526,7 @@
   <string name="members_empty_body">Invite people from the chat to see them here.</string>
   <string name="group_not_found_title">Group not found</string>
   <string name="group_not_found_body">It may have been removed or it belongs to a different identity.</string>
-  <string name="members_section_invitation">INVITATION</string>
+  <string name="members_section_rules">GROUP RULES</string>
   <string name="members_you_suffix">(you)</string>
   <string name="share_invite_cd">Share invite</string>
   <string name="group_photo_cd">Group photo</string>
@@ -941,4 +941,32 @@
   <string name="join_confirm_signed_note">Your agreement is signed with this identity’s key and sent with your request.</string>
   <string name="join_confirm_agree_and_send">Agree and send request</string>
   <string name="join_confirm_rules_disclosure">Your signed agreement to the rules goes with it.</string>
+
+  <!-- Group rules: a member's standing, shown on the members screen and
+       again on their proof sheet. Deliberately subjectless — these read
+       on your own row as often as on anyone else's. -->
+  <string name="rules_standing_author">Wrote the group rules</string>
+  <string name="rules_standing_signed">Signed the group rules</string>
+  <string name="rules_standing_earlier_version">Signed an earlier version of the rules</string>
+  <string name="rules_standing_did_not_sign">Didn\'t sign the group rules</string>
+  <string name="rules_standing_unknown_rules">Signed rules this device doesn\'t have — can\'t be checked</string>
+  <string name="rules_standing_does_not_verify">Signature on the rules doesn\'t check out</string>
+  <string name="rules_explanation_author">These rules were set for the group by this member. Founders don\'t sign their own.</string>
+  <string name="rules_explanation_signed">These rules were read and signed with this identity\'s key before joining.</string>
+  <string name="rules_explanation_earlier_version">Signed as the rules were written at the time of joining. The group has changed them since.</string>
+  <string name="rules_explanation_did_not_sign">Joined before this group had rules, or from an app version that predates them.</string>
+  <string name="rules_explanation_unknown_rules">A signature is stored, but the wording it covers isn\'t on this device, so nothing here can check it.</string>
+  <string name="rules_explanation_does_not_verify">A signature is stored and it doesn\'t check out. Nothing here can be shown as an agreement.</string>
+  <string name="rules_proof_what_signed">WHAT THEY SIGNED</string>
+  <string name="rules_proof_rules_they_set">THE RULES THEY SET</string>
+  <string name="rules_proof_changed_since">The group\'s rules have changed since. This is the wording that was agreed to.</string>
+  <string name="rules_proof_member">member</string>
+  <string name="rules_proof_signing_key">signing key</string>
+  <string name="rules_proof_signature">signature</string>
+  <string name="rules_proof_export">Export proof</string>
+  <string name="rules_proof_export_note_signed">A file anyone can check with any Ed25519 tool — it explains how inside.</string>
+  <string name="rules_proof_export_note_unproven">The file records what this device knows. There is no signature in it to check.</string>
+  <string name="rules_proof_write_failed">This device couldn\'t write the proof file.</string>
+  <string name="rules_proof_nothing_to_show">There\'s nothing to show about this member\'s agreement any more.</string>
+  <string name="rules_proof_chooser_title">Export proof</string>
 </resources>

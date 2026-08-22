@@ -522,7 +522,7 @@
   <string name="members_empty_body">Пригласите людей из чата, чтобы увидеть их здесь.</string>
   <string name="group_not_found_title">Группа не найдена</string>
   <string name="group_not_found_body">Возможно, она удалена или принадлежит другой личности.</string>
-  <string name="members_section_invitation">ПРИГЛАШЕНИЕ</string>
+  <string name="members_section_rules">ПРАВИЛА ГРУППЫ</string>
   <string name="members_you_suffix">(вы)</string>
   <string name="share_invite_cd">Поделиться приглашением</string>
   <string name="group_photo_cd">Фото группы</string>
@@ -940,4 +940,30 @@
   <string name="join_confirm_signed_note">Ваше согласие подписывается ключом этой личности и отправляется вместе с запросом.</string>
   <string name="join_confirm_agree_and_send">Согласиться и отправить запрос</string>
   <string name="join_confirm_rules_disclosure">Вместе с ним отправляется ваше подписанное согласие с правилами.</string>
+
+  <!-- Правила группы. Формулировки безличные: их читают и о себе. -->
+  <string name="rules_standing_author">Автор правил группы</string>
+  <string name="rules_standing_signed">Правила группы подписаны</string>
+  <string name="rules_standing_earlier_version">Подписана более ранняя версия правил</string>
+  <string name="rules_standing_did_not_sign">Правила группы не подписаны</string>
+  <string name="rules_standing_unknown_rules">Подписаны правила, которых нет на этом устройстве — проверить нельзя</string>
+  <string name="rules_standing_does_not_verify">Подпись под правилами не проходит проверку</string>
+  <string name="rules_explanation_author">Эти правила для группы установил этот участник. Основатели не подписывают собственные правила.</string>
+  <string name="rules_explanation_signed">Правила были прочитаны и подписаны ключом этой личности перед вступлением.</string>
+  <string name="rules_explanation_earlier_version">Подписано в той редакции правил, что действовала при вступлении. С тех пор группа их изменила.</string>
+  <string name="rules_explanation_did_not_sign">Вступление произошло до появления правил в группе или из версии приложения, которая их не поддерживала.</string>
+  <string name="rules_explanation_unknown_rules">Подпись сохранена, но формулировки, которую она покрывает, нет на этом устройстве — проверить её здесь нечем.</string>
+  <string name="rules_explanation_does_not_verify">Подпись сохранена, и она не проходит проверку. Ничто здесь нельзя предъявить как согласие.</string>
+  <string name="rules_proof_what_signed">ЧТО БЫЛО ПОДПИСАНО</string>
+  <string name="rules_proof_rules_they_set">УСТАНОВЛЕННЫЕ ПРАВИЛА</string>
+  <string name="rules_proof_changed_since">С тех пор правила группы изменились. Здесь та формулировка, с которой согласились.</string>
+  <string name="rules_proof_member">участник</string>
+  <string name="rules_proof_signing_key">ключ подписи</string>
+  <string name="rules_proof_signature">подпись</string>
+  <string name="rules_proof_export">Экспортировать подтверждение</string>
+  <string name="rules_proof_export_note_signed">Файл, который каждый может проверить любым инструментом Ed25519 — внутри описано как.</string>
+  <string name="rules_proof_export_note_unproven">Файл фиксирует то, что известно этому устройству. Подписи для проверки в нём нет.</string>
+  <string name="rules_proof_write_failed">Это устройство не смогло записать файл подтверждения.</string>
+  <string name="rules_proof_nothing_to_show">О согласии этого участника больше нечего показать.</string>
+  <string name="rules_proof_chooser_title">Экспортировать подтверждение</string>
 </resources>

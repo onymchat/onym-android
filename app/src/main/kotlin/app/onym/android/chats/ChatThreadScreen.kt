@@ -1096,7 +1096,7 @@ private fun EmptyThread(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = stringResource(R.string.members_section_invitation),
+                    text = stringResource(R.string.members_section_rules),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

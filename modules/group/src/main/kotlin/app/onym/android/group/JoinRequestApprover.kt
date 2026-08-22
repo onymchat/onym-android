@@ -392,6 +392,36 @@ open class JoinRequestApprover(
             }
         }
 
+        // The directory the joiner lands with, including their own row.
+        //
+        // Their own row has to come from here, because it is the one
+        // thing about themselves they cannot reconstruct: this device
+        // holds the signature they sent, and their device kept no copy
+        // of it. Without it they arrive to find themselves marked as
+        // never having signed the rules they had just agreed to — on
+        // the one screen where their agreement is the point. Found on
+        // iOS by running the app; nothing below the UI crosses two
+        // devices, so nothing else was going to catch it.
+        val invitedProfiles = anchored.memberProfiles.toMutableMap()
+        if (blsPub != null) {
+            invitedProfiles[blsPub.toHexLowercase()] = MemberProfile(
+                alias = req.joinerDisplayLabel,
+                inboxPublicKey = req.joinerInboxPublicKey,
+                sendingPubkey = req.joinerSendingPublicKey,
+                rulesHash = req.rulesHash,
+                rulesSignature = req.rulesSignature,
+                // Only the wording this signature actually covers —
+                // pairing it with whatever the group says *now* made a
+                // founder's edit between request and approval land on
+                // the joiner as "their signature doesn't check out",
+                // red, about themselves, on their first look.
+                rulesText = MemberProfile.storableRulesText(
+                    GroupRules.normalized(anchored.invitationMessage),
+                    req.rulesHash,
+                ),
+            )
+        }
+
         val invitePayload = GroupInvitationPayload(
             version = 1,
             groupId = anchored.groupIdBytes,
@@ -405,10 +435,11 @@ open class JoinRequestApprover(
             groupTypeRaw = anchored.groupType.wireValue,
             adminPubkeyHex = anchored.adminPubkeyHex,
             // Ship the directory-as-known so the joiner sees existing
-            // peers + admin by name from the moment they land. The
-            // joiner's own profile gets backfilled by the receiver's
-            // materializer (PR 83) from their active identity.
-            memberProfiles = anchored.memberProfiles.takeIf { it.isNotEmpty() },
+            // peers + admin by name from the moment they land — plus
+            // their own row, for the agreement they can't rebuild
+            // themselves. The receiver still overwrites the alias and
+            // keys in it with its own; see the materializer.
+            memberProfiles = invitedProfiles.takeIf { it.isNotEmpty() },
             // Carry the group photo so a create-time member sees it the
             // moment the snapshot lands — the only delivery path for
             // members who join via the full snapshot rather than a later
