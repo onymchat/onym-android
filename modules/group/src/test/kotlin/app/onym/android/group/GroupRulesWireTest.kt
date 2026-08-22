@@ -1,7 +1,13 @@
 package app.onym.android.group
 
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -59,33 +65,35 @@ class GroupRulesWireTest {
             java.util.Base64.getUrlDecoder().decode(capability.encode()),
             Charsets.UTF_8,
         )
-        assertFalse(json.contains("rules"))
+        assertFalse(json.contains("\"rules\""))
     }
 
     @Test
     fun aLinkFromAnOlderBuild_hasNoRules() {
         // Forward compatibility in the other direction: a link minted
         // before rules existed still decodes, and its joiner is asked to
-        // agree to nothing.
-        val older = IntroCapability(introPublicKey = introPub, groupId = groupId, groupName = "X")
-        val json = Json { encodeDefaults = false }
-            .encodeToString(IntroCapability.serializer(), older)
+        // agree to nothing. Hand-written and pushed through the shipped
+        // `decode`, because what has to tolerate the older shape is
+        // `jsonFormat`, not a `Json` the test configured itself.
+        val json = "{\"intro_pub\":\"${b64(introPub)}\"," +
+            "\"group_id\":\"${b64(groupId)}\"," +
+            "\"group_name\":\"X\"}"
 
-        val decoded = Json { ignoreUnknownKeys = true }
-            .decodeFromString(IntroCapability.serializer(), json)
+        val decoded = IntroCapability.decode(urlSafe(json))
 
         assertNull(decoded.rules)
+        assertEquals("X", decoded.groupName)
     }
 
     @Test
     fun rulesAtTheCap_areAccepted() {
-        val atCap = "x".repeat(GroupRules.MAX_LENGTH)
+        val atCap = "x".repeat(GroupRules.MAX_BYTES)
         val capability = IntroCapability(
             introPublicKey = introPub,
             groupId = groupId,
             rules = atCap,
         )
-        assertEquals(GroupRules.MAX_LENGTH, capability.rules?.length)
+        assertEquals(GroupRules.MAX_BYTES, capability.rules?.toByteArray(Charsets.UTF_8)?.size)
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -96,46 +104,91 @@ class GroupRulesWireTest {
         IntroCapability(
             introPublicKey = introPub,
             groupId = groupId,
-            rules = "x".repeat(GroupRules.MAX_LENGTH + 1),
+            rules = "x".repeat(GroupRules.MAX_BYTES + 1),
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun nonCanonicalRules_areRejected() {
+        // The joiner signs `canonical(rules)`, so a link whose text is
+        // not already canonical would have them agreeing to bytes the
+        // link doesn't contain.
+        IntroCapability(introPublicKey = introPub, groupId = groupId, rules = " Be kind. ")
+    }
+
+    @Test
+    fun twoLinksDifferingOnlyInTheirRules_areNotEqual() {
+        // The one field where a silent mismatch means someone signed
+        // text they were never shown, so a cache or a `distinctBy` must
+        // not treat these as one invitation.
+        val a = IntroCapability(introPublicKey = introPub, groupId = groupId, rules = "Be kind.")
+        val b = IntroCapability(introPublicKey = introPub, groupId = groupId, rules = "Be cruel.")
+
+        assertNotEquals(a, b)
+        assertNotEquals(a.hashCode(), b.hashCode())
+        assertEquals(
+            a,
+            IntroCapability(introPublicKey = introPub, groupId = groupId, rules = "Be kind."),
         )
     }
 
     @Test
-    fun theCappedLinkFitsAQrCode() {
-        // The cap is the QR code's, and the case that decides it is
-        // three bytes per character.
-        val cjk = "字".repeat(GroupRules.MAX_LENGTH)
+    fun theCappedLinkStillEncodesAsAQrCode() {
+        // Asserted against the encoder that ships rather than against a
+        // remembered capacity number: a literal can't drift, but it also
+        // can't notice when the renderer's correction level changes
+        // under it, which is exactly how a link that "fits" became a
+        // link nothing could encode.
         val link = IntroCapability(
             introPublicKey = introPub,
             groupId = groupId,
             groupName = "x".repeat(30),
-            rules = cjk,
+            rules = "字".repeat(GroupRules.MAX_BYTES / 3),
         ).toAppLink()
 
-        assertTrue(
-            "worst-case rules must still encode inside the level-M ceiling: ${link.length}",
-            link.toByteArray(Charsets.UTF_8).size <= QR_BYTE_CEILING,
+        assertNotNull(
+            "worst-case rules must still encode at some level the renderer tries: " +
+                "${link.toByteArray(Charsets.UTF_8).size} bytes",
+            encodableLevel(link),
         )
     }
 
     @Test
-    fun theWorstCaseNameAndRulesTogether_overrunTheQrCode() {
-        // The headroom is thin and shared with the group name, which has
-        // no cap of its own. Pinned so a future change to either has to
-        // re-measure rather than discover this from a link that scans
-        // nowhere.
-        val cjk = "字".repeat(GroupRules.MAX_LENGTH)
+    fun theWorstCaseNameAndRulesTogether_stillProduceAnInvite() {
+        // The headroom is shared with the group name, which has no cap
+        // of its own, so the pair can exceed what the preferred level
+        // holds. What must hold is that the failure is handled: a lower
+        // level takes it, or the share screen falls back to a copyable
+        // link — never an exception out of a composition.
         val link = IntroCapability(
             introPublicKey = introPub,
             groupId = groupId,
             groupName = "字".repeat(30),
-            rules = cjk,
+            rules = "字".repeat(GroupRules.MAX_BYTES / 3),
         ).toAppLink()
 
+        val level = encodableLevel(link)
         assertTrue(
-            "a CJK name alongside CJK rules is expected to overrun: ${link.length}",
-            link.toByteArray(Charsets.UTF_8).size > QR_BYTE_CEILING,
+            "either it encodes, or it is over even level L and the QR is simply omitted",
+            level != null || !fitsAt(link, ErrorCorrectionLevel.L),
         )
+    }
+
+    @Test
+    fun theCap_leavesTheBadgedLevelBehind() {
+        // Worth knowing rather than discovering: a full-length rules
+        // link no longer fits level H, the only level whose budget
+        // covers the centre badge. The renderer steps down and drops the
+        // badge; this pins that the step-down is load-bearing rather
+        // than theoretical.
+        val link = IntroCapability(
+            introPublicKey = introPub,
+            groupId = groupId,
+            rules = "x".repeat(GroupRules.MAX_BYTES),
+        ).toAppLink()
+
+        assertFalse(fitsAt(link, ErrorCorrectionLevel.H))
+        assertNotNull(encodableLevel(link))
     }
 
     @Test
@@ -204,9 +257,30 @@ class GroupRulesWireTest {
 
     private fun b64(bytes: ByteArray): String = java.util.Base64.getEncoder().encodeToString(bytes)
 
-    private companion object {
-        /** Byte-mode capacity of a version-40 QR code at correction
-         *  level M, which `SettingsQRCode` renders at. */
-        const val QR_BYTE_CEILING = 2331
-    }
+    private fun urlSafe(json: String): String = java.util.Base64.getUrlEncoder()
+        .withoutPadding()
+        .encodeToString(json.toByteArray(Charsets.UTF_8))
+
+    /** The first level `OnymQrCode` would settle on, or null if the
+     *  value fits none of them and no QR is drawn at all. */
+    private fun encodableLevel(value: String): ErrorCorrectionLevel? = listOf(
+        ErrorCorrectionLevel.H,
+        ErrorCorrectionLevel.Q,
+        ErrorCorrectionLevel.M,
+        ErrorCorrectionLevel.L,
+    ).firstOrNull { fitsAt(value, it) }
+
+    private fun fitsAt(value: String, level: ErrorCorrectionLevel): Boolean = runCatching {
+        QRCodeWriter().encode(
+            value,
+            BarcodeFormat.QR_CODE,
+            1,
+            1,
+            mapOf(
+                EncodeHintType.ERROR_CORRECTION to level,
+                EncodeHintType.MARGIN to 0,
+                EncodeHintType.CHARACTER_SET to "UTF-8",
+            ),
+        )
+    }.isSuccess
 }

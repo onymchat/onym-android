@@ -418,6 +418,89 @@ class PendingChatsViewModelTest {
     }
 
     @Test
+    fun aLinkWithoutRules_fallsBackToAStoredOffers() = runTest {
+        // The other half of the resolution: a link that carries nothing
+        // must not erase the rules a pushed offer already delivered, or
+        // the tick disappears and the founder reads a joiner who
+        // declined.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "House rules."))
+
+        val confirm = h.viewModel.prepareJoin(h.capability())
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        assertEquals("House rules.", confirm.confirmation.rules)
+    }
+
+    @Test
+    fun aLinkOverAStoredOffer_signsWhatTheScreenShowed() = runTest {
+        // The row already exists, so the send goes down the
+        // already-present path — which used to read the rules back off
+        // the row and sign the offer's older wording instead of the
+        // words on screen.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "Older wording."))
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Newer wording."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        assertEquals("Newer wording.", h.sender.calls.single().agreedRules)
+    }
+
+    @Test
+    fun askAgainAfterALinkOverAnOffer_reSignsWhatWasRead() = runTest {
+        // And the row is brought up to it, so every later "Ask again" —
+        // which has only the row to read from — attests to the same
+        // words rather than to the draft nobody saw.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "Older wording."))
+        val confirm = h.viewModel.prepareJoin(h.capability(rules = "Newer wording."))
+            as PendingChatsViewModel.JoinDestination.Confirm
+        h.viewModel.confirmJoin(confirm.confirmation, "Bobby")
+
+        h.viewModel.retry(h.chat().id)
+
+        assertEquals(
+            listOf("Newer wording.", "Newer wording."),
+            h.sender.calls.map { it.agreedRules },
+        )
+    }
+
+    @Test
+    fun rulesThatAreOnlyWhitespace_areNoRulesAtAll() = runTest {
+        // "   " is non-null, so it drew an empty card over a mandatory
+        // tick and then signed nothing, because the sender normalizes
+        // before signing. The screen and the send agree now.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "   \n  "))
+
+        val confirmation = h.viewModel.prepareAccept(h.chat().id)
+        assertNull(confirmation?.rules)
+        h.viewModel.confirmJoin(confirmation!!, "Bobby")
+
+        assertNull(h.sender.calls.single().agreedRules)
+    }
+
+    @Test
+    fun anOffersGreeting_isNotDrawnTwice() = runTest {
+        // A group's invitation message *is* its rules since the rename,
+        // so the confirmation must not also offer it as a greeting.
+        val h = harness()
+        h.viewModel.start()
+        h.repository.record(h.chat().copy(invitationMessage = "House rules."))
+
+        val confirmation = h.viewModel.prepareAccept(h.chat().id)
+
+        assertEquals("House rules.", confirmation?.rules)
+        assertNull(confirmation?.invitationMessage)
+    }
+
+    @Test
     fun aGroupWithoutRules_signsNothing() = runTest {
         val h = harness()
         h.viewModel.start()

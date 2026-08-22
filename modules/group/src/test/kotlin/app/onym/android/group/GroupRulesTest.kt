@@ -53,6 +53,59 @@ class GroupRulesTest {
     }
 
     @Test
+    fun clamped_stopsAtWhicheverCapComesFirst() {
+        // Latin text runs out of characters first; a script that costs
+        // more per character runs out of bytes first. Both have to hold,
+        // because the byte cap decides whether a link is valid and the
+        // character cap is what the field counts.
+        assertEquals(GroupRules.MAX_LENGTH, GroupRules.clamped("x".repeat(9_000)).length)
+        val cjk = GroupRules.clamped("字".repeat(9_000))
+        assertTrue(cjk.toByteArray(Charsets.UTF_8).size <= GroupRules.MAX_BYTES)
+        assertTrue(cjk.length <= GroupRules.MAX_LENGTH)
+    }
+
+    @Test
+    fun clamped_trimsCharactersRatherThanBytes() {
+        // A family emoji is one grapheme cluster and 25 bytes; slicing
+        // the byte array would cut a codepoint in half and leave text no
+        // font can draw and no hash either side agrees on.
+        val clamped = GroupRules.clamped("👨‍👩‍👧‍👦".repeat(200))
+        assertEquals(clamped, String(clamped.toByteArray(Charsets.UTF_8), Charsets.UTF_8))
+        assertTrue(clamped.toByteArray(Charsets.UTF_8).size <= GroupRules.MAX_BYTES)
+    }
+
+    @Test
+    fun remaining_countsDownTheCloserCap() {
+        // A counter that kept moving after typing had stopped having an
+        // effect would be worse than no counter.
+        assertEquals(GroupRules.MAX_LENGTH, GroupRules.remaining(""))
+        // No UTF-16 unit costs more than three bytes, and Han characters
+        // cost exactly that — so on this platform the two caps meet at
+        // the same text (500 units, 1500 bytes) and the character cap is
+        // what binds for everything else, astral characters included.
+        assertEquals(100, GroupRules.remaining("字".repeat(400)))
+        assertEquals(0, GroupRules.remaining("字".repeat(500)))
+        // Which is not true of the other platform: Swift counts grapheme
+        // clusters, so the same emoji text is 300 "characters" there and
+        // its bytes are the only cap left. Taking the smaller of the two
+        // is what makes one number correct on both.
+        assertEquals(
+            GroupRules.MAX_LENGTH - 600,
+            GroupRules.remaining("🙂".repeat(300)),
+        )
+        assertEquals(0, GroupRules.remaining(GroupRules.clamped("字".repeat(9_000))))
+    }
+
+    @Test
+    fun fits_isMeasuredInBytesNotCharacters() {
+        assertTrue(GroupRules.fits("x".repeat(GroupRules.MAX_BYTES)))
+        assertFalse(GroupRules.fits("x".repeat(GroupRules.MAX_BYTES + 1)))
+        // 500 characters, and far past the cap the character count would
+        // have called safe.
+        assertFalse(GroupRules.fits("👨‍👩‍👧‍👦".repeat(500)))
+    }
+
+    @Test
     fun statement_isDomainSeparated() {
         val statement = GroupRules.statement(groupId, GroupRules.hash(rules), ByteArray(32) { 0x33 })
         assertEquals(GroupRules.DOMAIN.length + 96, statement.size)

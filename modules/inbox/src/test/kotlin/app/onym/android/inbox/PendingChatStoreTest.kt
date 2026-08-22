@@ -45,6 +45,34 @@ class PendingChatStoreTest {
     }
 
     @Test
+    fun setRules_replacesTheTextWithoutTouchingOfferOrdering() = runTest {
+        // The link's rules win over a stored offer's on the confirmation
+        // screen, so the row has to be brought up to what was read
+        // before anything is signed. Deliberately not `refreshOffer`,
+        // which carries an authenticated timestamp and would reorder the
+        // row on a text change.
+        val store = InMemoryPendingChatStore()
+        val row = chat(group = 0x11, owner = owner).copy(invitationMessage = "Older wording.")
+        store.insert(row)
+
+        store.setRules(row.id, "Newer wording.")
+
+        val stored = store.list().single()
+        assertEquals("Newer wording.", stored.invitationMessage)
+        assertEquals(row.offerReceivedAt, stored.offerReceivedAt)
+        assertEquals(row.receivedAt, stored.receivedAt)
+    }
+
+    @Test
+    fun setRules_onARowThatIsGone_isANoOp() = runTest {
+        val store = InMemoryPendingChatStore()
+
+        store.setRules("nobody:home", "Be kind.")
+
+        assertTrue(store.list().isEmpty())
+    }
+
+    @Test
     fun insert_isKeyedByGroupAndOwner_notByDelivery() = runTest {
         val store = InMemoryPendingChatStore()
         val first = store.insert(chat(group = 0x11, owner = owner))

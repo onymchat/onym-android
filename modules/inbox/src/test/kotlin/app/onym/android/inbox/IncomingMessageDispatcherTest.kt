@@ -741,6 +741,51 @@ class IncomingMessageDispatcherTest {
         )
     }
 
+    @Test
+    fun announcement_carriesTheJoinersAgreementIntoTheLocalRoster() = runTest {
+        // The evidence has to survive the fanout, or a member who joined
+        // before Bob can never check what Bob agreed to — only the
+        // founder who admitted him could, which is the thing the
+        // signature scheme exists to avoid.
+        groupStore.replaceForTest(makeGroup(groupId).copy(adminEd25519PubkeyHex = adminHex))
+        groupRepository.reload()
+        val hash = ByteArray(32) { 0x04 }
+        val signature = ByteArray(64) { 0x05 }
+        val payload = announcementPayload().let {
+            it.copy(
+                newMember = MemberAnnouncementPayload.AnnouncedMember(
+                    blsPub = newMemberBlsPub,
+                    inboxPub = newMemberInbox,
+                    alias = "Bob",
+                    sendingPub = ByteArray(32) { 0x77 },
+                    rulesHash = hash,
+                    rulesSignature = signature,
+                    rulesText = "Be kind.",
+                ),
+            )
+        }
+        val plaintext = Json.encodeToString(MemberAnnouncementPayload.serializer(), payload)
+            .toByteArray(Charsets.UTF_8)
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(plaintext, senderPub = admin),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+        )
+
+        dispatcher.dispatch(
+            messageId = "m1",
+            ownerIdentityId = ownerIdentity,
+            payload = byteArrayOf(),
+            receivedAt = Instant.EPOCH,
+        )
+
+        val key = newMemberBlsPub.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val member = groupRepository.snapshots.value.single().memberProfiles[key]!!
+        assertTrue(hash.contentEquals(member.rulesHash))
+        assertTrue(signature.contentEquals(member.rulesSignature))
+        assertEquals("Be kind.", member.rulesText)
+    }
+
     private fun announcementPayload() = MemberAnnouncementPayload(
         version = 1,
         groupId = groupId,

@@ -404,6 +404,94 @@ class JoinRequestApproverBehaviorTest {
         val expectedTag: TransportInboxId,
     )
 
+    // ─── the rules a joiner is asked to sign ──────────────────────
+
+    @Test
+    fun aGroupsInvitationMessage_isWhatTheJoinerIsAskedToSign() =
+        runTest(UnconfinedTestDispatcher()) {
+            // The conflation, pinned: since the rename, a group's
+            // invitation message *is* its rules, and this is the only
+            // place that fact is load-bearing. A joiner who signed that
+            // text reads as agreed; the same joiner signing anything
+            // else does not.
+            val env = seed(rules = "Be kind. No links.")
+            env.seedJoiner(bls = 0xC1, inbox = 0xC2, alias = "Bob", agreesTo = "Be kind. No links.")
+            env.approver.pumpOnce()
+
+            assertEquals(
+                JoinRequestApprover.RulesAgreement.AGREED,
+                env.approver.pending.value.single().rulesAgreement,
+            )
+        }
+
+    @Test
+    fun aJoinerWhoSignedAnotherText_readsAsUnknownRatherThanAgreed() =
+        runTest(UnconfinedTestDispatcher()) {
+            val env = seed(rules = "Be kind. No links.")
+            env.seedJoiner(bls = 0xC1, inbox = 0xC2, alias = "Bob", agreesTo = "Anything goes.")
+            env.approver.pumpOnce()
+
+            assertEquals(
+                JoinRequestApprover.RulesAgreement.UNKNOWN_RULES,
+                env.approver.pending.value.single().rulesAgreement,
+            )
+        }
+
+    @Test
+    fun aGroupWithNoRules_asksForNothing() =
+        runTest(UnconfinedTestDispatcher()) {
+            val env = seed()
+            env.seedJoiner(bls = 0xC1, inbox = 0xC2, alias = "Bob")
+            env.approver.pumpOnce()
+
+            assertEquals(
+                JoinRequestApprover.RulesAgreement.NOT_REQUIRED,
+                env.approver.pending.value.single().rulesAgreement,
+            )
+        }
+
+    @Test
+    fun approve_keepsTheAgreementAndTheTextItCovers() =
+        runTest(UnconfinedTestDispatcher()) {
+            // The request is consumed at approval, so what the founder
+            // decided in front of has to be retained on the member —
+            // with the words, not a pointer to whatever the group says
+            // by then.
+            val env = seed(rules = "Be kind. No links.")
+            val joiner = env.seedJoiner(
+                bls = 0xC1, inbox = 0xC2, alias = "Bob", agreesTo = "Be kind. No links.",
+            )
+            env.approver.pumpOnce()
+
+            env.approver.approve(joiner.requestId)
+
+            val key = joiner.blsPub.joinToString("") { "%02x".format(it) }
+            val member = env.currentGroup().memberProfiles[key]!!
+            assertEquals("Be kind. No links.", member.rulesText)
+            assertTrue(member.agreedToRules(groupId))
+        }
+
+    @Test
+    fun aFoundersLaterEdit_doesNotUnpickAnAgreementAlreadyRecorded() =
+        runTest(UnconfinedTestDispatcher()) {
+            // The whole reason the text is stored beside the signature
+            // rather than read back off the live group.
+            val env = seed(rules = "Be kind. No links.")
+            val joiner = env.seedJoiner(
+                bls = 0xC1, inbox = 0xC2, alias = "Bob", agreesTo = "Be kind. No links.",
+            )
+            env.approver.pumpOnce()
+            env.approver.approve(joiner.requestId)
+
+            env.groupRepository.insert(
+                env.currentGroup().copy(invitationMessage = "Rewritten afterwards."),
+            )
+
+            val key = joiner.blsPub.joinToString("") { "%02x".format(it) }
+            val member = env.currentGroup().memberProfiles[key]!!
+            assertTrue(member.agreedToRules(groupId))
+        }
+
     private inner class Env(
         val approver: JoinRequestApprover,
         val introKeyStore: InMemoryIntroKeyStore,
