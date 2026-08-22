@@ -35,6 +35,17 @@ class JoinRequestSender(
         object Sent : Outcome()
         class NoIdentityLoaded : Outcome()
         class TransportFailed(val reason: String) : Outcome()
+
+        /**
+         * The invitation carries rules and the caller passed no
+         * agreement — a wiring mistake, not a person who declined.
+         *
+         * Its own outcome rather than a [TransportFailed], because the
+         * two differ in what the row should then offer: nothing left the
+         * device and nothing will, so "Ask again" would retry a call
+         * that cannot start succeeding.
+         */
+        object RulesAgreementMissing : Outcome()
     }
 
     /**
@@ -43,11 +54,31 @@ class JoinRequestSender(
      *        prompt. Joiner-controlled untrusted text — keep short
      *        (Nostr relays typically cap event size at ~64KB and
      *        we don't want to bloat the request envelope).
+     * @param ownerIdentityId the identity this request is sent as, and
+     *        the one whose key signs the agreement. Named rather than
+     *        read from the selection, so switching identities mid-flight
+     *        cannot attribute an agreement to the wrong person.
+     * @param agreedRules the rules text the joiner was shown and
+     *        accepted, or null when the invitation carried none.
+     *
+     *        No default value on purpose. The whole reason it is a
+     *        parameter is that it cannot be derived from [capability],
+     *        so a default would make "forgot to pass it" the quiet
+     *        answer — and the quiet answer reaches the founder as a
+     *        joiner who declined to agree.
+     *
+     *        Passed in rather than read off [capability], because the
+     *        signature has to cover what a person actually saw. The two
+     *        are the same for a link, but an invitation pushed to this
+     *        device carries its rules on the stored offer instead, and a
+     *        sender that reached for the capability's copy would sign
+     *        text that was never on screen in that case.
      */
     suspend fun send(
         capability: IntroCapability,
         joinerDisplayLabel: String,
         ownerIdentityId: IdentityId,
+        agreedRules: String?,
     ): Outcome = withContext(ioDispatcher) {
         val ownerIdentity = identity.identities.value.firstOrNull { it.id == ownerIdentityId }
             ?: return@withContext Outcome.NoIdentityLoaded()
@@ -61,6 +92,42 @@ class JoinRequestSender(
             GroupCommitmentBuilder.computeLeafHash(sk)
         } catch (_: Throwable) {
             null
+        }
+        // The agreement, when there is one to make. Signed with the same
+        // long-term key the request already announces as
+        // `joinerSendingPublicKey`, so every member who is later told
+        // about this joiner can check it — not just the founder who
+        // admitted them.
+        // An invitation that carried rules and a send with none is a
+        // wiring mistake, not a person who declined — and the two are
+        // indistinguishable by the time they reach the founder. Fail
+        // here, where it is still a bug report.
+        if (capability.rules != null && GroupRules.normalized(agreedRules) == null) {
+            return@withContext Outcome.RulesAgreementMissing
+        }
+        var rulesHash: ByteArray? = null
+        var rulesSignature: ByteArray? = null
+        GroupRules.normalized(agreedRules)?.let { rules ->
+            val hash = GroupRules.hash(rules)
+            try {
+                rulesSignature = identity.signWithStellarKeyAs(
+                    ownerIdentityId,
+                    GroupRules.statement(
+                        groupId = capability.groupId,
+                        rulesHash = hash,
+                        joinerSendingPublicKey = ownerIdentity.sendingPublicKey,
+                    ),
+                )
+                rulesHash = hash
+            } catch (e: Throwable) {
+                // Nothing is sent unsigned behind the person's back: they
+                // were shown rules and told that Send agrees to them, and
+                // a request that arrives without the signature reads to
+                // the founder as someone who declined to agree.
+                return@withContext Outcome.TransportFailed(
+                    "rules signature: ${e.message ?: e.javaClass.simpleName}",
+                )
+            }
         }
         val payload = JoinRequestPayload(
             joinerInboxPublicKey = ownerIdentity.inboxPublicKey,
@@ -76,6 +143,8 @@ class JoinRequestSender(
             joinerSendingPublicKey = ownerIdentity.sendingPublicKey,
             joinerDisplayLabel = joinerDisplayLabel,
             groupId = capability.groupId,
+            rulesHash = rulesHash,
+            rulesSignature = rulesSignature,
         )
         val payloadBytes = jsonFormat.encodeToString(JoinRequestPayload.serializer(), payload)
             .toByteArray(Charsets.UTF_8)

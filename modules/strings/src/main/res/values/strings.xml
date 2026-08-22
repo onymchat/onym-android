@@ -909,6 +909,7 @@
   <string name="pending_chat_retry">Retry</string>
   <string name="pending_chat_send_failed">Your request didn’t go out. Tap Retry to send it again.</string>
   <string name="pending_chat_no_identity">Sign in first.</string>
+  <string name="pending_chat_rules_missing">This invitation asks you to agree to the group’s rules. Open the invite again to read them.</string>
   <string name="pending_chat_malformed">This invite is malformed and can’t be accepted.</string>
   <string name="pending_chat_invited_you">%1$s invited you</string>
   <string name="pending_chat_invited_you_generic">You’ve been invited</string>

@@ -70,8 +70,39 @@ data class JoinRequestPayload(
     @SerialName("group_id")
     @Serializable(with = Base64ByteArraySerializer::class)
     val groupId: ByteArray,
+    /**
+     * 32-byte `SHA256` of the canonical rules text the joiner was shown.
+     * Absent when the invitation carried no rules, and when the joiner
+     * runs a build that predates them.
+     *
+     * Carried even though the inviter knows their own rules, because it
+     * is what separates "agreed to an older version" from "signed
+     * something that doesn't verify" — only one of those is worth asking
+     * a person to redo.
+     */
+    @SerialName("rules_hash")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val rulesHash: ByteArray? = null,
+    /** 64-byte Ed25519 signature over [GroupRules.statement]. Absent
+     *  together with [rulesHash]; see [GroupRules] for why the
+     *  envelope's own signature could not serve. */
+    @SerialName("rules_signature")
+    @Serializable(with = Base64ByteArraySerializer::class)
+    val rulesSignature: ByteArray? = null,
 ) {
     init {
+        // Absent together or present together: half an agreement is a
+        // shape neither side has a reading for, and accepting it would
+        // leave the founder deciding on evidence that cannot be checked.
+        require((rulesHash == null) == (rulesSignature == null)) {
+            "rulesHash and rulesSignature must be absent or present together"
+        }
+        require(rulesHash == null || rulesHash.size == 32) {
+            "rulesHash: expected 32 bytes, got ${rulesHash?.size}"
+        }
+        require(rulesSignature == null || rulesSignature.size == 64) {
+            "rulesSignature: expected 64 bytes, got ${rulesSignature?.size}"
+        }
         require(joinerInboxPublicKey.size == 32) {
             "joinerInboxPublicKey: expected 32 bytes, got ${joinerInboxPublicKey.size}"
         }
@@ -103,7 +134,15 @@ data class JoinRequestPayload(
                 ?: (other.joinerLeafHash == null)) &&
             joinerSendingPublicKey.contentEquals(other.joinerSendingPublicKey) &&
             joinerDisplayLabel == other.joinerDisplayLabel &&
-            groupId.contentEquals(other.groupId)
+            groupId.contentEquals(other.groupId) &&
+            // The agreement is the whole point of these two fields being
+            // unforgeable, so two requests carrying different signatures
+            // must not compare equal — a dedupe or a test that treated
+            // them as one request would be conflating exactly the
+            // evidence the founder decides on.
+            (rulesHash?.contentEquals(other.rulesHash) ?: (other.rulesHash == null)) &&
+            (rulesSignature?.contentEquals(other.rulesSignature)
+                ?: (other.rulesSignature == null))
     }
 
     override fun hashCode(): Int {
@@ -113,6 +152,8 @@ data class JoinRequestPayload(
         h = 31 * h + joinerSendingPublicKey.contentHashCode()
         h = 31 * h + joinerDisplayLabel.hashCode()
         h = 31 * h + groupId.contentHashCode()
+        h = 31 * h + (rulesHash?.contentHashCode() ?: 0)
+        h = 31 * h + (rulesSignature?.contentHashCode() ?: 0)
         return h
     }
 }

@@ -112,7 +112,10 @@ class PendingChatsViewModel(
         val isRetryable: Boolean
             get() = when (this) {
                 FounderUnreachable, ChainUnreachable, ChainNotConfigured, Waiting -> true
-                is SendFailed -> true
+                // Every send failure can be asked again except the one
+                // that never got as far as sending: a missing agreement
+                // stays missing however many times the button is tapped.
+                is SendFailed -> failure != PendingChat.SendFailure.RULES_MISSING
                 Offered, ChainSettling -> false
             }
     }
@@ -668,6 +671,11 @@ class PendingChatsViewModel(
                 // translation or a re-read six months later, and it
                 // tells the reader nothing they can act on. The code
                 // carries what matters: it didn't go out.
+                // Not retryable, and not the transport's fault: the
+                // agreement never reached the sender, so asking again
+                // would ship the same nothing.
+                is JoinRequestSender.Outcome.RulesAgreementMissing ->
+                    repository.markFailed(id, PendingChat.SendFailure.RULES_MISSING)
                 is JoinRequestSender.Outcome.TransportFailed ->
                     repository.markFailed(id, PendingChat.SendFailure.TRANSPORT)
             }

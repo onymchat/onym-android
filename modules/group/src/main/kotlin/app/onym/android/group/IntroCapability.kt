@@ -69,6 +69,23 @@ data class IntroCapability(
     /** Optional display name. Public — see class doc. */
     @SerialName("group_name")
     val groupName: String? = null,
+
+    /**
+     * The group's rules, as the founder wrote them. Public — see class
+     * doc. Canonical (ends-trimmed) and non-empty, or null.
+     *
+     * Carried so the joiner can read them on the confirmation screen and
+     * sign them: the signature in [JoinRequestPayload] covers `SHA256`
+     * of exactly this text, which is why it is stored the way
+     * [GroupRules.canonical] produces rather than however it was typed.
+     * There is no channel to fetch rules from before joining, and a
+     * joiner asked to agree to a hash they cannot read has not agreed to
+     * anything — so the text travels with the link. A link minted by an
+     * older build has none, and a joiner reaching it is asked to agree
+     * to nothing.
+     */
+    @SerialName("rules")
+    val rules: String? = null,
 ) {
     init {
         require(introPublicKey.size == 32) {
@@ -76,6 +93,24 @@ data class IntroCapability(
         }
         require(groupId.size == 32) {
             "groupId: expected 32 bytes, got ${groupId.size}"
+        }
+        // Rejected, not truncated. Both platforms enforce the cap when
+        // they mint a link, so an over-long one is corruption or
+        // mischief — and the alternatives fail worse: truncating would
+        // have the joiner sign rules that end mid-sentence, and dropping
+        // the field would walk them into a group whose rules they were
+        // never shown while the founder believes otherwise.
+        // Bytes, not characters: `String.length` counts UTF-16 units and
+        // Swift's `String.count` counts grapheme clusters, so a
+        // character cap is a different cap on each platform — and since
+        // this rejects rather than truncates, disagreement is a link
+        // that simply doesn't open. See `GroupRules.MAX_BYTES`.
+        require(rules == null || GroupRules.fits(rules)) {
+            "rules: expected at most ${GroupRules.MAX_BYTES} UTF-8 bytes, " +
+                "got ${rules?.toByteArray(Charsets.UTF_8)?.size}"
+        }
+        require(rules == null || rules == GroupRules.canonical(rules)) {
+            "rules: expected canonical (ends-trimmed) text"
         }
     }
 
@@ -105,13 +140,21 @@ data class IntroCapability(
         if (other !is IntroCapability) return false
         return introPublicKey.contentEquals(other.introPublicKey) &&
             groupId.contentEquals(other.groupId) &&
-            groupName == other.groupName
+            groupName == other.groupName &&
+            // Included because a link differing only in its rules is a
+            // different invitation: the joiner signs this text, so two
+            // capabilities that compare equal while carrying different
+            // rules would let a cache, a `distinctBy` or a test assert
+            // sameness about the one field where a silent mismatch means
+            // someone signed words they were never shown.
+            rules == other.rules
     }
 
     override fun hashCode(): Int {
         var h = introPublicKey.contentHashCode()
         h = 31 * h + groupId.contentHashCode()
         h = 31 * h + (groupName?.hashCode() ?: 0)
+        h = 31 * h + (rules?.hashCode() ?: 0)
         return h
     }
 

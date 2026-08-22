@@ -241,9 +241,33 @@ class IdentityRepository(
      *
      * @throws IdentityError.IdentityNotLoaded before [bootstrap].
      */
-    override suspend fun signWithStellarKey(message: ByteArray): ByteArray = withContext(ioDispatcher) {
-        val id = store.loadCurrent() ?: throw IdentityError.IdentityNotLoaded
-        val snapshot = store.load(id) ?: throw IdentityError.IdentityNotLoaded
+    override suspend fun signWithStellarKey(message: ByteArray): ByteArray {
+        // Only the lookup needs wrapping — `loadCurrent` reads
+        // EncryptedSharedPreferences, which blocks, and every existing
+        // caller signs from wherever it happens to be. The signing below
+        // does its own `withContext`, so wrapping the whole thing would
+        // nest two of them for one blocking read.
+        val current = withContext(ioDispatcher) { store.loadCurrent() }
+            ?: throw IdentityError.IdentityNotLoaded
+        return signWithStellarKeyAs(current, message)
+    }
+
+    /**
+     * Sign as a *named* identity rather than as whichever one is
+     * selected.
+     *
+     * The join path is per-identity end to end — the request is sealed
+     * as its owner via [sealInvitationAs] — and a signature that reached
+     * for the active identity instead would attribute an agreement to
+     * the wrong person the moment someone switched identities while a
+     * request was in flight. Same single-use key discipline as
+     * [signWithStellarKey].
+     */
+    suspend fun signWithStellarKeyAs(
+        ownerIdentityId: IdentityId,
+        message: ByteArray,
+    ): ByteArray = withContext(ioDispatcher) {
+        val snapshot = store.load(ownerIdentityId) ?: throw IdentityError.IdentityNotLoaded
         val signingKey = stellarSigningPrivateKey(snapshot.nostrSecretKey)
         Ed25519Signer().apply {
             init(true, signingKey)
