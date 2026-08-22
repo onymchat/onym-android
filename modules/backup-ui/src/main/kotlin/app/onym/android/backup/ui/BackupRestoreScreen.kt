@@ -131,7 +131,10 @@ fun BackupRestoreScreen(
                 title = { Text(stringResource(R.string.backup_restore_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.testTag("backup.restore.back")) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
                     }
                 },
             )

@@ -22,6 +22,27 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 
+/** A status's tile rendering alone — for the places (aggregate
+ *  summary row, operator rows) that pick the glyph for a status while
+ *  composing their own text. Pure, so the icon/tint mapping is
+ *  testable without composition. */
+internal data class StatusGlyph(
+    val icon: ImageVector,
+    val tint: Color,
+)
+
+internal fun statusGlyph(status: DeviceBackupStatus): StatusGlyph = when (status) {
+    is DeviceBackupStatus.Off -> StatusGlyph(Icons.Filled.Storage, SettingsTile.Gray)
+    is DeviceBackupStatus.Idle -> StatusGlyph(Icons.Filled.CloudDone, SettingsTile.Green)
+    is DeviceBackupStatus.Running -> StatusGlyph(Icons.Filled.Sync, SettingsTile.Blue)
+    is DeviceBackupStatus.Stale -> StatusGlyph(Icons.Filled.WarningAmber, SettingsTile.Amber)
+    is DeviceBackupStatus.PaymentRequired -> StatusGlyph(Icons.Filled.CreditCard, SettingsTile.Amber)
+    is DeviceBackupStatus.TermsChanged -> StatusGlyph(Icons.AutoMirrored.Filled.Article, SettingsTile.Orange)
+    is DeviceBackupStatus.OperatorChanged -> StatusGlyph(Icons.Filled.SwapHoriz, SettingsTile.Orange)
+    is DeviceBackupStatus.CheckingEarlierBackup -> StatusGlyph(Icons.Filled.HelpOutline, SettingsTile.Amber)
+    is DeviceBackupStatus.Failed -> StatusGlyph(Icons.Filled.Dangerous, SettingsTile.Red)
+}
+
 /** One status's rendering on the per-operator card: title/subtitle
  *  pair plus the tile glyph — the Android shape of the status table in
  *  onym-ios `DeviceBackupSettingsView`. */
@@ -33,63 +54,43 @@ internal data class StatusPresentation(
 )
 
 @Composable
-internal fun statusPresentation(status: DeviceBackupStatus): StatusPresentation = when (status) {
-    is DeviceBackupStatus.Off -> StatusPresentation(
-        stringResource(R.string.backup_status_off),
-        stringResource(R.string.backup_status_off_subtitle),
-        Icons.Filled.Storage,
-        SettingsTile.Gray,
-    )
-    is DeviceBackupStatus.Idle -> StatusPresentation(
-        stringResource(R.string.backup_status_on_title),
-        status.lastSuccessAt?.let { stringResource(R.string.backup_status_last_backup, formatBackupInstant(it)) }
-            ?: stringResource(R.string.backup_status_none_completed),
-        Icons.Filled.CloudDone,
-        SettingsTile.Green,
-    )
-    is DeviceBackupStatus.Running -> StatusPresentation(
-        stringResource(R.string.backup_status_backing_up),
-        stringResource(R.string.backup_status_uploading),
-        Icons.Filled.Sync,
-        SettingsTile.Blue,
-    )
-    is DeviceBackupStatus.Stale -> StatusPresentation(
-        stringResource(R.string.backup_status_out_of_date_title),
-        status.lastSuccessAt?.let { stringResource(R.string.backup_status_last_backup, formatBackupInstant(it)) }
-            ?: stringResource(R.string.backup_status_none_completed),
-        Icons.Filled.WarningAmber,
-        SettingsTile.Amber,
-    )
-    is DeviceBackupStatus.PaymentRequired -> StatusPresentation(
-        stringResource(R.string.backup_status_payment_title),
-        stringResource(R.string.backup_status_payment_subtitle),
-        Icons.Filled.CreditCard,
-        SettingsTile.Amber,
-    )
-    is DeviceBackupStatus.TermsChanged -> StatusPresentation(
-        stringResource(R.string.backup_status_terms_title),
-        stringResource(R.string.backup_status_terms_subtitle),
-        Icons.AutoMirrored.Filled.Article,
-        SettingsTile.Orange,
-    )
-    is DeviceBackupStatus.OperatorChanged -> StatusPresentation(
-        stringResource(R.string.backup_status_operator_title),
-        stringResource(R.string.backup_status_operator_subtitle),
-        Icons.Filled.SwapHoriz,
-        SettingsTile.Orange,
-    )
-    is DeviceBackupStatus.CheckingEarlierBackup -> StatusPresentation(
-        stringResource(R.string.backup_status_checking_title),
-        stringResource(R.string.backup_status_checking_subtitle),
-        Icons.Filled.HelpOutline,
-        SettingsTile.Amber,
-    )
-    is DeviceBackupStatus.Failed -> StatusPresentation(
-        stringResource(R.string.backup_status_failed_title),
-        status.message,
-        Icons.Filled.Dangerous,
-        SettingsTile.Red,
-    )
+internal fun statusPresentation(status: DeviceBackupStatus): StatusPresentation {
+    val glyph = statusGlyph(status)
+    val (title, subtitle) = when (status) {
+        is DeviceBackupStatus.Off ->
+            stringResource(R.string.backup_status_off) to
+                stringResource(R.string.backup_status_off_subtitle)
+        is DeviceBackupStatus.Idle ->
+            stringResource(R.string.backup_status_on_title) to (
+                status.lastSuccessAt
+                    ?.let { stringResource(R.string.backup_status_last_backup, formatBackupInstant(it)) }
+                    ?: stringResource(R.string.backup_status_none_completed)
+                )
+        is DeviceBackupStatus.Running ->
+            stringResource(R.string.backup_status_backing_up) to
+                stringResource(R.string.backup_status_uploading)
+        is DeviceBackupStatus.Stale ->
+            stringResource(R.string.backup_status_out_of_date_title) to (
+                status.lastSuccessAt
+                    ?.let { stringResource(R.string.backup_status_last_backup, formatBackupInstant(it)) }
+                    ?: stringResource(R.string.backup_status_none_completed)
+                )
+        is DeviceBackupStatus.PaymentRequired ->
+            stringResource(R.string.backup_status_payment_title) to
+                stringResource(R.string.backup_status_payment_subtitle)
+        is DeviceBackupStatus.TermsChanged ->
+            stringResource(R.string.backup_status_terms_title) to
+                stringResource(R.string.backup_status_terms_subtitle)
+        is DeviceBackupStatus.OperatorChanged ->
+            stringResource(R.string.backup_status_operator_title) to
+                stringResource(R.string.backup_status_operator_subtitle)
+        is DeviceBackupStatus.CheckingEarlierBackup ->
+            stringResource(R.string.backup_status_checking_title) to
+                stringResource(R.string.backup_status_checking_subtitle)
+        is DeviceBackupStatus.Failed ->
+            stringResource(R.string.backup_status_failed_title) to status.message
+    }
+    return StatusPresentation(title, subtitle, glyph.icon, glyph.tint)
 }
 
 /** The compact lowercase phrase for an operator row's subtitle on the
@@ -118,8 +119,12 @@ internal fun formatBackupInstant(instant: Instant): String =
 
 /** An operator that is Off, or whose terms/operator changed, has no
  *  valid enrolment right now — same predicate as `needsEnrolment` in
- *  onym-ios `DeviceBackupSettingsFlow`. */
-internal fun needsEnrolment(status: DeviceBackupStatus): Boolean = when (status) {
+ *  onym-ios `DeviceBackupSettingsFlow`. Public because the
+ *  composition root gates the enrolment-vs-settings destination on
+ *  the SAME predicate the overview uses to count enrolled operators —
+ *  two predicates would let the overview exclude an operator that the
+ *  settings screen still offers a working "Back Up Now". */
+fun needsEnrolment(status: DeviceBackupStatus): Boolean = when (status) {
     is DeviceBackupStatus.Off,
     is DeviceBackupStatus.TermsChanged,
     is DeviceBackupStatus.OperatorChanged,

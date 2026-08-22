@@ -58,7 +58,13 @@ data class BackupVendorRow(
 fun BackupVendorsListScreen(
     vendors: List<BackupVendorRow>,
     onVendorClick: (componentId: String) -> Unit,
-    onBackUpAll: () -> Unit,
+    /** Called with the componentIds of the operators the row's own
+     *  count and subtitle describe — the ENROLLED ones. Running
+     *  `backUpNow` on an un-enrolled operator would only flip it from
+     *  "not set up" to a failure state (`runBackUpNowIfEnrolled`
+     *  reports not-enrolled as a failure), so the screen hands the
+     *  caller exactly the set it advertised. */
+    onBackUpAll: (componentIds: List<String>) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     /** The operators discovery is offering for this seat, as a slot:
@@ -71,7 +77,8 @@ fun BackupVendorsListScreen(
     catalogSection: (@Composable () -> Unit)? = null,
 ) {
     val summary = summarize(vendors.map { it.status })
-    val enrolledCount = vendors.count { !needsEnrolment(it.status) }
+    val enrolledIds = vendors.filter { !needsEnrolment(it.status) }.map { it.componentId }
+    val enrolledCount = enrolledIds.size
 
     Scaffold(
         modifier = modifier,
@@ -80,7 +87,10 @@ fun BackupVendorsListScreen(
                 title = { Text(stringResource(R.string.settings_device_backup_row_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.testTag("backup.vendors.back")) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back),
+                        )
                     }
                 },
             )
@@ -132,7 +142,7 @@ fun BackupVendorsListScreen(
                                 } else {
                                     MaterialTheme.colorScheme.onSurface
                                 },
-                                onClick = if (running) null else onBackUpAll,
+                                onClick = if (running) null else ({ onBackUpAll(enrolledIds) }),
                                 showChevron = false,
                                 isLast = true,
                                 modifier = Modifier.testTag("backup.vendors.back_up_all"),
@@ -146,9 +156,9 @@ fun BackupVendorsListScreen(
                 item {
                     SettingsCard {
                         vendors.forEachIndexed { index, vendor ->
-                            val presentation = statusPresentation(vendor.status)
+                            val glyph = statusGlyph(vendor.status)
                             SettingsRow(
-                                leading = { SettingsTileBox(presentation.icon, presentation.tint) },
+                                leading = { SettingsTileBox(glyph.icon, glyph.tint) },
                                 title = stringResource(R.string.backup_operator_row_title),
                                 subtitle = "${vendor.displayName} · ${statusPhrase(vendor.status)}",
                                 onClick = { onVendorClick(vendor.componentId) },
@@ -177,9 +187,7 @@ private fun SummaryRow(summary: BackupVendorsSummary, modifier: Modifier = Modif
             modifier = modifier,
         )
         is BackupVendorsSummary.On -> {
-            val presentation = statusPresentation(
-                DeviceBackupStatus.Idle(summary.oldestCopy),
-            )
+            val glyph = statusGlyph(DeviceBackupStatus.Idle(summary.oldestCopy))
             val parts = mutableListOf(
                 pluralStringResource(
                     R.plurals.backup_summary_operators_set_up,
@@ -198,7 +206,7 @@ private fun SummaryRow(summary: BackupVendorsSummary, modifier: Modifier = Modif
                 )
             }
             SettingsRow(
-                leading = { SettingsTileBox(presentation.icon, presentation.tint) },
+                leading = { SettingsTileBox(glyph.icon, glyph.tint) },
                 title = stringResource(R.string.backup_status_on_title),
                 subtitle = parts.joinToString(" · "),
                 isLast = true,
@@ -206,11 +214,11 @@ private fun SummaryRow(summary: BackupVendorsSummary, modifier: Modifier = Modif
             )
         }
         is BackupVendorsSummary.Running -> {
-            val presentation = statusPresentation(DeviceBackupStatus.Running)
+            val glyph = statusGlyph(DeviceBackupStatus.Running)
             SettingsRow(
-                leading = { SettingsTileBox(presentation.icon, presentation.tint) },
-                title = presentation.title,
-                subtitle = presentation.subtitle,
+                leading = { SettingsTileBox(glyph.icon, glyph.tint) },
+                title = stringResource(R.string.backup_status_backing_up),
+                subtitle = stringResource(R.string.backup_status_uploading),
                 isLast = true,
                 modifier = modifier,
             )
@@ -230,9 +238,9 @@ private fun SummaryRow(summary: BackupVendorsSummary, modifier: Modifier = Modif
             } else {
                 attentionPart
             }
-            val presentation = statusPresentation(DeviceBackupStatus.Stale(null))
+            val glyph = statusGlyph(DeviceBackupStatus.Stale(null))
             SettingsRow(
-                leading = { SettingsTileBox(presentation.icon, presentation.tint) },
+                leading = { SettingsTileBox(glyph.icon, glyph.tint) },
                 title = stringResource(R.string.backup_summary_attention_title),
                 subtitle = subtitle,
                 isLast = true,

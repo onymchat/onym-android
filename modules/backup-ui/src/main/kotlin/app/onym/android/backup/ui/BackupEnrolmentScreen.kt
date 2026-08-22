@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -206,7 +207,7 @@ fun BackupEnrolmentLoadingScreen(
                     Icons.Filled.WarningAmber,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.height(44.dp),
+                    modifier = Modifier.size(44.dp),
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
@@ -246,7 +247,10 @@ private fun EnrolmentTopBar(onBack: () -> Unit) {
         title = { Text(stringResource(R.string.settings_device_backup_row_title)) },
         navigationIcon = {
             IconButton(onClick = onBack, modifier = Modifier.testTag("backup.enrolment.back")) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.back),
+                )
             }
         },
     )
@@ -258,9 +262,9 @@ private fun DisclosureLead(
     body: String,
     modifier: Modifier = Modifier,
 ) {
-    SettingsCard(modifier = Modifier.padding(vertical = 4.dp)) {
+    SettingsCard(modifier = modifier.padding(vertical = 4.dp)) {
         Column(
-            modifier = modifier
+            modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
         ) {

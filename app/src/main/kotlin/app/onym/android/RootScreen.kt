@@ -1067,11 +1067,16 @@ fun RootScreen(
                     onVendorClick = { componentId ->
                         navController.navigate(deviceBackupSettingsRoute(componentId))
                     },
-                    onBackUpAll = {
+                    onBackUpAll = { enrolledIds ->
                         // Fire-and-forget per operator, same as each
                         // operator screen's own Back Up Now — the runs
-                        // survive navigating off this screen.
-                        backupVendors.forEach { vendor -> vendor.backUpNow() }
+                        // survive navigating off this screen. Only the
+                        // ids the screen advertised: backUpNow on an
+                        // un-enrolled operator would report a failure
+                        // instead of quietly doing nothing.
+                        backupVendors
+                            .filter { vendor -> vendor.componentId in enrolledIds }
+                            .forEach { vendor -> vendor.backUpNow() }
                     },
                     onBack = { navController.popBackStack() },
                     catalogSection = {
@@ -1099,7 +1104,13 @@ fun RootScreen(
                 val status by backup.settingsFlow.status.collectAsStateWithLifecycle()
                 val coroutineScope = rememberCoroutineScope()
 
-                if (status is app.onym.android.backup.ui.DeviceBackupStatus.Off) {
+                // Same predicate the overview uses to count enrolled
+                // operators: TermsChanged/OperatorChanged also have no
+                // valid enrolment, so they route to the disclosure to
+                // re-accept (iOS's "Review New Terms" / "Set Up With
+                // New Operator" paths), not to a settings screen whose
+                // Back Up Now would just fail.
+                if (app.onym.android.backup.ui.needsEnrolment(status)) {
                     var disclosure by remember {
                         mutableStateOf<Pair<List<app.onym.android.backup.ui.BackupDisclosureItem>, String>?>(null)
                     }
