@@ -262,12 +262,33 @@ class GroupRulesStandingTest {
     }
 
     @Test
-    fun `the export is stable between runs`() {
-        val proof = GroupRulesProof.of(
-            group(rules = rules, members = mapOf("cc" to signer().profile)),
+    fun `two exports of the same agreement are byte-identical`() {
+        // Two documents from two separately built groups, not one
+        // instance compared with itself — which is what this asserted
+        // before, and could not fail.
+        val signed = signer()
+        val first = GroupRulesProof.of(
+            group(rules = rules, members = mapOf("cc" to signed.profile)),
             "cc",
         )!!
-        assertEquals(proof.json(), proof.json())
+        val second = GroupRulesProof.of(
+            group(rules = rules, members = mapOf("cc" to signed.profile)),
+            "cc",
+        )!!
+        assertEquals(first.json(), second.json())
+    }
+
+    @Test
+    fun `a standing with nothing to show produces no document at all`() {
+        // The gate whose own KDoc says it decides whether plaintext
+        // reaches the disk, and which nothing asserted.
+        val noRules = group(rules = null, members = mapOf("dd" to unsigned()))
+        assertNull(GroupRulesProof.of(noRules, "dd"))
+
+        val notCollected = group(rules = rules, members = mapOf("dd" to unsigned()))
+            .copy(groupType = SepGroupType.ANARCHY, adminPubkeyHex = null)
+        assertEquals(GroupRulesStanding.NOT_COLLECTED, notCollected.rulesStanding("dd"))
+        assertNull(GroupRulesProof.of(notCollected, "dd"))
     }
 
     // MARK: filenames
@@ -342,7 +363,11 @@ class GroupRulesStandingTest {
             members = mapOf("ab12".repeat(24) to unsigned("a".repeat(400))),
         )
         val name = GroupRulesProof.of(group, "ab12".repeat(24))!!.suggestedFileName
-        assertTrue("filesystems cap a component at 255", name.length <= 255)
+        // The real bound, not the filesystem's: "onym-rules-proof-" +
+        // a stem clamped to 60 + "-" + a 12-character digest +
+        // ".json". `<= 255` would still pass if the clamp regressed to
+        // two hundred, which is the regression worth catching.
+        assertEquals("onym-rules-proof-".length + 60 + 1 + 12 + ".json".length, name.length)
     }
 
     // MARK: helpers

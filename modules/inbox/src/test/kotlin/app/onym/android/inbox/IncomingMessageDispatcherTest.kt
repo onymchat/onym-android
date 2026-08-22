@@ -520,9 +520,10 @@ class IncomingMessageDispatcherTest {
     fun invitation_selfRowSignedUnderAnotherKey_isNotReadAsProven() = runTest {
         // The branch the production comment exists for: the wire ships a
         // signature made over a *different* sending key than the one we
-        // hold. Composed with our key it cannot verify, so it must land
-        // as "can't be checked" rather than as an agreement — and
-        // without the wording, which was never made over these bytes.
+        // hold. Composed with our key it cannot verify, so it must not
+        // read as an agreement — and it keeps its wording, because
+        // discarding that is the one move a later invitation
+        // re-announcing the original key could not undo.
         val newGroupId = ByteArray(32) { 0xC2.toByte() }
         val selfBls = ByteArray(48) { 0xAA.toByte() }
         val selfKeyHex = selfBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
@@ -588,10 +589,14 @@ class IncomingMessageDispatcherTest {
         val self = group.memberProfiles[selfKeyHex]!!
         assertEquals(
             "a signature over somebody else's key is not our agreement",
-            GroupRulesStanding.UNKNOWN_RULES,
+            GroupRulesStanding.DOES_NOT_VERIFY,
             group.rulesStanding(selfKeyHex),
         )
-        assertNull("and the wording it covers is not ours to keep", self.rulesText)
+        assertEquals(
+            "but the wording survives, so a later re-announcement can restore it",
+            rules,
+            self.rulesText,
+        )
     }
 
     @Test
@@ -737,6 +742,97 @@ class IncomingMessageDispatcherTest {
             "a sender with nothing to say about members must not empty the directory",
             "Peer",
             group.memberProfiles[peerKey]?.alias,
+        )
+    }
+
+    @Test
+    fun invitation_reAnnouncingTheOriginalKey_restoresTheAgreement() = runTest {
+        // Why the last rung keeps the wording. A key generation arrives
+        // out of order — replays make that reachable — and the row
+        // reads `DOES_NOT_VERIFY` in the meantime. When the original
+        // key is announced again the agreement must come back, which it
+        // can only do if the words it covers were still on disk.
+        val newGroupId = ByteArray(32) { 0xC5.toByte() }
+        val newGroupHex = newGroupId.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val rules = "Be kind. No links."
+        val peerKey = "ee".repeat(48)
+        val signing = Ed25519PrivateKeyParameters(ByteArray(32) { 0x22 }, 0)
+        val peerPub = signing.generatePublicKey().encoded
+        val statement = GroupRules.statement(newGroupId, GroupRules.hash(rules), peerPub)
+        val peerSignature = Ed25519Signer().apply {
+            init(true, signing)
+            update(statement, 0, statement.size)
+        }.generateSignature()
+        val strangerPub = Ed25519PrivateKeyParameters(ByteArray(32) { 0x33 }, 0)
+            .generatePublicKey().encoded
+
+        groupRepository.insert(
+            makeGroup(newGroupId).copy(
+                invitationMessage = rules,
+                memberProfiles = mapOf(
+                    peerKey to MemberProfile(
+                        alias = "Peer",
+                        inboxPublicKey = ByteArray(32) { 0x10 },
+                        sendingPubkey = peerPub,
+                        rulesHash = GroupRules.hash(rules),
+                        rulesSignature = peerSignature,
+                        rulesText = rules,
+                    ),
+                ),
+            ),
+        )
+
+        fun invitationAnnouncing(key: ByteArray) = GroupInvitationPayload(
+            version = 1,
+            groupId = newGroupId,
+            groupSecret = ByteArray(32) { 0x33 },
+            name = "Rotating",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32) { 0x55 },
+            commitment = ByteArray(32) { 0x66 },
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = null,
+            memberProfiles = mapOf(
+                peerKey to MemberProfile(
+                    alias = "Peer",
+                    inboxPublicKey = ByteArray(32) { 0x10 },
+                    sendingPubkey = key,
+                ),
+            ),
+            invitationMessage = rules,
+        )
+
+        suspend fun deliver(id: String, key: ByteArray) {
+            IncomingMessageDispatcher(
+                envelopeDecrypter = StubDecrypter(
+                    Json.encodeToString(
+                        GroupInvitationPayload.serializer(),
+                        invitationAnnouncing(key),
+                    ).toByteArray(Charsets.UTF_8),
+                    senderPub = ByteArray(32),
+                ),
+                groupRepository = groupRepository,
+                invitationsRepository = invitationsRepository,
+                identitiesFlow = MutableStateFlow(emptyList<IdentitySummary>()).asStateFlow(),
+            ).dispatch(id, ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        }
+
+        deliver("m-rotated", strangerPub)
+        assertEquals(
+            "a re-announced key doesn't make the signature verify",
+            GroupRulesStanding.DOES_NOT_VERIFY,
+            groupRepository.findForOwner(ownerIdentity.value, newGroupHex)!!
+                .rulesStanding(peerKey),
+        )
+
+        deliver("m-restored", peerPub)
+        assertEquals(
+            "and when the original key comes back, so does the agreement",
+            GroupRulesStanding.SIGNED,
+            groupRepository.findForOwner(ownerIdentity.value, newGroupHex)!!
+                .rulesStanding(peerKey),
         )
     }
 

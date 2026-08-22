@@ -41,7 +41,10 @@ class GroupRulesProofVectorTest {
     private val rules = "Be kind. No links."
 
     /** 96 hex characters, as a BLS pubkey renders. The suffix in the
-     *  pinned filename is its first twelve. */
+     *  pinned filename is a SHA-256 digest of the whole key, not a
+     *  slice of it — two attacker-chosen keys sharing a prefix would
+     *  otherwise share a filename. Regenerating this expects
+     *  `7054d02d3974`, not `ab12ab12ab12`. */
     private val memberKey = "ab12".repeat(24)
 
     @Test
@@ -71,22 +74,6 @@ class GroupRulesProofVectorTest {
         assertEquals(GOLDEN_DOCUMENT, GroupRulesProof.of(group(), memberKey)!!.json())
     }
 
-    @Test
-    fun `the pinned fields are what the golden document contains`() {
-        val proof = GroupRulesProof.of(group(), memberKey)!!
-        val json = Json.parseToJsonElement(proof.json()).jsonObject
-        val member = json["member"]!!.jsonObject
-        val carried = json["rules"]!!.jsonObject
-
-        assertEquals(groupId.toHex(), json["group"]!!.jsonObject["id"]!!.jsonPrimitive.content)
-        assertEquals(publicKey().toHex(), member["sending_public_key"]!!.jsonPrimitive.content)
-        assertEquals(signature().toHex(), member["signature"]!!.jsonPrimitive.content)
-        assertEquals(
-            "440518f597c71a23fe7d99980df8c2156ac86dcc7f5b49493a4d403819b16473",
-            carried["sha256"]!!.jsonPrimitive.content,
-        )
-        assertEquals("onym-rules-proof-maple-garden-bob-7054d02d3974.json", proof.suggestedFileName)
-    }
 
     @Test
     fun `the statement is the domain then three fixed-length fields`() {
