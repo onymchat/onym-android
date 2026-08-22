@@ -300,7 +300,7 @@ class GroupRulesStandingTest {
             group(rules = rules, name = "Maple  Garden!", members = mapOf(key to signer().profile)),
             key,
         )!!
-        assertEquals("onym-rules-proof-maple-garden-bob-7054d02d3974.json", proof.suggestedFileName)
+        assertEquals("onym-rules-proof-maple-garden-bob-0290b964857e.json", proof.suggestedFileName)
     }
 
     @Test
@@ -337,7 +337,33 @@ class GroupRulesStandingTest {
         val boris = GroupRulesProof.of(group, "aa11bb22cc33")!!.suggestedFileName
         val anna = GroupRulesProof.of(group, "dd44ee55ff66")!!.suggestedFileName
         assertNotEquals(boris, anna)
-        assertEquals("onym-rules-proof-group-rules-378d594d7bb4.json", boris)
+        assertEquals("onym-rules-proof-group-rules-030b99e21cd8.json", boris)
+    }
+
+    @Test
+    fun `the same member in two groups gets two files`() {
+        // The collision a Downloads folder sees, which is not the one a
+        // roster sees. Both stems collapse to the alias — neither name
+        // survives the ASCII gate — and the member is the same person,
+        // so a digest over the key alone names both files identically
+        // and the second export destroys the first proof.
+        val key = "ab12".repeat(24)
+        val japanese = GroupRulesProof.of(
+            group(rules = rules, name = "\u65e5\u672c\u8a9e", members = mapOf(key to unsigned("anna"))),
+            key,
+        )!!.suggestedFileName
+        val cyrillic = GroupRulesProof.of(
+            group(
+                rules = rules,
+                name = "\u0420\u0443\u0441\u0441\u043a\u0438\u0439",
+                members = mapOf(key to unsigned("anna")),
+                groupIdByte = 0x2b,
+            ),
+            key,
+        )!!.suggestedFileName
+
+        assertEquals("both stems collapse to the alias", "onym-rules-proof-anna-", japanese.substringBeforeLast("-") + "-")
+        assertNotEquals("and the suffix is what has to tell them apart", japanese, cyrillic)
     }
 
     @Test
@@ -450,8 +476,9 @@ class GroupRulesStandingTest {
         name: String = "Maple Garden",
         members: Map<String, MemberProfile> = emptyMap(),
         adminHex: String? = null,
+        groupIdByte: Int = 0x1a,
     ) = ChatGroup(
-        id = groupId.joinToString("") { "%02x".format(it) },
+        id = ByteArray(32) { groupIdByte.toByte() }.joinToString("") { "%02x".format(it) },
         ownerIdentityId = UUID.randomUUID().toString(),
         name = name,
         groupSecret = ByteArray(32) { 1 },

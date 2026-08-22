@@ -44,7 +44,7 @@ class GroupRulesProofVectorTest {
      *  pinned filename is a SHA-256 digest of the whole key, not a
      *  slice of it — two attacker-chosen keys sharing a prefix would
      *  otherwise share a filename. Regenerating this expects
-     *  `7054d02d3974`, not `ab12ab12ab12`. */
+     *  `0290b964857e`, not `ab12ab12ab12`. */
     private val memberKey = "ab12".repeat(24)
 
     @Test
@@ -132,54 +132,54 @@ class GroupRulesProofVectorTest {
  * change to a format two platforms have to agree on.
  */
 private val GOLDEN_DOCUMENT = """{
-    "_readme": [
-        "Proof of what this member agreed to in this group's rules.",
-        "To verify a signature, with any Ed25519 implementation:",
-        "  1. message = \"onym-group-rules-v1\" (ASCII, 19 bytes)",
-        "             || group.id (32 bytes, hex above)",
-        "             || SHA-256(rules.text as UTF-8) (32 bytes)",
-        "             || member.sending_public_key (32 bytes, hex above)",
-        "  2. check member.signature against that message and that key.",
-        "",
-        "How to read the fields, including where they disagree:",
-        "  member.signed is this app's verdict, not evidence. A stored",
-        "  signature is exported whether or not it verified here, so",
-        "  you can repeat the check and disagree; member.note says what",
-        "  this device concluded.",
-        "  rules.text is the wording this member put their name to. For",
-        "  the member who wrote the rules it is their own text and",
-        "  signed is false — founders do not sign their own terms.",
-        "  rules is absent entirely when this member signed nothing, or",
-        "  when the wording their signature covers is not held by the",
-        "  device that wrote this file.",
-        "  group.current_rules is what the group asks today. Compare it",
-        "  against rules.text when matches_current_rules is false. It is",
-        "  absent only when the group has no rules at all any more.",
-        "",
-        "What the signature does NOT cover, and what you must not read",
-        "out of it: alias and bls_public_key. Neither is inside the",
-        "signed message. The alias is a name this member chose and can",
-        "change, and the pairing of that name and that BLS key with this",
-        "signature is an assertion by the app that wrote this file — not",
-        "something the signature proves. What the signature proves is",
-        "that the holder of sending_public_key agreed to these rules for",
-        "this group. Tie that key to a person by some other means."
-    ],
-    "group": {
-        "id": "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
-        "name": "Maple Garden",
-        "current_rules": "Be kind. No links."
-    },
-    "member": {
-        "alias": "Bob",
-        "bls_public_key": "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12",
-        "sending_public_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
-        "signature": "02ffd354bf379e72127a8b3893f1ae27d93dd5afeb4c38860fdeffd02dcffeb28f77c467506e80e99704db1780d074855ea9c30883f1bac7ab250246718d2001",
-        "signed": true
-    },
-    "rules": {
-        "text": "Be kind. No links.",
-        "sha256": "440518f597c71a23fe7d99980df8c2156ac86dcc7f5b49493a4d403819b16473",
-        "matches_current_rules": true
-    }
+  "_readme": [
+    "Proof of what this member agreed to in this group's rules.",
+    "To verify a signature, with any Ed25519 implementation:",
+    "  1. message = \"onym-group-rules-v1\" (ASCII, 19 bytes)",
+    "             || group.id (32 bytes, hex above)",
+    "             || SHA-256(rules.text as UTF-8) (32 bytes)",
+    "             || member.sending_public_key (32 bytes, hex above)",
+    "  2. check member.signature against that message and that key.",
+    "",
+    "How to read the fields, including where they disagree:",
+    "  member.signed is this app's verdict, not evidence. A stored",
+    "  signature is exported whether or not it verified here, so",
+    "  you can repeat the check and disagree; member.note says what",
+    "  this device concluded.",
+    "  rules.text is the wording this member put their name to. For",
+    "  the member who wrote the rules it is their own text and",
+    "  signed is false — founders do not sign their own terms.",
+    "  rules is absent entirely when this member signed nothing, or",
+    "  when the wording their signature covers is not held by the",
+    "  device that wrote this file.",
+    "  group.current_rules is what the group asks today. Compare it",
+    "  against rules.text when matches_current_rules is false. It is",
+    "  absent only when the group has no rules at all any more.",
+    "",
+    "What the signature does NOT cover, and what you must not read",
+    "out of it: alias and bls_public_key. Neither is inside the",
+    "signed message. The alias is a name this member chose and can",
+    "change, and the pairing of that name and that BLS key with this",
+    "signature is an assertion by the app that wrote this file — not",
+    "something the signature proves. What the signature proves is",
+    "that the holder of sending_public_key agreed to these rules for",
+    "this group. Tie that key to a person by some other means."
+  ],
+  "group": {
+    "id": "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+    "name": "Maple Garden",
+    "current_rules": "Be kind. No links."
+  },
+  "member": {
+    "alias": "Bob",
+    "bls_public_key": "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12",
+    "sending_public_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+    "signature": "02ffd354bf379e72127a8b3893f1ae27d93dd5afeb4c38860fdeffd02dcffeb28f77c467506e80e99704db1780d074855ea9c30883f1bac7ab250246718d2001",
+    "signed": true
+  },
+  "rules": {
+    "text": "Be kind. No links.",
+    "sha256": "440518f597c71a23fe7d99980df8c2156ac86dcc7f5b49493a4d403819b16473",
+    "matches_current_rules": true
+  }
 }"""
