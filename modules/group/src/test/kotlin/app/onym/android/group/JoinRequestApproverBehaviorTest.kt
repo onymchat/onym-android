@@ -13,11 +13,14 @@ import app.onym.android.support.PassThroughEnvelopeSealer
 import app.onym.android.support.TestInvitationEncryptor
 import app.onym.android.transport.TransportInboxId
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
+import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -361,6 +364,36 @@ class JoinRequestApproverBehaviorTest {
             assertNotNull(env.introKeyStore.find(env.introPub))
         }
 
+    // ─── the rules a joiner is asked to sign ──────────────────────
+
+    @Test
+    fun aRequestDecodedBeforeTheGroupLoaded_isDecidedAgainWhenItArrives() =
+        runTest(UnconfinedTestDispatcher()) {
+            // Persisted intro requests routinely emit before the group
+            // store hydrates. Decided once in that window, every row
+            // would carry "this group has no rules" — a claim, made by
+            // omission, standing until some unrelated request happened
+            // to arrive. The collector watches group snapshots for
+            // exactly this, and `PendingRequest` compares its verdict so
+            // the re-decision actually reaches the flow.
+            val env = seed()
+            env.seedJoiner(bls = 0xC1, inbox = 0xC2, alias = "Bob", agreesTo = "Be kind.")
+            env.approver.start()
+            assertEquals(
+                "precondition: nothing to check it against yet",
+                JoinRequestApprover.RulesAgreement.NOT_REQUIRED,
+                env.approver.pending.value.single().rulesAgreement,
+            )
+
+            env.groupRepository.insert(env.currentGroup().copy(invitationMessage = "Be kind."))
+
+            assertEquals(
+                JoinRequestApprover.RulesAgreement.AGREED,
+                env.approver.pending.value.single().rulesAgreement,
+            )
+            coroutineContext.cancelChildren()
+        }
+
     // ─── harness ──────────────────────────────────────────────────
 
     private data class SeededJoiner(
@@ -412,16 +445,36 @@ class JoinRequestApproverBehaviorTest {
              *  group's shared link; pass an offer key to exercise the
              *  spent-offer-key path. */
             arrivesOn: ByteArray = introPub,
+            /** The text this joiner signs, if any. Signed with a real
+             *  key, whose public half the request announces — the same
+             *  key the founder verifies against. */
+            agreesTo: String? = null,
         ): SeededJoiner {
             val blsPub = ByteArray(48) { bls.toByte() }
             val inboxPub = ByteArray(32) { inbox.toByte() }
+            val signingKey = Ed25519PrivateKeyParameters(ByteArray(32) { (bls + 3).toByte() }, 0)
+            val sendingPub = if (agreesTo == null) {
+                ByteArray(32) { (bls + 2).toByte() }
+            } else {
+                signingKey.generatePublicKey().encoded
+            }
+            val rulesHash = agreesTo?.let { GroupRules.hash(it) }
+            val rulesSignature = rulesHash?.let { hash ->
+                val statement = GroupRules.statement(groupId, hash, sendingPub)
+                Ed25519Signer().apply {
+                    init(true, signingKey)
+                    update(statement, 0, statement.size)
+                }.generateSignature()
+            }
             val payload = JoinRequestPayload(
                 joinerInboxPublicKey = inboxPub,
                 joinerBlsPublicKey = blsPub,
                 joinerLeafHash = ByteArray(32) { (bls + 1).toByte() },
-                joinerSendingPublicKey = ByteArray(32) { (bls + 2).toByte() },
+                joinerSendingPublicKey = sendingPub,
                 joinerDisplayLabel = alias,
                 groupId = groupId,
+                rulesHash = rulesHash,
+                rulesSignature = rulesSignature,
             )
             val sealed = TestInvitationEncryptor.envelopeBytes(
                 payload = Json.encodeToString(JoinRequestPayload.serializer(), payload)
@@ -466,6 +519,9 @@ class JoinRequestApproverBehaviorTest {
 
     private suspend fun TestScope.seed(
         extraMembers: List<GovernanceMember> = emptyList(),
+        /** The group's rules — its invitation message, which is what a
+         *  joiner is shown and asked to sign. */
+        rules: String? = null,
     ): Env {
         val introKeyStore = InMemoryIntroKeyStore()
         val introPrivate = X25519PrivateKeyParameters(SecureRandom())
@@ -512,6 +568,7 @@ class JoinRequestApproverBehaviorTest {
                 adminPubkeyHex = adminBls.joinToString("") { "%02x".format(it) },
                 ownerIdentityId = owner.value,
                 isPublishedOnChain = true,
+                invitationMessage = rules,
             ),
         )
 

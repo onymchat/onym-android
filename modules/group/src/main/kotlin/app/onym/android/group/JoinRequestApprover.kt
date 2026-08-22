@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -206,7 +207,16 @@ open class JoinRequestApprover(
                 joinerSendingPublicKey.contentEquals(other.joinerSendingPublicKey) &&
                 joinerDisplayLabel == other.joinerDisplayLabel &&
                 groupId.contentEquals(other.groupId) &&
-                groupName == other.groupName)
+                groupName == other.groupName &&
+                // The verdict and its evidence are part of what this
+                // row *is*. Left out, a re-decode whose only change is
+                // the agreement compares equal, the `pending` StateFlow
+                // skips the update, and the founder keeps reading a
+                // verdict reached before the group had loaded.
+                rulesAgreement == other.rulesAgreement &&
+                (rulesSignature?.contentEquals(other.rulesSignature)
+                    ?: (other.rulesSignature == null)) &&
+                (rulesHash?.contentEquals(other.rulesHash) ?: (other.rulesHash == null)))
 
         override fun hashCode(): Int {
             var h = id.hashCode()
@@ -216,6 +226,9 @@ open class JoinRequestApprover(
             h = 31 * h + joinerSendingPublicKey.contentHashCode()
             h = 31 * h + joinerDisplayLabel.hashCode()
             h = 31 * h + groupId.contentHashCode()
+            h = 31 * h + rulesAgreement.hashCode()
+            h = 31 * h + (rulesSignature?.contentHashCode() ?: 0)
+            h = 31 * h + (rulesHash?.contentHashCode() ?: 0)
             h = 31 * h + (groupName?.hashCode() ?: 0)
             return h
         }
@@ -285,10 +298,23 @@ open class JoinRequestApprover(
      * Subscribe to [IntroRequestStore.requests] and keep [pending]
      * in sync. Idempotent — safe to call once at app start. The
      * collector lives for [scope]'s lifetime.
+     *
+     * Group snapshots are in the collection too, because a request is
+     * decoded *against* its group: the name it shows and the rules
+     * verdict it carries both come from a snapshot that may not have
+     * hydrated yet. Requests restored from disk routinely emit before
+     * the group store finishes loading, and without this the verdict
+     * decided in that window — "this group has no rules", which is a
+     * claim — would stand until some unrelated request happened to
+     * arrive. Re-deciding costs one decrypt per stored request per
+     * roster change, on a list bounded by outstanding joins.
      */
     override fun start() {
         scope.launch {
-            introRequestStore.requests.collectLatest { raw -> refresh(raw) }
+            combine(
+                introRequestStore.requests,
+                groupRepository.snapshots,
+            ) { raw, _ -> raw }.collectLatest { raw -> refresh(raw) }
         }
     }
 
@@ -504,10 +530,10 @@ open class JoinRequestApprover(
         // separates "signed something this device can't check" from
         // "signed nothing", which is the distinction the verdict exists
         // for.
-        val ourRules = GroupRules.normalized(group.invitationMessage)
-        val rulesText = ourRules?.takeIf { text ->
-            rulesHash != null && GroupRules.hash(text).contentEquals(rulesHash)
-        }
+        val rulesText = MemberProfile.storableRulesText(
+            GroupRules.normalized(group.invitationMessage),
+            rulesHash,
+        )
         val updated = group.copy(
             memberProfiles = group.memberProfiles +
                 (key to MemberProfile(
@@ -572,10 +598,16 @@ open class JoinRequestApprover(
                     sendingPub = joinerSendingPub,
                     rulesHash = rulesHash,
                     rulesSignature = rulesSignature,
-                    // Same rule as `recordJoiner`: our text travels only
-                    // when it is the text their hash names.
-                    rulesText = GroupRules.normalized(group.invitationMessage)
-                        ?.takeIf { rulesHash != null && GroupRules.hash(it).contentEquals(rulesHash) },
+                    // Same predicate as everywhere else a text and a
+                    // hash are put side by side — not a hash-only
+                    // approximation of it. `AnnouncedMember`'s own
+                    // `init` enforces the cap, so a hand-rolled check
+                    // here would throw out of `approve()` *after* the
+                    // invitation had already shipped.
+                    rulesText = MemberProfile.storableRulesText(
+                        GroupRules.normalized(group.invitationMessage),
+                        rulesHash,
+                    ),
                 ),
                 adminAlias = adminAlias,
                 // PR 88: ship the post-anchor commitment + epoch so

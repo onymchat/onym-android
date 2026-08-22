@@ -66,6 +66,15 @@ data class MemberProfile(
      * check any other member's agreement against the [sendingPubkey]
      * they already hold — the founder who admitted them is not a
      * required witness.
+     *
+     * With one known limit: a recipient that already holds a roster
+     * entry for this member ignores the re-announcement
+     * (`IncomingMessageDispatcher` dedups on the member key), so
+     * evidence recorded *after* that entry was created never backfills.
+     * In practice the two coincide — the agreement is recorded at
+     * admission, which is what produces the announcement — but a member
+     * whose entry predates this feature keeps a blank one until the
+     * roster is rebuilt from a fresh invitation snapshot.
      */
     @SerialName("rules_hash")
     @Serializable(with = Base64ByteArraySerializer::class)
