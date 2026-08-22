@@ -106,7 +106,6 @@ open class JoinRequestApprover(
      *  source for the row. */
     private val systemEvents: GroupSystemEventRecording = NoopGroupSystemEventRecorder,
 ) : JoinRequestApproving {
-    /** UI-renderable view of one decrypted, awaiting-action request. */
     /**
      * Whether the joiner agreed to the group's rules, decided once when
      * the request is decrypted and against the group's own copy of the
@@ -126,10 +125,20 @@ open class JoinRequestApprover(
         /** Verified against the rules this group holds right now. */
         AGREED,
 
-        /** A valid signature, over a different text than the group's
-         *  current rules — the joiner accepted an earlier version, or a
-         *  link that carried something else. */
-        AGREED_TO_OTHER_RULES,
+        /**
+         * A signature this device cannot check, because the hash it
+         * carries is not the hash of any rules we hold.
+         *
+         * Named for what is known rather than for what it suggests. The
+         * earlier name — "agreed to other rules" — asserted an agreement
+         * nothing here verified: the only evidence is the joiner's *own*
+         * hash differing from ours, which they choose. Sixty-four random
+         * bytes and a random hash landed in this case, and it was the
+         * reassuring one, so a forgery could pick its own verdict simply
+         * by not echoing our hash. It reads as "can't be checked" now,
+         * and is coloured accordingly.
+         */
+        UNKNOWN_RULES,
 
         /** A signature that doesn't verify. Not an old client: an old
          *  client sends none at all. */
@@ -139,6 +148,7 @@ open class JoinRequestApprover(
         NOT_SIGNED,
     }
 
+    /** UI-renderable view of one decrypted, awaiting-action request. */
     data class PendingRequest(
         /** Stable id == [IntroRequest.id]. Approve / Decline use it
          *  as the dedupe key. */
@@ -172,14 +182,18 @@ open class JoinRequestApprover(
          *  founder is shown it and decides, because rejecting outright
          *  would silently exclude every joiner on a build that predates
          *  rules. */
-        val rulesAgreement: RulesAgreement = RulesAgreement.NOT_REQUIRED,
+        val rulesAgreement: RulesAgreement,
         /** The signature itself, kept so approval can record it on the
          *  member. Retained rather than re-derived: this is the
          *  evidence. */
-        val rulesSignature: ByteArray? = null,
+        val rulesSignature: ByteArray?,
         /** The hash the joiner signed over — not necessarily the hash of
-         *  this group's current rules; see [RulesAgreement]. */
-        val rulesHash: ByteArray? = null,
+         *  this group's current rules; see [RulesAgreement].
+         *
+         *  No defaults on these three: forgetting the verdict would read
+         *  as "this group has no rules", which is a claim, and the
+         *  compiler is the cheapest place to catch it. */
+        val rulesHash: ByteArray?,
     ) {
         override fun equals(other: Any?): Boolean = this === other ||
             (other is PendingRequest &&
@@ -425,6 +439,12 @@ open class JoinRequestApprover(
                 joinerInboxPub = req.joinerInboxPublicKey,
                 joinerSendingPub = req.joinerSendingPublicKey,
                 joinerAlias = req.joinerDisplayLabel,
+                // Fanned out with the rest of the profile: every member
+                // holds `sendingPub`, so every member can check this.
+                // Kept to the founder, the evidence would reach nobody
+                // who joined earlier.
+                rulesHash = req.rulesHash,
+                rulesSignature = req.rulesSignature,
             )
             // The admin's own "X joined" row. Everyone else derives
             // theirs from the announcement fanned out just above, which
@@ -470,6 +490,14 @@ open class JoinRequestApprover(
         rulesSignature: ByteArray?,
     ) {
         val key = blsPub.toHexLowercase()
+        // This device's own copy of the rules, as of the approval — the
+        // text the verdict was reached against. Kept whatever that
+        // verdict was: it is what the founder decided in front of, and
+        // re-reading the decision later needs the words, not a pointer
+        // to whatever the group says by then.
+        val rulesText = GroupRules.normalized(group.invitationMessage).takeIf {
+            rulesHash != null
+        }
         val updated = group.copy(
             memberProfiles = group.memberProfiles +
                 (key to MemberProfile(
@@ -485,6 +513,7 @@ open class JoinRequestApprover(
                     // wrong" indistinguishable after the fact.
                     rulesHash = rulesHash,
                     rulesSignature = rulesSignature,
+                    rulesText = rulesText,
                 )),
         )
         groupRepository.insert(updated)
@@ -510,6 +539,8 @@ open class JoinRequestApprover(
         joinerInboxPub: ByteArray,
         joinerSendingPub: ByteArray,
         joinerAlias: String,
+        rulesHash: ByteArray?,
+        rulesSignature: ByteArray?,
     ) {
         // Identity has no display-name field on Android — the
         // per-identity summary carries it. Fall back to empty when
@@ -529,6 +560,10 @@ open class JoinRequestApprover(
                     inboxPub = joinerInboxPub,
                     alias = joinerAlias,
                     sendingPub = joinerSendingPub,
+                    rulesHash = rulesHash,
+                    rulesSignature = rulesSignature,
+                    rulesText = GroupRules.normalized(group.invitationMessage)
+                        .takeIf { rulesHash != null },
                 ),
                 adminAlias = adminAlias,
                 // PR 88: ship the post-anchor commitment + epoch so
@@ -931,9 +966,13 @@ internal fun rulesAgreementFor(
     ) {
         return JoinRequestApprover.RulesAgreement.AGREED
     }
+    // Claimed our exact rules and failed against them: not an old
+    // client, not another version, and nothing else this can be.
+    // Claimed some other text, and we have no copy of it to check
+    // against — so we say that, rather than calling it agreement.
     return if (signedHash.contentEquals(GroupRules.hash(ours))) {
         JoinRequestApprover.RulesAgreement.INVALID
     } else {
-        JoinRequestApprover.RulesAgreement.AGREED_TO_OTHER_RULES
+        JoinRequestApprover.RulesAgreement.UNKNOWN_RULES
     }
 }

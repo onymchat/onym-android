@@ -571,6 +571,14 @@ class IncomingMessageDispatcher(
                 alias = payload.newMember.alias,
                 inboxPublicKey = payload.newMember.inboxPub,
                 sendingPubkey = payload.newMember.sendingPub,
+                // Carried through, so a member admitted after this
+                // device joined is one whose agreement this device can
+                // check for itself — the admitting founder is not a
+                // required witness. Dropped here, the evidence would
+                // stop at whoever pressed Accept.
+                rulesHash = payload.newMember.rulesHash,
+                rulesSignature = payload.newMember.rulesSignature,
+                rulesText = payload.newMember.rulesText,
             )),
         )
         groupRepository.insert(updated)

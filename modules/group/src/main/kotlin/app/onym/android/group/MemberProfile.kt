@@ -69,6 +69,24 @@ data class MemberProfile(
     @SerialName("rules_signature")
     @Serializable(with = Base64ByteArraySerializer::class)
     val rulesSignature: ByteArray? = null,
+    /**
+     * The rules text those bytes cover, as this device held it when the
+     * member was admitted.
+     *
+     * Retained rather than pointed at. [GroupRules]' own doc is the
+     * argument: a signature is evidence only if the bytes it covers can
+     * be produced again, and a hash beside a *live*
+     * [ChatGroup.invitationMessage] proves that something was agreed and
+     * never what — one edit by the founder and every retained agreement
+     * becomes unattributable to any text on the device.
+     *
+     * It is the admitting device's own copy, never the joiner's: the
+     * request deliberately doesn't carry the text, because a joiner who
+     * supplied it would be choosing what their own signature is checked
+     * against.
+     */
+    @SerialName("rules_text")
+    val rulesText: String? = null,
 ) {
     init {
         require(inboxPublicKey.size == 32) {
@@ -77,18 +95,62 @@ data class MemberProfile(
         require(sendingPubkey.size == 32) {
             "sendingPubkey: expected 32 bytes, got ${sendingPubkey.size}"
         }
+        // Same shape the wire enforces on [JoinRequestPayload], enforced
+        // here too: profiles arrive inside peer-announced snapshots, and
+        // a malformed pair should fail at the boundary rather than at
+        // verify time, where "wrong size" would read as "didn't agree".
+        require((rulesHash == null) == (rulesSignature == null)) {
+            "rulesHash and rulesSignature must be absent or present together"
+        }
+        require(rulesHash == null || rulesHash.size == 32) {
+            "rulesHash: expected 32 bytes, got ${rulesHash?.size}"
+        }
+        require(rulesSignature == null || rulesSignature.size == 64) {
+            "rulesSignature: expected 64 bytes, got ${rulesSignature?.size}"
+        }
+    }
+
+    /**
+     * Whether this member's stored signature verifies against the text
+     * stored beside it, for [groupId].
+     *
+     * The whole question in one place, and the only place that answers
+     * it: the retained text is what the signature covers, so anything
+     * reaching for the group's current rules instead would report a
+     * founder's later edit as a member who never agreed.
+     */
+    fun agreedToRules(groupId: ByteArray): Boolean {
+        val signature = rulesSignature ?: return false
+        val text = rulesText ?: return false
+        return GroupRules.isAgreement(
+            signature = signature,
+            rules = text,
+            groupId = groupId,
+            joinerSendingPublicKey = sendingPubkey,
+        )
     }
 
     override fun equals(other: Any?): Boolean = this === other ||
         (other is MemberProfile &&
             alias == other.alias &&
             inboxPublicKey.contentEquals(other.inboxPublicKey) &&
-            sendingPubkey.contentEquals(other.sendingPubkey))
+            sendingPubkey.contentEquals(other.sendingPubkey) &&
+            // A profile that gained an agreement is not the profile
+            // without it: left out, the `snapshots` flow would treat the
+            // two as one value and never re-emit the group whose only
+            // change is the evidence a founder decided on.
+            (rulesHash?.contentEquals(other.rulesHash) ?: (other.rulesHash == null)) &&
+            (rulesSignature?.contentEquals(other.rulesSignature)
+                ?: (other.rulesSignature == null)) &&
+            rulesText == other.rulesText)
 
     override fun hashCode(): Int {
         var h = alias.hashCode()
         h = 31 * h + inboxPublicKey.contentHashCode()
         h = 31 * h + sendingPubkey.contentHashCode()
+        h = 31 * h + (rulesHash?.contentHashCode() ?: 0)
+        h = 31 * h + (rulesSignature?.contentHashCode() ?: 0)
+        h = 31 * h + (rulesText?.hashCode() ?: 0)
         return h
     }
 }

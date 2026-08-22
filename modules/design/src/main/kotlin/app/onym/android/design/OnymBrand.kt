@@ -75,7 +75,7 @@ data class OnymTokens(
             hairline        = Color.Black.copy(alpha = 0.06f),
             hairlineStrong  = Color.Black.copy(alpha = 0.12f),
             green           = Color(0xFF1FA84A),
-            amber           = Color(0xFFB26A00),
+            amber           = Color(0xFFB25E00),
             red             = Color(0xFFE5392E),
             onAccent        = Color.White,
         )

@@ -173,9 +173,10 @@ fun ChatJoinRequestRow(
  *
  * The three failing cases read differently because they *are* different,
  * and the founder's next move differs with them: an unsigned request is
- * usually an older app and asking again fixes it; an other-rules
- * signature is someone who agreed to a previous wording; a signature
- * that doesn't verify is neither, and is the only one of the three that
+ * usually an older app, and asking again fixes it; a signature over
+ * rules this device doesn't hold can't be checked either way, so it
+ * claims nothing and is coloured neutrally; a signature that fails
+ * against our own rules is neither of those, and is the only one that
  * should give a founder pause about the request itself.
  */
 @Composable
@@ -189,9 +190,10 @@ private fun AgreementLine(agreement: JoinRequestApprover.RulesAgreement) {
             text = stringResource(R.string.chat_join_request_rules_agreed)
             color = tokens.green
         }
-        JoinRequestApprover.RulesAgreement.AGREED_TO_OTHER_RULES -> {
-            text = stringResource(R.string.chat_join_request_rules_other_version)
-            color = tokens.amber
+        JoinRequestApprover.RulesAgreement.UNKNOWN_RULES -> {
+            // Neutral, not reassuring: nothing here was verified.
+            text = stringResource(R.string.chat_join_request_rules_unknown)
+            color = tokens.text2
         }
         JoinRequestApprover.RulesAgreement.NOT_SIGNED -> {
             text = stringResource(R.string.chat_join_request_rules_unsigned)

@@ -109,6 +109,36 @@ data class MemberAnnouncementPayload(
         @SerialName("sending_pub")
         @Serializable(with = Base64ByteArraySerializer::class)
         val sendingPub: ByteArray,
+        /**
+         * This member's agreement to the group's rules: the 32-byte
+         * hash of the text they signed, and the 64-byte Ed25519
+         * signature over [GroupRules.statement].
+         *
+         * Announced, and not merely kept by the founder who admitted
+         * them, because the whole point of signing with [sendingPub] is
+         * that every member already holds the key to check it. Left out
+         * of the announcement, existing members would learn nothing
+         * about anyone admitted after them, and "any member can verify"
+         * would be true only of the admitting device.
+         *
+         * Null for a member admitted before rules existed, or by a
+         * build that predates them.
+         */
+        @SerialName("rules_hash")
+        @Serializable(with = Base64ByteArraySerializer::class)
+        val rulesHash: ByteArray? = null,
+        @SerialName("rules_signature")
+        @Serializable(with = Base64ByteArraySerializer::class)
+        val rulesSignature: ByteArray? = null,
+        /**
+         * The admitting device's copy of the rules those bytes cover.
+         * Announced with them, because a hash with no text tells the
+         * recipient that something was agreed and never what — and
+         * unlike the founder, they have no other copy of the wording
+         * that was current when this member joined.
+         */
+        @SerialName("rules_text")
+        val rulesText: String? = null,
     ) {
         init {
             require(blsPub.size == 48) {
@@ -120,6 +150,20 @@ data class MemberAnnouncementPayload(
             require(sendingPub.size == 32) {
                 "sendingPub: expected 32 bytes, got ${sendingPub.size}"
             }
+            // Wrong-sized or half-present agreement bytes are rejected
+            // rather than trimmed to null: an announcement is built by
+            // this device and decoded from a peer's, and in both
+            // directions "we can't show they agreed" should be a shape
+            // nobody can accidentally produce.
+            require((rulesHash == null) == (rulesSignature == null)) {
+                "rulesHash and rulesSignature must be absent or present together"
+            }
+            require(rulesHash == null || rulesHash.size == 32) {
+                "rulesHash: expected 32 bytes, got ${rulesHash?.size}"
+            }
+            require(rulesSignature == null || rulesSignature.size == 64) {
+                "rulesSignature: expected 64 bytes, got ${rulesSignature?.size}"
+            }
         }
 
         override fun equals(other: Any?): Boolean = this === other ||
@@ -127,13 +171,20 @@ data class MemberAnnouncementPayload(
                 blsPub.contentEquals(other.blsPub) &&
                 inboxPub.contentEquals(other.inboxPub) &&
                 alias == other.alias &&
-                sendingPub.contentEquals(other.sendingPub))
+                sendingPub.contentEquals(other.sendingPub) &&
+                (rulesHash?.contentEquals(other.rulesHash) ?: (other.rulesHash == null)) &&
+                (rulesSignature?.contentEquals(other.rulesSignature)
+                    ?: (other.rulesSignature == null)) &&
+                rulesText == other.rulesText)
 
         override fun hashCode(): Int {
             var h = blsPub.contentHashCode()
             h = 31 * h + inboxPub.contentHashCode()
             h = 31 * h + alias.hashCode()
             h = 31 * h + sendingPub.contentHashCode()
+            h = 31 * h + (rulesHash?.contentHashCode() ?: 0)
+            h = 31 * h + (rulesSignature?.contentHashCode() ?: 0)
+            h = 31 * h + (rulesText?.hashCode() ?: 0)
             return h
         }
     }
