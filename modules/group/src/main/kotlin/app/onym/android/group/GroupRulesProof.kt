@@ -1,6 +1,7 @@
 package app.onym.android.group
 
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -147,8 +148,15 @@ class GroupRulesProof private constructor(
             "this group. Tie that key to a person by some other means.",
         )
 
+        @OptIn(ExperimentalSerializationApi::class)
         private val JSON = Json {
             prettyPrint = true
+            // Pinned, not defaulted. kotlinx indents four spaces and
+            // Foundation's `.prettyPrinted` two, so leaving it to the
+            // library would make the same agreement export differently
+            // on the two platforms — for no reason a reader diffing
+            // them could ever guess.
+            prettyPrintIndent = "  "
             encodeDefaults = true
             explicitNulls = false
         }
@@ -158,14 +166,14 @@ class GroupRulesProof private constructor(
          *  dotless ı. */
         private val FILE_LOCALE: Locale = Locale.US
 
-        /** Compiled once rather than per call — `fileSafe` runs twice
-         *  per filename. */
+        /** Compiled once rather than per call — `fileSafe` runs once
+         *  per component of every filename. */
         private val COMBINING_MARKS = Regex("\\p{Mn}+")
     }
 
     /**
      * A filename someone can find again six months later — and one no
-     * two members of a group can share.
+     * two exports can share, across groups as well as within one.
      *
      * The readable part is the group and the alias, which is what a
      * person recognises. The key after it is what keeps two members
@@ -187,7 +195,13 @@ class GroupRulesProof private constructor(
      */
     val suggestedFileName: String
         get() {
-            val stem = fileSafe("$groupName-$memberAlias")
+            // Scrubbed per part, then joined. Scrubbing the joined
+            // string works today only because the separator survives
+            // its own scrub; the invariant that holds regardless is
+            // that nothing reaches this template un-scrubbed, and the
+            // next component appended here is the one that would
+            // otherwise carry a `..` in.
+            val stem = "${fileSafe(groupName)}-${fileSafe(memberAlias)}"
                 .take(READABLE_STEM_MAX)
                 .trim('-')
             val named = stem.ifEmpty { "group-rules" }
@@ -204,8 +218,18 @@ class GroupRulesProof private constructor(
             // fingerprint on screen. The document carries
             // `bls_public_key` in full, which is where an exact
             // comparison belongs anyway.
+            //
+            // Over the group *and* the member, because the collision a
+            // Downloads folder sees is not the one a roster sees. The
+            // readable part is the first thing to collapse — two groups
+            // named in CJK both scrub to nothing, two named alike share
+            // their first sixty characters — and with the same person
+            // in both, a key-only digest names both files identically
+            // and the second export overwrites the first. `groupIdHex`
+            // is in hand, is always hex, and is already in the
+            // document.
             val key = MessageDigest.getInstance("SHA-256")
-                .digest(memberBlsHex.toByteArray(Charsets.UTF_8))
+                .digest((groupIdHex + memberBlsHex).toByteArray(Charsets.UTF_8))
                 .copyOfRange(0, 6)
                 .toHexLowercase()
             return "onym-rules-proof-$named-$key.json"
