@@ -1,5 +1,9 @@
 package app.onym.android.inbox
 
+import org.bouncycastle.crypto.signers.Ed25519Signer
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+import app.onym.android.group.rulesStanding
+import app.onym.android.group.GroupRulesStanding
 import app.onym.android.chain.ChainStateReading
 import app.onym.android.chain.SepCommitmentEntry
 import app.onym.android.chain.SepGroupType
@@ -35,6 +39,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.UUID
 import java.time.Instant
 
 /**
@@ -355,6 +360,19 @@ class IncomingMessageDispatcherTest {
         val inviterBls = ByteArray(48) { 0x11 }
         val inviterInbox = ByteArray(32) { 0x22 }
         val inviterKey = inviterBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val selfBls = ByteArray(48) { 0xAA.toByte() }
+        val selfInbox = ByteArray(32) { 0xBB.toByte() }
+        val selfKeyHex = selfBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        // The joiner's own signed row, as the admitting device ships it.
+        val rules = "Be kind. No links."
+        val selfSeed = ByteArray(32) { 0x07 }
+        val selfSigning = Ed25519PrivateKeyParameters(selfSeed, 0)
+        val selfSendingPub = selfSigning.generatePublicKey().encoded
+        val selfStatement = GroupRules.statement(newGroupId, GroupRules.hash(rules), selfSendingPub)
+        val selfSignature = Ed25519Signer().apply {
+            init(true, selfSigning)
+            update(selfStatement, 0, selfStatement.size)
+        }.generateSignature()
         val invitation = GroupInvitationPayload(
             version = 1,
             groupId = newGroupId,
@@ -378,14 +396,23 @@ class IncomingMessageDispatcherTest {
                     inboxPublicKey = inviterInbox,
                     sendingPubkey = ByteArray(32) { 0x88.toByte() },
                 ),
+                selfKeyHex to MemberProfile(
+                    alias = "Bob as the admin knows them",
+                    inboxPublicKey = selfInbox,
+                    sendingPubkey = selfSendingPub,
+                    rulesHash = GroupRules.hash(rules),
+                    rulesSignature = selfSignature,
+                    rulesText = rules,
+                ),
             ),
+            invitationMessage = rules,
         )
         val plaintext = Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
             .toByteArray(Charsets.UTF_8)
 
-        // Mock identitiesFlow so the dispatcher can backfill self.
-        val selfBls = ByteArray(48) { 0xAA.toByte() }
-        val selfInbox = ByteArray(32) { 0xBB.toByte() }
+        // Mock identitiesFlow: the wire carries a row under our key, so
+        // this exercises the *overwrite* path — identity ours, agreement
+        // theirs. The insert path has its own test below.
         val identitiesFlow = MutableStateFlow(
             listOf(
                 IdentitySummary(
@@ -393,7 +420,7 @@ class IncomingMessageDispatcherTest {
                     name = "Bob",
                     blsPublicKey = selfBls,
                     inboxPublicKey = selfInbox,
-                    sendingPublicKey = ByteArray(32) { 0x99.toByte() },
+                    sendingPublicKey = selfSendingPub,
                 ),
             ),
         )
@@ -415,14 +442,397 @@ class IncomingMessageDispatcherTest {
         assertEquals("From Wire", group!!.name)
         assertTrue(group.isPublishedOnChain)
         // Wire-shipped inviter + self both present in the directory.
-        val selfKey = selfBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val selfKey = selfKeyHex
         assertEquals(2, group.memberProfiles.size)
         assertEquals("Alice", group.memberProfiles[inviterKey]?.alias)
         assertEquals("Bob", group.memberProfiles[selfKey]?.alias)
+        // The joiner's own agreement, carried in the invitation because
+        // it is the one thing about themselves they cannot rebuild:
+        // this device signed it and kept no copy. Without it they land
+        // marked as never having signed the rules they just agreed to.
+        assertEquals(
+            "the self row's agreement must survive the identity overwrite",
+            GroupRulesStanding.SIGNED,
+            group.rulesStanding(selfKey),
+        )
         invitationsRepository.bootstrap()
         assertTrue(
             "invitation must NOT land in the legacy queue",
             invitationsRepository.invitations.value.isEmpty(),
+        )
+    }
+
+    @Test
+    fun invitation_withNoSelfRow_insertsOurOwnProfile() = runTest {
+        // The path the test above used to cover before the invitation
+        // began carrying the joiner's row: an admin on an older build
+        // ships a roster without us, and the dispatcher inserts our
+        // profile rather than leaving us out of our own group.
+        val newGroupId = ByteArray(32) { 0xC1.toByte() }
+        val selfBls = ByteArray(48) { 0xAA.toByte() }
+        val selfKeyHex = selfBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val invitation = GroupInvitationPayload(
+            version = 1,
+            groupId = newGroupId,
+            groupSecret = ByteArray(32) { 0x33 },
+            name = "No Self Row",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32) { 0x55 },
+            commitment = ByteArray(32) { 0x66 },
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = null,
+            memberProfiles = null,
+        )
+        val identitiesFlow = MutableStateFlow(
+            listOf(
+                IdentitySummary(
+                    id = ownerIdentity,
+                    name = "Bob",
+                    blsPublicKey = selfBls,
+                    inboxPublicKey = ByteArray(32) { 0xBB.toByte() },
+                    sendingPublicKey = ByteArray(32) { 0x99.toByte() },
+                ),
+            ),
+        )
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(
+                Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
+                    .toByteArray(Charsets.UTF_8),
+                senderPub = ByteArray(32),
+            ),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            identitiesFlow = identitiesFlow.asStateFlow(),
+        )
+
+        dispatcher.dispatch("m-noself", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        val group = groupRepository.snapshots.value.first {
+            it.groupIdBytes.contentEquals(newGroupId)
+        }
+        assertEquals(1, group.memberProfiles.size)
+        assertEquals("Bob", group.memberProfiles[selfKeyHex]?.alias)
+    }
+
+    @Test
+    fun invitation_selfRowSignedUnderAnotherKey_isNotReadAsProven() = runTest {
+        // The branch the production comment exists for: the wire ships a
+        // signature made over a *different* sending key than the one we
+        // hold. Composed with our key it cannot verify, so it must not
+        // read as an agreement — and it keeps its wording, because
+        // discarding that is the one move a later invitation
+        // re-announcing the original key could not undo.
+        val newGroupId = ByteArray(32) { 0xC2.toByte() }
+        val selfBls = ByteArray(48) { 0xAA.toByte() }
+        val selfKeyHex = selfBls.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val rules = "Be kind. No links."
+        val strangerSigning = Ed25519PrivateKeyParameters(ByteArray(32) { 0x5A }, 0)
+        val strangerPub = strangerSigning.generatePublicKey().encoded
+        val statement = GroupRules.statement(newGroupId, GroupRules.hash(rules), strangerPub)
+        val strangerSignature = Ed25519Signer().apply {
+            init(true, strangerSigning)
+            update(statement, 0, statement.size)
+        }.generateSignature()
+        val invitation = GroupInvitationPayload(
+            version = 1,
+            groupId = newGroupId,
+            groupSecret = ByteArray(32) { 0x33 },
+            name = "Wrong Key",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32) { 0x55 },
+            commitment = ByteArray(32) { 0x66 },
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = null,
+            memberProfiles = mapOf(
+                selfKeyHex to MemberProfile(
+                    alias = "Bob as the admin knows them",
+                    inboxPublicKey = ByteArray(32) { 0xBB.toByte() },
+                    sendingPubkey = strangerPub,
+                    rulesHash = GroupRules.hash(rules),
+                    rulesSignature = strangerSignature,
+                    rulesText = rules,
+                ),
+            ),
+            invitationMessage = rules,
+        )
+        val identitiesFlow = MutableStateFlow(
+            listOf(
+                IdentitySummary(
+                    id = ownerIdentity,
+                    name = "Bob",
+                    blsPublicKey = selfBls,
+                    inboxPublicKey = ByteArray(32) { 0xBB.toByte() },
+                    sendingPublicKey = ByteArray(32) { 0x99.toByte() },
+                ),
+            ),
+        )
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(
+                Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
+                    .toByteArray(Charsets.UTF_8),
+                senderPub = ByteArray(32),
+            ),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            identitiesFlow = identitiesFlow.asStateFlow(),
+        )
+
+        dispatcher.dispatch("m-wrongkey", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        val group = groupRepository.snapshots.value.first {
+            it.groupIdBytes.contentEquals(newGroupId)
+        }
+        val self = group.memberProfiles[selfKeyHex]!!
+        assertEquals(
+            "a signature over somebody else's key is not our agreement",
+            GroupRulesStanding.DOES_NOT_VERIFY,
+            group.rulesStanding(selfKeyHex),
+        )
+        assertEquals(
+            "but the wording survives, so a later re-announcement can restore it",
+            rules,
+            self.rulesText,
+        )
+    }
+
+    @Test
+    fun invitation_forANonActiveIdentity_stillRunsTheEvidenceLadder() = runTest {
+        // The lookup used to read `snapshots`, which holds only the
+        // *active* identity's groups — so for every other identity this
+        // ladder no-oped, and a pre-rules replay dropped the roster to
+        // "didn't sign", which is the bug this stack exists to fix.
+        // Invitations are dispatched for all identities in parallel, so
+        // this is the ordinary case rather than an edge one.
+        //
+        // Modelled by pointing the repository's active identity
+        // somewhere else: exactly what a fan-out to a background
+        // identity looks like from in here.
+        val blind = GroupRepository(
+            store = groupStore,
+            identity = ConstantIdentity(IdentityId(UUID.randomUUID().toString())),
+            scope = CoroutineScope(UnconfinedTestDispatcher()),
+        )
+        val newGroupId = ByteArray(32) { 0xC3.toByte() }
+        val newGroupHex = newGroupId.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val rules = "Be kind. No links."
+        val peerKey = "bb".repeat(48)
+        val signing = Ed25519PrivateKeyParameters(ByteArray(32) { 0x11 }, 0)
+        val peerPub = signing.generatePublicKey().encoded
+        val statement = GroupRules.statement(newGroupId, GroupRules.hash(rules), peerPub)
+        val peerSignature = Ed25519Signer().apply {
+            init(true, signing)
+            update(statement, 0, statement.size)
+        }.generateSignature()
+        blind.insert(
+            makeGroup(newGroupId).copy(
+                invitationMessage = rules,
+                memberProfiles = mapOf(
+                    peerKey to MemberProfile(
+                        alias = "Peer",
+                        inboxPublicKey = ByteArray(32) { 0x10 },
+                        sendingPubkey = peerPub,
+                        rulesHash = GroupRules.hash(rules),
+                        rulesSignature = peerSignature,
+                        rulesText = rules,
+                    ),
+                ),
+            ),
+        )
+
+        // A pre-rules admin re-sends: same roster, no agreements.
+        val invitation = GroupInvitationPayload(
+            version = 1,
+            groupId = newGroupId,
+            groupSecret = ByteArray(32) { 0x33 },
+            name = "Replayed",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32) { 0x55 },
+            commitment = ByteArray(32) { 0x66 },
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = null,
+            memberProfiles = mapOf(
+                peerKey to MemberProfile(
+                    alias = "Peer",
+                    inboxPublicKey = ByteArray(32) { 0x10 },
+                    sendingPubkey = peerPub,
+                ),
+            ),
+        )
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(
+                Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
+                    .toByteArray(Charsets.UTF_8),
+                senderPub = ByteArray(32),
+            ),
+            groupRepository = blind,
+            invitationsRepository = invitationsRepository,
+            identitiesFlow = MutableStateFlow(emptyList<IdentitySummary>()).asStateFlow(),
+        )
+
+        dispatcher.dispatch("m-nonactive", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        val group = blind.findForOwner(ownerIdentity.value, newGroupHex)!!
+        assertEquals(
+            "a replay carrying no agreements must not erase one that verifies",
+            GroupRulesStanding.SIGNED,
+            group.rulesStanding(peerKey),
+        )
+        assertEquals(
+            "and the rules it says nothing about must survive too",
+            rules,
+            group.invitationMessage,
+        )
+    }
+
+    @Test
+    fun invitation_withNoRosterAtAll_keepsTheStoredOne() = runTest {
+        // `memberProfiles == null` is what an older admin's refresh
+        // reply ships — the sender writes `takeIf { it.isNotEmpty() }`.
+        // Starting from empty replaced the whole directory, agreements
+        // included, with self alone.
+        val newGroupId = ByteArray(32) { 0xC4.toByte() }
+        val newGroupHex = newGroupId.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val peerKey = "cc".repeat(48)
+        groupRepository.insert(
+            makeGroup(newGroupId).copy(
+                memberProfiles = mapOf(
+                    peerKey to MemberProfile(
+                        alias = "Peer",
+                        inboxPublicKey = ByteArray(32) { 0x10 },
+                        sendingPubkey = ByteArray(32) { 0xEE.toByte() },
+                    ),
+                ),
+            ),
+        )
+        val invitation = GroupInvitationPayload(
+            version = 1,
+            groupId = newGroupId,
+            groupSecret = ByteArray(32) { 0x33 },
+            name = "Rosterless",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32) { 0x55 },
+            commitment = ByteArray(32) { 0x66 },
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = null,
+            memberProfiles = null,
+        )
+        val dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypter(
+                Json.encodeToString(GroupInvitationPayload.serializer(), invitation)
+                    .toByteArray(Charsets.UTF_8),
+                senderPub = ByteArray(32),
+            ),
+            groupRepository = groupRepository,
+            invitationsRepository = invitationsRepository,
+            identitiesFlow = MutableStateFlow(emptyList<IdentitySummary>()).asStateFlow(),
+        )
+
+        dispatcher.dispatch("m-rosterless", ownerIdentity, byteArrayOf(), Instant.EPOCH)
+
+        val group = groupRepository.findForOwner(ownerIdentity.value, newGroupHex)!!
+        assertEquals(
+            "a sender with nothing to say about members must not empty the directory",
+            "Peer",
+            group.memberProfiles[peerKey]?.alias,
+        )
+    }
+
+    @Test
+    fun invitation_reAnnouncingTheOriginalKey_restoresTheAgreement() = runTest {
+        // Why the last rung keeps the wording. A key generation arrives
+        // out of order — replays make that reachable — and the row
+        // reads `DOES_NOT_VERIFY` in the meantime. When the original
+        // key is announced again the agreement must come back, which it
+        // can only do if the words it covers were still on disk.
+        val newGroupId = ByteArray(32) { 0xC5.toByte() }
+        val newGroupHex = newGroupId.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        val rules = "Be kind. No links."
+        val peerKey = "ee".repeat(48)
+        val signing = Ed25519PrivateKeyParameters(ByteArray(32) { 0x22 }, 0)
+        val peerPub = signing.generatePublicKey().encoded
+        val statement = GroupRules.statement(newGroupId, GroupRules.hash(rules), peerPub)
+        val peerSignature = Ed25519Signer().apply {
+            init(true, signing)
+            update(statement, 0, statement.size)
+        }.generateSignature()
+        val strangerPub = Ed25519PrivateKeyParameters(ByteArray(32) { 0x33 }, 0)
+            .generatePublicKey().encoded
+
+        groupRepository.insert(
+            makeGroup(newGroupId).copy(
+                invitationMessage = rules,
+                memberProfiles = mapOf(
+                    peerKey to MemberProfile(
+                        alias = "Peer",
+                        inboxPublicKey = ByteArray(32) { 0x10 },
+                        sendingPubkey = peerPub,
+                        rulesHash = GroupRules.hash(rules),
+                        rulesSignature = peerSignature,
+                        rulesText = rules,
+                    ),
+                ),
+            ),
+        )
+
+        fun invitationAnnouncing(key: ByteArray) = GroupInvitationPayload(
+            version = 1,
+            groupId = newGroupId,
+            groupSecret = ByteArray(32) { 0x33 },
+            name = "Rotating",
+            members = emptyList(),
+            epoch = 0uL,
+            salt = ByteArray(32) { 0x55 },
+            commitment = ByteArray(32) { 0x66 },
+            tierRaw = SepTier.SMALL.rawValue,
+            groupTypeRaw = SepGroupType.TYRANNY.wireValue,
+            adminPubkeyHex = null,
+            memberProfiles = mapOf(
+                peerKey to MemberProfile(
+                    alias = "Peer",
+                    inboxPublicKey = ByteArray(32) { 0x10 },
+                    sendingPubkey = key,
+                ),
+            ),
+            invitationMessage = rules,
+        )
+
+        suspend fun deliver(id: String, key: ByteArray) {
+            IncomingMessageDispatcher(
+                envelopeDecrypter = StubDecrypter(
+                    Json.encodeToString(
+                        GroupInvitationPayload.serializer(),
+                        invitationAnnouncing(key),
+                    ).toByteArray(Charsets.UTF_8),
+                    senderPub = ByteArray(32),
+                ),
+                groupRepository = groupRepository,
+                invitationsRepository = invitationsRepository,
+                identitiesFlow = MutableStateFlow(emptyList<IdentitySummary>()).asStateFlow(),
+            ).dispatch(id, ownerIdentity, byteArrayOf(), Instant.EPOCH)
+        }
+
+        deliver("m-rotated", strangerPub)
+        assertEquals(
+            "a re-announced key doesn't make the signature verify",
+            GroupRulesStanding.DOES_NOT_VERIFY,
+            groupRepository.findForOwner(ownerIdentity.value, newGroupHex)!!
+                .rulesStanding(peerKey),
+        )
+
+        deliver("m-restored", peerPub)
+        assertEquals(
+            "and when the original key comes back, so does the agreement",
+            GroupRulesStanding.SIGNED,
+            groupRepository.findForOwner(ownerIdentity.value, newGroupHex)!!
+                .rulesStanding(peerKey),
         )
     }
 
