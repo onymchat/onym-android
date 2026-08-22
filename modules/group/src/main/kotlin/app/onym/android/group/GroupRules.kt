@@ -50,8 +50,17 @@ import java.security.MessageDigest
  *
  * A signature is only evidence if the bytes it covers can be produced
  * again. The verifier therefore stores the exact rules text alongside
- * the signature; a stored hash with no text proves that *something* was
- * agreed to and never what.
+ * the signature, whenever it holds the text that signature names — a
+ * stored hash with no text proves that *something* was agreed to and
+ * never what.
+ *
+ * When it doesn't hold that text — the joiner signed a wording this
+ * device has never seen — the hash and signature are still kept, and
+ * the text is not. Storing our own words beside a hash of theirs would
+ * be worse than storing none: every later reader would be checking a
+ * signature against bytes it was never made over. What the bytes alone
+ * are good for is the one distinction that still matters, between
+ * having signed something uncheckable and having signed nothing.
  *
  * Mirrors `GroupRules` in onym-ios — same domain string, same field
  * order, same canonical form, same byte cap, so a signature made on

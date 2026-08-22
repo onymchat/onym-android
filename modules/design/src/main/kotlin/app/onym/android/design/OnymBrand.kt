@@ -54,6 +54,10 @@ data class OnymTokens(
     val hairline: Color,
     val hairlineStrong: Color,
     val green: Color,
+    /** Caution, not failure. For the states a person should read before
+     *  deciding — a rules agreement over an older wording, or none at
+     *  all — where [red] would claim the decision is already wrong. */
+    val amber: Color,
     val red: Color,
     /** Reads on accent fills (button labels, the tyranny crown's
      *  centre pip, etc.). White on light, black on dark. */
@@ -71,6 +75,7 @@ data class OnymTokens(
             hairline        = Color.Black.copy(alpha = 0.06f),
             hairlineStrong  = Color.Black.copy(alpha = 0.12f),
             green           = Color(0xFF1FA84A),
+            amber           = Color(0xFFB25E00),
             red             = Color(0xFFE5392E),
             onAccent        = Color.White,
         )
@@ -86,6 +91,7 @@ data class OnymTokens(
             hairline        = Color.White.copy(alpha = 0.07f),
             hairlineStrong  = Color.White.copy(alpha = 0.12f),
             green           = Color(0xFF34C759),
+            amber           = Color(0xFFFFB340),
             red             = Color(0xFFFF453A),
             onAccent        = Color.Black,
         )

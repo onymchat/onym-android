@@ -930,4 +930,8 @@
   <string name="join_confirm_group_label">группа</string>
   <string name="join_confirm_invite_key_label">ключ приглашения</string>
   <string name="join_confirm_identity_label">личность</string>
+  <string name="chat_join_request_rules_agreed">Подписал правила группы</string>
+  <string name="chat_join_request_rules_unknown">Подписал правила, которых нет на этом устройстве — проверить нечем</string>
+  <string name="chat_join_request_rules_unsigned">Не подписал правила группы</string>
+  <string name="chat_join_request_rules_invalid">Их подпись под правилами не сходится</string>
 </resources>

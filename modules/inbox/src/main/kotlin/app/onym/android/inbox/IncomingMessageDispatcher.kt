@@ -23,6 +23,7 @@ import app.onym.android.group.GroupCommitmentBuilder
 import app.onym.android.group.GroupInvitationPayload
 import app.onym.android.group.GroupInviteOfferPayload
 import app.onym.android.group.GroupRepository
+import app.onym.android.group.GroupRules
 import app.onym.android.group.GroupStateRefreshRequest
 import app.onym.android.group.MemberAnnouncementPayload
 import app.onym.android.group.MemberProfile
@@ -571,6 +572,25 @@ class IncomingMessageDispatcher(
                 alias = payload.newMember.alias,
                 inboxPublicKey = payload.newMember.inboxPub,
                 sendingPubkey = payload.newMember.sendingPub,
+                // Carried through, so a member admitted after this
+                // device joined is one whose agreement this device can
+                // check for itself — the admitting founder is not a
+                // required witness. Dropped here, the evidence would
+                // stop at whoever pressed Accept.
+                rulesHash = payload.newMember.rulesHash,
+                rulesSignature = payload.newMember.rulesSignature,
+                // The announced text is kept only when `MemberProfile`
+                // would accept it beside that hash — the same predicate
+                // the invitation path's decoder applies, and not a
+                // hash-only approximation of it: `init` also requires
+                // the canonical form and the as-sent cap, so a text like
+                // "\n$rules" would pass a hash check and then throw
+                // from inside this `collect`, taking the identity's
+                // whole inbox subscription with it.
+                rulesText = MemberProfile.storableRulesText(
+                    payload.newMember.rulesText,
+                    payload.newMember.rulesHash,
+                ),
             )),
         )
         groupRepository.insert(updated)

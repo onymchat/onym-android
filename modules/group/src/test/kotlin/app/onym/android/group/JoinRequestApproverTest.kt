@@ -85,5 +85,11 @@ class JoinRequestApproverTest {
         joinerDisplayLabel = "Bob",
         groupId = ByteArray(32) { 0x33 },
         groupName = groupName,
+        // Spelled out because the type no longer defaults them: a
+        // fixture that quietly said "this group has no rules" would be
+        // asserting something it never set up.
+        rulesAgreement = JoinRequestApprover.RulesAgreement.NOT_REQUIRED,
+        rulesSignature = null,
+        rulesHash = null,
     )
 }

@@ -191,6 +191,7 @@ class ChatThreadViewModel(
                                 .take(8)
                                 .joinToString("") { "%02x".format(it) } + "\u2026",
                             isInFlight = request.id in inFlight,
+                            agreement = request.rulesAgreement,
                             // Each row reads its own failure, so two
                             // outstanding errors both stay explained.
                             errorText = errors[request.id],

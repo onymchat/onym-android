@@ -157,6 +157,15 @@ class RoomGroupStore(
                     )
                 } catch (_: SerializationException) {
                     emptyMap()
+                } catch (_: IllegalArgumentException) {
+                    // `MemberProfile` sanitizes a peer's agreement
+                    // fields at decode, so those no longer throw — but
+                    // its key sizes are still checked in `init`, and a
+                    // row written by a build that allowed something
+                    // else would otherwise take the group down instead
+                    // of opening without its roster. Deliberately not
+                    // `Throwable`: cancellation is not a corrupt row.
+                    emptyMap()
                 }
             }
             ?: emptyMap()
