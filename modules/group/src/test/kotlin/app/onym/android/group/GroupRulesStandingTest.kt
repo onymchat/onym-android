@@ -101,11 +101,30 @@ class GroupRulesStandingTest {
 
     @Test
     fun `a signature lifted from another member does not verify here`() {
-        // The signer is named inside the signed bytes.
-        val impostor = signer().profile.copy(
-            sendingPubkey = signer().publicKey,
+        // The signer is named inside the signed bytes, so a signature
+        // taken from one member and presented under another's key
+        // fails. Two locals, because `signer()` mints a fresh seed per
+        // call — the previous single-expression form read as a no-op
+        // and only worked by accident of that.
+        val victim = signer()
+        val impostor = signer()
+        val transplanted = impostor.profile.copy(
+            rulesSignature = victim.profile.rulesSignature,
         )
-        assertEquals(GroupRulesStanding.DOES_NOT_VERIFY, standingOf(impostor, rules = rules))
+        assertEquals(
+            GroupRulesStanding.DOES_NOT_VERIFY,
+            standingOf(transplanted, rules = rules),
+        )
+    }
+
+    @Test
+    fun `a key swapped under a good signature does not verify either`() {
+        // The other direction: the signature is genuine, the key it is
+        // presented with is somebody else's.
+        val signed = signer()
+        val other = signer()
+        val swapped = signed.profile.copy(sendingPubkey = other.publicKey)
+        assertEquals(GroupRulesStanding.DOES_NOT_VERIFY, standingOf(swapped, rules = rules))
     }
 
     @Test
@@ -159,25 +178,62 @@ class GroupRulesStandingTest {
         val carried = json["rules"]!!.jsonObject
         assertEquals(rules, carried["text"]!!.jsonPrimitive.content)
         assertFalse(carried["matches_current_rules"]!!.jsonPrimitive.content.toBoolean())
-        assertEquals(today, carried["current_text"]!!.jsonPrimitive.content)
+        // What the group says now lives in the group block, carried for
+        // every standing rather than only for divergence.
+        assertEquals(
+            today,
+            json["group"]!!.jsonObject["current_rules"]!!.jsonPrimitive.content,
+        )
     }
 
     @Test
-    fun `matching rules ship no redundant copy`() {
+    fun `the readme names the shapes the document can take`() {
+        // Three claims the file used to make and not keep: that the
+        // rules text is always what the member signed (false for the
+        // author), that the block is always present (false when nothing
+        // was signed), and that a comparison is always available.
         val json = documentOf(group(rules = rules, members = mapOf("cc" to signer().profile)), "cc")
-        assertNull(json["rules"]!!.jsonObject["current_text"])
+        val readme = json["_readme"]!!.jsonArray.joinToString("\n") { it.jsonPrimitive.content }
+        assertTrue(readme.contains("signed is false"))
+        assertTrue(readme.contains("rules is absent"))
+        assertTrue(readme.contains("group.current_rules"))
+        assertTrue(readme.contains("verdict"))
     }
 
     @Test
-    fun `an unproven standing ships no bytes to mistake for proof`() {
-        val profile = signer().profile.copy(rulesSignature = ByteArray(64))
+    fun `an unproven standing ships its bytes and says they did not check out`() {
+        // Reversed deliberately from "ship nothing": a document that
+        // asserts a signature does not verify while withholding the
+        // signature asks to be taken on faith, which is the one thing
+        // this file is not for. `signed` and `note` carry the verdict;
+        // the bytes let a reader reach their own.
+        val signed = signer()
+        val profile = signed.profile.copy(rulesSignature = ByteArray(64))
         val json = documentOf(group(rules = rules, members = mapOf("mm" to profile)), "mm")
         val member = json["member"]!!.jsonObject
+
         assertFalse(member["signed"]!!.jsonPrimitive.content.toBoolean())
-        assertNull(member["signature"])
-        assertNull(member["sending_public_key"])
-        assertNull(json["rules"])
-        assertTrue(member["note"] != null)
+        assertTrue("the bytes behind the claim ship with it", member["signature"] != null)
+        assertTrue(member["sending_public_key"] != null)
+        assertEquals(
+            "and the wording they cover, so the check can be repeated",
+            rules,
+            json["rules"]!!.jsonObject["text"]!!.jsonPrimitive.content,
+        )
+        assertTrue(member["note"]!!.jsonPrimitive.content.contains("does not verify"))
+    }
+
+    @Test
+    fun `a member who signed nothing still learns what was asked`() {
+        // The group's own rules ride in the group block whatever the
+        // standing. Without them a document about an agreement never
+        // stated what was on the table.
+        val json = documentOf(group(rules = rules, members = mapOf("dd" to unsigned())), "dd")
+        assertNull("nothing was signed, so there is no signed wording", json["rules"])
+        assertEquals(
+            rules,
+            json["group"]!!.jsonObject["current_rules"]!!.jsonPrimitive.content,
+        )
     }
 
     @Test
@@ -223,7 +279,7 @@ class GroupRulesStandingTest {
             group(rules = rules, name = "Maple  Garden!", members = mapOf(key to signer().profile)),
             key,
         )!!
-        assertEquals("onym-rules-proof-maple-garden-bob-ab12ab12ab12.json", proof.suggestedFileName)
+        assertEquals("onym-rules-proof-maple-garden-bob-7054d02d3974.json", proof.suggestedFileName)
     }
 
     @Test
@@ -260,7 +316,7 @@ class GroupRulesStandingTest {
         val boris = GroupRulesProof.of(group, "aa11bb22cc33")!!.suggestedFileName
         val anna = GroupRulesProof.of(group, "dd44ee55ff66")!!.suggestedFileName
         assertNotEquals(boris, anna)
-        assertEquals("onym-rules-proof-group-rules-aa11bb22cc33.json", boris)
+        assertEquals("onym-rules-proof-group-rules-378d594d7bb4.json", boris)
     }
 
     @Test

@@ -126,6 +126,11 @@ dependencies {
 
     // ---- unit tests (moved from app/src/test/.../inbox/) ----
     testImplementation(libs.junit)
+    // Declared rather than inherited: the dispatcher's tests sign
+    // agreements directly, and until now those imports resolved only
+    // through `identity`'s `testFixturesApi`. Every other module using
+    // BouncyCastle in tests declares it.
+    testImplementation(libs.bouncycastle)
     testImplementation(libs.kotlinx.coroutines.test)
     // FakeActiveIdentityProvider, FakeInvitationEnvelopeDecrypter.
     testImplementation(testFixtures(project(":identity")))
