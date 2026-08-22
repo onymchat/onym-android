@@ -579,15 +579,18 @@ class IncomingMessageDispatcher(
                 // stop at whoever pressed Accept.
                 rulesHash = payload.newMember.rulesHash,
                 rulesSignature = payload.newMember.rulesSignature,
-                // The announced text is kept only when it is the text
-                // the announced hash names. A sender that admitted
-                // someone who signed a wording it doesn't hold announces
-                // its own copy anyway, and storing that beside the
-                // joiner's hash would leave this device checking a
-                // signature against words it was never made over.
-                rulesText = payload.newMember.rulesText?.takeIf { text ->
-                    payload.newMember.rulesHash?.contentEquals(GroupRules.hash(text)) == true
-                },
+                // The announced text is kept only when `MemberProfile`
+                // would accept it beside that hash — the same predicate
+                // the invitation path's decoder applies, and not a
+                // hash-only approximation of it: `init` also requires
+                // the canonical form and the as-sent cap, so a text like
+                // "\n$rules" would pass a hash check and then throw
+                // from inside this `collect`, taking the identity's
+                // whole inbox subscription with it.
+                rulesText = MemberProfile.storableRulesText(
+                    payload.newMember.rulesText,
+                    payload.newMember.rulesHash,
+                ),
             )),
         )
         groupRepository.insert(updated)

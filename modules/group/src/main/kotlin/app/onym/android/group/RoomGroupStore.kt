@@ -155,13 +155,16 @@ class RoomGroupStore(
                         memberProfilesSerializer,
                         bytes.toString(Charsets.UTF_8),
                     )
-                } catch (_: Throwable) {
-                    // Not only `SerializationException`: `MemberProfile`
-                    // validates its agreement fields in `init`, so a row
-                    // written before those rules — or by a build that
-                    // wrote something they now refuse — throws
-                    // `IllegalArgumentException` from inside decode. A
-                    // group whose roster won't parse still has to open.
+                } catch (_: SerializationException) {
+                    emptyMap()
+                } catch (_: IllegalArgumentException) {
+                    // `MemberProfile` sanitizes a peer's agreement
+                    // fields at decode, so those no longer throw — but
+                    // its key sizes are still checked in `init`, and a
+                    // row written by a build that allowed something
+                    // else would otherwise take the group down instead
+                    // of opening without its roster. Deliberately not
+                    // `Throwable`: cancellation is not a corrupt row.
                     emptyMap()
                 }
             }

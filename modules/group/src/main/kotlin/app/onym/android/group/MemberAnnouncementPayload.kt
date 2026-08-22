@@ -167,8 +167,15 @@ data class MemberAnnouncementPayload(
             // Capped like the link that carried it: this arrives from a
             // peer, and an uncapped string is a way to grow every
             // recipient's stored group without bound.
-            require(rulesText == null || GroupRules.fits(rulesText)) {
-                "rulesText: expected at most ${GroupRules.MAX_BYTES} UTF-8 bytes"
+            // Measured as *sent*, not canonicalized first: `fits`
+            // trims before measuring, so leading whitespace in front of
+            // the real rules would be unbounded — and the hash check
+            // downstream trims too, so it would pass as well.
+            require(
+                rulesText == null ||
+                    rulesText.toByteArray(Charsets.UTF_8).size <= GroupRules.MAX_BYTES,
+            ) {
+                "rulesText: expected at most ${GroupRules.MAX_BYTES} UTF-8 bytes as sent"
             }
             // Deliberately *not* required to hash to [rulesHash]. The
             // sender stores its own copy of the rules beside whatever

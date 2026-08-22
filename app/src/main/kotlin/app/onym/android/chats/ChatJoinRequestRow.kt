@@ -47,11 +47,12 @@ data class ChatJoinRequestDisplay(
     val fingerprint: String,
     /** A call is in flight: spinner on, both buttons disabled. */
     val isInFlight: Boolean,
-    /** Whether this joiner agreed to the group's rules, already decided
-     *  by [app.onym.android.group.JoinRequestApprover] against the
-     *  group's own copy of the text. The row renders it and nothing
-     *  more — a screen is the wrong place to be verifying signatures. */
     /**
+     * Whether this joiner agreed to the group's rules, already decided
+     * by [app.onym.android.group.JoinRequestApprover] against the
+     * group's own copy of the text. The row renders it and nothing more
+     * — a screen is the wrong place to be verifying signatures.
+     *
      * No default, for the same reason [JoinRequestApprover.PendingRequest]
      * has none: omitting it would quietly claim "this group has no
      * rules", and a display type is the one a future call site is

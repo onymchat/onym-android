@@ -163,15 +163,73 @@ data class MemberProfile(
      * reaching for the group's current rules instead would report a
      * founder's later edit as a member who never agreed.
      */
-    fun agreedToRules(groupId: ByteArray): Boolean {
-        val signature = rulesSignature ?: return false
-        val text = rulesText ?: return false
-        return GroupRules.isAgreement(
-            signature = signature,
-            rules = text,
-            groupId = groupId,
-            joinerSendingPublicKey = sendingPubkey,
-        )
+    fun agreedToRules(groupId: ByteArray): Boolean =
+        storedAgreement(groupId) == StoredAgreement.VERIFIED
+
+    /**
+     * What this member's retained evidence actually shows.
+     *
+     * Three outcomes rather than a boolean, for the same reason
+     * [JoinRequestApprover.RulesAgreement] has five: "didn't agree" and
+     * "agreed to something this device can't check" are different facts
+     * about a person, and collapsing them here would throw away exactly
+     * what the retained bytes were kept for.
+     */
+    fun storedAgreement(groupId: ByteArray): StoredAgreement {
+        val signature = rulesSignature ?: return StoredAgreement.NONE
+        val text = rulesText ?: return StoredAgreement.UNCHECKABLE
+        return if (
+            GroupRules.isAgreement(
+                signature = signature,
+                rules = text,
+                groupId = groupId,
+                joinerSendingPublicKey = sendingPubkey,
+            )
+        ) {
+            StoredAgreement.VERIFIED
+        } else {
+            StoredAgreement.NOT_VERIFIED
+        }
+    }
+
+    /** See [storedAgreement]. */
+    enum class StoredAgreement {
+        /** No agreement was recorded: an older build, or a group that
+         *  had no rules when this member was admitted. */
+        NONE,
+
+        /** Bytes were recorded, and the text they cover isn't held by
+         *  this device — signed something, and never what. */
+        UNCHECKABLE,
+
+        /** The signature verifies against the retained text. */
+        VERIFIED,
+
+        /** The retained text is the text the hash names, and the
+         *  signature over it doesn't verify. */
+        NOT_VERIFIED,
+    }
+
+    companion object {
+        /**
+         * [text] if it can be stored beside [hash], else null — the one
+         * predicate every boundary has to apply.
+         *
+         * Shared rather than restated because the two places that
+         * decode a peer's profile differ in how much a rejection costs:
+         * the invitation carries a whole roster and the announcement
+         * carries one member, but in both cases `init` refuses a text
+         * that isn't canonical, is over the cap as sent, or isn't the
+         * text the hash names — and a caller that checked only the hash
+         * would throw from inside a `collect` and take an identity's
+         * inbox subscription down with it.
+         */
+        fun storableRulesText(text: String?, hash: ByteArray?): String? = text?.takeIf {
+            hash != null &&
+                it.toByteArray(Charsets.UTF_8).size <= GroupRules.MAX_BYTES &&
+                it == GroupRules.canonical(it) &&
+                GroupRules.hash(it).contentEquals(hash)
+        }
     }
 
     override fun equals(other: Any?): Boolean = this === other ||
@@ -251,12 +309,7 @@ internal object MemberProfileSerializer : KSerializer<MemberProfile> {
         val signature = raw.rulesSignature.takeIf { keep }
         // And the text is kept only when it is the text that hash names,
         // measured and compared exactly as it arrived.
-        val text = raw.rulesText?.takeIf { candidate ->
-            hash != null &&
-                candidate.toByteArray(Charsets.UTF_8).size <= GroupRules.MAX_BYTES &&
-                candidate == GroupRules.canonical(candidate) &&
-                GroupRules.hash(candidate).contentEquals(hash)
-        }
+        val text = MemberProfile.storableRulesText(raw.rulesText, hash)
         return MemberProfile(
             alias = raw.alias,
             inboxPublicKey = raw.inboxPublicKey,
