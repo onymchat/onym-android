@@ -971,6 +971,30 @@ class PushRegistrationInteractorTest {
         assertNull(backend.registered.single().integrityToken)
     }
 
+    /** The fingerprint's privacy invariant, pinned directly (PR #257
+     * review): the exact double hash for fixed inputs — computed
+     * here from first principles — and never the raw token as a
+     * substring, which is precisely what the double hash exists to
+     * keep out of the preference store. */
+    @Test
+    fun `the fingerprint is the double hash and never carries the token`() {
+        val fcmToken = "token-a"
+        val digest = SignedPushPayload.subscriptionsDigest(subscriptions)
+        val fingerprint =
+            PushRegistrationInteractor.registrationFingerprint(fcmToken, digest)
+
+        val sha = java.security.MessageDigest.getInstance("SHA-256")
+        val inner = sha.digest(fcmToken.encodeToByteArray())
+        sha.reset()
+        sha.update(inner)
+        sha.update(digest)
+        val expected = sha.digest().joinToString("") { "%02x".format(it) }
+
+        assertEquals(expected, fingerprint)
+        assertEquals(64, fingerprint.length)
+        assertFalse(fingerprint.contains(fcmToken))
+    }
+
     /** The requestHash Play Integrity binds is the hash of the exact
      * signed bytes. */
     @Test
