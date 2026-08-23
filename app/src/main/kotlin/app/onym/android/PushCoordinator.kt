@@ -67,15 +67,15 @@ class PushCoordinator(
     }
 
     /** Called AFTER POST_NOTIFICATIONS is granted (below API 33 it is
-     * granted by install). */
+     * granted by install). The preference write lives inside
+     * [PushRegistrationInteractor.pushEnabled] — persisted before the
+     * pass wakes, so a pass can never read a stale value. */
     suspend fun enable() {
-        preference.setEnabled(true)
         fetchToken()?.let { interactor.updateToken(it) }
         interactor.pushEnabled()
     }
 
     suspend fun disable() {
-        preference.setEnabled(false)
         interactor.pushDisabled()
     }
 
