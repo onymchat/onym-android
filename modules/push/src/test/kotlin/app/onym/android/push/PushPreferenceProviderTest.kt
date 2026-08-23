@@ -42,8 +42,9 @@ class PushPreferenceProviderTest {
     fun setUp() {
         datastoreScopeJob = SupervisorJob()
         val scope = CoroutineScope(UnconfinedTestDispatcher() + datastoreScopeJob)
-        val file = tempFolder.newFile("push-${System.nanoTime()}.preferences_pb")
-        file.delete()
+        // TemporaryFolder is already per-test; the file must merely
+        // not pre-exist (DataStore creates it), so name it plainly.
+        val file = java.io.File(tempFolder.root, "push.preferences_pb")
         dataStore = PreferenceDataStoreFactory.create(scope = scope) { file }
         provider = DataStorePushPreferenceProvider(dataStore)
     }
