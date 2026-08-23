@@ -302,11 +302,14 @@ class OkHttpPushBackendClientTest {
         )
         assertEquals("http://10.0.2.2:8080/v1/unregister", requestUrl)
 
-        // Release posture: refused.
+        // Release posture: refused — and, like the https-wall test,
+        // provably before anything reached the wire (PR #257 review).
+        requestUrl = null
         try {
             client(200, "{}", baseUrl = "http://10.0.2.2:8080").fetchChallenge("register")
             fail("loopback without the allowance must not send")
         } catch (_: PushBackendUnreachableException) {
+            assertNull("nothing may reach the wire", requestUrl)
         }
     }
 
@@ -324,10 +327,10 @@ class OkHttpPushBackendClientTest {
      * with fractional seconds. Both must parse. */
     @Test
     fun `instant parsing tolerates fractional seconds`() {
-        assertEquals(
-            PushJson.parseInstant("2026-08-22T12:00:00Z"),
-            PushJson.parseInstant("2026-08-22T12:00:00.000Z"),
-        )
+        // Bare parses — each either succeeds or throws; comparing two
+        // parseInstant results to each other would assert a JDK
+        // identity, not client behavior (PR #257 review).
+        PushJson.parseInstant("2026-08-22T12:00:00Z")
         PushJson.parseInstant("2026-08-22T12:00:00.123456Z")
         try {
             PushJson.parseInstant("yesterday, around noon")
