@@ -89,6 +89,26 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
 
+      - name: Materialize google-services.json
+        # The file is deliberately NOT committed (gitignored, matching
+        # the repo's no-deployment-config-in-tree convention). It is
+        # not a credential — Google documents it as publishable and its
+        # API key is restricted to package + signing cert — but a
+        # privacy-focused public repo has no reason to advertise its
+        # project identifiers. The push build check in
+        # app/build.gradle.kts refuses a PUSH_BASE_URL without this
+        # file, so a configured release fails here loudly rather than
+        # shipping a toggle that can never activate.
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            echo "google-services.json materialized"
+          else
+            echo "GOOGLE_SERVICES_JSON secret unset — push stays dark"
+          fi
+
       - name: bundleRelease
         # Produces app/build/outputs/bundle/release/app-release.aab
         # (unsigned — no signingConfig on the release buildType).
@@ -109,6 +129,12 @@ jobs:
           # visible configuration act, not a credential.
           MODERATION_BASE_URL: ${{ vars.MODERATION_BASE_URL }}
           PLAY_CLOUD_PROJECT_NUMBER: ${{ vars.PLAY_CLOUD_PROJECT_NUMBER }}
+          # ONYM_PUSH_BASE_URL lights up the push seat the same way
+          # (empty keeps the dark launch — pushBaseUrl() in
+          # app/build.gradle.kts; the build refuses a base URL without
+          # google-services.json + a Play project number). A repo
+          # VARIABLE for the same reason as the moderation pair.
+          ONYM_PUSH_BASE_URL: ${{ vars.ONYM_PUSH_BASE_URL }}
         run: ./gradlew :app:bundleRelease --no-daemon
 
       - name: Locate AAB
