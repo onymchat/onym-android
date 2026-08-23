@@ -547,6 +547,44 @@ class PushRegistrationInteractorTest {
         assertEquals(2, backend.registered.size)
     }
 
+    /** The min(7d, window/2) margin's OTHER branch: a short server
+     * window (4 days) must refresh at its midpoint (margin 2d), not
+     * at a flat 7 days — which would mean immediately, or with a
+     * mutated flat margin, never early enough. */
+    @Test
+    fun `a short server window refreshes at its midpoint`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        var now = Instant.parse("2026-08-22T12:00:00Z")
+        // expiresAt 4 days out ⇒ window 4d ⇒ margin = min(7d, 2d) = 2d.
+        backend.expiresAt = "2026-08-26T12:00:00Z"
+        val interactor = build(
+            backend,
+            preference,
+            clock = { now },
+            refreshInterval = Duration.ofDays(90),
+        )
+
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        advanceUntilIdle()
+        assertEquals(1, backend.registered.size)
+
+        // 1 day 23 h in: before the midpoint — nothing sent. A flat
+        // 7-day margin would already have re-registered here.
+        now = Instant.parse("2026-08-24T11:00:00Z")
+        interactor.pushEnabled()
+        advanceUntilIdle()
+        assertEquals(1, backend.registered.size)
+
+        // Past the midpoint (2 days of the 4-day window left + 1 h):
+        // inside the 2-day margin — re-register.
+        now = Instant.parse("2026-08-24T13:00:00Z")
+        interactor.pushEnabled()
+        advanceUntilIdle()
+        assertEquals(2, backend.registered.size)
+    }
+
     @Test
     fun `refreshes after the cadence interval`() = runTest {
         val backend = ScriptedBackend()
