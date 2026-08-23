@@ -238,6 +238,26 @@ class OkHttpPushBackendClientTest {
         assertFalse(rejected(503, null).deterministic)
     }
 
+    /** The linchpin of the retry classification (PR #257 review): a
+     * THROWN IOException — the genuinely-offline device — must map to
+     * PushBackendUnreachableException, i.e. retryable. Mutated to a
+     * deterministic rejection, an offline device would permanently
+     * kill its self-wake and leave the backend watching relays
+     * forever. */
+    @Test
+    fun `a thrown IOException maps to unreachable`() = runTest {
+        val http = OkHttpClient.Builder()
+            .addInterceptor { throw java.io.IOException("scripted network failure") }
+            .build()
+        val client = OkHttpPushBackendClient(http, "https://push.example")
+        try {
+            client.fetchChallenge("register")
+            fail("an IOException must surface typed")
+        } catch (e: PushBackendUnreachableException) {
+            assertTrue(e.cause is java.io.IOException)
+        }
+    }
+
     /** An unparseable 2xx is a broken deploy or a proxy interlude —
      * retry-later, never a refusal. */
     @Test
