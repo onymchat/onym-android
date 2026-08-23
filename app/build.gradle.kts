@@ -103,6 +103,29 @@ android {
         // PLAY_CLOUD_PROJECT_NUMBER for the Play Integrity provider —
         // one Cloud project, one Play pairing.
         buildConfigField("String", "PUSH_BASE_URL", "\"${pushBaseUrl()}\"")
+
+        // Half-configured push is worse than dark, the moderation
+        // posture above: release CI sets ONYM_PUSH_BASE_URL, so
+        // without these walls a release could ship the NOTIFICATIONS
+        // section while Firebase is unconfigured — fetchToken() then
+        // answers null forever, every pass returns early, and the
+        // toggle sits on "Turning on…" for every user who opts in.
+        // A configured push backend therefore demands the Firebase
+        // config file AND the Play Console pairing (the same number
+        // the moderation seat checks). Loopback dev backends are
+        // exempt like moderation's: an emulator loop against a local
+        // service has neither a Firebase project nor a Play pairing
+        // to demand, and the runtime client only honors loopback
+        // under a debug build.
+        check(
+            pushBaseUrl().isBlank() ||
+                pushUrlIsLoopback() ||
+                (file("google-services.json").exists() && playCloudProjectNumber() != 0L)
+        ) {
+            "PUSH_BASE_URL is set but push is only half-configured — the push seat needs " +
+                "app/google-services.json (Firebase) AND PLAY_CLOUD_PROJECT_NUMBER " +
+                "(Play Integrity), or no base URL at all, to stay dark."
+        }
         // The Google Cloud project number linked in the Play Console —
         // StandardIntegrityManager.prepare needs it. ENV
         // `PLAY_CLOUD_PROJECT_NUMBER` → local.properties
@@ -459,6 +482,13 @@ fun moderationBaseUrl(): String {
 fun moderationUrlIsLoopback(): Boolean {
     val rest = moderationBaseUrl().removePrefix("http://")
     if (rest == moderationBaseUrl()) return false
+    val host = rest.takeWhile { it != ':' && it != '/' }
+    return host == "localhost" || host == "10.0.2.2"
+}
+
+fun pushUrlIsLoopback(): Boolean {
+    val rest = pushBaseUrl().removePrefix("http://")
+    if (rest == pushBaseUrl()) return false
     val host = rest.takeWhile { it != ':' && it != '/' }
     return host == "localhost" || host == "10.0.2.2"
 }
