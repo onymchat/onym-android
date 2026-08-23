@@ -28,6 +28,12 @@ import kotlinx.coroutines.flow.map
  *   BEFORE the unregister attempt and cleared only on success, so an
  *   offline disable (or a token rotation) is retried until the
  *   server has actually forgotten.
+ * - [pendingUnregisterAttempts] / [pendingUnregisterFirstAttemptAt] —
+ *   how often and for how long the debt has been pressed, so the
+ *   reconciler can expire a debt that has genuinely had its chance
+ *   (attempt count AND age together — never refusal classification;
+ *   see the reconciler's KDoc). Reset whenever the debt slot is
+ *   written.
  */
 interface PushPreferenceProvider {
     /** Reactive read for the Settings toggle. Default OFF. */
@@ -59,7 +65,22 @@ interface PushPreferenceProvider {
     suspend fun clearRegistration()
 
     suspend fun pendingUnregisterToken(): String?
+
+    /** Writes (or clears) the debt slot. Either way the attempt
+     * bookkeeping resets — a rotation that overwrites the debt with a
+     * different token starts that token's account at zero. */
     suspend fun setPendingUnregisterToken(token: String?)
+
+    /** Failed unregister attempts charged against the current debt. */
+    suspend fun pendingUnregisterAttempts(): Int
+
+    /** When the current debt was first pressed; null before the first
+     * recorded attempt. */
+    suspend fun pendingUnregisterFirstAttemptAt(): Instant?
+
+    /** Charge one attempt against the current debt, stamping
+     * [pendingUnregisterFirstAttemptAt] on the first. */
+    suspend fun recordPendingUnregisterAttempt(now: Instant)
 }
 
 /** Production impl — DataStore Preferences. */
@@ -124,6 +145,23 @@ class DataStorePushPreferenceProvider(
         dataStore.edit { prefs ->
             if (token != null) prefs[PENDING_UNREGISTER] = token
             else prefs.remove(PENDING_UNREGISTER)
+            prefs.remove(PENDING_UNREGISTER_ATTEMPTS)
+            prefs.remove(PENDING_UNREGISTER_FIRST_ATTEMPT_AT)
+        }
+    }
+
+    override suspend fun pendingUnregisterAttempts(): Int =
+        dataStore.data.first()[PENDING_UNREGISTER_ATTEMPTS]?.toInt() ?: 0
+
+    override suspend fun pendingUnregisterFirstAttemptAt(): Instant? =
+        dataStore.data.first()[PENDING_UNREGISTER_FIRST_ATTEMPT_AT]?.let(Instant::ofEpochSecond)
+
+    override suspend fun recordPendingUnregisterAttempt(now: Instant) {
+        dataStore.edit { prefs ->
+            prefs[PENDING_UNREGISTER_ATTEMPTS] = (prefs[PENDING_UNREGISTER_ATTEMPTS] ?: 0L) + 1L
+            if (prefs[PENDING_UNREGISTER_FIRST_ATTEMPT_AT] == null) {
+                prefs[PENDING_UNREGISTER_FIRST_ATTEMPT_AT] = now.epochSecond
+            }
         }
     }
 
@@ -134,6 +172,10 @@ class DataStorePushPreferenceProvider(
         val EXPIRES_AT = longPreferencesKey("onym.push.registrationExpiresAtEpochSeconds")
         val REGISTERED_TOKEN = stringPreferencesKey("onym.push.lastRegisteredToken")
         val PENDING_UNREGISTER = stringPreferencesKey("onym.push.pendingUnregisterToken")
+        val PENDING_UNREGISTER_ATTEMPTS =
+            longPreferencesKey("onym.push.pendingUnregisterAttempts")
+        val PENDING_UNREGISTER_FIRST_ATTEMPT_AT =
+            longPreferencesKey("onym.push.pendingUnregisterFirstAttemptAtEpochSeconds")
     }
 }
 
@@ -153,6 +195,8 @@ class StaticPushPreferenceProvider(
     var expiresAt: Instant? = null
     var registeredToken: String? = null
     var pendingUnregister: String? = null
+    var pendingUnregisterAttempts: Int = 0
+    var pendingUnregisterFirstAttemptAt: Instant? = null
 
     override val enabledFlow: Flow<Boolean> = enabledState
 
@@ -192,5 +236,17 @@ class StaticPushPreferenceProvider(
 
     override suspend fun setPendingUnregisterToken(token: String?) {
         pendingUnregister = token
+        pendingUnregisterAttempts = 0
+        pendingUnregisterFirstAttemptAt = null
+    }
+
+    override suspend fun pendingUnregisterAttempts(): Int = pendingUnregisterAttempts
+
+    override suspend fun pendingUnregisterFirstAttemptAt(): Instant? =
+        pendingUnregisterFirstAttemptAt
+
+    override suspend fun recordPendingUnregisterAttempt(now: Instant) {
+        pendingUnregisterAttempts += 1
+        if (pendingUnregisterFirstAttemptAt == null) pendingUnregisterFirstAttemptAt = now
     }
 }

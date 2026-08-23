@@ -54,16 +54,23 @@ import kotlinx.coroutines.launch
  * Durability contract (see [PushPreferenceProvider]): a token the
  * backend must forget — disable, or the OLD token on rotation — is
  * written to `pendingUnregisterToken` BEFORE the unregister attempt
- * and cleared on success — or expired when the backend refuses the
- * unregister deterministically (see
- * [PushBackendRejectedException.deterministic]): such a refusal can
- * never succeed on retry, and holding the debt open would wedge every
- * future registration behind it. Every still-owed debt is drained
- * before any register. Disable therefore works from
- * `lastRegisteredToken` even when FCM no longer answers, an offline
- * disable is retried until the server confirms, and a disable that
- * lands while a register is suspended on the network converts the
- * just-registered token into pending debt instead of recording it.
+ * and cleared on success. Refusal CLASSIFICATION never expires the
+ * debt: the backend's unregister is idempotent (an unknown token
+ * still answers 200), so a refusal can never mean "not registered
+ * here" — it means this client is broken (clock skew, key mismatch,
+ * wire drift), and erasing the debt on it would erase the only
+ * record that could ever retry the forget while the backend keeps
+ * watching a device that asked to stop. Instead the debt is bounded
+ * by ATTEMPT COUNT and AGE together: it expires only after
+ * [DEBT_ATTEMPT_LIMIT] failed attempts AND [DEBT_MAX_AGE] since the
+ * first — both, so a slowly-retrying device is not prematurely
+ * dropped — with the bookkeeping persisted alongside the token.
+ * Every still-owed debt is drained before any register. Disable
+ * therefore works from `lastRegisteredToken` even when FCM no longer
+ * answers, an offline disable is retried until the server confirms,
+ * and a disable that lands while a register is suspended on the
+ * network converts the just-registered token into pending debt
+ * instead of recording it.
  *
  * Failures are quiet — no user-activity logging (privacy: the
  * backend registration IS activity metadata) — and leave the durable
@@ -75,11 +82,16 @@ import kotlinx.coroutines.launch
  * adds is exactly one delayed self-wake per failed pass, with
  * exponential backoff capped at [failureRetryCap] — so an offline
  * disable keeps retrying while the process lives instead of leaving
- * the backend watching until an unrelated trigger happens to fire. A
- * pass that fails on a DETERMINISTIC backend rejection (see
- * [PushBackendRejectedException.deterministic]) schedules no
- * self-wake: resubmitting the identical request is pointless, and
- * only a state-changing trigger can make the next attempt different.
+ * the backend watching until an unrelated trigger happens to fire.
+ * Classification (see [PushBackendRejectedException.deterministic])
+ * shapes the PACING, never whether state survives: a DETERMINISTIC
+ * refusal earns the same bounded backoff but stops self-waking after
+ * [DETERMINISTIC_RETRY_LIMIT] consecutive failures — a 4xx is often
+ * really transient (a challenge outlived by a slow network, a
+ * transiently-bad relay set), so suppressing the self-wake outright
+ * left the pass permanently stalled with the toggle ON; the bound
+ * keeps the anti-hammer property, since a truly-broken client goes
+ * quiet at the cap until a state-changing trigger arrives.
  * [onFailure] is a test-only observation hook.
  */
 class PushRegistrationInteractor(
@@ -173,24 +185,31 @@ class PushRegistrationInteractor(
             if (pass()) {
                 consecutiveFailures = 0
             } else {
-                scheduleFailureRetry()
+                scheduleFailureRetry(bounded = false)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Throwable) {
             onFailure?.invoke(failure)
+            // Classification shapes pacing only (see the class KDoc):
+            // a deterministic refusal retries on the same backoff but
+            // stops self-waking at the attempt bound.
             val deterministic =
                 (failure as? PushBackendRejectedException)?.deterministic == true
-            if (!deterministic) scheduleFailureRetry()
+            scheduleFailureRetry(bounded = deterministic)
         }
     }
 
     /** One delayed self-wake, exponential backoff from
      * [failureRetryBase] capped at [failureRetryCap], at most one
-     * outstanding at a time. */
-    private fun scheduleFailureRetry() {
+     * outstanding at a time. A [bounded] (deterministic) failure
+     * schedules nothing beyond [DETERMINISTIC_RETRY_LIMIT]
+     * consecutive failures. Answers whether a retry is (or already
+     * was) outstanding. */
+    private fun scheduleFailureRetry(bounded: Boolean): Boolean {
         consecutiveFailures += 1
-        if (!retryScheduled.compareAndSet(false, true)) return
+        if (bounded && consecutiveFailures > DETERMINISTIC_RETRY_LIMIT) return false
+        if (!retryScheduled.compareAndSet(false, true)) return true
         val shift = (consecutiveFailures - 1).coerceAtMost(MAX_BACKOFF_SHIFT)
         val backoff = minOf(
             failureRetryBase.multipliedBy(1L shl shift),
@@ -201,6 +220,7 @@ class PushRegistrationInteractor(
             retryScheduled.set(false)
             wakeUp()
         }
+        return true
     }
 
     /** Answers whether the pass CONVERGED: true when the backend now
@@ -222,15 +242,19 @@ class PushRegistrationInteractor(
         // Drain pending debt before ANY register: the server must
         // forget the old token before it is told about a new one. A
         // RETRY outcome gates the pass (transient — the next trigger
-        // drains again); a REFUSED outcome clears the debt and lets
-        // the pass continue — the backend refused the unregister
-        // knowingly and deterministically, so the token was never
-        // registered under this key (or the request is malformed) and
-        // retrying it forever would wedge every future registration.
+        // drains again); a deterministic refusal throws out of
+        // [unregisterQuietly] with the debt KEPT — see the class
+        // KDoc: only the attempt/age bound below ever expires a
+        // debt, never the refusal's classification.
         val pending = preference.pendingUnregisterToken()
         if (pending != null) {
-            if (unregisterQuietly(pending) == UnregisterOutcome.RETRY) return false
-            preference.setPendingUnregisterToken(null)
+            if (debtExpired()) {
+                preference.setPendingUnregisterToken(null)
+            } else {
+                preference.recordPendingUnregisterAttempt(clock())
+                if (unregisterQuietly(pending) == UnregisterOutcome.RETRY) return false
+                preference.setPendingUnregisterToken(null)
+            }
         }
 
         if (!preference.enabled()) {
@@ -239,6 +263,7 @@ class PushRegistrationInteractor(
             val target = preference.lastRegisteredToken() ?: return true
             preference.setPendingUnregisterToken(target)
             preference.clearRegistration()
+            preference.recordPendingUnregisterAttempt(clock())
             if (unregisterQuietly(target) == UnregisterOutcome.RETRY) return false
             preference.setPendingUnregisterToken(null)
             return true
@@ -264,7 +289,7 @@ class PushRegistrationInteractor(
 
         // register session: challenge → payload → requestHash →
         // attestation → sign → registration key → seal → register.
-        val challenge = backend.fetchChallenge("register")
+        val challenge = freshChallenge("register")
         val userKey = signer.userKeyId()
         val timestamp = wireTimestamp(now)
         val payload = SignedPushPayload.register(
@@ -322,19 +347,35 @@ class PushRegistrationInteractor(
         return true
     }
 
+    /** Whether the current debt has had its full chance:
+     * [DEBT_ATTEMPT_LIMIT] attempts AND [DEBT_MAX_AGE] since the
+     * first — both, so a device that retries slowly is not dropped
+     * early (see the class KDoc). */
+    private suspend fun debtExpired(): Boolean {
+        if (preference.pendingUnregisterAttempts() < DEBT_ATTEMPT_LIMIT) return false
+        val firstAttempt = preference.pendingUnregisterFirstAttemptAt() ?: return false
+        return clock().isAfter(firstAttempt.plus(DEBT_MAX_AGE))
+    }
+
+    /** A challenge with a usable remainder of its ~600 s TTL: when
+     * the fetched one arrives with under [CHALLENGE_MIN_REMAINING]
+     * left (a slow network ate the window), one refetch — signing an
+     * already-stale challenge earns a deterministic `bad_request` for
+     * what is really a transient condition. An unparseable
+     * `expiresAt` is used as-is; the backend stays the authority. */
+    private suspend fun freshChallenge(purpose: String): IssuedPushChallenge {
+        val challenge = backend.fetchChallenge(purpose)
+        val expiresAt = runCatching { PushJson.parseInstant(challenge.expiresAt) }.getOrNull()
+            ?: return challenge
+        if (clock().isBefore(expiresAt.minus(CHALLENGE_MIN_REMAINING))) return challenge
+        return backend.fetchChallenge(purpose)
+    }
+
     /** How an unregister session for a stale token ended, and what
      * the caller owes the pending-debt slot for it. */
     private enum class UnregisterOutcome {
         /** The server confirmed — the debt is paid, clear it. */
         FORGOTTEN,
-
-        /** The server understood the request and refused it
-         * deterministically ([PushBackendRejectedException.deterministic]):
-         * the token was never registered under this key, or the
-         * request is malformed. Retrying the identical request is
-         * pointless — clear the debt so it cannot wedge every future
-         * registration behind an unpayable refusal. */
-        REFUSED,
 
         /** Unreachable, rate-limited (429 / `capacity`), throttled
          * attestation, or any other transient condition — keep the
@@ -342,10 +383,14 @@ class PushRegistrationInteractor(
         RETRY,
     }
 
-    /** One full unregister session for [staleToken]. Never throws;
-     * the outcome says what to do with the pending debt. */
+    /** One full unregister session for [staleToken]. A DETERMINISTIC
+     * refusal ([PushBackendRejectedException.deterministic]) is
+     * rethrown — the debt stays (unregister is idempotent, so a
+     * refusal never means "not registered here") and [reconcile]
+     * paces the retry on the bounded backoff; every other failure is
+     * swallowed into [UnregisterOutcome.RETRY]. */
     private suspend fun unregisterQuietly(staleToken: String): UnregisterOutcome = try {
-        val challenge = backend.fetchChallenge("unregister")
+        val challenge = freshChallenge("unregister")
         val userKey = signer.userKeyId()
         val timestamp = wireTimestamp(clock())
         val payload = SignedPushPayload.unregister(
@@ -379,8 +424,9 @@ class PushRegistrationInteractor(
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (refused: PushBackendRejectedException) {
+        if (refused.deterministic) throw refused
         onFailure?.invoke(refused)
-        if (refused.deterministic) UnregisterOutcome.REFUSED else UnregisterOutcome.RETRY
+        UnregisterOutcome.RETRY
     } catch (failure: Throwable) {
         onFailure?.invoke(failure)
         UnregisterOutcome.RETRY
@@ -392,6 +438,21 @@ class PushRegistrationInteractor(
          * [failureRetryCap] anyway, and an unchecked shift would
          * overflow. */
         private const val MAX_BACKOFF_SHIFT = 10
+
+        /** The debt-expiry bound (attempts AND age, both — see the
+         * class KDoc): enough attempts to rule out a bad day, enough
+         * age to rule out a fast burst. */
+        internal const val DEBT_ATTEMPT_LIMIT = 8
+        internal val DEBT_MAX_AGE: Duration = Duration.ofDays(7)
+
+        /** Consecutive failures after which a DETERMINISTIC refusal
+         * stops earning self-wakes — the anti-hammer bound; external
+         * triggers still retry. */
+        internal const val DETERMINISTIC_RETRY_LIMIT = 8
+
+        /** Sign only a challenge with at least this much TTL left —
+         * under it, one refetch (see [freshChallenge]). */
+        internal val CHALLENGE_MIN_REMAINING: Duration = Duration.ofSeconds(60)
 
         /** Refresh this far before server expiry — at most 7 days, at
          * most half the granted window (a short-lived grant refreshes

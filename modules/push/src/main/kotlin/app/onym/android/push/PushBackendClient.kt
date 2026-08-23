@@ -53,11 +53,15 @@ class PushBackendRejectedException(
      * onym-push `google/README.md`), and any 5xx, where the request
      * may be fine and the service is not.
      *
-     * The reconciler branches on this: a deterministic refusal of a
-     * pending unregister clears the debt (the token was never
-     * registered under this key, or the request is malformed — the
-     * backend refused knowingly, and retrying is pointless), while a
-     * retryable refusal keeps state untouched for the next pass.
+     * The reconciler consumes this as a PACING signal only — a
+     * deterministic refusal retries on the same bounded backoff but
+     * stops self-waking at an attempt bound, while a retryable one
+     * self-wakes without that bound. It never decides whether durable
+     * state (the pending-unregister debt) survives: unregister is
+     * idempotent for unknown tokens, so no refusal can mean "not
+     * registered here", and a 4xx may be transient in origin (a
+     * challenge outlived by a slow network). See
+     * `PushRegistrationInteractor`'s KDoc.
      */
     val deterministic: Boolean
         get() = statusCode in 400..499 &&
