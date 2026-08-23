@@ -185,6 +185,59 @@ class OkHttpPushBackendClientTest {
         assertEquals(PushBackendErrorCode.UNKNOWN, PushBackendErrorCode.fromRaw(null))
     }
 
+    /** A non-2xx whose body isn't the {error,message} envelope (an
+     * HTML error page from a proxy, an empty body) still classifies
+     * as a refusal — with the synthetic message and a null rawCode,
+     * which the typed classification maps to UNKNOWN. */
+    @Test
+    fun `an unparseable refusal body falls back to the synthetic message`() = runTest {
+        try {
+            client(502, "<html>bad gateway</html>").register(registerRequest(null))
+            fail("a 502 must throw")
+        } catch (e: PushBackendRejectedException) {
+            assertEquals(502, e.statusCode)
+            assertNull(e.rawCode)
+            assertEquals(PushBackendErrorCode.UNKNOWN, e.code)
+            assertEquals("push backend answered HTTP 502", e.message)
+        }
+    }
+
+    /** Pins the CURRENT 5xx classification: a 5xx lands as Rejected
+     * (not Unreachable). Behaviorally fine under the interactor —
+     * the deterministic flag is false for every 5xx, so the
+     * reconciler treats it as retryable either way; this test is a
+     * note, not a defect (PR #257 review). */
+    @Test
+    fun `a 5xx is a rejection but never a deterministic one`() = runTest {
+        try {
+            client(500, """{"error":"internal_error","message":"scripted"}""")
+                .register(registerRequest(null))
+            fail("a 500 must throw")
+        } catch (e: PushBackendRejectedException) {
+            assertEquals(500, e.statusCode)
+            assertEquals(PushBackendErrorCode.INTERNAL, e.code)
+            assertFalse(e.deterministic)
+        }
+    }
+
+    /** The rejected-vs-retryable boundary the reconciler consumes:
+     * plain 4xx refusals are deterministic; 429 and the capacity
+     * code (either alone) and every 5xx are not. */
+    @Test
+    fun `the deterministic flag draws the retry boundary`() {
+        fun rejected(status: Int, raw: String?) =
+            PushBackendRejectedException(status, raw, "scripted")
+        assertTrue(rejected(400, "bad_request").deterministic)
+        assertTrue(rejected(400, "signature_invalid").deterministic)
+        assertTrue(rejected(400, "relay_invalid").deterministic)
+        assertTrue(rejected(404, null).deterministic)
+        assertFalse(rejected(429, "capacity").deterministic)
+        assertFalse(rejected(429, null).deterministic)
+        assertFalse(rejected(400, "capacity").deterministic)
+        assertFalse(rejected(500, "internal_error").deterministic)
+        assertFalse(rejected(503, null).deterministic)
+    }
+
     /** An unparseable 2xx is a broken deploy or a proxy interlude —
      * retry-later, never a refusal. */
     @Test
