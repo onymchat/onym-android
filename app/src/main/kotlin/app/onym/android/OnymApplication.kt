@@ -1433,6 +1433,14 @@ class OnymApplication : Application() {
                 )
             else -> null
         }
+        // ONE prepare limiter for every PlayIntegrityAttestationProvider
+        // in this process: the 5-prepares-per-minute cap it guards is
+        // Google's PER-APP-INSTANCE budget, so the moderation and push
+        // seats must draw from the same window — two independent
+        // limiters would admit 10/min and let the seats drive each
+        // other into TOO_MANY_REQUESTS. Per-provider backoff state
+        // stays separate by design.
+        val playIntegrityPrepareLimiter = app.onym.android.moderation.PrepareRateLimiter()
         val moderationUi: ModerationUiDependencies?
         if (moderationBackend == null) {
             moderationUi = null
@@ -1445,6 +1453,7 @@ class OnymApplication : Application() {
                 app.onym.android.moderation.PlayIntegrityAttestationProvider(
                     context = applicationContext,
                     cloudProjectNumber = BuildConfig.PLAY_CLOUD_PROJECT_NUMBER,
+                    rateLimiter = playIntegrityPrepareLimiter,
                 )
             }
             val moderationSigner = IdentityModerationSigner(identityRepository)
@@ -1680,11 +1689,15 @@ class OnymApplication : Application() {
                 // story, and its API takes exactly the requestHash
                 // the push payload computes. A second instance (not
                 // moderation's) so the two seats' backoff states
-                // don't couple; same Cloud project number.
+                // don't couple — but the SAME prepare limiter, since
+                // the 5/min prepare cap is per app instance (see the
+                // shared limiter's construction above); same Cloud
+                // project number.
                 attestation = PlayIntegrityPushAttestation(
                     app.onym.android.moderation.PlayIntegrityAttestationProvider(
                         context = applicationContext,
                         cloudProjectNumber = BuildConfig.PLAY_CLOUD_PROJECT_NUMBER,
+                        rateLimiter = playIntegrityPrepareLimiter,
                     ),
                 ),
                 preference = pushPreference,
