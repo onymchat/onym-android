@@ -761,9 +761,9 @@ fun RootScreen(
                 val notificationsPermissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
                 ) { granted ->
-                    if (granted && pushDeps != null) {
-                        coroutineScope.launch { pushDeps.enable() }
-                    }
+                    // Application-scoped fire-and-forget: leaving
+                    // Settings must not cancel a toggle mid-flight.
+                    if (granted && pushDeps != null) pushDeps.enable()
                     // Denied: nothing was persisted; the toggle stays
                     // off on its own.
                 }
@@ -791,7 +791,7 @@ fun RootScreen(
                     onTogglePush = pushDeps?.let { push ->
                         { on: Boolean ->
                             if (!on) {
-                                coroutineScope.launch { push.disable() }
+                                push.disable()
                             } else if (
                                 android.os.Build.VERSION.SDK_INT >= 33 &&
                                 androidx.core.content.ContextCompat.checkSelfPermission(
@@ -806,7 +806,7 @@ fun RootScreen(
                                     android.Manifest.permission.POST_NOTIFICATIONS,
                                 )
                             } else {
-                                coroutineScope.launch { push.enable() }
+                                push.enable()
                             }
                         }
                     },

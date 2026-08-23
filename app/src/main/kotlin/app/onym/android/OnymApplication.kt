@@ -1776,8 +1776,13 @@ class OnymApplication : Application() {
             pushUi = PushUiDependencies(
                 enabledFlow = pushPreference.enabledFlow,
                 registeredFlow = pushPreference.registeredFlow,
-                enable = { pushCoordinator.enable() },
-                disable = { pushCoordinator.disable() },
+                // applicationScope, not the caller's composition
+                // scope: enable/disable are toggle-sized fire-and-
+                // forget state changes, and running them on a
+                // screen-lifetime scope let a navigate-away cancel
+                // between the preference write and the wake.
+                enable = { applicationScope.launch { pushCoordinator.enable() } },
+                disable = { applicationScope.launch { pushCoordinator.disable() } },
                 checkRevocation = { pushCoordinator.checkRevocation() },
             )
         }

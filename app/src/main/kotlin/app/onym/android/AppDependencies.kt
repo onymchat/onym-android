@@ -218,11 +218,13 @@ class PushUiDependencies(
     /** Flip ON — call only once POST_NOTIFICATIONS is granted (below
      *  API 33 it is granted by install); the Settings host owns the
      *  permission request, and a denial simply never calls this, so
-     *  the toggle snaps back on its own. */
-    val enable: suspend () -> Unit,
+     *  the toggle snaps back on its own. Fire-and-forget: runs on the
+     *  application scope, so navigating away from Settings mid-call
+     *  cannot cancel between the preference write and the wake. */
+    val enable: () -> Unit,
     /** Flip OFF — asks the server to forget this device, retried
-     *  until it succeeds. */
-    val disable: suspend () -> Unit,
+     *  until it succeeds. Application-scoped like [enable]. */
+    val disable: () -> Unit,
     /** App start / resume: if the preference is ON but the OS has
      *  notifications blocked, runs the full disable path. */
     val checkRevocation: () -> Unit,
