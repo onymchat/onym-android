@@ -180,8 +180,10 @@ class DataStorePushPreferenceProvider(
 }
 
 /** Test double — in-memory, fully functional, so reconciler tests can
- * assert the durable bookkeeping without DataStore. */
-class StaticPushPreferenceProvider(
+ * assert the durable bookkeeping without DataStore. `internal`, like
+ * the chats-core trio's `StaticReadReceiptsPreferenceProvider` — a
+ * test double must not ship as public API in the release AAR. */
+internal class StaticPushPreferenceProvider(
     enabled: Boolean = false,
 ) : PushPreferenceProvider {
     private val enabledState = MutableStateFlow(enabled)
