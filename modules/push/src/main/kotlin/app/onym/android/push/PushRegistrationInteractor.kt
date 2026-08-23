@@ -42,7 +42,11 @@ import kotlinx.coroutines.launch
  * Durability contract (see [PushPreferenceProvider]): a token the
  * backend must forget — disable, or the OLD token on rotation — is
  * written to `pendingUnregisterToken` BEFORE the unregister attempt
- * and cleared only on success, and every pending debt is drained
+ * and cleared on success — or expired when the backend refuses the
+ * unregister deterministically (see
+ * [PushBackendRejectedException.deterministic]): such a refusal can
+ * never succeed on retry, and holding the debt open would wedge every
+ * future registration behind it. Every still-owed debt is drained
  * before any register. Disable therefore works from
  * `lastRegisteredToken` even when FCM no longer answers, an offline
  * disable is retried until the server confirms, and a disable that
@@ -138,10 +142,16 @@ class PushRegistrationInteractor(
         }
 
         // Drain pending debt before ANY register: the server must
-        // forget the old token before it is told about a new one.
+        // forget the old token before it is told about a new one. A
+        // RETRY outcome gates the pass (transient — the next trigger
+        // drains again); a REFUSED outcome clears the debt and lets
+        // the pass continue — the backend refused the unregister
+        // knowingly and deterministically, so the token was never
+        // registered under this key (or the request is malformed) and
+        // retrying it forever would wedge every future registration.
         val pending = preference.pendingUnregisterToken()
         if (pending != null) {
-            if (!unregisterQuietly(pending)) return
+            if (unregisterQuietly(pending) == UnregisterOutcome.RETRY) return
             preference.setPendingUnregisterToken(null)
         }
 
@@ -151,7 +161,7 @@ class PushRegistrationInteractor(
             val target = preference.lastRegisteredToken() ?: return
             preference.setPendingUnregisterToken(target)
             preference.clearRegistration()
-            if (!unregisterQuietly(target)) return
+            if (unregisterQuietly(target) == UnregisterOutcome.RETRY) return
             preference.setPendingUnregisterToken(null)
             return
         }
@@ -227,10 +237,29 @@ class PushRegistrationInteractor(
         )
     }
 
-    /** One full unregister session for [staleToken]. Answers false on
-     * any failure (including attestation throttle) — the pending debt
-     * stays set and the next trigger retries. */
-    private suspend fun unregisterQuietly(staleToken: String): Boolean = try {
+    /** How an unregister session for a stale token ended, and what
+     * the caller owes the pending-debt slot for it. */
+    private enum class UnregisterOutcome {
+        /** The server confirmed — the debt is paid, clear it. */
+        FORGOTTEN,
+
+        /** The server understood the request and refused it
+         * deterministically ([PushBackendRejectedException.deterministic]):
+         * the token was never registered under this key, or the
+         * request is malformed. Retrying the identical request is
+         * pointless — clear the debt so it cannot wedge every future
+         * registration behind an unpayable refusal. */
+        REFUSED,
+
+        /** Unreachable, rate-limited (429 / `capacity`), throttled
+         * attestation, or any other transient condition — keep the
+         * debt, the next trigger retries. */
+        RETRY,
+    }
+
+    /** One full unregister session for [staleToken]. Never throws;
+     * the outcome says what to do with the pending debt. */
+    private suspend fun unregisterQuietly(staleToken: String): UnregisterOutcome = try {
         val challenge = backend.fetchChallenge("unregister")
         val userKey = signer.userKeyId()
         val timestamp = wireTimestamp(clock())
@@ -245,7 +274,7 @@ class PushRegistrationInteractor(
         ) {
             is PushAttestationToken.Token -> attested.value
             PushAttestationToken.Unsupported -> null
-            PushAttestationToken.Throttled -> return false
+            PushAttestationToken.Throttled -> return UnregisterOutcome.RETRY
         }
         val signature = signer.sign(payload)
         val serverKey = backend.fetchRegistrationKey()
@@ -259,12 +288,15 @@ class PushRegistrationInteractor(
                 tokenEnvelope = PushTokenEnvelope.seal(staleToken, serverKey.publicKey),
             ),
         )
-        true
+        UnregisterOutcome.FORGOTTEN
     } catch (cancelled: CancellationException) {
         throw cancelled
+    } catch (refused: PushBackendRejectedException) {
+        onFailure?.invoke(refused)
+        if (refused.deterministic) UnregisterOutcome.REFUSED else UnregisterOutcome.RETRY
     } catch (failure: Throwable) {
         onFailure?.invoke(failure)
-        false
+        UnregisterOutcome.RETRY
     }
 
     companion object {

@@ -42,6 +42,27 @@ class PushBackendRejectedException(
     override val message: String,
 ) : Exception(message) {
     val code: PushBackendErrorCode get() = PushBackendErrorCode.fromRaw(rawCode)
+
+    /**
+     * True when resubmitting the SAME request can never succeed: the
+     * backend understood it and refused it on its merits (4xx —
+     * `bad_request`, `signature_invalid`, `relay_invalid`). False for
+     * every retry-later refusal: HTTP 429 and the `capacity` code
+     * (the backend's fixed-window rate limits and pool caps answer
+     * both, on `/v1/challenge` and register/unregister alike — see
+     * onym-push `google/README.md`), and any 5xx, where the request
+     * may be fine and the service is not.
+     *
+     * The reconciler branches on this: a deterministic refusal of a
+     * pending unregister clears the debt (the token was never
+     * registered under this key, or the request is malformed — the
+     * backend refused knowingly, and retrying is pointless), while a
+     * retryable refusal keeps state untouched for the next pass.
+     */
+    val deterministic: Boolean
+        get() = statusCode in 400..499 &&
+            statusCode != 429 &&
+            code != PushBackendErrorCode.CAPACITY
 }
 
 /** The backend could not be reached, or answered unparseably — a
