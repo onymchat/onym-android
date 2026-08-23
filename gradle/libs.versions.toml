@@ -58,7 +58,17 @@ play-integrity = "1.4.0"
 # SeatEntitlement redemption). Second Google Play services dependency
 # in the app; a de-Googled device simply can't purchase a paid seat
 # (free offers are unaffected — see FreeTierEntitlementProvider).
-play-billing = "7.1.1"
+#
+# 9.1.0 — Play rejects updates built against Billing Library < 8.0.0
+# from 2026-08-31 (the same date as the target-API-36 gate above), and
+# the console flags the dependency even though no BillingClient call
+# has landed yet: the check reads the library packaged into the AAB,
+# not the call sites. Nothing in this repo references a Billing type
+# (see modules/foundation/build.gradle.kts), so the v7→v9 API breaks
+# cost us nothing today — the purchase-UI wiring will simply be
+# written against v9 when it lands. Requires compileSdk 35+ and
+# minSdk 21; the app is at 36 / 26.
+play-billing = "9.1.0"
 
 # Firebase — FCM data-only wakes for the push seat. The BOM pins
 # firebase-messaging; only the messaging artifact is pulled (no
@@ -177,7 +187,14 @@ play-integrity = { module = "com.google.android.play:integrity", version.ref = "
 # Firebase — messaging only (see the version entry).
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebase-bom" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
-play-billing = { module = "com.android.billingclient:billing-ktx", version.ref = "play-billing" }
+# `billing`, not `billing-ktx`: every billing-ktx above 8.0.0 declares
+# kotlin-stdlib 2.2.10, whose metadata a Kotlin 2.0.21 compiler refuses
+# to read ("binary version 2.2.0, expected 2.0.0" — an internal compiler
+# error, not a warning). The base artifact declares no Kotlin dependency
+# at all. It costs only the suspend wrappers (`queryProductDetails` and
+# friends), which nothing here calls; add ktx back with the Kotlin bump,
+# by which point the purchase UI will actually want them.
+play-billing = { module = "com.android.billingclient:billing", version.ref = "play-billing" }
 kotlinx-coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "kotlinx-coroutines" }
 
 # ZXing core — QR-bit-matrix generator (encode) + `MultiFormatReader`
