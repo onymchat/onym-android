@@ -289,6 +289,9 @@ class PushRegistrationInteractor(
         val signature = signer.sign(payload)
         val serverKey = backend.fetchRegistrationKey()
         val envelope = PushTokenEnvelope.seal(fcmToken, serverKey.publicKey)
+        // Inline padded Base64 (not Base64ByteArraySerializer) is
+        // deliberate: `signature` is a String on the wire and this
+        // matches the Rust fixtures' encoding exactly.
         val registration = backend.register(
             PushRegisterRequest(
                 userKey = userKey,
@@ -360,6 +363,8 @@ class PushRegistrationInteractor(
         }
         val signature = signer.sign(payload)
         val serverKey = backend.fetchRegistrationKey()
+        // Inline padded Base64 on purpose — see the note at the
+        // register call.
         backend.unregister(
             PushUnregisterRequest(
                 userKey = userKey,
