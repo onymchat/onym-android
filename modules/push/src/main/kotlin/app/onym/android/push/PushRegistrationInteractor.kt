@@ -39,6 +39,18 @@ import kotlinx.coroutines.launch
  * window is the server-granted registration lifetime — so short
  * server windows still refresh at their midpoint.
  *
+ * The arithmetic above only runs when a trigger arrives — this class
+ * GUARANTEES no cadence of its own. Keeping the registration from
+ * lapsing on a quiet app is the app-integration layer's job, and it
+ * does it: `PushCoordinator.start()` runs at every process launch
+ * (Application onCreate) and, when the preference is on, calls
+ * [pushEnabled] — so every app start is a pass, and the margin
+ * arithmetic gets its chance whenever the user actually uses the
+ * device the wakes are for. A device whose app never opens within the
+ * server window lets the registration lapse server-side by design:
+ * the backend must not watch relays forever for a device that
+ * stopped showing up.
+ *
  * Durability contract (see [PushPreferenceProvider]): a token the
  * backend must forget — disable, or the OLD token on rotation — is
  * written to `pendingUnregisterToken` BEFORE the unregister attempt
