@@ -1781,7 +1781,14 @@ class OnymApplication : Application() {
                 // forget state changes, and running them on a
                 // screen-lifetime scope let a navigate-away cancel
                 // between the preference write and the wake.
-                enable = { applicationScope.launch { pushCoordinator.enable() } },
+                enable = {
+                    // Channel first: the OS switch for this exact
+                    // feature should exist in system settings the
+                    // moment the user opts in, not after the first
+                    // wake happens to arrive.
+                    PushMessagingService.ensureChannel(applicationContext)
+                    applicationScope.launch { pushCoordinator.enable() }
+                },
                 disable = { applicationScope.launch { pushCoordinator.disable() } },
                 checkRevocation = { pushCoordinator.checkRevocation() },
             )

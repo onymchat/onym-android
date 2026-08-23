@@ -40,13 +40,7 @@ class PushMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         if (!canNotify()) return
         val manager = NotificationManagerCompat.from(this)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                getString(app.onym.android.strings.R.string.push_channel_name),
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ),
-        )
+        ensureChannel(this)
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
@@ -81,6 +75,24 @@ class PushMessagingService : FirebaseMessagingService() {
     companion object {
         const val CHANNEL_ID = "messages"
         private const val NOTIFICATION_ID = 1
+
+        /**
+         * Idempotent [CHANNEL_ID] creation. Called at enable() time
+         * as well as on delivery: without the enable-time call an
+         * opted-in user sees no "Messages" channel in system settings
+         * until the first wake happens to arrive, so the OS-level
+         * switch for exactly this feature is undiscoverable right
+         * when the user is thinking about it.
+         */
+        fun ensureChannel(context: android.content.Context) {
+            NotificationManagerCompat.from(context).createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    context.getString(app.onym.android.strings.R.string.push_channel_name),
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ),
+            )
+        }
 
         /**
          * Whether a notification posted on [CHANNEL_ID] can actually
