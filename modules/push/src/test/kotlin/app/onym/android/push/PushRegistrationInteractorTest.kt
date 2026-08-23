@@ -135,6 +135,29 @@ class PushRegistrationInteractorTest {
         assertEquals(Instant.parse("2026-09-21T12:00:00Z"), preference.expiresAt)
         // One challenge, one register: the two triggers coalesced.
         assertEquals(1, backend.challengeCount)
+        // And it was minted for the endpoint it authorizes.
+        assertEquals(listOf("register"), backend.challengePurposes)
+    }
+
+    /** The backend binds each challenge to its purpose and refuses a
+     * swap — so the CALLER'S choice is what needs pinning: a register
+     * session fetches a "register" challenge, an unregister session
+     * an "unregister" one. */
+    @Test
+    fun `challenge purposes bind to the session that spends them`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        val interactor = build(backend, preference)
+
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        advanceUntilIdle()
+        interactor.pushDisabled()
+        advanceUntilIdle()
+
+        assertEquals(1, backend.registered.size)
+        assertEquals(1, backend.unregistered.size)
+        assertEquals(listOf("register", "unregister"), backend.challengePurposes)
     }
 
     @Test
