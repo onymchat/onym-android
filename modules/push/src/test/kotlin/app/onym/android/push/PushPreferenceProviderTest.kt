@@ -130,6 +130,53 @@ class PushPreferenceProviderTest {
         assertNull(provider.pendingUnregisterToken())
     }
 
+    /** The debt's attempt bookkeeping (PR #255 round 2, finding 1):
+     * attempts count up, the FIRST attempt's stamp sticks, and any
+     * write to the debt slot — new token or clear — resets both, so
+     * a rotation's fresh debt starts its account at zero. */
+    @Test
+    fun `the debt attempt bookkeeping counts and resets with the slot`() = runTest {
+        assertEquals(0, provider.pendingUnregisterAttempts())
+        assertNull(provider.pendingUnregisterFirstAttemptAt())
+
+        provider.setPendingUnregisterToken("token-old")
+        provider.recordPendingUnregisterAttempt(Instant.parse("2026-08-22T12:00:00Z"))
+        provider.recordPendingUnregisterAttempt(Instant.parse("2026-08-23T12:00:00Z"))
+        assertEquals(2, provider.pendingUnregisterAttempts())
+        assertEquals(
+            Instant.parse("2026-08-22T12:00:00Z"),
+            provider.pendingUnregisterFirstAttemptAt(),
+        )
+
+        // Overwriting the slot with a DIFFERENT token starts fresh.
+        provider.setPendingUnregisterToken("token-newer")
+        assertEquals(0, provider.pendingUnregisterAttempts())
+        assertNull(provider.pendingUnregisterFirstAttemptAt())
+
+        // Clearing the slot drops the bookkeeping with it.
+        provider.recordPendingUnregisterAttempt(Instant.parse("2026-08-24T12:00:00Z"))
+        provider.setPendingUnregisterToken(null)
+        assertEquals(0, provider.pendingUnregisterAttempts())
+        assertNull(provider.pendingUnregisterFirstAttemptAt())
+    }
+
+    /** The double keeps the same attempt-bookkeeping contract. */
+    @Test
+    fun `the double mirrors the attempt bookkeeping`() = runTest {
+        val double = StaticPushPreferenceProvider()
+        double.setPendingUnregisterToken("token-old")
+        double.recordPendingUnregisterAttempt(Instant.parse("2026-08-22T12:00:00Z"))
+        double.recordPendingUnregisterAttempt(Instant.parse("2026-08-23T12:00:00Z"))
+        assertEquals(2, double.pendingUnregisterAttempts())
+        assertEquals(
+            Instant.parse("2026-08-22T12:00:00Z"),
+            double.pendingUnregisterFirstAttemptAt(),
+        )
+        double.setPendingUnregisterToken(null)
+        assertEquals(0, double.pendingUnregisterAttempts())
+        assertNull(double.pendingUnregisterFirstAttemptAt())
+    }
+
     // ─── the in-memory double, held to the same contract ──────────
 
     @Test
