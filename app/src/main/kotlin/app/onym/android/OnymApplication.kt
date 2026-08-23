@@ -1683,7 +1683,12 @@ class OnymApplication : Application() {
             )
             val pushInteractor = app.onym.android.push.PushRegistrationInteractor(
                 backend = pushBackend,
-                signer = IdentityPushSigner(identityRepository),
+                // A device-local random key, NOT the identity key:
+                // the backend discards the verified userKey, so the
+                // identity key buys nothing and would let the backend
+                // link persona keys across periodic re-registrations
+                // (see DevicePushSigner's KDoc). Coordinated with iOS.
+                signer = DevicePushSigner(applicationContext),
                 // Reused, not forked: :moderation's provider already
                 // owns the single-flight + prepare-cap + backoff
                 // story, and its API takes exactly the requestHash
