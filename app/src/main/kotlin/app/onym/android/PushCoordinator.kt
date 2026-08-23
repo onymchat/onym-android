@@ -52,6 +52,13 @@ class PushCoordinator(
      * disable path turns it back off, symmetric with the server-side
      * unregister that already runs. */
     private val firebaseAutoInit: (Boolean) -> Unit = {},
+    /** Synchronous write of the graph-free render-gate mirror
+     * ([PushMessagingService.writeRenderGate] in production): the
+     * service gates rendering on the user preference through a plain
+     * SharedPreferences copy of the flag, because it must not pay
+     * the composition root per delivery. Written on every
+     * enable/disable and re-asserted at [start]. */
+    private val renderGateMirror: (Boolean) -> Unit = {},
 ) {
 
     fun start() {
@@ -67,6 +74,7 @@ class PushCoordinator(
             }
         }
         scope.launch {
+            renderGateMirror(preference.enabled())
             if (!preference.enabled()) {
                 // A pending server-side forget survives a relaunch —
                 // give the reconciler a chance to drain it.
@@ -103,11 +111,16 @@ class PushCoordinator(
     suspend fun enable() {
         if (!notificationsEnabled()) return
         firebaseAutoInit(true)
+        renderGateMirror(true)
         fetchToken()?.let { interactor.updateToken(it) }
         interactor.pushEnabled()
     }
 
     suspend fun disable() {
+        // Mirror FIRST: a disable may take a while to reach the
+        // server (retried until it confirms), and wakes arriving in
+        // that window must already find the render gate closed.
+        renderGateMirror(false)
         firebaseAutoInit(false)
         interactor.pushDisabled()
     }

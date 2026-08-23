@@ -1788,6 +1788,9 @@ class OnymApplication : Application() {
                             .isAutoInitEnabled = on
                     }
                 },
+                renderGateMirror = { on ->
+                    PushMessagingService.writeRenderGate(applicationContext, on)
+                },
             )
             pushCoordinator.start()
             pushUi = PushUiDependencies(

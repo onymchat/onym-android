@@ -63,6 +63,12 @@ class PushMessagingService : FirebaseMessagingService() {
     }
 
     private fun canNotify(): Boolean {
+        // The user's word first: a disable that hasn't reached the
+        // server yet (offline — "retried until the server confirms")
+        // leaves the backend waking this device for a while, and
+        // those wakes must not render "New message" for a switch the
+        // user just turned off.
+        if (!renderGateAllows(this)) return false
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -75,6 +81,36 @@ class PushMessagingService : FirebaseMessagingService() {
     companion object {
         const val CHANNEL_ID = "messages"
         private const val NOTIFICATION_ID = 1
+
+        /**
+         * A plain-SharedPreferences MIRROR of the push opt-in flag —
+         * deliberately not the DataStore preference itself: this
+         * service must stay cheap and graph-free (FCM may spin the
+         * process up just for one delivery, and reading the DataStore
+         * would pay the composition root for a one-line
+         * notification), so the coordinator writes the flag here
+         * SYNCHRONOUSLY (commit) on every enable/disable and the
+         * render gate reads it without touching the graph. Default
+         * false is safe: no opt-in ever happened → nothing was
+         * registered → no wake arrives (and `start()` re-asserts the
+         * mirror at every process launch).
+         */
+        private const val RENDER_GATE_PREFS = "app.onym.android.push_render_gate"
+        private const val RENDER_GATE_KEY = "enabled"
+
+        /** Synchronous (commit) mirror write — see [renderGateAllows]. */
+        @Suppress("ApplySharedPref")
+        fun writeRenderGate(context: android.content.Context, enabled: Boolean) {
+            context.getSharedPreferences(RENDER_GATE_PREFS, android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(RENDER_GATE_KEY, enabled)
+                .commit()
+        }
+
+        /** The user-preference half of the render gate. */
+        fun renderGateAllows(context: android.content.Context): Boolean =
+            context.getSharedPreferences(RENDER_GATE_PREFS, android.content.Context.MODE_PRIVATE)
+                .getBoolean(RENDER_GATE_KEY, false)
 
         /**
          * Idempotent [CHANNEL_ID] creation. Called at enable() time
