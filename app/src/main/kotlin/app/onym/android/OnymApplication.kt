@@ -1764,9 +1764,12 @@ class OnymApplication : Application() {
                             .token.await()
                     }.getOrNull()
                 },
+                // Channel-aware: app-level areNotificationsEnabled()
+                // alone misses a user who blocked only the `messages`
+                // channel — the shared helper is the one definition
+                // both the render gate and this revocation check use.
                 notificationsEnabled = {
-                    androidx.core.app.NotificationManagerCompat.from(applicationContext)
-                        .areNotificationsEnabled()
+                    PushMessagingService.notificationsRenderable(applicationContext)
                 },
             )
             pushCoordinator.start()

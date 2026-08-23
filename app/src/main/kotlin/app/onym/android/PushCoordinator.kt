@@ -38,8 +38,10 @@ class PushCoordinator(
      * Firebase is unconfigured (no google-services.json) or the
      * fetch fails; the reconciler simply waits for a token. */
     private val fetchToken: suspend () -> String?,
-    /** `NotificationManagerCompat.areNotificationsEnabled` in
-     * production; injectable for tests. */
+    /** [PushMessagingService.notificationsRenderable] in production —
+     * app-level notifications enabled AND the `messages` channel not
+     * blocked, the same definition the render gate uses; injectable
+     * for tests. */
     private val notificationsEnabled: () -> Boolean,
 ) {
 

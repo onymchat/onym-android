@@ -75,11 +75,31 @@ class PushMessagingService : FirebaseMessagingService() {
         ) {
             return false
         }
-        return NotificationManagerCompat.from(this).areNotificationsEnabled()
+        return notificationsRenderable(this)
     }
 
     companion object {
         const val CHANNEL_ID = "messages"
         private const val NOTIFICATION_ID = 1
+
+        /**
+         * Whether a notification posted on [CHANNEL_ID] can actually
+         * render — the ONE definition both gates share (this
+         * service's render gate and PushCoordinator's revocation
+         * check via the composition root), so they cannot drift.
+         * App-level `areNotificationsEnabled()` is not enough: a user
+         * who blocks only the `messages` CHANNEL leaves it true while
+         * `notify()` silently drops every wake — exactly the
+         * "backend watching relays for wakes that can never render"
+         * state the revocation check exists to prevent. A channel
+         * the system hasn't seen yet (null) is not revoked.
+         */
+        fun notificationsRenderable(context: android.content.Context): Boolean {
+            val manager = NotificationManagerCompat.from(context)
+            if (!manager.areNotificationsEnabled()) return false
+            val channel = manager.getNotificationChannelCompat(CHANNEL_ID)
+            return channel == null ||
+                channel.importance != NotificationManagerCompat.IMPORTANCE_NONE
+        }
     }
 }
