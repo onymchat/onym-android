@@ -155,6 +155,14 @@ fun SettingsScreen(
      *  registration. `pushEnabled && !pushRegistered` renders the
      *  "still activating" footnote under the toggle. */
     pushRegistered: Boolean = false,
+    /** True when the reconciler's last pass FAILED — while `enabled
+     *  && !registered`, the footnote stops claiming "turning on…"
+     *  and says the attempt failed. */
+    pushActivationFailed: Boolean = false,
+    /** With [pushActivationFailed]: true when a retry is coming on
+     *  its own ("will keep trying"), false when the deterministic
+     *  attempt bound was reached ("check configuration"). */
+    pushActivationWillRetry: Boolean = true,
     /** True after an enable attempt found the `messages` channel (or
      *  app-level notifications) blocked: nothing was persisted, the
      *  switch stays off, and the footnote below the toggle explains
@@ -426,7 +434,16 @@ fun SettingsScreen(
                 if (pushEnabled && !pushRegistered) {
                     item {
                         SettingsFootnote(
-                            stringResource(R.string.settings_push_activating),
+                            stringResource(
+                                when {
+                                    !pushActivationFailed ->
+                                        R.string.settings_push_activating
+                                    pushActivationWillRetry ->
+                                        R.string.settings_push_failed_retrying
+                                    else ->
+                                        R.string.settings_push_failed_check
+                                },
+                            ),
                         )
                     }
                 }

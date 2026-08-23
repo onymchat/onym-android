@@ -1796,6 +1796,7 @@ class OnymApplication : Application() {
             pushUi = PushUiDependencies(
                 enabledFlow = pushPreference.enabledFlow,
                 registeredFlow = pushPreference.registeredFlow,
+                registrationState = pushInteractor.state,
                 // applicationScope, not the caller's composition
                 // scope: enable/disable are toggle-sized fire-and-
                 // forget state changes, and running them on a

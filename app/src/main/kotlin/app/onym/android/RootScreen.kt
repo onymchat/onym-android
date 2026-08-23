@@ -757,6 +757,14 @@ fun RootScreen(
                 val pushRegistered by (pushDeps?.registeredFlow
                     ?: kotlinx.coroutines.flow.flowOf(false))
                     .collectAsStateWithLifecycle(initialValue = false)
+                val pushState by (
+                    pushDeps?.registrationState
+                        ?: kotlinx.coroutines.flow.flowOf(
+                            app.onym.android.push.PushRegistrationState.Idle,
+                        )
+                    ).collectAsStateWithLifecycle(
+                    initialValue = app.onym.android.push.PushRegistrationState.Idle,
+                )
                 val settingsContext = LocalContext.current
                 // The channel gate at the door (same snapback shape
                 // as a permission denial): a user who blocked only
@@ -832,6 +840,11 @@ fun RootScreen(
                     },
                     pushEnabled = pushEnabled,
                     pushRegistered = pushRegistered,
+                    pushActivationFailed = pushState
+                        is app.onym.android.push.PushRegistrationState.Failed,
+                    pushActivationWillRetry = (
+                        pushState as? app.onym.android.push.PushRegistrationState.Failed
+                        )?.willRetry != false,
                     pushChannelBlocked = pushChannelBlocked,
                     onOpenNotificationChannelSettings = {
                         // The channel's own screen when the channel is

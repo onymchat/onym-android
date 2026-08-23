@@ -215,6 +215,16 @@ class PushUiDependencies(
     /** Whether the backend has confirmed a registration. `enabled &&
      *  !registered` renders the "still activating" footnote. */
     val registeredFlow: kotlinx.coroutines.flow.Flow<Boolean>,
+    /** The reconciler's last-pass conclusion
+     *  ([app.onym.android.push.PushRegistrationState]) — what makes a
+     *  terminal failure diagnosable: while `enabled && !registered`,
+     *  a `Failed` state turns the "activating" footnote into
+     *  "couldn't activate — will keep trying" (willRetry) or
+     *  "couldn't activate — check configuration" (the deterministic
+     *  attempt bound was reached). Carries an error code at most,
+     *  never request contents. */
+    val registrationState:
+        kotlinx.coroutines.flow.StateFlow<app.onym.android.push.PushRegistrationState>,
     /** Flip ON — call only once POST_NOTIFICATIONS is granted (below
      *  API 33 it is granted by install); the Settings host owns the
      *  permission request, and a denial simply never calls this, so
