@@ -506,6 +506,43 @@ class PushRegistrationInteractorTest {
         assertNull(preference.pendingUnregister)
     }
 
+    /** The documented conflation semantics (PR #257 review, finding
+     * 16): any number of triggers landing while a pass is RUNNING —
+     * not merely queued — collapse into exactly one follow-up pass,
+     * which reads the state current at ITS start. */
+    @Test
+    fun `triggers during a running pass coalesce into one follow-up`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        val interactor = build(backend, preference)
+
+        backend.registerGate = CompletableDeferred()
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        advanceUntilIdle()
+        // The pass is genuinely mid-flight, suspended inside
+        // register() — after its challenge, before its response.
+        assertEquals(1, backend.challengeCount)
+        assertEquals(0, backend.registered.size)
+
+        // Three triggers against the running pass, one of which
+        // changes the desired state.
+        val widened = subscriptions +
+            PushSubscription("00ff00ff00ff00ff", listOf("wss://nostr.onym.app"))
+        interactor.updateSubscriptions(widened)
+        interactor.pushEnabled()
+        interactor.pushEnabled()
+        backend.registerGate!!.complete(Unit)
+        backend.registerGate = null
+        advanceUntilIdle()
+
+        // Exactly ONE follow-up pass ran (2 sessions total, not 4),
+        // and it asserted the widened set.
+        assertEquals(2, backend.challengeCount)
+        assertEquals(2, backend.registered.size)
+        assertEquals(widened, backend.registered.last().subscriptions)
+    }
+
     /** The reentrancy contract: a disable landing while the register
      * is suspended on the network must not record the registration —
      * the just-registered token becomes pending debt and is
