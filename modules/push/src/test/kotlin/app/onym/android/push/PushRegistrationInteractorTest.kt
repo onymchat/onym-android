@@ -456,6 +456,103 @@ class PushRegistrationInteractorTest {
         assertEquals(PushRegistrationState.Idle, interactor.state.value)
     }
 
+    /** The doubling itself (PR #257 review): after two consecutive
+     * failures the SECOND retry waits 60 s — a mutant collapsing the
+     * arithmetic to a flat 30 s base fires early and is caught by
+     * the 31 s probe. Counters are SNAPSHOTTED while the backend is
+     * failing and asserted only after it heals: a transient failure
+     * reschedules itself unbounded, so an assertion thrown
+     * mid-flight would leave runTest's cleanup draining a retry loop
+     * that never goes idle. */
+    @Test
+    fun `the second retry waits sixty seconds not thirty`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        val interactor = build(backend, preference)
+
+        backend.failChallenge = true
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        runOnePass()
+        val afterFirstPass = backend.challengeAttempts
+
+        // Retry #1 fires at 30 s and fails again.
+        advanceTimeBy(31_000)
+        runCurrent()
+        runOnePass()
+        val afterTheFirstBackoff = backend.challengeAttempts
+
+        // Another 31 s: retry #2 must NOT have fired — it is due
+        // 60 s after the second failure, not another 30.
+        advanceTimeBy(31_000)
+        runCurrent()
+        runOnePass()
+        val thirtyOneSecondsLater = backend.challengeAttempts
+
+        // ...and by 60 s it does fire.
+        advanceTimeBy(30_000)
+        runCurrent()
+        runOnePass()
+        val sixtySecondsLater = backend.challengeAttempts
+
+        backend.failChallenge = false
+        advanceUntilIdle()
+
+        assertEquals(1, afterFirstPass)
+        assertEquals(2, afterTheFirstBackoff)
+        assertEquals(2, thirtyOneSecondsLater)
+        assertEquals(3, sixtySecondsLater)
+        assertEquals(1, backend.registered.size)
+    }
+
+    /** The cap: the doubling stops at failureRetryCap (15 min) —
+     * min(30 s × 2^5, cap) = cap, so the seventh attempt comes at
+     * 900 s, not 960. Probe windows leave ~10 s of slack for the
+     * debounce/slop drift the ladder accumulates, well under the
+     * 60 s gaps being distinguished. (The deterministic ATTEMPT
+     * bound is pinned in `a deterministic refusal stops self-waking
+     * at the attempt bound`; transient failures like these retry
+     * unbounded, hence the same snapshot-then-heal shape as above.) */
+    @Test
+    fun `the backoff doubling stops at the cap`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        val interactor = build(backend, preference)
+
+        backend.failChallenge = true
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        runOnePass()
+        // Walk the ladder: 30, 60, 120, 240, 480 s.
+        for (delay in listOf(30_000L, 60_000L, 120_000L, 240_000L, 480_000L)) {
+            advanceTimeBy(delay + 1_000)
+            runCurrent()
+            runOnePass()
+        }
+        val afterTheLadder = backend.challengeAttempts
+
+        // The sixth failure schedules min(960 s, 900 s) = the cap:
+        // nothing 880 s in...
+        advanceTimeBy(880_000)
+        runCurrent()
+        runOnePass()
+        val beforeTheCap = backend.challengeAttempts
+        // ...the retry lands at 900 s — and had the doubling gone
+        // uncapped (960 s), this probe would still be too early.
+        advanceTimeBy(25_000)
+        runCurrent()
+        runOnePass()
+        val atTheCap = backend.challengeAttempts
+
+        backend.failChallenge = false
+        advanceUntilIdle()
+
+        assertEquals(6, afterTheLadder)
+        assertEquals(6, beforeTheCap)
+        assertEquals(7, atTheCap)
+        assertEquals(1, backend.registered.size)
+    }
+
     /** Backend alignment: a 429/capacity refusal (the fixed-window
      * rate limits on challenge AND register) is fully retryable —
      * nothing recorded, nothing cleared, and the self-wake retries. */
