@@ -47,7 +47,9 @@ class PushCoordinator(
 
     fun start() {
         scope.launch {
-            subscriptions.collect { interactor.updateSubscriptions(it) }
+            subscriptions.collect {
+                interactor.updateSubscriptions(it?.let(::capToBackendLimits))
+            }
         }
         // Same-process token rotations from PushMessagingService.
         scope.launch {
@@ -90,5 +92,83 @@ class PushCoordinator(
         scope.launch {
             if (preference.enabled() && !notificationsEnabled()) disable()
         }
+    }
+
+    companion object {
+        /** The backend's configured default relay (`PUSH_DEFAULT_RELAY`
+         * in onym-push `google/`), exempt from every server-side cap.
+         * Prioritized when present in the user's configured list —
+         * never injected into it: the backend must only watch relays
+         * this device actually reads. */
+        internal const val DEFAULT_RELAY = "wss://nostr.onym.app"
+
+        // The backend's per-device relay caps, mirrored client-side
+        // so a heavily-configured device truncates deterministically
+        // instead of collecting relay_invalid/bad_request refusals.
+        // Source: onym-push google/README.md ("Relay capacity is
+        // three nested caps") and google/src/config.rs defaults —
+        // PUSH_MAX_RELAYS_PER_TAG=4, PUSH_MAX_RELAYS_PER_DEVICE=8
+        // (distinct hosts), PUSH_MAX_RELAYS_PER_HOST=4 (URLs per host,
+        // per device). The global 50-URL pool cap is the server's
+        // business (grandfathered upserts) and cannot be mirrored.
+        internal const val MAX_RELAYS_PER_TAG = 4
+        internal const val MAX_DISTINCT_HOSTS_PER_DEVICE = 8
+        internal const val MAX_URLS_PER_HOST_PER_DEVICE = 4
+
+        /**
+         * Truncates a desired subscription set to what the backend's
+         * per-device caps will accept: per tag, the default relay
+         * first (when configured) then the user's relays in
+         * configured order, cut at [MAX_RELAYS_PER_TAG]; across the
+         * whole set, at most [MAX_DISTINCT_HOSTS_PER_DEVICE] distinct
+         * non-default hosts and [MAX_URLS_PER_HOST_PER_DEVICE] URLs
+         * per host. Deterministic: earlier tags and
+         * earlier-configured relays win, so the same configuration
+         * always registers the same set and the fingerprint
+         * arithmetic stays stable.
+         */
+        internal fun capToBackendLimits(
+            subscriptions: List<PushSubscription>,
+        ): List<PushSubscription> {
+            // Device-wide budget of accepted non-default URLs, by host.
+            val acceptedByHost = mutableMapOf<String, MutableSet<String>>()
+            return subscriptions.map { subscription ->
+                val ordered =
+                    subscription.relays.filter { it == DEFAULT_RELAY } +
+                        subscription.relays.filter { it != DEFAULT_RELAY }
+                val kept = mutableListOf<String>()
+                for (url in ordered) {
+                    if (kept.size >= MAX_RELAYS_PER_TAG) break
+                    if (url == DEFAULT_RELAY) {
+                        // Exempt from the host/URL budgets server-side.
+                        if (url !in kept) kept.add(url)
+                        continue
+                    }
+                    if (url in kept) continue
+                    val host = hostOf(url)
+                    val urls = acceptedByHost[host]
+                    when {
+                        urls == null ->
+                            if (acceptedByHost.size < MAX_DISTINCT_HOSTS_PER_DEVICE) {
+                                acceptedByHost[host] = mutableSetOf(url)
+                                kept.add(url)
+                            }
+                        url in urls -> kept.add(url)
+                        urls.size < MAX_URLS_PER_HOST_PER_DEVICE -> {
+                            urls.add(url)
+                            kept.add(url)
+                        }
+                    }
+                }
+                PushSubscription(tag = subscription.tag, relays = kept)
+            }
+        }
+
+        /** Lowercased host of a `wss://host[:port][/path]` URL — the
+         * unit the backend's per-device host cap counts. */
+        private fun hostOf(url: String): String = url
+            .substringAfter("://")
+            .takeWhile { it != ':' && it != '/' }
+            .lowercase()
     }
 }
