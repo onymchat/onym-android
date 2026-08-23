@@ -14,10 +14,13 @@ import kotlinx.coroutines.launch
  * and owns the enable/disable choreography the Settings toggle and
  * the launch-time revocation check call into.
  *
- * The subscription flow emits `null` until identities have actually
- * loaded — the composition root maps a not-yet-populated identity
- * list to null, never to an empty set, so a cold start can't
- * register "watch nothing" before the bootstrap lands.
+ * The subscription flow emits `null` until the identity and relay
+ * stores have BOOTSTRAPPED — the composition root gates on each
+ * store's first real load, not on emptiness — so a cold start can't
+ * register "watch nothing" before the bootstrap lands, while a
+ * genuinely empty set after load (last identity deleted, every relay
+ * removed) flows through as `[]` and IS sent: that clearing register
+ * is the one that tells the backend to stop watching.
  *
  * The system notification switch is the master: if the preference is
  * ON but the OS has notifications blocked for this app, the seat

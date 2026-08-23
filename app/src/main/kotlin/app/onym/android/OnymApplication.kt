@@ -43,6 +43,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -1691,30 +1692,50 @@ class OnymApplication : Application() {
             )
             // ALL identities' inbox tags register together (the
             // footnote in Settings says so): a wake must arrive no
-            // matter which identity was messaged. `null` (never an
-            // empty set) until BOTH the identity list and the relay
-            // configuration have actually loaded — the initial empty
-            // StateFlow emissions are "not loaded yet", and
-            // registering an empty set on cold start would tell the
-            // backend to watch nothing.
-            val pushSubscriptions =
-                kotlinx.coroutines.flow.combine(
-                    identityRepository.identities,
-                    nostrRelaysRepository.snapshots,
-                ) { summaries, relays ->
-                    val urls = relays.endpoints.map { it.url }
-                    if (summaries.isEmpty() || urls.isEmpty()) {
-                        null
-                    } else {
-                        summaries.map { summary ->
-                            app.onym.android.push.PushSubscription(
-                                tag = app.onym.android.identity.IdentityRepository
-                                    .inboxTag(summary.inboxPublicKey),
-                                relays = urls,
-                            )
-                        }
-                    }
+            // matter which identity was messaged. "Not loaded yet"
+            // and "loaded, and empty" are DIFFERENT values here: the
+            // reconciler's contract is that an empty list is
+            // meaningful (no identities → watch nothing) and must be
+            // SENT, so mapping emptiness to null would swallow the
+            // one register that matters most — the clearing one after
+            // the last identity (or every relay) is deleted. So the
+            // flow gates once on each store's bootstrap signal —
+            // identity: the first non-null snapshot (the launch-time
+            // bootstrap() populates it); relays: the first hydrated
+            // configuration (post-bootstrap it is either non-empty or
+            // deliberately emptied with hasUserInteracted set; the
+            // pre-load initial is empty+non-interacted) — and from
+            // then on every emission flows through as-is, empty
+            // included. Zero relays maps to "watch nothing": the
+            // backend refuses empty-relay entries.
+            val pushSubscriptions: kotlinx.coroutines.flow.Flow<
+                List<app.onym.android.push.PushSubscription>?,
+                > = kotlinx.coroutines.flow.flow {
+                emit(null)
+                identityRepository.snapshots.filterNotNull().first()
+                nostrRelaysRepository.snapshots.first {
+                    it.endpoints.isNotEmpty() || it.hasUserInteracted
                 }
+                emitAll(
+                    kotlinx.coroutines.flow.combine(
+                        identityRepository.identities,
+                        nostrRelaysRepository.snapshots,
+                    ) { summaries, relays ->
+                        val urls = relays.endpoints.map { it.url }
+                        if (urls.isEmpty()) {
+                            emptyList()
+                        } else {
+                            summaries.map { summary ->
+                                app.onym.android.push.PushSubscription(
+                                    tag = app.onym.android.identity.IdentityRepository
+                                        .inboxTag(summary.inboxPublicKey),
+                                    relays = urls,
+                                )
+                            }
+                        }
+                    },
+                )
+            }
             val pushCoordinator = PushCoordinator(
                 interactor = pushInteractor,
                 preference = pushPreference,
