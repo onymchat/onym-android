@@ -186,12 +186,12 @@ class PushCoordinator(
             val acceptedByHost = mutableMapOf<String, MutableSet<String>>()
             return subscriptions.map { subscription ->
                 val ordered =
-                    subscription.relays.filter { it == DEFAULT_RELAY } +
-                        subscription.relays.filter { it != DEFAULT_RELAY }
+                    subscription.relays.filter(::isDefaultRelay) +
+                        subscription.relays.filterNot(::isDefaultRelay)
                 val kept = mutableListOf<String>()
                 for (url in ordered) {
                     if (kept.size >= MAX_RELAYS_PER_TAG) break
-                    if (url == DEFAULT_RELAY) {
+                    if (isDefaultRelay(url)) {
                         // Exempt from the host/URL budgets server-side.
                         if (url !in kept) kept.add(url)
                         continue
@@ -222,5 +222,13 @@ class PushCoordinator(
             .substringAfter("://")
             .takeWhile { it != ':' && it != '/' }
             .lowercase()
+
+        /** By HOST, not exact string: a user-configured
+         * `wss://nostr.onym.app/` (trailing slash, or an uppercased
+         * host) is still the default relay and must keep its
+         * server-side cap exemption instead of consuming a host
+         * slot. */
+        internal fun isDefaultRelay(url: String): Boolean =
+            hostOf(url) == hostOf(DEFAULT_RELAY)
     }
 }
