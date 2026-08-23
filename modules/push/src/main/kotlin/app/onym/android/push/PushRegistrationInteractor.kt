@@ -54,23 +54,48 @@ import kotlinx.coroutines.launch
  * just-registered token into pending debt instead of recording it.
  *
  * Failures are quiet — no user-activity logging (privacy: the
- * backend registration IS activity metadata) — and simply leave the
- * state to be retried by the next trigger. [onFailure] is a test-only
- * observation hook.
+ * backend registration IS activity metadata) — and leave the durable
+ * state untouched. RETRY CADENCE CONTRACT: this class is not the
+ * periodic driver. The app-integration layer re-runs a pass at every
+ * app start and foreground (`PushCoordinator.start()` /
+ * `checkRevocation()`), and ordinary triggers (token rotation,
+ * subscription change, toggle) arrive on their own; what this class
+ * adds is exactly one delayed self-wake per failed pass, with
+ * exponential backoff capped at [failureRetryCap] — so an offline
+ * disable keeps retrying while the process lives instead of leaving
+ * the backend watching until an unrelated trigger happens to fire. A
+ * pass that fails on a DETERMINISTIC backend rejection (see
+ * [PushBackendRejectedException.deterministic]) schedules no
+ * self-wake: resubmitting the identical request is pointless, and
+ * only a state-changing trigger can make the next attempt different.
+ * [onFailure] is a test-only observation hook.
  */
 class PushRegistrationInteractor(
     private val backend: PushBackendClient,
     private val signer: PushSigner,
     private val attestation: PushAttestationProvider,
     private val preference: PushPreferenceProvider,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     private val clock: () -> Instant = Instant::now,
     private val debounce: Duration = Duration.ofSeconds(2),
     private val refreshInterval: Duration = Duration.ofDays(3),
+    /** First self-wake delay after a failed pass; doubles per
+     * consecutive failure up to [failureRetryCap]. */
+    private val failureRetryBase: Duration = Duration.ofSeconds(30),
+    private val failureRetryCap: Duration = Duration.ofMinutes(15),
     private val onFailure: ((Throwable) -> Unit)? = null,
 ) {
     private val token = AtomicReference<String?>(null)
     private val subscriptions = AtomicReference<List<PushSubscription>?>(null)
+
+    /** Consecutive failed passes — sizes the self-wake backoff; reset
+     * by any pass that completes without throwing. Worker-loop
+     * confined (passes are strictly serialized). */
+    private var consecutiveFailures = 0
+
+    /** At most ONE outstanding failure self-wake, ever — a burst of
+     * failing triggers must not stack delayed retries. */
+    private val retryScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** Conflated: any number of triggers collapse into at most one
      * queued pass. A trigger during the debounce window is absorbed
@@ -120,16 +145,51 @@ class PushRegistrationInteractor(
 
     private suspend fun reconcile() {
         try {
-            pass()
+            // Quiet on every path — nothing recorded. A pass that is
+            // transiently blocked (thrown network failure, retryable
+            // refusal, a RETRY unregister outcome, a throttled
+            // attestation) earns one delayed self-wake (see the class
+            // KDoc's cadence contract); a deterministic rejection
+            // earns none — resubmitting the identical request cannot
+            // succeed, so only a state-changing trigger retries it.
+            if (pass()) {
+                consecutiveFailures = 0
+            } else {
+                scheduleFailureRetry()
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Throwable) {
-            // Quiet: nothing recorded, the next trigger retries.
             onFailure?.invoke(failure)
+            val deterministic =
+                (failure as? PushBackendRejectedException)?.deterministic == true
+            if (!deterministic) scheduleFailureRetry()
         }
     }
 
-    private suspend fun pass() {
+    /** One delayed self-wake, exponential backoff from
+     * [failureRetryBase] capped at [failureRetryCap], at most one
+     * outstanding at a time. */
+    private fun scheduleFailureRetry() {
+        consecutiveFailures += 1
+        if (!retryScheduled.compareAndSet(false, true)) return
+        val shift = (consecutiveFailures - 1).coerceAtMost(MAX_BACKOFF_SHIFT)
+        val backoff = minOf(
+            failureRetryBase.multipliedBy(1L shl shift),
+            failureRetryCap,
+        )
+        scope.launch {
+            delay(backoff.toMillis())
+            retryScheduled.set(false)
+            wakeUp()
+        }
+    }
+
+    /** Answers whether the pass CONVERGED: true when the backend now
+     * matches the desired state (or nothing can be done until a new
+     * input arrives — no token/subscriptions yet); false when the
+     * pass was blocked by a transient condition worth a self-wake. */
+    private suspend fun pass(): Boolean {
         // Token rotation: the backend holds a token this device no
         // longer has. The old token becomes pending debt (durable,
         // before any attempt) and the stale registration record is
@@ -151,23 +211,25 @@ class PushRegistrationInteractor(
         // retrying it forever would wedge every future registration.
         val pending = preference.pendingUnregisterToken()
         if (pending != null) {
-            if (unregisterQuietly(pending) == UnregisterOutcome.RETRY) return
+            if (unregisterQuietly(pending) == UnregisterOutcome.RETRY) return false
             preference.setPendingUnregisterToken(null)
         }
 
         if (!preference.enabled()) {
             // Disable: forget whatever the backend holds — from the
             // durable record, so this works when no live token exists.
-            val target = preference.lastRegisteredToken() ?: return
+            val target = preference.lastRegisteredToken() ?: return true
             preference.setPendingUnregisterToken(target)
             preference.clearRegistration()
-            if (unregisterQuietly(target) == UnregisterOutcome.RETRY) return
+            if (unregisterQuietly(target) == UnregisterOutcome.RETRY) return false
             preference.setPendingUnregisterToken(null)
-            return
+            return true
         }
 
-        val fcmToken = currentToken ?: return
-        val subs = subscriptions.get() ?: return
+        // Waiting for inputs, not blocked: the missing token or
+        // subscription set arrives as its own trigger.
+        val fcmToken = currentToken ?: return true
+        val subs = subscriptions.get() ?: return true
 
         val digest = SignedPushPayload.subscriptionsDigest(subs)
         val fingerprint = registrationFingerprint(fcmToken, digest)
@@ -179,7 +241,7 @@ class PushRegistrationInteractor(
                 now.isBefore(registeredAt.plus(refreshInterval))
             val outsideExpiryMargin = registeredAt == null || expiresAt == null ||
                 now.isBefore(expiresAt.minus(refreshMargin(registeredAt, expiresAt)))
-            if (withinCadence && outsideExpiryMargin) return
+            if (withinCadence && outsideExpiryMargin) return true
         }
 
         // register session: challenge → payload → requestHash →
@@ -201,9 +263,10 @@ class PushRegistrationInteractor(
             // No usable Play environment: send without a token, the
             // backend decides.
             PushAttestationToken.Unsupported -> null
-            // Rate-limited: retry later. Never fails the enabled
-            // state — the toggle stays on, the next trigger retries.
-            PushAttestationToken.Throttled -> return
+            // Rate-limited: retry later (the self-wake, or any
+            // trigger). Never fails the enabled state — the toggle
+            // stays on.
+            PushAttestationToken.Throttled -> return false
         }
         val signature = signer.sign(payload)
         val serverKey = backend.fetchRegistrationKey()
@@ -227,7 +290,7 @@ class PushRegistrationInteractor(
         if (!preference.enabled()) {
             preference.setPendingUnregisterToken(fcmToken)
             wakeUp()
-            return
+            return true
         }
         preference.recordRegistration(
             fingerprint = fingerprint,
@@ -235,6 +298,7 @@ class PushRegistrationInteractor(
             expiresAt = runCatching { PushJson.parseInstant(registration.expiresAt) }.getOrNull(),
             token = fcmToken,
         )
+        return true
     }
 
     /** How an unregister session for a stale token ended, and what
@@ -300,6 +364,12 @@ class PushRegistrationInteractor(
     }
 
     companion object {
+        /** Caps the backoff doubling arithmetic, not the retry count
+         * — beyond this many consecutive failures the delay sits at
+         * [failureRetryCap] anyway, and an unchecked shift would
+         * overflow. */
+        private const val MAX_BACKOFF_SHIFT = 10
+
         /** Refresh this far before server expiry — at most 7 days, at
          * most half the granted window (a short-lived grant refreshes
          * at its midpoint rather than immediately). */
