@@ -4,26 +4,23 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import org.bouncycastle.crypto.agreement.X25519Agreement
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
-import org.bouncycastle.crypto.params.X25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
-import java.security.SecureRandom
 import java.util.Base64
-import javax.crypto.Cipher
-import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
 /**
  * Ephemeral X25519 + ECDH + HKDF-SHA256 + AES-GCM + Ed25519 sealing —
- * the same construction shape this codebase already uses for
- * invitation envelopes (`:identity`'s `InvitationEnvelopeSealer`), but
- * with its own scheme string and HKDF salt, deliberately NOT shared
- * with the invitation suite (domain separation: a seat-entitlement
- * envelope and an invitation envelope must never be mistaken for one
- * another even if a key were ever reused).
+ * the sealing core is [X25519Sealed], shared with `:push`'s token
+ * envelope; this class adds the Ed25519 sender-signature layer and
+ * the seat-specific JSON framing. The same construction shape this
+ * codebase already uses for invitation envelopes (`:identity`'s
+ * `InvitationEnvelopeSealer`), but with its own scheme string and
+ * HKDF salt, deliberately NOT shared with the invitation suite
+ * (domain separation: a seat-entitlement envelope and an invitation
+ * envelope must never be mistaken for one another even if a key were
+ * ever reused).
  *
  * `:foundation` cannot depend on `:identity`, so this is a standalone
  * implementation rather than a reuse of `InvitationEnvelopeSealer`'s
@@ -67,33 +64,20 @@ class SeatSealedEnvelope private constructor(
             recipientAgreementPublicKey: ByteArray,
             senderSigningKey: Ed25519PrivateKeyParameters,
         ): SeatSealedEnvelope {
-            val ephemeral = X25519PrivateKeyParameters(SecureRandom())
-            val ephemeralPublic = ephemeral.generatePublicKey().encoded
-
-            val sharedSecret = ByteArray(32)
-            X25519Agreement().apply { init(ephemeral) }
-                .calculateAgreement(X25519PublicKeyParameters(recipientAgreementPublicKey, 0), sharedSecret, 0)
-            val aesKey = Bip39.hkdfSha256(sharedSecret, HKDF_SALT, HKDF_INFO, 32)
-
-            val nonce = ByteArray(NONCE_BYTES).also { SecureRandom().nextBytes(it) }
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(aesKey, "AES"), GCMParameterSpec(TAG_BYTES * 8, nonce))
-            val combined = cipher.doFinal(payload)
-            val ciphertext = combined.copyOfRange(0, combined.size - TAG_BYTES)
-            val tag = combined.copyOfRange(combined.size - TAG_BYTES, combined.size)
+            val sealed = X25519Sealed.seal(payload, recipientAgreementPublicKey, HKDF_SALT, HKDF_INFO)
 
             val signature = Ed25519Signer().apply {
                 init(true, senderSigningKey)
-                update(ephemeralPublic, 0, ephemeralPublic.size)
+                update(sealed.ephemeralPublicKey, 0, sealed.ephemeralPublicKey.size)
             }.generateSignature()
 
             return SeatSealedEnvelope(
-                ephemeralPublicKey = ephemeralPublic,
+                ephemeralPublicKey = sealed.ephemeralPublicKey,
                 ephemeralKeySignature = signature,
                 senderEd25519PublicKey = senderSigningKey.generatePublicKey().encoded,
-                nonce = nonce,
-                ciphertext = ciphertext,
-                authenticationTag = tag,
+                nonce = sealed.nonce,
+                ciphertext = sealed.ciphertext,
+                authenticationTag = sealed.authenticationTag,
             )
         }
 
@@ -149,18 +133,15 @@ class SeatSealedEnvelope private constructor(
             }.verifySignature(envelope.ephemeralKeySignature)
             require(signatureValid) { "ephemeral key signature does not verify" }
 
-            val sharedSecret = ByteArray(32)
-            X25519Agreement().apply { init(recipientAgreementPrivateKey) }
-                .calculateAgreement(X25519PublicKeyParameters(envelope.ephemeralPublicKey, 0), sharedSecret, 0)
-            val aesKey = Bip39.hkdfSha256(sharedSecret, HKDF_SALT, HKDF_INFO, 32)
-
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(
-                Cipher.DECRYPT_MODE,
-                SecretKeySpec(aesKey, "AES"),
-                GCMParameterSpec(TAG_BYTES * 8, envelope.nonce),
+            return X25519Sealed.open(
+                ephemeralPublicKey = envelope.ephemeralPublicKey,
+                nonce = envelope.nonce,
+                ciphertext = envelope.ciphertext,
+                authenticationTag = envelope.authenticationTag,
+                recipientPrivateKey = recipientAgreementPrivateKey,
+                salt = HKDF_SALT,
+                info = HKDF_INFO,
             )
-            return cipher.doFinal(envelope.ciphertext + envelope.authenticationTag)
         }
     }
 }
