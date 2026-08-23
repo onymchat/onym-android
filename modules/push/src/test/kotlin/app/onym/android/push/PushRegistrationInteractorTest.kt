@@ -8,10 +8,13 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -43,30 +46,46 @@ class PushRegistrationInteractorTest {
             X25519PrivateKeyParameters(ByteArray(32) { 5 }, 0).generatePublicKey().encoded
         var expiresAt: String = "2026-09-21T12:00:00Z"
         var failChallenge = false
-        var failUnregister = false
+        /** Thrown by unregister() while set — outage or scripted
+         * refusal, the classification under test. */
+        var unregisterFailure: Throwable? = null
+        var registerFailure: Throwable? = null
         var registerGate: CompletableDeferred<Unit>? = null
         val registered = mutableListOf<PushRegisterRequest>()
         val unregistered = mutableListOf<PushUnregisterRequest>()
         var challengeCount = 0
+        /** Purposes in fetch order — binds register→"register",
+         * unregister→"unregister". */
+        val challengePurposes = mutableListOf<String>()
 
         override suspend fun fetchRegistrationKey() = PushRegistrationKey(serverPublic)
 
         override suspend fun fetchChallenge(purpose: String): IssuedPushChallenge {
             if (failChallenge) throw PushBackendUnreachableException("scripted outage")
             challengeCount += 1
+            challengePurposes.add(purpose)
             return IssuedPushChallenge(ByteArray(32) { 0x42 }, "2026-08-22T12:10:00Z")
         }
 
         override suspend fun register(request: PushRegisterRequest): PushRegistration {
             registerGate?.await()
+            registerFailure?.let { throw it }
             registered.add(request)
             return PushRegistration(expiresAt)
         }
 
         override suspend fun unregister(request: PushUnregisterRequest) {
-            if (failUnregister) throw PushBackendUnreachableException("scripted outage")
+            unregisterFailure?.let { throw it }
             unregistered.add(request)
         }
+    }
+
+    /** Runs exactly the next debounced pass — 100 ms debounce plus
+     * slack — WITHOUT draining the scheduler, so a test can observe a
+     * blocked pass before its self-wake retry fires. */
+    private fun TestScope.runOnePass() {
+        advanceTimeBy(200)
+        runCurrent()
     }
 
     private val subscriptions = listOf(
@@ -198,7 +217,7 @@ class PushRegistrationInteractorTest {
         backend.failChallenge = true
         interactor.updateSubscriptions(subscriptions)
         interactor.updateToken("token-a")
-        advanceUntilIdle()
+        runOnePass()
 
         assertEquals(0, backend.registered.size)
         assertNull(preference.fingerprint)
@@ -207,6 +226,85 @@ class PushRegistrationInteractorTest {
         interactor.pushEnabled()
         advanceUntilIdle()
 
+        assertEquals(1, backend.registered.size)
+        assertNotNull(preference.fingerprint)
+    }
+
+    /** Finding 3 (PR #255): a blocked pass self-wakes — the retry
+     * runs with NO external trigger, after the backoff delay. */
+    @Test
+    fun `a blocked pass retries itself after the backoff`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        val interactor = build(backend, preference)
+
+        backend.failChallenge = true
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        runOnePass()
+        assertEquals(0, backend.registered.size)
+
+        // Nothing but time passes: the self-wake (30 s base backoff)
+        // plus the debounce drives the retry on its own.
+        backend.failChallenge = false
+        advanceTimeBy(31_000)
+        runCurrent()
+        runOnePass()
+
+        assertEquals(1, backend.registered.size)
+        assertNotNull(preference.fingerprint)
+    }
+
+    /** Finding 3: a deterministic refusal schedules NO self-wake —
+     * resubmitting the identical request cannot succeed. */
+    @Test
+    fun `a deterministic register refusal does not self-retry`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        val interactor = build(backend, preference)
+
+        backend.registerFailure = PushBackendRejectedException(
+            statusCode = 400,
+            rawCode = "bad_request",
+            message = "scripted refusal",
+        )
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        runOnePass()
+        assertEquals(0, backend.registered.size)
+        val challengesAfterFirstPass = backend.challengeCount
+
+        // Even unbounded time drains no retry — no self-wake exists.
+        backend.registerFailure = null
+        advanceUntilIdle()
+        assertEquals(challengesAfterFirstPass, backend.challengeCount)
+        assertEquals(0, backend.registered.size)
+        assertNull(preference.fingerprint)
+    }
+
+    /** Backend alignment: a 429/capacity refusal (the fixed-window
+     * rate limits on challenge AND register) is fully retryable —
+     * nothing recorded, nothing cleared, and the self-wake retries. */
+    @Test
+    fun `a capacity-refused register stays fully retryable`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        val interactor = build(backend, preference)
+
+        backend.registerFailure = PushBackendRejectedException(
+            statusCode = 429,
+            rawCode = "capacity",
+            message = "scripted rate limit",
+        )
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        runOnePass()
+        assertEquals(0, backend.registered.size)
+        assertNull(preference.fingerprint)
+        assertNull(preference.pendingUnregister)
+
+        backend.registerFailure = null
+        advanceUntilIdle()
         assertEquals(1, backend.registered.size)
         assertNotNull(preference.fingerprint)
     }
@@ -240,21 +338,131 @@ class PushRegistrationInteractorTest {
         interactor.updateToken("token-a")
         advanceUntilIdle()
 
-        backend.failUnregister = true
-        preference.setEnabled(false)
+        backend.unregisterFailure = PushBackendUnreachableException("scripted outage")
         interactor.pushDisabled()
-        advanceUntilIdle()
+        runOnePass()
 
         // Written BEFORE the attempt, kept on failure.
         assertEquals("token-a", preference.pendingUnregister)
         assertEquals(0, backend.unregistered.size)
+        assertFalse(preference.enabled())
 
-        backend.failUnregister = false
+        backend.unregisterFailure = null
         interactor.pushDisabled()
         advanceUntilIdle()
 
         assertEquals(1, backend.unregistered.size)
         assertNull(preference.pendingUnregister)
+    }
+
+    /** Finding 3: the offline disable's swallowed failure still earns
+     * the self-wake — the drain completes with no external trigger. */
+    @Test
+    fun `an offline disable drains by itself once the backend answers`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        val interactor = build(backend, preference)
+
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        advanceUntilIdle()
+
+        backend.unregisterFailure = PushBackendUnreachableException("scripted outage")
+        interactor.pushDisabled()
+        runOnePass()
+        assertEquals("token-a", preference.pendingUnregister)
+
+        backend.unregisterFailure = null
+        advanceTimeBy(31_000)
+        runCurrent()
+        runOnePass()
+
+        assertEquals(1, backend.unregistered.size)
+        assertNull(preference.pendingUnregister)
+    }
+
+    /** Finding 1 (PR #255, blocking): a pending unregister the
+     * backend deterministically refuses is EXPIRED, not retried
+     * forever — and the pass continues into the register instead of
+     * staying wedged behind an unpayable debt. Also consumes the
+     * typed error classification (finding 2). */
+    @Test
+    fun `a deterministically refused debt expires and the register proceeds`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        preference.pendingUnregister = "token-orphaned"
+        val interactor = build(backend, preference)
+
+        backend.unregisterFailure = PushBackendRejectedException(
+            statusCode = 400,
+            rawCode = "signature_invalid",
+            message = "unknown user key",
+        )
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        advanceUntilIdle()
+
+        // The refused debt is gone, and the register went through.
+        assertNull(preference.pendingUnregister)
+        assertEquals(0, backend.unregistered.size)
+        assertEquals(1, backend.registered.size)
+        assertEquals("token-a", preference.registeredToken)
+    }
+
+    /** Findings 1+2 / backend alignment: a 429 capacity refusal of
+     * the pending unregister is TRANSIENT — the debt survives and no
+     * register may pass it. */
+    @Test
+    fun `a capacity-refused debt is kept and gates the register`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        preference.pendingUnregister = "token-old"
+        val interactor = build(backend, preference)
+
+        backend.unregisterFailure = PushBackendRejectedException(
+            statusCode = 429,
+            rawCode = "capacity",
+            message = "scripted rate limit",
+        )
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        runOnePass()
+
+        assertEquals("token-old", preference.pendingUnregister)
+        assertEquals(0, backend.registered.size)
+
+        // Once capacity clears, the self-wake drains the debt first,
+        // then registers.
+        backend.unregisterFailure = null
+        advanceUntilIdle()
+        assertNull(preference.pendingUnregister)
+        assertEquals(1, backend.unregistered.size)
+        assertEquals(1, backend.registered.size)
+    }
+
+    /** Finding 5 (PR #255): the preference write lives inside
+     * pushEnabled()/pushDisabled() — persisted before the pass, so
+     * callers cannot leave a pass reading a stale value. */
+    @Test
+    fun `the interactor persists the preference itself`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = false)
+        val interactor = build(backend, preference)
+
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        advanceUntilIdle()
+        assertEquals(0, backend.registered.size)
+
+        interactor.pushEnabled()
+        assertTrue(preference.enabled())
+        advanceUntilIdle()
+        assertEquals(1, backend.registered.size)
+
+        interactor.pushDisabled()
+        assertFalse(preference.enabled())
+        advanceUntilIdle()
+        assertEquals(1, backend.unregistered.size)
     }
 
     @Test
@@ -290,11 +498,12 @@ class PushRegistrationInteractorTest {
         interactor.updateToken("token-a")
         advanceUntilIdle()
 
-        // The pass is suspended inside register(). Flip the
-        // preference off — the way the Settings toggle does, directly
-        // through the preference — then let the register complete.
+        // The pass is suspended inside register(). Flip the switch
+        // off the way the Settings toggle does — through
+        // pushDisabled(), which persists the preference itself — then
+        // let the register complete.
         assertEquals(0, backend.registered.size)
-        preference.setEnabled(false)
+        interactor.pushDisabled()
         backend.registerGate!!.complete(Unit)
         backend.registerGate = null
         advanceUntilIdle()
@@ -372,7 +581,7 @@ class PushRegistrationInteractorTest {
 
         interactor.updateSubscriptions(subscriptions)
         interactor.updateToken("token-a")
-        advanceUntilIdle()
+        runOnePass()
 
         assertEquals(0, backend.registered.size)
         assertTrue(preference.enabled())
