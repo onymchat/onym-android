@@ -164,10 +164,11 @@ class PushRegistrationInteractor(
      * failing triggers must not stack delayed retries. */
     private val retryScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    /** Conflated: any number of triggers collapse into at most one
-     * queued pass. A trigger during the debounce window is absorbed
-     * (its state is read at pass time anyway); a trigger during a
-     * running pass queues exactly one follow-up. */
+    /** Conflated: any number of triggers collapse into at most ONE
+     * queued follow-up. The worker has already consumed the element
+     * before the debounce delay, so a trigger landing mid-debounce
+     * (or mid-pass) buffers one follow-up pass — harmless, passes
+     * are idempotent and read current state at pass time. */
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
     init {
