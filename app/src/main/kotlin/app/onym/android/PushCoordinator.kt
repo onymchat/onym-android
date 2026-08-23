@@ -43,6 +43,15 @@ class PushCoordinator(
      * blocked, the same definition the render gate uses; injectable
      * for tests. */
     private val notificationsEnabled: () -> Boolean,
+    /** Flips `FirebaseMessaging.isAutoInitEnabled` (a no-op stub when
+     * Firebase is unconfigured). The manifest ships auto-init and
+     * default data collection OFF, so nothing Firebase-shaped runs —
+     * no Installations registration with Google, no unprompted token
+     * — until the user opts in; the enable path turns auto-init on
+     * (token rotations must keep flowing while opted in) and every
+     * disable path turns it back off, symmetric with the server-side
+     * unregister that already runs. */
+    private val firebaseAutoInit: (Boolean) -> Unit = {},
 ) {
 
     fun start() {
@@ -68,6 +77,10 @@ class PushCoordinator(
                 disable()
                 return@launch
             }
+            // Re-assert opt-in side state (auto-init) — Firebase
+            // persists it, but healing here keeps the pair of flags
+            // from ever drifting apart across upgrades.
+            firebaseAutoInit(true)
             fetchToken()?.let { interactor.updateToken(it) }
             interactor.pushEnabled()
         }
@@ -78,11 +91,13 @@ class PushCoordinator(
      * [PushRegistrationInteractor.pushEnabled] — persisted before the
      * pass wakes, so a pass can never read a stale value. */
     suspend fun enable() {
+        firebaseAutoInit(true)
         fetchToken()?.let { interactor.updateToken(it) }
         interactor.pushEnabled()
     }
 
     suspend fun disable() {
+        firebaseAutoInit(false)
         interactor.pushDisabled()
     }
 

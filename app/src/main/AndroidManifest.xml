@@ -134,6 +134,32 @@
             </intent-filter>
         </service>
 
+        <!--
+            Firebase stays ASLEEP until the user opts in. Without
+            these, firebase-messaging auto-initializes at every
+            process start of a configured build: Firebase
+            Installations registers with Google and an FCM token is
+            minted for every user, including those who never touched
+            the toggle. "Dark unless PUSH_BASE_URL is empty" is not
+            "dark unless the user opts in" — the shipping build has a
+            base URL. With auto-init and default data collection off,
+            NO Firebase registration and NO contact with Google
+            happens until the enable path flips
+            FirebaseMessaging.isAutoInitEnabled to true (and the
+            disable path flips it back — see PushCoordinator). The
+            explicit token fetch in the enable path
+            (FirebaseMessaging.getInstance().token) still works with
+            auto-init off, per the firebase-messaging docs: the
+            manifest flag only suppresses UNPROMPTED token generation
+            at startup, never an explicit request.
+        -->
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+        <meta-data
+            android:name="firebase_data_collection_default_enabled"
+            android:value="false" />
+
         <!-- Grants a share target read access to one exported proof,
              and nothing else: the authority is scoped to the
              `rules-proof/` cache subdirectory. `grantUriPermissions`

@@ -1776,6 +1776,18 @@ class OnymApplication : Application() {
                 notificationsEnabled = {
                     PushMessagingService.notificationsRenderable(applicationContext)
                 },
+                // The manifest ships firebase_messaging_auto_init_enabled
+                // (and default data collection) FALSE, so a configured
+                // build makes no contact with Google at process start;
+                // opting in flips auto-init on, opting out flips it
+                // back. runCatching for the same reason as fetchToken:
+                // an unconfigured Firebase must degrade, never crash.
+                firebaseAutoInit = { on ->
+                    runCatching {
+                        com.google.firebase.messaging.FirebaseMessaging.getInstance()
+                            .isAutoInitEnabled = on
+                    }
+                },
             )
             pushCoordinator.start()
             pushUi = PushUiDependencies(
