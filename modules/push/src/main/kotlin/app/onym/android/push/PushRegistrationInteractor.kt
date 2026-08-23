@@ -139,15 +139,21 @@ class PushRegistrationInteractor(
         wakeUp()
     }
 
-    /** The preference flipped ON (already persisted by the caller). */
-    fun pushEnabled() {
+    /** Flip the preference ON. The write happens HERE, before the
+     * wake, so a pass can never read a stale value and act on the
+     * old state — callers must not persist it themselves. Suspends
+     * only for the preference write; the pass runs on [scope]. */
+    suspend fun pushEnabled() {
+        preference.setEnabled(true)
         wakeUp()
     }
 
-    /** The preference flipped OFF (already persisted by the caller).
-     * The pass asks the server to forget, retried until it
-     * succeeds. */
-    fun pushDisabled() {
+    /** Flip the preference OFF; the write happens HERE, before the
+     * wake (see [pushEnabled]). The pass asks the server to forget,
+     * retried until it succeeds. Idempotent — safe to call at app
+     * start to give a pending server-side forget a drain chance. */
+    suspend fun pushDisabled() {
+        preference.setEnabled(false)
         wakeUp()
     }
 
