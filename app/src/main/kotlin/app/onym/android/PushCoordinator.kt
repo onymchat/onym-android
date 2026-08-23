@@ -102,10 +102,23 @@ class PushCoordinator(
     }
 
     /** App start / resume: enabled-but-OS-blocked runs the full
-     * disable path. */
+     * disable path; enabled-and-renderable runs a refresh pass — the
+     * interactor promises "a pass at every app start AND foreground",
+     * and without this the foreground half didn't exist: a warm
+     * process living past the server-granted window (Android keeps
+     * them for days) let the registration lapse and wakes stop
+     * silently, since [start] only runs at process launch.
+     * [PushRegistrationInteractor.pushEnabled] is idempotent and
+     * fingerprint/cadence-gated, so this is a no-op unless a refresh
+     * is actually due. */
     fun checkRevocation() {
         scope.launch {
-            if (preference.enabled() && !notificationsEnabled()) disable()
+            if (!preference.enabled()) return@launch
+            if (!notificationsEnabled()) {
+                disable()
+                return@launch
+            }
+            interactor.pushEnabled()
         }
     }
 
