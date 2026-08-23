@@ -758,12 +758,31 @@ fun RootScreen(
                     ?: kotlinx.coroutines.flow.flowOf(false))
                     .collectAsStateWithLifecycle(initialValue = false)
                 val settingsContext = LocalContext.current
+                // The channel gate at the door (same snapback shape
+                // as a permission denial): a user who blocked only
+                // the `messages` channel still passes the
+                // POST_NOTIFICATIONS check, and enabling anyway would
+                // register a device whose wakes can never render —
+                // undone silently by the next revocation check. So
+                // the blocked state is surfaced instead, with a path
+                // to the channel's own settings.
+                var pushChannelBlocked by remember { mutableStateOf(false) }
+                val enableOrExplain = {
+                    if (pushDeps != null) {
+                        if (pushDeps.notificationsRenderable()) {
+                            pushChannelBlocked = false
+                            pushDeps.enable()
+                        } else {
+                            pushChannelBlocked = true
+                        }
+                    }
+                }
                 val notificationsPermissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
                 ) { granted ->
                     // Application-scoped fire-and-forget: leaving
                     // Settings must not cancel a toggle mid-flight.
-                    if (granted && pushDeps != null) pushDeps.enable()
+                    if (granted) enableOrExplain()
                     // Denied: nothing was persisted; the toggle stays
                     // off on its own.
                 }
@@ -791,6 +810,7 @@ fun RootScreen(
                     onTogglePush = pushDeps?.let { push ->
                         { on: Boolean ->
                             if (!on) {
+                                pushChannelBlocked = false
                                 push.disable()
                             } else if (
                                 android.os.Build.VERSION.SDK_INT >= 33 &&
@@ -806,12 +826,40 @@ fun RootScreen(
                                     android.Manifest.permission.POST_NOTIFICATIONS,
                                 )
                             } else {
-                                push.enable()
+                                enableOrExplain()
                             }
                         }
                     },
                     pushEnabled = pushEnabled,
                     pushRegistered = pushRegistered,
+                    pushChannelBlocked = pushChannelBlocked,
+                    onOpenNotificationChannelSettings = {
+                        // The channel's own screen when the channel is
+                        // the thing blocked; the app's notification
+                        // screen otherwise (app-level off, API < 33).
+                        val manager = androidx.core.app.NotificationManagerCompat
+                            .from(settingsContext)
+                        val channelBlocked = manager
+                            .getNotificationChannelCompat(PushMessagingService.CHANNEL_ID)
+                            ?.importance ==
+                            androidx.core.app.NotificationManagerCompat.IMPORTANCE_NONE
+                        val intent = if (channelBlocked) {
+                            android.content.Intent(
+                                android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS,
+                            ).putExtra(
+                                android.provider.Settings.EXTRA_CHANNEL_ID,
+                                PushMessagingService.CHANNEL_ID,
+                            )
+                        } else {
+                            android.content.Intent(
+                                android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+                            )
+                        }.putExtra(
+                            android.provider.Settings.EXTRA_APP_PACKAGE,
+                            settingsContext.packageName,
+                        )
+                        runCatching { settingsContext.startActivity(intent) }
+                    },
                     onNostrRelaysClick = { navController.navigate(ROUTE_NOSTR_RELAYS) },
                     nostrRelaysCount = nostrRelays.endpoints.size,
                     onBlossomRelaysClick = { navController.navigate(ROUTE_BLOSSOM_RELAYS) },

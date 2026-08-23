@@ -1808,6 +1808,9 @@ class OnymApplication : Application() {
                 },
                 disable = { applicationScope.launch { pushCoordinator.disable() } },
                 checkRevocation = { pushCoordinator.checkRevocation() },
+                notificationsRenderable = {
+                    PushMessagingService.notificationsRenderable(applicationContext)
+                },
             )
         }
 

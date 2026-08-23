@@ -155,6 +155,13 @@ fun SettingsScreen(
      *  registration. `pushEnabled && !pushRegistered` renders the
      *  "still activating" footnote under the toggle. */
     pushRegistered: Boolean = false,
+    /** True after an enable attempt found the `messages` channel (or
+     *  app-level notifications) blocked: nothing was persisted, the
+     *  switch stays off, and the footnote below the toggle explains
+     *  and links to the channel's system settings. */
+    pushChannelBlocked: Boolean = false,
+    /** Opens the `messages` channel's system settings screen. */
+    onOpenNotificationChannelSettings: (() -> Unit)? = null,
     /** Settings → Device Backup entry. Null when no backup operator is
      *  consented for any vendor (or the identity has no recovery
      *  phrase) — the section is omitted entirely, same posture as
@@ -401,6 +408,18 @@ fun SettingsScreen(
                             },
                             onClick = { onTogglePush(!pushEnabled) },
                             isLast = true,
+                        )
+                    }
+                }
+                if (pushChannelBlocked) {
+                    item {
+                        SettingsFootnote(
+                            stringResource(R.string.settings_push_channel_blocked),
+                            modifier = Modifier
+                                .clickable(
+                                    enabled = onOpenNotificationChannelSettings != null,
+                                ) { onOpenNotificationChannelSettings?.invoke() }
+                                .testTag("settings.push_channel_blocked"),
                         )
                     }
                 }

@@ -226,8 +226,18 @@ class PushUiDependencies(
      *  until it succeeds. Application-scoped like [enable]. */
     val disable: () -> Unit,
     /** App start / resume: if the preference is ON but the OS has
-     *  notifications blocked, runs the full disable path. */
+     *  notifications blocked, runs the full disable path; otherwise
+     *  runs an (idempotent, cadence-gated) refresh pass. */
     val checkRevocation: () -> Unit,
+    /** Whether a `messages`-channel notification can actually render
+     *  — `PushMessagingService.notificationsRenderable`. The Settings
+     *  host checks this BEFORE calling [enable]: a user who blocked
+     *  only the channel still passes the POST_NOTIFICATIONS check,
+     *  and registering a device that can't render only sets up the
+     *  next revocation check to silently undo the toggle. When
+     *  false, the host keeps the switch off (the permission-denial
+     *  snapback pattern) and points the user at channel settings. */
+    val notificationsRenderable: () -> Boolean,
 )
 
 /**

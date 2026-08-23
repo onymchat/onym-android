@@ -89,8 +89,19 @@ class PushCoordinator(
     /** Called AFTER POST_NOTIFICATIONS is granted (below API 33 it is
      * granted by install). The preference write lives inside
      * [PushRegistrationInteractor.pushEnabled] — persisted before the
-     * pass wakes, so a pass can never read a stale value. */
+     * pass wakes, so a pass can never read a stale value.
+     *
+     * The channel gate that [checkRevocation] applies holds at the
+     * door too: a user who blocked only the `messages` channel still
+     * passes the POST_NOTIFICATIONS check, and without this guard the
+     * toggle flipped on and registered — only for the next onStart's
+     * revocation check to silently turn it back off. Refusing here
+     * means nothing is persisted (the switch snaps back on its own,
+     * same as a permission denial) and no device that can't render
+     * is ever registered; the Settings host surfaces the guidance
+     * toward channel settings. */
     suspend fun enable() {
+        if (!notificationsEnabled()) return
         firebaseAutoInit(true)
         fetchToken()?.let { interactor.updateToken(it) }
         interactor.pushEnabled()
