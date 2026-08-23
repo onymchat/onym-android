@@ -27,9 +27,17 @@ import org.junit.Test
  */
 class PushRegistrationInteractorTest {
 
+    /** Records the exact bytes it signed (PR #257 review, finding 1):
+     * a constant answer alone structurally cannot witness WHAT was
+     * signed, which let a mutated interactor sign the wrong payload
+     * unnoticed. */
     private class FakeSigner : PushSigner {
+        val signed = mutableListOf<ByteArray>()
         override suspend fun userKeyId(): String = "onym:key:aabb"
-        override suspend fun sign(message: ByteArray): ByteArray = ByteArray(64) { 0x11 }
+        override suspend fun sign(message: ByteArray): ByteArray {
+            signed.add(message.copyOf())
+            return ByteArray(64) { 0x11 }
+        }
     }
 
     private class FakeAttestation : PushAttestationProvider {
@@ -104,9 +112,10 @@ class PushRegistrationInteractorTest {
         attestation: FakeAttestation = FakeAttestation(),
         clock: () -> Instant = { Instant.parse("2026-08-22T12:00:00Z") },
         refreshInterval: Duration = Duration.ofDays(3),
+        signer: FakeSigner = FakeSigner(),
     ): PushRegistrationInteractor = PushRegistrationInteractor(
         backend = backend,
-        signer = FakeSigner(),
+        signer = signer,
         attestation = attestation,
         preference = preference,
         // A plain scope on the test scheduler, NOT backgroundScope:
@@ -143,6 +152,55 @@ class PushRegistrationInteractorTest {
         assertEquals(1, backend.challengeCount)
         // And it was minted for the endpoint it authorizes.
         assertEquals(listOf("register"), backend.challengePurposes)
+    }
+
+    /** The outbound register request pinned end to end (PR #257
+     * review, finding 1 — three authenticating fields no mutation
+     * may drift): the challenge is the issued bytes, the signed
+     * bytes are the payload the backend recomputes from the
+     * request's own transmitted fields, and the sealed envelope
+     * opens to the exact FCM token. */
+    @Test
+    fun `the register request carries what was challenged, signed and sealed`() = runTest {
+        val backend = ScriptedBackend()
+        val preference = StaticPushPreferenceProvider(enabled = true)
+        val signer = FakeSigner()
+        val interactor = build(backend, preference, signer = signer)
+
+        interactor.updateSubscriptions(subscriptions)
+        interactor.updateToken("token-a")
+        advanceUntilIdle()
+
+        val request = backend.registered.single()
+        // (a) the challenge echoes the issued 32×0x42 bytes — not
+        // zeros, not anything else.
+        assertTrue(request.challenge.contentEquals(ByteArray(32) { 0x42 }))
+
+        // (b) the signed bytes ARE the register payload recomputed
+        // from the request's own fields — the backend's verification
+        // arithmetic, run here.
+        val expectedPayload = SignedPushPayload.register(
+            challenge = request.challenge,
+            userKey = request.userKey,
+            timestamp = request.timestamp,
+            fcmToken = "token-a",
+            subscriptions = request.subscriptions,
+        )
+        assertTrue(signer.signed.single().contentEquals(expectedPayload))
+        // ...and the transmitted signature is the signer's answer,
+        // padded Base64.
+        assertEquals(
+            java.util.Base64.getEncoder().encodeToString(ByteArray(64) { 0x11 }),
+            request.signature,
+        )
+
+        // (c) the envelope opens, under the server's private key, to
+        // the exact FCM token this device holds.
+        assertEquals(
+            "token-a",
+            openPushTokenEnvelope(request.tokenEnvelope, backend.serverPrivate)
+                .decodeToString(),
+        )
     }
 
     /** The backend binds each challenge to its purpose and refuses a
@@ -679,7 +737,8 @@ class PushRegistrationInteractorTest {
     fun `token rotation unregisters the old token first`() = runTest {
         val backend = ScriptedBackend()
         val preference = StaticPushPreferenceProvider(enabled = true)
-        val interactor = build(backend, preference)
+        val signer = FakeSigner()
+        val interactor = build(backend, preference, signer = signer)
 
         interactor.updateSubscriptions(subscriptions)
         interactor.updateToken("token-a")
@@ -691,6 +750,24 @@ class PushRegistrationInteractorTest {
         assertEquals(2, backend.registered.size)
         assertEquals("token-b", preference.registeredToken)
         assertNull(preference.pendingUnregister)
+
+        // WHICH token was unregistered (PR #257 review, finding 1):
+        // the debt is paid against the STALE token — provably, in
+        // both the sealed envelope and the signed payload — not
+        // against some token the server never held.
+        val unregister = backend.unregistered.single()
+        assertEquals(
+            "token-a",
+            openPushTokenEnvelope(unregister.tokenEnvelope, backend.serverPrivate)
+                .decodeToString(),
+        )
+        val expectedUnregisterPayload = SignedPushPayload.unregister(
+            challenge = unregister.challenge,
+            userKey = unregister.userKey,
+            timestamp = unregister.timestamp,
+            fcmToken = "token-a",
+        )
+        assertTrue(signer.signed.any { it.contentEquals(expectedUnregisterPayload) })
     }
 
     /** The documented conflation semantics (PR #257 review, finding

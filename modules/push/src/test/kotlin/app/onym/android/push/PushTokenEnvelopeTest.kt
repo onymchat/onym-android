@@ -27,27 +27,8 @@ class PushTokenEnvelopeTest {
     private val serverPublic = serverPrivate.generatePublicKey().encoded
     private val token = "fcm-registration-token-fixture"
 
-    private fun open(envelope: PushTokenEnvelope, private: X25519PrivateKeyParameters): ByteArray {
-        val shared = ByteArray(32)
-        X25519Agreement().apply { init(private) }.calculateAgreement(
-            X25519PublicKeyParameters(envelope.ephemeralPublicKey, 0),
-            shared,
-            0,
-        )
-        val key = Bip39.hkdfSha256(
-            ikm = shared,
-            salt = "onym-push-token-v1".toByteArray(Charsets.UTF_8),
-            info = "aes-256-gcm".toByteArray(Charsets.UTF_8),
-            length = 32,
-        )
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(
-            Cipher.DECRYPT_MODE,
-            SecretKeySpec(key, "AES"),
-            GCMParameterSpec(128, envelope.nonce),
-        )
-        return cipher.doFinal(envelope.ciphertext + envelope.authenticationTag)
-    }
+    private fun open(envelope: PushTokenEnvelope, private: X25519PrivateKeyParameters): ByteArray =
+        openPushTokenEnvelope(envelope, private)
 
     @Test
     fun `the server's private key opens the sealed token`() {
@@ -132,3 +113,36 @@ class PushTokenEnvelopeTest {
 
 private fun String.hexBytes(): ByteArray =
     chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+/**
+ * The server's side of the table, shared across tests (this file and
+ * PushRegistrationInteractorTest's outbound-request pinning): opens a
+ * [PushTokenEnvelope] with the recipient's X25519 private key. A
+ * REIMPLEMENTATION of the construction — X25519 agreement + HKDF +
+ * AES-GCM spelled out — deliberately not a call into production code,
+ * so it witnesses the construction rather than echoing it.
+ */
+internal fun openPushTokenEnvelope(
+    envelope: PushTokenEnvelope,
+    private: X25519PrivateKeyParameters,
+): ByteArray {
+    val shared = ByteArray(32)
+    X25519Agreement().apply { init(private) }.calculateAgreement(
+        X25519PublicKeyParameters(envelope.ephemeralPublicKey, 0),
+        shared,
+        0,
+    )
+    val key = Bip39.hkdfSha256(
+        ikm = shared,
+        salt = "onym-push-token-v1".toByteArray(Charsets.UTF_8),
+        info = "aes-256-gcm".toByteArray(Charsets.UTF_8),
+        length = 32,
+    )
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(
+        Cipher.DECRYPT_MODE,
+        SecretKeySpec(key, "AES"),
+        GCMParameterSpec(128, envelope.nonce),
+    )
+    return cipher.doFinal(envelope.ciphertext + envelope.authenticationTag)
+}
