@@ -10,7 +10,42 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+
+/**
+ * What the last reconciliation pass concluded — the interactor's one
+ * observable surface beyond [PushPreferenceProvider.registeredFlow],
+ * added so a terminal failure is DIAGNOSABLE instead of rendering as
+ * "still activating" forever. Privacy: carries the backend's error
+ * CODE at most — never request contents, tokens, or messages (the
+ * no-activity-logging stance holds; this is state, not a log).
+ */
+sealed interface PushRegistrationState {
+    /** No pass has run since construction, or push is off. */
+    data object Idle : PushRegistrationState
+
+    /** The last pass converged without a registration to show for it
+     * — waiting on inputs (token/identities) or on the next pass. */
+    data object Activating : PushRegistrationState
+
+    /** The backend confirmed the current registration. */
+    data object Registered : PushRegistrationState
+
+    /**
+     * The last pass failed. [willRetry] says whether a self-wake is
+     * outstanding ("couldn't activate — will keep trying") or the
+     * deterministic attempt bound was reached ("couldn't activate —
+     * check configuration"; only a state-changing trigger retries).
+     * [code] is the backend's error vocabulary when the failure was a
+     * refusal, null for transport-level failures.
+     */
+    data class Failed(
+        val code: PushBackendErrorCode?,
+        val willRetry: Boolean,
+    ) : PushRegistrationState
+}
 
 /**
  * The reconciler: converges what the push backend holds toward what
@@ -112,6 +147,14 @@ class PushRegistrationInteractor(
     private val token = AtomicReference<String?>(null)
     private val subscriptions = AtomicReference<List<PushSubscription>?>(null)
 
+    private val _state = MutableStateFlow<PushRegistrationState>(PushRegistrationState.Idle)
+
+    /** The last pass's conclusion — see [PushRegistrationState]. The
+     * app layer renders the Settings footnote from this; the durable
+     * "backend holds a registration" bit stays
+     * [PushPreferenceProvider.registeredFlow]. */
+    val state: StateFlow<PushRegistrationState> = _state
+
     /** Consecutive failed passes — sizes the self-wake backoff; reset
      * by any pass that completes without throwing. Worker-loop
      * confined (passes are strictly serialized). */
@@ -184,8 +227,15 @@ class PushRegistrationInteractor(
             // succeed, so only a state-changing trigger retries it.
             if (pass()) {
                 consecutiveFailures = 0
+                _state.value = when {
+                    !preference.enabled() -> PushRegistrationState.Idle
+                    preference.lastRegistrationFingerprint() != null ->
+                        PushRegistrationState.Registered
+                    else -> PushRegistrationState.Activating
+                }
             } else {
-                scheduleFailureRetry(bounded = false)
+                val willRetry = scheduleFailureRetry(bounded = false)
+                _state.value = PushRegistrationState.Failed(code = null, willRetry = willRetry)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -194,9 +244,12 @@ class PushRegistrationInteractor(
             // Classification shapes pacing only (see the class KDoc):
             // a deterministic refusal retries on the same backoff but
             // stops self-waking at the attempt bound.
-            val deterministic =
-                (failure as? PushBackendRejectedException)?.deterministic == true
-            scheduleFailureRetry(bounded = deterministic)
+            val rejected = failure as? PushBackendRejectedException
+            val willRetry = scheduleFailureRetry(bounded = rejected?.deterministic == true)
+            _state.value = PushRegistrationState.Failed(
+                code = rejected?.code,
+                willRetry = willRetry,
+            )
         }
     }
 
