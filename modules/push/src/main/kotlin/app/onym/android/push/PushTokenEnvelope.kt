@@ -62,13 +62,26 @@ data class PushTokenEnvelope(
     companion object {
         internal val HKDF_SALT = "onym-push-token-v1".toByteArray(Charsets.UTF_8)
         internal val HKDF_INFO = "aes-256-gcm".toByteArray(Charsets.UTF_8)
+        private const val X25519_KEY_BYTES = 32
 
         /**
          * Seals [fcmToken] (the UTF-8 bytes of the token string) to
          * [serverPublicKey], the backend's 32-byte X25519 registration
          * key fetched fresh from `GET /v1/registration-key`.
+         *
+         * @throws PushBackendUnreachableException when [serverPublicKey]
+         *   is not 32 bytes — a malformed key from the backend is a bad
+         *   *response*, classified retryable like any other one (a
+         *   rotated-away or truncated key heals server-side), never an
+         *   `ArrayIndexOutOfBoundsException` out of the crypto layer.
          */
         fun seal(fcmToken: String, serverPublicKey: ByteArray): PushTokenEnvelope {
+            if (serverPublicKey.size != X25519_KEY_BYTES) {
+                throw PushBackendUnreachableException(
+                    "push backend registration key must be $X25519_KEY_BYTES bytes, " +
+                        "got ${serverPublicKey.size}",
+                )
+            }
             val sealed = X25519Sealed.seal(
                 payload = fcmToken.encodeToByteArray(),
                 recipientPublicKey = serverPublicKey,
