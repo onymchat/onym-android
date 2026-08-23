@@ -88,6 +88,33 @@ class PushTokenEnvelopeTest {
         assertFalse(first.ciphertext.contentEquals(second.ciphertext))
     }
 
+    /** The cross-implementation vector (PR #257 review): this exact
+     * envelope was sealed by the iOS client's CryptoKit
+     * `PushTokenEnvelope.seal` and verified by the Rust backend
+     * (onym-push `apple/src/crypto.rs`,
+     * `envelope_sealed_by_the_swift_client_opens`) — same scheme and
+     * the same `onym-push-token-v1` salt this client uses. The local
+     * `open` above reimplements X25519 agreement + HKDF + AES-GCM, so
+     * decrypting the pinned bytes pins Kotlin's HKDF against RFC 5869
+     * via an implementation it does not share code with — the
+     * self-consistency gap the review named. Regenerate from Swift,
+     * never by hand. */
+    @Test
+    fun `the envelope pinned by iOS and Rust opens here too`() {
+        val serverPrivateFixture = X25519PrivateKeyParameters(ByteArray(32) { 0x11 }, 0)
+        val envelope = PushTokenEnvelope(
+            ephemeralPublicKey =
+                "4f92241343f3e16583ba4b44b2205922d4149a1122b646f4c6a6321cfd503926".hexBytes(),
+            nonce = "fcf4b38dd99af1c85a25f0f7".hexBytes(),
+            ciphertext = "0c8abae976be".hexBytes(),
+            authenticationTag = "c22d3b0c0332573a004543e4f4710e49".hexBytes(),
+        )
+        assertTrue(
+            "0a0b0c0deeff".hexBytes()
+                .contentEquals(open(envelope, serverPrivateFixture)),
+        )
+    }
+
     /** camelCase, base64 fields — the wire form the register body
      * embeds. */
     @Test
@@ -102,3 +129,6 @@ class PushTokenEnvelopeTest {
         assertEquals(envelope, decoded)
     }
 }
+
+private fun String.hexBytes(): ByteArray =
+    chunked(2).map { it.toInt(16).toByte() }.toByteArray()
