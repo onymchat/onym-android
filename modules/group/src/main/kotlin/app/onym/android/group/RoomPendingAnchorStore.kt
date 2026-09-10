@@ -22,17 +22,10 @@ class RoomPendingAnchorStore(
 ) : PendingAnchorStore {
 
     override suspend fun record(anchor: PendingAnchor) {
-        // An attempt from an epoch this one has already left cannot be
-        // waiting to land any more. Swept on the way in so a group that
-        // keeps failing doesn't carry rows that can no longer explain
-        // anything.
-        if (anchor.epochOld > 0uL) {
-            dao.clearThrough(
-                groupIdHex = hex(anchor.groupId),
-                ownerIdentityId = anchor.ownerIdentityId,
-                throughEpoch = (anchor.epochOld - 1uL).toLong(),
-            )
-        }
+        // Adds only — see the interface. The epoch an attempt proves
+        // from is not always one this device has persisted, so a sweep
+        // here can delete the record for a landed transaction while the
+        // group on disk still names the epoch before it.
         dao.insert(
             PersistedPendingAnchor(
                 groupIdHex = hex(anchor.groupId),

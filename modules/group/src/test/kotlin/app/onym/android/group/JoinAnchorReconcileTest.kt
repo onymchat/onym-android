@@ -307,6 +307,25 @@ class JoinAnchorReconcileTest {
         )
     }
 
+    /** A chain *behind* local is not a drifted counter, whatever the
+     *  commitment reproduces. Rebasing onto it would walk this device's
+     *  epoch backwards, and the next proof would be building on a state
+     *  the chain has already superseded. */
+    @Test
+    fun doesNotRebaseOntoAnEpochBehindThisDevice() {
+        val g = group(epoch = 5uL)
+        assertNull(
+            rebaseOnChainEpoch(
+                g,
+                SepCommitmentEntry(
+                    commitment = commitmentOf(g.members, g.tier, 3uL, g.salt),
+                    epoch = 3uL,
+                ),
+                commitmentOf,
+            ),
+        )
+    }
+
     /** A later epoch over a roster this device can't reproduce is a
      *  real divergence, not a drifted counter. */
     @Test

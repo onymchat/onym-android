@@ -99,22 +99,28 @@ class RoomPendingAnchorStoreTest {
         assertArrayEquals(ByteArray(32) { 0x11 }, read[1].saltNew)
     }
 
-    /** Recording from a later epoch sweeps what the group has already
-     *  moved past — a group that keeps failing must not accumulate rows
-     *  that can no longer explain anything. */
+    /**
+     * [RoomPendingAnchorStore.record] adds and never deletes.
+     *
+     * The tempting optimisation is to sweep older epochs here — the
+     * chain has left them. It is wrong: the reconcile retries from an
+     * adopted state *before* that state is persisted, so a sweep on
+     * write would delete the record naming the landed transaction while
+     * the group on disk still says the epoch before it. Crash there and
+     * the salt is gone for good.
+     */
     @Test
-    fun recordingFromALaterEpochSweepsTheEarlierOnes() = runTest {
+    fun recordingFromALaterEpochKeepsTheEarlierOnes() = runTest {
         store.record(anchor(epochOld = 3uL, salt = 0x11))
         store.record(anchor(epochOld = 4uL, salt = 0x22))
 
         val read = store.pending(groupId, owner)
 
-        assertEquals(1, read.size)
-        assertEquals(4uL, read.first().epochOld)
+        assertEquals("only a persisted advance may sweep", 2, read.size)
+        assertEquals(setOf(3uL, 4uL), read.map { it.epochOld }.toSet())
     }
 
-    /** …but never the epoch it is recording from. Two approvals from
-     *  the same state are both live candidates. */
+    /** Two approvals from the same state are both live candidates. */
     @Test
     fun recordingFromTheSameEpochKeepsTheOthers() = runTest {
         store.record(anchor(epochOld = 3uL, joiner = 0xC1))

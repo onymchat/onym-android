@@ -169,12 +169,18 @@ class ApproveRequestsViewModel(
             is JoinRequestApprover.ApproveOutcome.AnchorRejected ->
                 "Chain rejected the proof: ${outcome.reason}"
             is JoinRequestApprover.ApproveOutcome.StaleGroupState ->
-                // Says which two numbers disagree, because that is the
-                // one thing that makes this diagnosable from a
-                // screenshot — and names the device, since the state
-                // the chain is holding was written by one of them and
-                // that device is where the approval can still work.
-                "This device’s copy of the group is behind the chain " +
+                // "Doesn't match", not "is behind": this is reached with
+                // the chain ahead, and also with the two epochs equal
+                // and the commitment diverged over the roster or the
+                // salt. Claiming a direction would be wrong in the
+                // second case, and the advice is the same in both.
+                //
+                // Both numbers stay, because that is the one thing that
+                // makes this diagnosable from a screenshot — and the
+                // device is named, since the state the chain is holding
+                // was written by one of them and that device is where
+                // the approval can still work.
+                "This device’s copy of the group doesn’t match the chain " +
                     "(here: epoch ${outcome.localEpoch}, chain: epoch ${outcome.chainEpoch}). " +
                     "Approve from the device that last added a member, or restore this one from a backup."
         }

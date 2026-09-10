@@ -300,6 +300,14 @@ open class JoinRequestApprover(
          * of the group, and the founder can do something about that
          * (approve from the device that last anchored, or restore it)
          * where "the chain said no" leaves them nowhere.
+         *
+         * [localEpoch] is what this device holds *after* any correction
+         * the reconcile handed back has been persisted, not what it held
+         * when the approval started — the founder reads it next to
+         * [chainEpoch], and describing a state that no longer exists
+         * would send them to restore a backup over current data. The two
+         * can therefore be equal: the epochs agreeing while the
+         * commitment does not is a real shape of this failure.
          */
         class StaleGroupState(
             val localEpoch: ULong,
@@ -991,6 +999,19 @@ open class JoinRequestApprover(
      * so it goes too.
      */
     private suspend fun settleAnchor(group: ChatGroup) {
+        // Deliberately unguarded, and deliberately first. A write that
+        // fails here throws — [GroupRepository.insert]'s `Boolean` is
+        // "inserted vs updated", never "worked vs didn't" — so the sweep
+        // below is already unreachable when nothing was persisted, which
+        // is the property that matters: records swept against an advance
+        // the device did not keep would leave the group naming the epoch
+        // before them with nothing left to explain it. The throw is left
+        // to propagate rather than caught, because an approval that
+        // cannot write the state it just put on a public chain has
+        // nothing useful to continue with.
+        //
+        // (The iOS twin needs an explicit guard: its `insert` answers
+        // `GroupInsertOutcome.failed` instead of throwing.)
         groupRepository.insert(group)
         if (group.epoch == 0uL) return
         runCatching {
@@ -1234,6 +1255,11 @@ open class JoinRequestApprover(
                 is SubmitVerdict.Ok -> AnchorOutcome.Ok(retry.group)
                 is SubmitVerdict.Failed ->
                     AnchorOutcome.Failed(retry.outcome, reconciled = adopted.group)
+                // The adopted state is handed back to be persisted, so
+                // by the time the founder reads this the device holds
+                // `adopted.group.epoch` — which [adoptLandedAnchor] set
+                // to the chain's own. Reporting the pre-adopt epoch
+                // would describe a device that no longer exists.
                 SubmitVerdict.Stale -> AnchorOutcome.Failed(
                     ApproveOutcome.StaleGroupState(
                         localEpoch = adopted.group.epoch,
@@ -1258,9 +1284,14 @@ open class JoinRequestApprover(
             // Refused again against the chain's own epoch. One retry was
             // the offer; a loop here would just re-prove into the same
             // wall for 3-5 seconds a go.
+            // `rebased`, not `group`: the rebase is persisted on the way
+            // out, so the epoch this device holds afterwards is the
+            // chain's. Naming the epoch it held before would tell the
+            // founder to restore a backup over state that is already
+            // current.
             SubmitVerdict.Stale -> AnchorOutcome.Failed(
                 ApproveOutcome.StaleGroupState(
-                    localEpoch = group.epoch,
+                    localEpoch = rebased.epoch,
                     chainEpoch = entry.epoch,
                 ),
                 reconciled = rebased,
@@ -1379,13 +1410,15 @@ internal fun adoptLandedAnchor(
 }
 
 /**
- * `group` moved onto the chain's epoch, if the chain holds this exact
- * roster and salt and only the counter drifted — the shape a
+ * `group` moved onto the chain's epoch, if the chain is *ahead* over
+ * this exact roster and salt and only the counter drifted — the shape a
  * half-persisted or replayed update leaves behind.
  *
  * `null` when the epochs already agree (the mismatch was something
  * else, and re-proving would spend 3-5 seconds to be refused
- * identically) or when the chain's commitment isn't over state this
+ * identically), when the chain is behind — an epoch counter that walked
+ * backwards is not a state to rebase onto, whatever the commitment
+ * reproduces — or when the chain's commitment isn't over state this
  * device can reproduce.
  */
 internal fun rebaseOnChainEpoch(
@@ -1393,7 +1426,7 @@ internal fun rebaseOnChainEpoch(
     entry: SepCommitmentEntry,
     commitmentOf: CommitmentRecomputing,
 ): ChatGroup? {
-    if (entry.epoch == group.epoch) return null
+    if (entry.epoch <= group.epoch) return null
     val expected = try {
         commitmentOf(group.members, group.tier, entry.epoch, group.salt)
     } catch (_: Throwable) {
