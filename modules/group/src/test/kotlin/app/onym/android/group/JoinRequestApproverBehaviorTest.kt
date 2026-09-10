@@ -364,6 +364,79 @@ class JoinRequestApproverBehaviorTest {
             assertNotNull(env.introKeyStore.find(env.introPub))
         }
 
+    /**
+     * The retry the previous test leaves room for, actually taken.
+     *
+     * This is the shape of a delivery that failed *after* the chain
+     * moved: the anchor is done and persisted, and all that is missing
+     * is the invitation. Since the request row survives a send failure,
+     * the founder tapping Accept again re-seals and re-ships it — no
+     * new outcome type, no manual repair.
+     */
+    @Test
+    fun approve_afterASendFailure_shipsTheInvitationOnTheNextTap() =
+        runTest(UnconfinedTestDispatcher()) {
+            val env = seed()
+            val a = env.seedJoiner(bls = 0xC1, inbox = 0xC2, alias = "Bob")
+            env.approver.pumpOnce()
+
+            env.transport.setReceiptAcceptedBy(0)
+            assertTrue(
+                env.approver.approve(a.requestId)
+                    is JoinRequestApprover.ApproveOutcome.TransportFailed,
+            )
+            // The envelope went out; no relay took it, which is what
+            // the approver refuses on.
+            assertEquals(1, env.transport.sends().size)
+
+            env.transport.setReceiptAcceptedBy(1)
+            env.approver.pumpOnce()
+
+            assertEquals(
+                JoinRequestApprover.ApproveOutcome.Sent,
+                env.approver.approve(a.requestId),
+            )
+            assertEquals("re-sealed and re-shipped", 2, env.transport.sends().size)
+            assertTrue(
+                "request consumed once it landed",
+                env.introRequestStore.requests.value.isEmpty(),
+            )
+        }
+
+    /**
+     * A joiner already in the on-chain roster is re-approved without
+     * touching the chain — the case where an anchor succeeded and only
+     * the delivery failed, after a relaunch has reloaded the advanced
+     * group.
+     *
+     * Proved by omission: this group is Tyranny with no relayer wired,
+     * so entering the anchor leg at all would come back
+     * `NoActiveRelayer`. `Sent` means it was skipped, and the joiner got
+     * their invitation off the state already on disk.
+     */
+    @Test
+    fun approve_joinerAlreadyInRoster_shipsTheInvitationWithoutReAnchoring() =
+        runTest(UnconfinedTestDispatcher()) {
+            val joinerBls = ByteArray(48) { 0xC1.toByte() }
+            val env = seed(
+                extraMembers = listOf(
+                    GovernanceMember(
+                        publicKeyCompressed = joinerBls,
+                        leafHash = ByteArray(32) { 0xC2.toByte() },
+                    ),
+                ),
+                groupType = SepGroupType.TYRANNY,
+            )
+            val a = env.seedJoiner(bls = 0xC1, inbox = 0xC2, alias = "Bob")
+            env.approver.pumpOnce()
+
+            assertEquals(
+                JoinRequestApprover.ApproveOutcome.Sent,
+                env.approver.approve(a.requestId),
+            )
+            assertEquals(1, env.transport.sends().size)
+        }
+
     // ─── the rules a joiner is asked to sign ──────────────────────
 
     @Test
@@ -610,6 +683,11 @@ class JoinRequestApproverBehaviorTest {
         /** The group's rules — its invitation message, which is what a
          *  joiner is shown and asked to sign. */
         rules: String? = null,
+        /** Anarchy by default, because it skips the chain anchor and
+         *  keeps the suite on the JVM. Tyranny with no relayer wired is
+         *  how a test proves the anchor leg was *not* entered: if it
+         *  were, the approval would come back `NoActiveRelayer`. */
+        groupType: SepGroupType = SepGroupType.ANARCHY,
     ): Env {
         val introKeyStore = InMemoryIntroKeyStore()
         val introPrivate = X25519PrivateKeyParameters(SecureRandom())
@@ -650,9 +728,7 @@ class JoinRequestApproverBehaviorTest {
                 salt = ByteArray(32) { 0x66 },
                 commitment = ByteArray(32) { 0x77 },
                 tier = SepTier.SMALL,
-                // Anarchy skips the chain anchor entirely, which is what
-                // lets this whole suite run on the JVM.
-                groupType = SepGroupType.ANARCHY,
+                groupType = groupType,
                 adminPubkeyHex = adminBls.joinToString("") { "%02x".format(it) },
                 ownerIdentityId = owner.value,
                 isPublishedOnChain = true,

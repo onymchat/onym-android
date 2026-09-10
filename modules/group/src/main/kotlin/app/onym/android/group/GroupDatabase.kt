@@ -16,7 +16,11 @@ import androidx.room.RoomDatabase
  * `SwiftDataGroupStore` constructs in onym-ios PR #25.
  */
 @Database(
-    entities = [PersistedGroup::class, PersistedIntroRequest::class],
+    entities = [
+        PersistedGroup::class,
+        PersistedIntroRequest::class,
+        PersistedPendingAnchor::class,
+    ],
     // v5 (admin Ed25519): adds nullable `encryptedAdminEd25519PubkeyHex`
     // column on top of v4's `encryptedMemberProfilesJson`. Both
     // migrations are non-destructive — existing rows decode to null
@@ -36,12 +40,18 @@ import androidx.room.RoomDatabase
     // approval UI was a modal to act on immediately; as a row inside
     // the chat thread, one lost on process death reads as a message the
     // app dropped while the joiner waits.
-    version = 9,
+    // v10 (pending anchors): adds the `pending_anchors` table. A
+    // member-add's new salt is random and, until now, existed only in
+    // the memory of the process that drew it — a submitted transaction
+    // whose answer was lost took the group's roster with it, since no
+    // later proof could name the salt the chain had committed to.
+    version = 10,
     exportSchema = false,
 )
 abstract class GroupDatabase : RoomDatabase() {
     abstract fun groupDao(): GroupDao
     abstract fun introRequestDao(): IntroRequestDao
+    abstract fun pendingAnchorDao(): PendingAnchorDao
 }
 
 /**
@@ -162,6 +172,27 @@ object GroupDatabaseMigrations {
                     "`encryptedTargetIntroPublicKey` BLOB NOT NULL, " +
                     "`encryptedPayload` BLOB NOT NULL, " +
                     "PRIMARY KEY(`id`))",
+            )
+        }
+    }
+
+    /**
+     * v9 → v10: create the `pending_anchors` table. New table, so
+     * nothing existing is touched — and nothing needs backfilling: a
+     * row only ever describes an attempt this build is about to make.
+     */
+    val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pending_anchors` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`groupIdHex` TEXT NOT NULL, " +
+                    "`ownerIdentityId` TEXT NOT NULL, " +
+                    "`epochOld` INTEGER NOT NULL, " +
+                    "`createdAtMillis` INTEGER NOT NULL, " +
+                    "`encryptedJoinerPublicKey` BLOB NOT NULL, " +
+                    "`encryptedJoinerLeafHash` BLOB NOT NULL, " +
+                    "`encryptedSaltNew` BLOB NOT NULL)",
             )
         }
     }

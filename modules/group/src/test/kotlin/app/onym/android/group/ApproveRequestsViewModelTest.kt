@@ -15,6 +15,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -75,6 +76,36 @@ class ApproveRequestsViewModelTest {
         approver.gate.complete(JoinRequestApprover.ApproveOutcome.Sent)
         advanceUntilIdle()
         assertTrue("inFlight cleared after completion", !vm.inFlight.value.contains("r1"))
+    }
+
+    /**
+     * `Error(Contract, #10)` used to reach the founder as the raw
+     * Soroban diagnostic — a screenful of red starting "Couldn't send:
+     * anchor:", ending in a hex dump, telling them nothing they could
+     * act on. It is a statement about this device's copy of the group,
+     * so the row says that, with the two epochs that disagree.
+     */
+    @Test
+    fun staleLocalStateIsExplainedByTheTwoEpochsThatDisagree() = runTest(dispatcher) {
+        val approver = FakeApprover()
+        val vm = ApproveRequestsViewModel(approver = approver)
+        vm.start()
+        approver.emit(listOf(samplePending("r1")))
+        advanceUntilIdle()
+
+        approver.gate = CompletableDeferred()
+        vm.approve("r1")
+        advanceUntilIdle()
+        approver.gate.complete(
+            JoinRequestApprover.ApproveOutcome.StaleGroupState(localEpoch = 3uL, chainEpoch = 4uL),
+        )
+        advanceUntilIdle()
+
+        val message = vm.error("r1")
+        assertNotNull(message)
+        assertTrue("names this device's epoch", message!!.contains("epoch 3"))
+        assertTrue("names the chain's epoch", message.contains("epoch 4"))
+        assertFalse("no raw diagnostic", message.contains("HostError"))
     }
 
     @Test

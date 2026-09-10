@@ -532,6 +532,7 @@ class OnymApplication : Application() {
                     GroupDatabaseMigrations.MIGRATION_6_7,
                     GroupDatabaseMigrations.MIGRATION_7_8,
                     GroupDatabaseMigrations.MIGRATION_8_9,
+                    GroupDatabaseMigrations.MIGRATION_9_10,
                 )
                 .fallbackToDestructiveMigration()
                 .build()
@@ -1270,6 +1271,21 @@ class OnymApplication : Application() {
         // pending requests + ship sealed GroupInvitationPayloads on
         // user approval. Single instance — the toolbar badge + the
         // modal screen share state via [ApproveRequestsViewModel].
+        // Keeps each member-add's freshly drawn salt on disk until the
+        // chain has moved past the attempt that used it. Without it a
+        // submitted `update_commitment` whose answer is lost leaves the
+        // chain committed to a salt nothing can name again, and the
+        // group can never add another member. Falls back to keeping
+        // nothing if the table is unavailable — approvals still work,
+        // they just lose the recovery.
+        val pendingAnchorStore: app.onym.android.group.PendingAnchorStore = try {
+            app.onym.android.group.RoomPendingAnchorStore(
+                dao = groupDatabase.pendingAnchorDao(),
+                encryption = storageEncryption,
+            )
+        } catch (_: Throwable) {
+            app.onym.android.group.NoopPendingAnchorStore
+        }
         val joinRequestApprover = app.onym.android.group.JoinRequestApprover(
             activeIdentity = identityRepository,
             envelopeSealer = identityRepository,
@@ -1289,6 +1305,7 @@ class OnymApplication : Application() {
             contracts = contractsRepository,
             networkPreference = networkPreference,
             makeContractTransport = contractTransportFactory,
+            pendingAnchors = pendingAnchorStore,
             // Gives the admin its own "X joined" row on approve. Every
             // other member's copy comes from the fanned-out
             // announcement, which the admin never receives.

@@ -168,6 +168,15 @@ class ApproveRequestsViewModel(
                 "Couldn’t generate proof: ${outcome.reason}"
             is JoinRequestApprover.ApproveOutcome.AnchorRejected ->
                 "Chain rejected the proof: ${outcome.reason}"
+            is JoinRequestApprover.ApproveOutcome.StaleGroupState ->
+                // Says which two numbers disagree, because that is the
+                // one thing that makes this diagnosable from a
+                // screenshot — and names the device, since the state
+                // the chain is holding was written by one of them and
+                // that device is where the approval can still work.
+                "This device’s copy of the group is behind the chain " +
+                    "(here: epoch ${outcome.localEpoch}, chain: epoch ${outcome.chainEpoch}). " +
+                    "Approve from the device that last added a member, or restore this one from a backup."
         }
     }
 }

@@ -11,11 +11,13 @@ import app.onym.android.chain.NetworkPreferenceProvider
 import app.onym.android.chain.OkHttpSepContractTransport
 import app.onym.android.chain.OnymGroupProofGenerator
 import app.onym.android.chain.RelayerRepository
+import app.onym.android.chain.SepCommitmentEntry
 import app.onym.android.chain.SepContractClient
 import app.onym.android.chain.SepContractError
 import app.onym.android.chain.SepContractErrorCode
 import app.onym.android.chain.SepContractTransport
 import app.onym.android.chain.SepGroupType
+import app.onym.android.chain.SepTier
 import app.onym.android.chain.TyrannyUpdateCommitmentPayload
 import app.onym.android.identity.ActiveIdentityProvider
 import app.onym.android.identity.IdentityRepository
@@ -99,6 +101,28 @@ open class JoinRequestApprover(
      *  OkHttp. */
     private val makeContractTransport: (String) -> SepContractTransport = { url ->
         OkHttpSepContractTransport(httpClient = OkHttpClient(), endpointUrl = url)
+    },
+    /**
+     * Where a member-add's new salt is written down before the
+     * transaction using it goes out. See [PendingAnchor] for why a
+     * lost answer is otherwise unrecoverable.
+     */
+    private val pendingAnchors: PendingAnchorStore = NoopPendingAnchorStore,
+    /**
+     * `Poseidon(Poseidon(root, epoch), salt)` over a roster — the same
+     * commitment shape the contract stores.
+     *
+     * Only the reconcile path needs it, to ask "is the state the chain
+     * holds one this device can still account for?". Injected because
+     * the production answer goes through the OnymSDK JNI and the
+     * reconcile decisions are worth testing on the JVM.
+     */
+    private val commitmentOf: CommitmentRecomputing = { members, tier, epoch, salt ->
+        GroupCommitmentBuilder.computePoseidonCommitment(
+            poseidonRoot = GroupCommitmentBuilder.computeMerkleRoot(members, tier),
+            epoch = epoch,
+            salt = salt,
+        )
     },
     /** Appends the "X joined" notice to the admin's own copy of the
      *  thread once an approval lands. Every other member gets theirs
@@ -265,6 +289,22 @@ open class JoinRequestApprover(
          *  chain looked at this and said no" and is not worth
          *  retrying. */
         object GroupNotAnchoredYet : ApproveOutcome()
+
+        /**
+         * The contract refused because the state this device proved
+         * *from* is not the state it holds (`PUBLIC_INPUTS_MISMATCH`),
+         * and the gap could not be closed by reading the chain back.
+         *
+         * Distinct from [AnchorRejected] because the chain did not
+         * judge the joiner or the proof — it judged this device's copy
+         * of the group, and the founder can do something about that
+         * (approve from the device that last anchored, or restore it)
+         * where "the chain said no" leaves them nowhere.
+         */
+        class StaleGroupState(
+            val localEpoch: ULong,
+            val chainEpoch: ULong,
+        ) : ApproveOutcome()
     }
 
     private val mutex = Mutex()
@@ -381,13 +421,20 @@ open class JoinRequestApprover(
         var anchored = group
         if (group.groupType == SepGroupType.TYRANNY && !alreadyInRoster) {
             when (val outcome = anchorTyrannyJoin(req, group)) {
-                is AnchorOutcome.Failed -> return@withLock outcome.outcome
+                is AnchorOutcome.Failed -> {
+                    // The approval failed, but the reconcile may still
+                    // have learned where the chain actually is. Keeping
+                    // that is what stops the next attempt paying for
+                    // the same discovery.
+                    outcome.reconciled?.let { settleAnchor(it) }
+                    return@withLock outcome.outcome
+                }
                 is AnchorOutcome.Ok -> {
                     anchored = outcome.group
                     // Persist the advanced state immediately so a
                     // subsequent crash before seal+ship doesn't lose
                     // the chain transition.
-                    groupRepository.insert(anchored)
+                    settleAnchor(anchored)
                 }
             }
         }
@@ -804,7 +851,34 @@ open class JoinRequestApprover(
     /** Outcome shape for [anchorTyrannyJoin]. */
     private sealed class AnchorOutcome {
         data class Ok(val group: ChatGroup) : AnchorOutcome()
-        data class Failed(val outcome: ApproveOutcome) : AnchorOutcome()
+
+        /**
+         * [reconciled] is state the reconcile path learned from the
+         * chain and the caller should persist even though the approval
+         * failed — a landed transaction this device hadn't recorded.
+         *
+         * Carried out rather than written here because the anchor leg
+         * stays pure: the caller owns persistence, and it is the caller
+         * that knows to sweep the pending records afterwards. Dropping
+         * it would make the next attempt rediscover the same thing, and
+         * pay the chain read again to do it.
+         */
+        data class Failed(
+            val outcome: ApproveOutcome,
+            val reconciled: ChatGroup? = null,
+        ) : AnchorOutcome()
+    }
+
+    /** Outcome shape for one [proveAndSubmitJoin] round. */
+    private sealed class SubmitVerdict {
+        data class Ok(val group: ChatGroup) : SubmitVerdict()
+
+        /** The contract refused with `PUBLIC_INPUTS_MISMATCH` — the one
+         *  refusal that says the fault is in what this device believes,
+         *  and therefore the one worth reconciling. */
+        object Stale : SubmitVerdict()
+
+        data class Failed(val outcome: ApproveOutcome) : SubmitVerdict()
     }
 
     /**
@@ -841,34 +915,19 @@ open class JoinRequestApprover(
         val binding = contractsRepo.snapshots.value.binding(key)
             ?: return AnchorOutcome.Failed(ApproveOutcome.NoContractBinding)
 
-        // Resolve admin's index in the OLD member roster.
-        val adminBytes = ChatGroup.bytesFromHex(adminPubkeyHex)
-        val adminIndexOld = group.members.indexOfFirst {
-            it.publicKeyCompressed.contentEquals(adminBytes)
-        }
-        if (adminIndexOld < 0) {
-            return AnchorOutcome.Failed(
+        // Resolve admin's index in the roster as it stands, for the
+        // identity pre-flight below. Each attempt re-resolves its own.
+        val adminIndexOld = adminIndexIn(group)
+            ?: return AnchorOutcome.Failed(
                 ApproveOutcome.TransportFailed("admin not in members roster"),
             )
-        }
 
-        // Build new lex-sorted member list including the joiner.
-        // Compute the new Poseidon root over the new tree.
+        // The leaf this approval adds. Where it sorts into the roster
+        // is decided per attempt, in [proveAndSubmitJoin].
         val joinerMember = GovernanceMember(
             publicKeyCompressed = joinerBlsPub,
             leafHash = joinerLeafHash,
         )
-        val newMembers = (group.members + joinerMember)
-            .sortedWith(compareBy(byteArrayLexComparator()) { it.publicKeyCompressed })
-        val memberRootNew = try {
-            GroupCommitmentBuilder.computeMerkleRoot(
-                members = newMembers,
-                tier = group.tier,
-            )
-        } catch (e: Throwable) {
-            return AnchorOutcome.Failed(ApproveOutcome.ProofFailed("merkle_root: ${e.message ?: e}"))
-        }
-        val saltNew = GroupCommitmentBuilder.generateSalt()
 
         val blsSecret = try {
             // onym:allow-secret-read
@@ -897,6 +956,103 @@ open class JoinRequestApprover(
             return AnchorOutcome.Failed(ApproveOutcome.NotAdminOfThisGroup)
         }
 
+        val client = SepContractClient(
+            contractID = binding.contractId,
+            contractType = SepGroupType.TYRANNY,
+            network = networkPref.sepNetwork,
+            transport = makeContractTransport(relayerUrl),
+        )
+
+        return when (val first = proveAndSubmitJoin(client, group, blsSecret, joinerMember)) {
+            is SubmitVerdict.Ok -> AnchorOutcome.Ok(first.group)
+            is SubmitVerdict.Failed -> AnchorOutcome.Failed(first.outcome)
+            // The contract held this proof's `c_old` up against the
+            // commitment it actually stores and they differed. That is a
+            // statement about *this device's* copy of the group, not
+            // about the joiner — so ask the chain what it holds before
+            // giving up on the approval.
+            SubmitVerdict.Stale -> reconcileAndRetry(client, group, blsSecret, joinerMember)
+        }
+    }
+
+    /**
+     * Persist an advanced group, then drop the anchor records the
+     * advance resolved.
+     *
+     * Strictly in that order. The records are the only evidence of
+     * which transaction landed; sweeping them before the state they
+     * explain is on disk would turn a crash in between into the exact
+     * unrecoverable group this whole mechanism exists to prevent.
+     *
+     * Everything at or below the epoch just left is swept: the chain
+     * has moved past it, so no proof from it can be accepted again and
+     * nothing recorded against it can still be waiting to land. The
+     * attempt that produced *this* state proved from that same epoch,
+     * so it goes too.
+     */
+    private suspend fun settleAnchor(group: ChatGroup) {
+        groupRepository.insert(group)
+        if (group.epoch == 0uL) return
+        runCatching {
+            pendingAnchors.clear(
+                groupId = group.groupIdBytes,
+                ownerIdentityId = group.ownerIdentityId,
+                throughEpoch = group.epoch - 1uL,
+            )
+        }
+    }
+
+    /** Where the group's admin sits in [group]'s roster, or null when
+     *  it isn't there at all. */
+    private fun adminIndexIn(group: ChatGroup): Int? {
+        val adminPubkeyHex = group.adminPubkeyHex ?: return null
+        val adminBytes = ChatGroup.bytesFromHex(adminPubkeyHex)
+        return group.members
+            .indexOfFirst { it.publicKeyCompressed.contentEquals(adminBytes) }
+            .takeIf { it >= 0 }
+    }
+
+    /**
+     * One prove-and-submit round from a given [group] state.
+     *
+     * Split out of [anchorTyrannyJoin] so the reconcile path can run it
+     * a second time against a corrected state without duplicating the
+     * proof wiring — and so "the chain refused because our old state
+     * was wrong" is a value the caller can branch on rather than a
+     * string in a message.
+     */
+    private suspend fun proveAndSubmitJoin(
+        client: SepContractClient,
+        group: ChatGroup,
+        blsSecret: ByteArray,
+        joinerMember: GovernanceMember,
+    ): SubmitVerdict {
+        // Resolved per attempt, against the roster actually being
+        // proved from. A reconcile can change that roster between the
+        // first attempt and the second, and an index carried over from
+        // the first would name the wrong leaf.
+        val adminIndexOld = adminIndexIn(group)
+            ?: return SubmitVerdict.Failed(
+                ApproveOutcome.TransportFailed("admin not in members roster"),
+            )
+        val newMembers = (group.members + joinerMember)
+            .sortedWith(compareBy(byteArrayLexComparator()) { it.publicKeyCompressed })
+        val memberRootNew = try {
+            GroupCommitmentBuilder.computeMerkleRoot(
+                members = newMembers,
+                tier = group.tier,
+            )
+        } catch (e: Throwable) {
+            return SubmitVerdict.Failed(ApproveOutcome.ProofFailed("merkle_root: ${e.message ?: e}"))
+        }
+        // Random, and it stays random: this is the blinding factor that
+        // stops a chain observer confirming a guessed roster by
+        // recomputing the commitment. Deriving it from anything other
+        // members hold would hand that power to everyone who has ever
+        // been in the group — including whoever was removed from it.
+        // What makes it survivable is [pendingAnchors], below.
+        val saltNew = GroupCommitmentBuilder.generateSalt()
+
         val proofInput = GroupProofUpdateInput(
             groupType = SepGroupType.TYRANNY,
             tier = group.tier,
@@ -912,41 +1068,64 @@ open class JoinRequestApprover(
         val proof = try {
             proofGenerator.proveUpdate(proofInput)
         } catch (e: GroupProofGeneratorError) {
-            return AnchorOutcome.Failed(
+            return SubmitVerdict.Failed(
                 ApproveOutcome.ProofFailed(e.message ?: e.javaClass.simpleName),
             )
         } catch (e: Throwable) {
-            return AnchorOutcome.Failed(
+            return SubmitVerdict.Failed(
                 ApproveOutcome.ProofFailed(e.message ?: e.toString()),
             )
         }
 
-        val transport = makeContractTransport(relayerUrl)
-        val client = SepContractClient(
-            contractID = binding.contractId,
-            contractType = SepGroupType.TYRANNY,
-            network = networkPref.sepNetwork,
-            transport = transport,
-        )
         val payload = TyrannyUpdateCommitmentPayload(
             groupId = group.groupIdBytes,
             proof = proof.proof,
             publicInputs = proof.publicInputs,
         )
+        // Before the transaction goes out, not after. A row written
+        // afterwards would miss exactly the window it exists to cover:
+        // the process dying, or the answer never arriving, between the
+        // submit and the write.
+        //
+        // A store that cannot keep the salt is a refusal, not a
+        // warning. Submitting anyway would put the group one lost
+        // response away from never accepting another member.
+        try {
+            pendingAnchors.record(
+                PendingAnchor(
+                    groupId = group.groupIdBytes,
+                    ownerIdentityId = group.ownerIdentityId,
+                    epochOld = group.epoch,
+                    joinerPublicKey = joinerMember.publicKeyCompressed,
+                    joinerLeafHash = joinerMember.leafHash,
+                    saltNew = saltNew,
+                    createdAtMillis = System.currentTimeMillis(),
+                ),
+            )
+        } catch (e: Throwable) {
+            return SubmitVerdict.Failed(
+                ApproveOutcome.TransportFailed(
+                    "couldn't record the pending anchor: ${e.message ?: e}",
+                ),
+            )
+        }
+
         val response = try {
             client.updateCommitmentTyranny(payload)
         } catch (e: SepContractError) {
             // A refused call arrives as a non-2xx whose body carries the
             // simulation output, so the contract's own error number is
             // in there rather than in a structured field.
-            if (e.contractErrorCode == SepContractErrorCode.GROUP_NOT_FOUND.code) {
-                return AnchorOutcome.Failed(ApproveOutcome.GroupNotAnchoredYet)
+            return when (e.contractErrorCode) {
+                SepContractErrorCode.GROUP_NOT_FOUND.code ->
+                    SubmitVerdict.Failed(ApproveOutcome.GroupNotAnchoredYet)
+                SepContractErrorCode.PUBLIC_INPUTS_MISMATCH.code -> SubmitVerdict.Stale
+                else -> SubmitVerdict.Failed(
+                    ApproveOutcome.TransportFailed("anchor: ${e.message ?: e}"),
+                )
             }
-            return AnchorOutcome.Failed(
-                ApproveOutcome.TransportFailed("anchor: ${e.message ?: e}"),
-            )
         } catch (e: Throwable) {
-            return AnchorOutcome.Failed(
+            return SubmitVerdict.Failed(
                 ApproveOutcome.TransportFailed("anchor: ${e.message ?: e}"),
             )
         }
@@ -955,13 +1134,15 @@ open class JoinRequestApprover(
             // `accepted: false`, depending on where the relayer catches
             // it — so both paths check.
             val message = response.message ?: "(no message)"
-            if (SepContractErrorCode.parse(message) == SepContractErrorCode.GROUP_NOT_FOUND.code) {
-                return AnchorOutcome.Failed(ApproveOutcome.GroupNotAnchoredYet)
+            return when (SepContractErrorCode.parse(message)) {
+                SepContractErrorCode.GROUP_NOT_FOUND.code ->
+                    SubmitVerdict.Failed(ApproveOutcome.GroupNotAnchoredYet)
+                SepContractErrorCode.PUBLIC_INPUTS_MISMATCH.code -> SubmitVerdict.Stale
+                else -> SubmitVerdict.Failed(ApproveOutcome.AnchorRejected(message))
             }
-            return AnchorOutcome.Failed(ApproveOutcome.AnchorRejected(message))
         }
 
-        return AnchorOutcome.Ok(
+        return SubmitVerdict.Ok(
             group.copy(
                 members = newMembers,
                 commitment = proof.commitmentNew,
@@ -971,20 +1152,124 @@ open class JoinRequestApprover(
         )
     }
 
+    /**
+     * What to do after the contract answers `PUBLIC_INPUTS_MISMATCH`.
+     *
+     * The proof itself was fine; it proved a step *out of a state the
+     * chain is not in*. Which is nearly always this: an earlier attempt
+     * — at this same approval, or at another one from the same epoch —
+     * reached the ledger and its answer did not reach the phone. A
+     * relayer 502, a dropped connection, a kill. The chain advanced and
+     * this device kept the state it had, so the founder sees the first
+     * Accept fail and taps again, and the second tap is the one that
+     * gets #10.
+     *
+     * [pendingAnchors] is what makes that answerable. Each attempt
+     * wrote down the salt it was moving to, so the commitments those
+     * attempts *would* have produced can be recomputed and held up
+     * against what the chain actually holds. Whichever one matches is
+     * the transaction that landed.
+     *
+     * Three shapes come out of that:
+     *
+     *  - this approval's own attempt landed. Nothing left to submit —
+     *    adopt the state and let [approve] carry on to the invitation
+     *    the joiner never got.
+     *  - a *different* joiner's attempt landed, which is what has been
+     *    blocking this one. Adopt that state and re-prove this join
+     *    from it. The other joiner's request is still pending (their
+     *    approval failed too), and re-approving them now takes
+     *    [approve]'s already-in-roster path: invitation only, no second
+     *    anchor.
+     *  - nothing landed but the chain is at a later epoch over this
+     *    exact roster and salt, so only the counter drifted. Re-prove
+     *    from the chain's epoch.
+     *
+     * Anything else is a divergence this device cannot name, and a
+     * second proof would be as wrong as the first. That is
+     * [ApproveOutcome.StaleGroupState], and it is deliberately not a
+     * retry. It is also where a group anchored by a build that kept no
+     * pending record lands — there is nothing to recompute against.
+     */
+    private suspend fun reconcileAndRetry(
+        client: SepContractClient,
+        group: ChatGroup,
+        blsSecret: ByteArray,
+        joinerMember: GovernanceMember,
+    ): AnchorOutcome {
+        val entry = try {
+            client.getCommitment(group.groupIdBytes)
+        } catch (e: Throwable) {
+            // Read-back failed, so the mismatch stays unexplained.
+            // Reported as the chain refusal it was rather than as a
+            // reconcile failure the founder never asked for.
+            return AnchorOutcome.Failed(
+                ApproveOutcome.AnchorRejected(
+                    "the chain holds a different state for this group, " +
+                        "and re-reading it failed: ${e.message ?: e}",
+                ),
+            )
+        }
+
+        val candidates = try {
+            pendingAnchors.pending(group.groupIdBytes, group.ownerIdentityId)
+        } catch (_: Throwable) {
+            emptyList()
+        }
+
+        val adopted = adoptLandedAnchor(group, entry, candidates, commitmentOf)
+        if (adopted != null) {
+            if (adopted.joinerPublicKey.contentEquals(joinerMember.publicKeyCompressed)) {
+                // Our own transaction. The chain already holds the join
+                // this call was making.
+                return AnchorOutcome.Ok(adopted.group)
+            }
+            // Someone else's. Re-prove this join from the corrected
+            // state — and hand the correction back even if that fails,
+            // so a second failure doesn't throw away what was learned
+            // and leave the next attempt to rediscover it.
+            return when (
+                val retry = proveAndSubmitJoin(client, adopted.group, blsSecret, joinerMember)
+            ) {
+                is SubmitVerdict.Ok -> AnchorOutcome.Ok(retry.group)
+                is SubmitVerdict.Failed ->
+                    AnchorOutcome.Failed(retry.outcome, reconciled = adopted.group)
+                SubmitVerdict.Stale -> AnchorOutcome.Failed(
+                    ApproveOutcome.StaleGroupState(
+                        localEpoch = adopted.group.epoch,
+                        chainEpoch = entry.epoch,
+                    ),
+                    reconciled = adopted.group,
+                )
+            }
+        }
+
+        val rebased = rebaseOnChainEpoch(group, entry, commitmentOf)
+            ?: return AnchorOutcome.Failed(
+                ApproveOutcome.StaleGroupState(
+                    localEpoch = group.epoch,
+                    chainEpoch = entry.epoch,
+                ),
+            )
+
+        return when (val second = proveAndSubmitJoin(client, rebased, blsSecret, joinerMember)) {
+            is SubmitVerdict.Ok -> AnchorOutcome.Ok(second.group)
+            is SubmitVerdict.Failed -> AnchorOutcome.Failed(second.outcome, reconciled = rebased)
+            // Refused again against the chain's own epoch. One retry was
+            // the offer; a loop here would just re-prove into the same
+            // wall for 3-5 seconds a go.
+            SubmitVerdict.Stale -> AnchorOutcome.Failed(
+                ApproveOutcome.StaleGroupState(
+                    localEpoch = group.epoch,
+                    chainEpoch = entry.epoch,
+                ),
+                reconciled = rebased,
+            )
+        }
+    }
+
     private companion object {
         private val jsonFormat = Json { encodeDefaults = true; ignoreUnknownKeys = true }
-
-        /** Lex comparator over [ByteArray]; matches the canonical
-         *  member ordering already used in [CreateGroupInteractor]. */
-        private fun byteArrayLexComparator(): Comparator<ByteArray> =
-            Comparator { a, b ->
-                val len = minOf(a.size, b.size)
-                for (i in 0 until len) {
-                    val cmp = (a[i].toInt() and 0xFF) - (b[i].toInt() and 0xFF)
-                    if (cmp != 0) return@Comparator cmp
-                }
-                a.size - b.size
-            }
 
         /** Lowercase hex of a [ByteArray]. Lives here so the
          *  approver doesn't have to import the persistence /
@@ -994,6 +1279,128 @@ open class JoinRequestApprover(
             for (b in this@toHexLowercase) append("%02x".format(b.toInt() and 0xFF))
         }
     }
+}
+
+/**
+ * Recomputes a group's on-chain commitment from
+ * `(roster, tier, epoch, salt)`. Production is
+ * [GroupCommitmentBuilder]; the reconcile tests pass a pure stand-in
+ * so they need no JNI.
+ */
+internal typealias CommitmentRecomputing =
+    (List<GovernanceMember>, SepTier, ULong, ByteArray) -> ByteArray
+
+/** Lex comparator over [ByteArray]; matches the canonical member
+ *  ordering already used in [CreateGroupInteractor]. */
+internal fun byteArrayLexComparator(): Comparator<ByteArray> =
+    Comparator { a, b ->
+        val len = minOf(a.size, b.size)
+        for (i in 0 until len) {
+            val cmp = (a[i].toInt() and 0xFF) - (b[i].toInt() and 0xFF)
+            if (cmp != 0) return@Comparator cmp
+        }
+        a.size - b.size
+    }
+
+/** A recorded attempt the chain turns out to have accepted, and the
+ *  state adopting it puts this device in. */
+internal data class AdoptedAnchor(
+    val group: ChatGroup,
+    val joinerPublicKey: ByteArray,
+) {
+    override fun equals(other: Any?): Boolean = this === other ||
+        (other is AdoptedAnchor &&
+            group == other.group &&
+            joinerPublicKey.contentEquals(other.joinerPublicKey))
+
+    override fun hashCode(): Int = 31 * group.hashCode() + joinerPublicKey.contentHashCode()
+}
+
+/**
+ * The recorded attempt that [entry] shows actually landed, if one did.
+ *
+ * Each [PendingAnchor] kept the salt its transaction was moving to, so
+ * the commitment it would have produced is recomputable: roster plus
+ * that joiner, at `epochOld + 1`, under that salt. Exactly one can
+ * match what the chain holds — a commitment is binding, so a match is
+ * an identification, not a guess.
+ *
+ * Checked by recomputing rather than by trusting the epoch counter. A
+ * matching epoch over a different roster is a different group state,
+ * and adopting it would put the founder's device into a belief the
+ * chain does not share.
+ *
+ * `null` when the chain is somewhere none of the records explain —
+ * including when there are no records, which is every group anchored
+ * before they were kept.
+ */
+internal fun adoptLandedAnchor(
+    group: ChatGroup,
+    entry: SepCommitmentEntry,
+    candidates: List<PendingAnchor>,
+    commitmentOf: CommitmentRecomputing,
+): AdoptedAnchor? {
+    // Only a single step forward can be one of ours: every recorded
+    // attempt proved from an epoch, and an accepted proof advances the
+    // chain by exactly one.
+    if (entry.epoch != group.epoch + 1uL) return null
+
+    for (candidate in candidates) {
+        if (candidate.epochOld != group.epoch) continue
+        // Already in the roster — this record was resolved and merely
+        // outlived its sweep. Adding the leaf twice would build a tree
+        // the contract never committed to.
+        if (group.members.any { it.publicKeyCompressed.contentEquals(candidate.joinerPublicKey) }) {
+            continue
+        }
+        val newMembers = (
+            group.members + GovernanceMember(
+                publicKeyCompressed = candidate.joinerPublicKey,
+                leafHash = candidate.joinerLeafHash,
+            )
+            ).sortedWith(compareBy(byteArrayLexComparator()) { it.publicKeyCompressed })
+        val expected = try {
+            commitmentOf(newMembers, group.tier, entry.epoch, candidate.saltNew)
+        } catch (_: Throwable) {
+            continue
+        }
+        if (!expected.contentEquals(entry.commitment)) continue
+        return AdoptedAnchor(
+            group = group.copy(
+                members = newMembers,
+                commitment = entry.commitment,
+                epoch = entry.epoch,
+                salt = candidate.saltNew,
+            ),
+            joinerPublicKey = candidate.joinerPublicKey,
+        )
+    }
+    return null
+}
+
+/**
+ * `group` moved onto the chain's epoch, if the chain holds this exact
+ * roster and salt and only the counter drifted — the shape a
+ * half-persisted or replayed update leaves behind.
+ *
+ * `null` when the epochs already agree (the mismatch was something
+ * else, and re-proving would spend 3-5 seconds to be refused
+ * identically) or when the chain's commitment isn't over state this
+ * device can reproduce.
+ */
+internal fun rebaseOnChainEpoch(
+    group: ChatGroup,
+    entry: SepCommitmentEntry,
+    commitmentOf: CommitmentRecomputing,
+): ChatGroup? {
+    if (entry.epoch == group.epoch) return null
+    val expected = try {
+        commitmentOf(group.members, group.tier, entry.epoch, group.salt)
+    } catch (_: Throwable) {
+        return null
+    }
+    if (!expected.contentEquals(entry.commitment)) return null
+    return group.copy(commitment = entry.commitment, epoch = entry.epoch)
 }
 
 /**
