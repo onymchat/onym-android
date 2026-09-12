@@ -1542,6 +1542,50 @@ class OnymApplication : Application() {
                     }.getOrNull()
                 },
             )
+            // Cascade the moderation ledgers on identity removal:
+            // the mandate, the filed-report rows, the appeal
+            // submissions. Registered here rather than beside the
+            // other removal hooks because the repository it needs is
+            // built in this block.
+            //
+            // The listener fires BEFORE the wipe and from inside the
+            // identity repository's own (non-reentrant) mutex, so the
+            // keep-set is read off the already-published summary list
+            // minus the id being removed. Nothing on this path may
+            // call a suspending IdentityRepository API, and the
+            // removed identity is still listed when it runs.
+            //
+            // Wrapped: a listener that throws aborts the rest of the
+            // chain and the wipe itself, and a ledger that cannot be
+            // purged must not keep an identity's keys on the device.
+            identityRepository.registerRemovalListener { removed ->
+                runCatching {
+                    val keep = identityRepository.identities.value
+                        .filter { it.id != removed }
+                        .mapTo(mutableSetOf()) {
+                            app.onym.android.moderation.keyReference(it.sendingPublicKey)
+                        }
+                    moderationRepository.purgeForRemovedIdentities(keep)
+                }
+            }
+            // One sweep for the devices that removed an identity
+            // before the cascade above existed — their rows are
+            // already on disk and nothing else will ever look at them
+            // again.
+            //
+            // Waits for the first non-empty summary list rather than
+            // bootstrapping the identity itself: an empty list at this
+            // point means nobody has loaded identity storage yet, not
+            // that the device holds none, and minting one here to find
+            // out would pre-empt onboarding.
+            applicationScope.launch {
+                val keep = identityRepository.identities
+                    .first { it.isNotEmpty() }
+                    .mapTo(mutableSetOf()) {
+                        app.onym.android.moderation.keyReference(it.sendingPublicKey)
+                    }
+                runCatching { moderationRepository.purgeForRemovedIdentities(keep) }
+            }
             val gateCheckRepository = app.onym.android.moderation.GateCheckRepository(
                 attestation = attestation,
                 backend = moderationBackend,
