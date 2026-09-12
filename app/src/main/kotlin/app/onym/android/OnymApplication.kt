@@ -1555,17 +1555,38 @@ class OnymApplication : Application() {
             // call a suspending IdentityRepository API, and the
             // removed identity is still listed when it runs.
             //
-            // Wrapped: a listener that throws aborts the rest of the
-            // chain and the wipe itself, and a ledger that cannot be
-            // purged must not keep an identity's keys on the device.
+            // That last part is also the check. The summary list is a
+            // StateFlow that stays empty until something loads
+            // identity storage, and `restore()` from the recovery flow
+            // can fire this listener before anything has — a keep-set
+            // of nothing, handed to a purge that deletes everything
+            // outside it, including the rows of the identity being
+            // restored onto. A list that does not contain the id being
+            // removed is a stale read rather than an answer, so this
+            // declines to purge instead of guessing; the launch sweep
+            // catches what it skips on the next start.
+            //
+            // Cancellation is rethrown and everything else swallowed:
+            // `remove` is cancellable, and treating a cancelled purge
+            // as a finished one would let the wipe proceed on its
+            // say-so — while a listener that throws for any other
+            // reason aborts the rest of the chain and the wipe itself,
+            // costing the user the key deletion they asked for over a
+            // ledger row.
             identityRepository.registerRemovalListener { removed ->
-                runCatching {
-                    val keep = identityRepository.identities.value
+                val summaries = identityRepository.identities.value
+                if (summaries.any { it.id == removed }) {
+                    val keep = summaries
                         .filter { it.id != removed }
                         .mapTo(mutableSetOf()) {
                             app.onym.android.moderation.keyReference(it.sendingPublicKey)
                         }
-                    moderationRepository.purgeForRemovedIdentities(keep)
+                    try {
+                        moderationRepository.purgeForRemovedIdentities(keep)
+                    } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                        throw cancellation
+                    } catch (_: Throwable) {
+                    }
                 }
             }
             // One sweep for the devices that removed an identity
@@ -1578,6 +1599,12 @@ class OnymApplication : Application() {
             // point means nobody has loaded identity storage yet, not
             // that the device holds none, and minting one here to find
             // out would pre-empt onboarding.
+            //
+            // No timeout, deliberately. A device parked in onboarding
+            // has no identities and therefore nothing this could
+            // purge; the moment it gains one — this minute or an hour
+            // in — is exactly when the sweep should run. Until then it
+            // is one suspended collector on a StateFlow.
             applicationScope.launch {
                 val keep = identityRepository.identities
                     .first { it.isNotEmpty() }

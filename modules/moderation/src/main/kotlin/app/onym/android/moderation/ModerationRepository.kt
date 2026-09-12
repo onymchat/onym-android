@@ -295,11 +295,22 @@ class ModerationRepository(
      * is warned their case already has a filing, which presumes the
      * identity is still on the device to return.
      *
-     * The caller supplies the keep-set, so an unreadable identity list
-     * is never mistaken for an empty one. Nothing here touches gate
-     * state or the device's marks: what this device carries is read
-     * back from the attestation provider on the next check, under
-     * whichever identity holds a mandate then.
+     * The caller supplies the keep-set, and this cannot check it:
+     * every row outside it is deleted, so an empty set deletes
+     * everything. A caller that cannot prove its list of identities is
+     * complete must not call at all rather than pass what it has.
+     *
+     * Each ledger is purged under the lock its own writers hold, so a
+     * filing in flight cannot be overwritten by a keep-list read
+     * before it appended. The three locks are taken in sequence and
+     * never nested: `fileReport` holds [reportMutex] while resolving
+     * the mandate through [mutex], so holding [mutex] across a
+     * [reportMutex] acquisition here would invert that order and
+     * deadlock.
+     *
+     * Nothing here touches gate state or the device's marks: what this
+     * device carries is read back from the attestation provider on the
+     * next check, under whichever identity holds a mandate then.
      */
     suspend fun purgeForRemovedIdentities(keepingUsers: Set<String>) {
         mutex.withLock {
@@ -312,14 +323,18 @@ class ModerationRepository(
             }
         }
         reportStore?.let { reports ->
-            val records = reports.load()
-            val kept = records.filter { it.report.reporter in keepingUsers }
-            if (kept.size != records.size) saveReports(kept)
+            reportMutex.withLock {
+                val records = reports.load()
+                val kept = records.filter { it.report.reporter in keepingUsers }
+                if (kept.size != records.size) saveReports(kept)
+            }
         }
         caseSubmissionStore?.let { submissions ->
-            val records = submissions.load()
-            val kept = records.filter { it.user in keepingUsers }
-            if (kept.size != records.size) saveSubmissions(kept)
+            appealMutex.withLock {
+                val records = submissions.load()
+                val kept = records.filter { it.user in keepingUsers }
+                if (kept.size != records.size) saveSubmissions(kept)
+            }
         }
     }
 
