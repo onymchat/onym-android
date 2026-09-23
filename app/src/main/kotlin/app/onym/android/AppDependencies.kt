@@ -143,6 +143,7 @@ class AppDependencies(
      *  flow, its memoized (expensive) key material, and its
      *  once-per-session schedule jitter. */
     val refreshBackupVendors: suspend () -> Unit = {},
+    val naming: app.onym.android.naming.NamingController? = null,
 )
 
 /**

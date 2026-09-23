@@ -108,8 +108,10 @@ fun ChatThreadScreen(
     /** When non-null (opened from Search), the thread cold-opens scrolled
      *  to this message and flashes it, instead of opening at the bottom. */
     scrollToMessageId: java.util.UUID? = null,
+    naming: app.onym.android.naming.NamingController? = null,
 ) {
     val group by viewModel.group.collectAsStateWithLifecycle()
+    val namedProfiles = app.onym.android.naming.rememberBsnProfiles(naming, group)
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val joinRequests by viewModel.joinRequests.collectAsStateWithLifecycle()
     val replyingTo by viewModel.replyingTo.collectAsStateWithLifecycle()
@@ -217,7 +219,7 @@ fun ChatThreadScreen(
                 // alias edit repaints the rendered name headers without
                 // a fresh message arriving (requirement #6) — Compose
                 // recomposes the `remember(memberProfiles)` below.
-                memberProfiles = group?.memberProfiles.orEmpty(),
+                memberProfiles = namedProfiles,
                 invitationMessage = group?.invitationMessage,
                 padding = padding,
                 onSend = viewModel::send,
@@ -340,6 +342,7 @@ private fun ChatThreadBody(
     onRemovePending: ((java.util.UUID) -> Unit)? = null,
     onSendMedia: (() -> Unit)? = null,
     scrollToMessageId: java.util.UUID? = null,
+    naming: app.onym.android.naming.NamingController? = null,
     replyingTo: java.util.UUID?,
     onArmReply: (java.util.UUID) -> Unit,
     onCancelReply: () -> Unit,

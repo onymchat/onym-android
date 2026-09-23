@@ -297,6 +297,17 @@ class OnymApplication : Application() {
         applicationScope.launch {
             runCatching { identityRepository.bootstrap() }
         }
+        val namingController = app.onym.android.naming.NamingController(
+            applicationContext.getSharedPreferences("bsn-naming", MODE_PRIVATE),
+        ) { owner ->
+            check(identityRepository.currentIdentityId.value == owner) { "Activate this identity first" }
+            val identity = requireNotNull(identityRepository.currentIdentity())
+            app.onym.android.naming.NamingController.Holder(
+                "onym:key:" + app.onym.android.naming.BsnNamingClient.hex(identity.stellarPublicKey),
+                identity.stellarAccountID,
+            ) { bytes -> identityRepository.signWithStellarKeyAs(owner, bytes) }
+        }
+        identityRepository.registerRemovalListener { namingController.remove(it) }
         val nostrSignerProvider = OnymNostrSignerProvider()
         val clipboard = AndroidClipboardWriter(applicationContext)
         val strings = AndroidStringProvider(applicationContext)
@@ -2115,6 +2126,7 @@ class OnymApplication : Application() {
         }
 
         return AppDependencies(
+            naming = namingController,
             nostrSignerProvider = nostrSignerProvider,
             moderation = moderationUi,
             push = pushUi,

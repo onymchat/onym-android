@@ -1059,4 +1059,15 @@
   <string name="push_channel_name">Сообщения</string>
   <string name="push_notification_title">Onym</string>
   <string name="push_notification_body">Новое сообщение</string>
+    <string name="bsn_title">Провайдер имён BSN</string>
+    <string name="bsn_consent">При включении имён публичные ключи участников отправляются на atlas.predhit.com, пока чат открыт. Имена публичны, одинаковое имя может быть у разных аккаунтов.</string>
+    <string name="bsn_enable">Показывать имена BSN в чатах</string>
+    <string name="bsn_binding">В своём Stellar-кошельке добавьте запись OwnershipFullN (со свободным номером N) со значением этого Stellar-адреса Onym. У аккаунта уже должна быть запись Name.</string>
+    <string name="bsn_guide">Инструкция по привязке и API</string>
+    <string name="bsn_account">Stellar-аккаунт с вашим именем BSN</string>
+    <string name="bsn_request">Запросить имя</string>
+    <string name="bsn_publish_notice">После публикации связь этого Stellar-аккаунта с публичным ключом Onym будет доступна всем.</string>
+    <string name="bsn_accept">Подтвердить и опубликовать</string>
+    <string name="bsn_refresh">Проверить моё опубликованное имя</string>
+    <string name="bsn_disavow">Отозвать имя</string>
 </resources>

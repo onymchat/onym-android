@@ -1056,4 +1056,15 @@
   <string name="push_channel_name">Messages</string>
   <string name="push_notification_title">Onym</string>
   <string name="push_notification_body">New message</string>
+    <string name="bsn_title">BSN name provider</string>
+    <string name="bsn_consent">Enabling names sends participant signing public keys to atlas.predhit.com while this chat is open. Names are public annotations; identical names may belong to different accounts.</string>
+    <string name="bsn_enable">Show BSN names in chats</string>
+    <string name="bsn_binding">In your Stellar wallet, add an OwnershipFullN data entry (with an unused number N) containing this Onym Stellar address. The account must already have a Name entry.</string>
+    <string name="bsn_guide">Binding and API guide</string>
+    <string name="bsn_account">Stellar account with your BSN name</string>
+    <string name="bsn_request">Request name</string>
+    <string name="bsn_publish_notice">Publishing makes the association between this Stellar account and this Onym public key visible to anyone.</string>
+    <string name="bsn_accept">Accept and publish</string>
+    <string name="bsn_refresh">Check my published name</string>
+    <string name="bsn_disavow">Disavow this name</string>
 </resources>

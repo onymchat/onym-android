@@ -97,6 +97,7 @@ fun IdentityDetailScreen(
     identityId: IdentityId,
     onBack: () -> Unit,
     onBackup: () -> Unit,
+    naming: app.onym.android.naming.NamingController? = null,
 ) {
     val items by viewModel.items.collectAsStateWithLifecycle()
     val row = items.firstOrNull { it.summary.id == identityId }
@@ -148,6 +149,11 @@ fun IdentityDetailScreen(
                 .fillMaxSize()
                 .testTag("identity_detail.list"),
         ) {
+            item {
+                if (naming != null && row.isActive) {
+                    app.onym.android.naming.NamingPanel(naming, identityId)
+                }
+            }
             // ─── Hero ─────────────────────────────────────────────
             item {
                 Column(
