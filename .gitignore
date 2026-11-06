@@ -51,3 +51,8 @@ fastlane/metadata/android/*/images/phoneScreenshots/
 fastlane/metadata/android/screenshots.html
 # Google Play service-account key (provide via env, never commit).
 fastlane/*.json
+
+# Nix dev env (flake.nix): direnv + flake build outputs
+.direnv/
+result
+result-*

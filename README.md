@@ -25,6 +25,28 @@ branch of `onym-sdk-kotlin` — see `settings.gradle.kts`. No
 contributor-side `publishToMavenLocal` step needed; the network fetch
 is the only requirement.
 
+### NixOS
+
+`flake.nix` carries the toolchain the app targets — Android SDK 36
+(platform 36, build-tools 35.0.0 + 36.0.0, platform-tools, emulator,
+`android-36;google_apis;x86_64`), JDK 17, git-lfs — and enters it through
+`buildFHSEnv`, because AAPT2 from Maven and the SDK binaries are plain ELF
+against `/lib64/ld-linux` and fail in a bare shell.
+
+```sh
+nix develop          # FHS container: SDK, JDK 17, adb, emulator, git-lfs
+onym-lfs             # one-off: materialise the git-lfs assets
+onym-build           # ./gradlew assembleDebug
+onym-test            # ./gradlew testDebugUnitTest
+onym-lint            # scripts/lint-*.py + :app:lintDebug
+onym-avd && onym-emu # AVD onym_api36 + emulator on emulator-5556
+onym-ui-test         # ./gradlew connectedDebugAndroidTest
+```
+
+`nix run .#<command>` is the one-shot form; `onym-doctor` prints the paths and
+versions in use. `nix develop --command …` is not supported — the FHS shell
+hook *is* the container entry point.
+
 ## Architecture
 
 Four layers, each isolated from the others by an explicit seam.
