@@ -498,24 +498,13 @@ private fun ChatThreadBody(
     LaunchedEffect(imeBottom) {
         val rising = imeBottom > prevImeBottom
         prevImeBottom = imeBottom
-        val glue = shouldGlueToBottomOnImeRise(
-            rising = rising,
-            anchoredBeforeIme = anchoredBeforeIme,
-            wasScrollable = scrollableBeforeIme,
-            hasMessages = lastRowIndex >= 0,
-        )
-        // TEMP diagnostic (see the report): adb logcat -s OnymIme:I
-        android.util.Log.i(
-            "OnymIme",
-            "ime=" + imeBottom + " rising=" + rising + " anchor=" + anchoredBeforeIme +
-                " overflows=" + scrollableBeforeIme +
-                " first=" + listState.firstVisibleItemIndex + "+" +
-                listState.firstVisibleItemScrollOffset +
-                " visible=" + listState.layoutInfo.visibleItemsInfo.size + "/" +
-                listState.layoutInfo.totalItemsCount +
-                " viewport=" + listState.layoutInfo.viewportSize.height + " glue=" + glue,
-        )
-        if (glue) {
+        if (shouldGlueToBottomOnImeRise(
+                rising = rising,
+                anchoredBeforeIme = anchoredBeforeIme,
+                wasScrollable = scrollableBeforeIme,
+                hasMessages = lastRowIndex >= 0,
+            )
+        ) {
             listState.scrollToItem(lastRowIndex)
         }
     }
