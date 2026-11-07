@@ -476,10 +476,16 @@ private fun ChatThreadBody(
     // keep pinned: gluing it to the bottom slides its first messages
     // above the top edge for as long as the keyboard is up.
     var scrollableBeforeIme by remember { mutableStateOf(false) }
-    LaunchedEffect(nearBottom, imeBottom, listState.canScrollBackward) {
+    LaunchedEffect(nearBottom, imeBottom, listState.layoutInfo) {
         if (imeBottom == 0) {
             anchoredBeforeIme = nearBottom
-            scrollableBeforeIme = listState.canScrollBackward
+            val info = listState.layoutInfo
+            // "Overflows the viewport", not "is scrolled". A thread whose
+            // rows all fit shows every one of them, so there is nothing to
+            // pin — even if an earlier `scrollToItem(last)` left the index
+            // mid-list.
+            scrollableBeforeIme =
+                info.totalItemsCount > 0 && info.visibleItemsInfo.size < info.totalItemsCount
         }
     }
 
@@ -492,13 +498,24 @@ private fun ChatThreadBody(
     LaunchedEffect(imeBottom) {
         val rising = imeBottom > prevImeBottom
         prevImeBottom = imeBottom
-        if (shouldGlueToBottomOnImeRise(
-                rising = rising,
-                anchoredBeforeIme = anchoredBeforeIme,
-                wasScrollable = scrollableBeforeIme,
-                hasMessages = lastRowIndex >= 0,
-            )
-        ) {
+        val glue = shouldGlueToBottomOnImeRise(
+            rising = rising,
+            anchoredBeforeIme = anchoredBeforeIme,
+            wasScrollable = scrollableBeforeIme,
+            hasMessages = lastRowIndex >= 0,
+        )
+        // TEMP diagnostic (see the report): adb logcat -s OnymIme:I
+        android.util.Log.i(
+            "OnymIme",
+            "ime=" + imeBottom + " rising=" + rising + " anchor=" + anchoredBeforeIme +
+                " overflows=" + scrollableBeforeIme +
+                " first=" + listState.firstVisibleItemIndex + "+" +
+                listState.firstVisibleItemScrollOffset +
+                " visible=" + listState.layoutInfo.visibleItemsInfo.size + "/" +
+                listState.layoutInfo.totalItemsCount +
+                " viewport=" + listState.layoutInfo.viewportSize.height + " glue=" + glue,
+        )
+        if (glue) {
             listState.scrollToItem(lastRowIndex)
         }
     }
