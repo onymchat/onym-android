@@ -1,0 +1,216 @@
+{
+  "now": 1800000000000,
+  "issuer": "fa4834147f6e690c3693eff61336046403cd8ae2a14f31b3c407358569239565",
+  "subject": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+  "policy": "sha256:7f6d5560fac4890877d02510b692e8bd747d8234f17279ceaf6ca8098f569edc",
+  "digest": "sha256:63a5c7ea4eab6b5366ade3a00b9eeb6cb1871ab31901bb745782c42bbf9bbc65",
+  "offer": {
+    "version": 1,
+    "registry": "onym:registry:atlas-bsn",
+    "query": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+    "records": [
+      {
+        "record": {
+          "recordVersion": 1,
+          "registry": "onym:registry:atlas-bsn",
+          "name": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "displayName": "Алиса 🌍",
+          "namespace": "bsn.atlas.predhit.com",
+          "subject": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+          "scope": [
+            "display-name"
+          ],
+          "issuedAt": "2027-01-15T08:00:00.000Z",
+          "expiresAt": "2027-01-22T08:00:00.000Z",
+          "sequence": 1,
+          "policy": "sha256:7f6d5560fac4890877d02510b692e8bd747d8234f17279ceaf6ca8098f569edc",
+          "membershipCondition": null,
+          "stellarAccount": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "nameTag": "Name",
+          "bindingTag": "OwnershipFull3",
+          "network": "public",
+          "signature": "/29OmqhWjBMJ1bGqWZw0//2MYotvQ1Hd28vPFytkZUHOP5mgc88JgWueVXroqXQLmcUCYi0VS3/GMBFM51eFAA=="
+        },
+        "acceptance": null,
+        "status": "unaccepted",
+        "disavowal": null,
+        "supersededBy": null
+      }
+    ],
+    "checkedAt": "2027-01-15T08:00:00.000Z",
+    "expiresAt": "2027-01-15T08:01:00.000Z",
+    "signature": "tcuMqlAdA7EgqT5yJ2vdbIelFD7eCTkUoZZyoE+OsrHMbJCJLuR/SjS2Jny56D/ISNEDY2liQ5W+TkIrEMbJDA=="
+  },
+  "active": {
+    "version": 1,
+    "registry": "onym:registry:atlas-bsn",
+    "query": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+    "records": [
+      {
+        "record": {
+          "recordVersion": 1,
+          "registry": "onym:registry:atlas-bsn",
+          "name": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "displayName": "Алиса 🌍",
+          "namespace": "bsn.atlas.predhit.com",
+          "subject": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+          "scope": [
+            "display-name"
+          ],
+          "issuedAt": "2027-01-15T08:00:00.000Z",
+          "expiresAt": "2027-01-22T08:00:00.000Z",
+          "sequence": 1,
+          "policy": "sha256:7f6d5560fac4890877d02510b692e8bd747d8234f17279ceaf6ca8098f569edc",
+          "membershipCondition": null,
+          "stellarAccount": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "nameTag": "Name",
+          "bindingTag": "OwnershipFull3",
+          "network": "public",
+          "signature": "/29OmqhWjBMJ1bGqWZw0//2MYotvQ1Hd28vPFytkZUHOP5mgc88JgWueVXroqXQLmcUCYi0VS3/GMBFM51eFAA=="
+        },
+        "acceptance": {
+          "acceptanceVersion": 1,
+          "record": "sha256:63a5c7ea4eab6b5366ade3a00b9eeb6cb1871ab31901bb745782c42bbf9bbc65",
+          "subject": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+          "publish": true,
+          "acceptedAt": "2027-01-15T08:00:00.000Z",
+          "expiresAt": "2027-01-22T08:00:00.000Z",
+          "signature": "Oum/vhvGtnQUGih1UlO49lO2QpR2GwYJ7p7ehV/X0mln5fcRpK4FvZxbb+xXJ6WZip3zPGIskPwj4iKJh76jDA=="
+        },
+        "status": "active",
+        "disavowal": null,
+        "supersededBy": null
+      }
+    ],
+    "checkedAt": "2027-01-15T08:00:00.000Z",
+    "expiresAt": "2027-01-15T08:01:00.000Z",
+    "signature": "MVPkdH5psH8KS8ui5qTuOxkhoBBaggHi9Us6eAv3EEiSY/pUEgcPF63MBxnaBNNv33NFWqsOuYdiLgGwnyLpDQ=="
+  },
+  "revoked": {
+    "version": 1,
+    "registry": "onym:registry:atlas-bsn",
+    "query": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+    "records": [
+      {
+        "record": {
+          "recordVersion": 1,
+          "registry": "onym:registry:atlas-bsn",
+          "name": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "displayName": "Алиса 🌍",
+          "namespace": "bsn.atlas.predhit.com",
+          "subject": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+          "scope": [
+            "display-name"
+          ],
+          "issuedAt": "2027-01-15T08:00:00.000Z",
+          "expiresAt": "2027-01-22T08:00:00.000Z",
+          "sequence": 1,
+          "policy": "sha256:7f6d5560fac4890877d02510b692e8bd747d8234f17279ceaf6ca8098f569edc",
+          "membershipCondition": null,
+          "stellarAccount": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "nameTag": "Name",
+          "bindingTag": "OwnershipFull3",
+          "network": "public",
+          "signature": "/29OmqhWjBMJ1bGqWZw0//2MYotvQ1Hd28vPFytkZUHOP5mgc88JgWueVXroqXQLmcUCYi0VS3/GMBFM51eFAA=="
+        },
+        "acceptance": {
+          "acceptanceVersion": 1,
+          "record": "sha256:63a5c7ea4eab6b5366ade3a00b9eeb6cb1871ab31901bb745782c42bbf9bbc65",
+          "subject": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+          "publish": true,
+          "acceptedAt": "2027-01-15T08:00:00.000Z",
+          "expiresAt": "2027-01-22T08:00:00.000Z",
+          "signature": "Oum/vhvGtnQUGih1UlO49lO2QpR2GwYJ7p7ehV/X0mln5fcRpK4FvZxbb+xXJ6WZip3zPGIskPwj4iKJh76jDA=="
+        },
+        "status": "revoked",
+        "disavowal": null,
+        "supersededBy": null
+      }
+    ],
+    "checkedAt": "2027-01-15T08:00:00.000Z",
+    "expiresAt": "2027-01-15T08:01:00.000Z",
+    "signature": "DA99Z8EnJCKHvlmDQu/19cL7iE0ZKaL9VQ/p+wBOi40bMW74gs3e/m/DBRxQODU3ICPP6qi7yYGtiTZ2DBIuDA=="
+  },
+  "noAcceptance": {
+    "version": 1,
+    "registry": "onym:registry:atlas-bsn",
+    "query": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+    "records": [
+      {
+        "record": {
+          "recordVersion": 1,
+          "registry": "onym:registry:atlas-bsn",
+          "name": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "displayName": "Алиса 🌍",
+          "namespace": "bsn.atlas.predhit.com",
+          "subject": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+          "scope": [
+            "display-name"
+          ],
+          "issuedAt": "2027-01-15T08:00:00.000Z",
+          "expiresAt": "2027-01-22T08:00:00.000Z",
+          "sequence": 1,
+          "policy": "sha256:7f6d5560fac4890877d02510b692e8bd747d8234f17279ceaf6ca8098f569edc",
+          "membershipCondition": null,
+          "stellarAccount": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "nameTag": "Name",
+          "bindingTag": "OwnershipFull3",
+          "network": "public",
+          "signature": "/29OmqhWjBMJ1bGqWZw0//2MYotvQ1Hd28vPFytkZUHOP5mgc88JgWueVXroqXQLmcUCYi0VS3/GMBFM51eFAA=="
+        },
+        "acceptance": null,
+        "status": "active",
+        "disavowal": null,
+        "supersededBy": null
+      }
+    ],
+    "checkedAt": "2027-01-15T08:00:00.000Z",
+    "expiresAt": "2027-01-15T08:01:00.000Z",
+    "signature": "azrW2xrcB0HvZtW4ivX7O2ignZX8lolPe1CUfYD2ndXZKFxTan39vQ0YOXAj/DS+XIr69c49CM1H1kilC5h9Bg=="
+  },
+  "wrongDigest": {
+    "version": 1,
+    "registry": "onym:registry:atlas-bsn",
+    "query": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+    "records": [
+      {
+        "record": {
+          "recordVersion": 1,
+          "registry": "onym:registry:atlas-bsn",
+          "name": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "displayName": "Алиса 🌍",
+          "namespace": "bsn.atlas.predhit.com",
+          "subject": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+          "scope": [
+            "display-name"
+          ],
+          "issuedAt": "2027-01-15T08:00:00.000Z",
+          "expiresAt": "2027-01-22T08:00:00.000Z",
+          "sequence": 1,
+          "policy": "sha256:7f6d5560fac4890877d02510b692e8bd747d8234f17279ceaf6ca8098f569edc",
+          "membershipCondition": null,
+          "stellarAccount": "GBCQRID2VFAXA7Z6WLNZJSEJPKALFQIZOR3LNXRBHLBHHX35Q3CP6J7I",
+          "nameTag": "Name",
+          "bindingTag": "OwnershipFull3",
+          "network": "public",
+          "signature": "/29OmqhWjBMJ1bGqWZw0//2MYotvQ1Hd28vPFytkZUHOP5mgc88JgWueVXroqXQLmcUCYi0VS3/GMBFM51eFAA=="
+        },
+        "acceptance": {
+          "acceptanceVersion": 1,
+          "record": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "subject": "onym:key:197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+          "publish": true,
+          "acceptedAt": "2027-01-15T08:00:00.000Z",
+          "expiresAt": "2027-01-22T08:00:00.000Z",
+          "signature": "6dQOfqMX7MCoaBTdLa98mtxGFcm8j8MmwDAH6SVpcSkFW1PA+xtPCp/YVqmI95/ZSRwM0q/mPYvie+NzEM+KBA=="
+        },
+        "status": "active",
+        "disavowal": null,
+        "supersededBy": null
+      }
+    ],
+    "checkedAt": "2027-01-15T08:00:00.000Z",
+    "expiresAt": "2027-01-15T08:01:00.000Z",
+    "signature": "xciiYqkDDOsE3/HSMuAN0TfPN1HP+1LmGITBaIv4LNlzZToHlO1Rq3s7+6DXOmSZNl6Awu0uChIFuKXyAB5TAg=="
+  }
+}

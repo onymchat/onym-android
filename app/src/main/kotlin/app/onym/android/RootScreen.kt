@@ -520,6 +520,7 @@ fun RootScreen(
                     },
                 )
                 app.onym.android.chats.ChatThreadScreen(
+                    naming = dependencies.naming,
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
                     onShowMembers = {
@@ -1016,6 +1017,7 @@ fun RootScreen(
                     },
                 )
                 IdentityDetailScreen(
+                    naming = dependencies.naming,
                     viewModel = vm,
                     identityId = IdentityId(raw),
                     onBack = { navController.popBackStack() },
