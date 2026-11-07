@@ -41,6 +41,7 @@ onym-test            # ./gradlew testDebugUnitTest
 onym-lint            # scripts/lint-*.py + :app:lintDebug
 onym-avd && onym-emu # AVD onym_api36 + emulator on emulator-5556
 onym-ui-test         # ./gradlew connectedDebugAndroidTest
+onym-install-phone  # adb -d install trial-APK на телефон (рядом с основной)
 ```
 
 `nix run .#<command>` is the one-shot form; `onym-doctor` prints the paths and

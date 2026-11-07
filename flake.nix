@@ -189,7 +189,10 @@ EOF
           (mk "onym-build" ''
             set -eu
             ./gradlew ''${*:-assembleDebug} --no-daemon --console=plain
-            echo "APK: app/build/outputs/apk/debug/app-debug.apk"
+            # Печатаем тот APK, который реально собрался: assembleTrial и
+            # assembleDebug кладут их в разные каталоги.
+            apk="$(ls -t app/build/outputs/apk/*/*.apk 2>/dev/null | head -1 || true)"
+            [ -n "$apk" ] && echo "APK: $apk"
           '')
 
           (mk "onym-test" ''
@@ -221,6 +224,29 @@ EOF
               app/build/outputs/apk/debug/app-debug.apk
             "$ANDROID_HOME/platform-tools/adb" -s "$serial" shell am start \
               -n app.onym.android/.MainActivity
+          '')
+
+          # Установка на настоящий телефон, а не на эмулятор: `adb -d` берёт
+          # единственное USB-устройство, поэтому не важно, что ещё висит в
+          # `adb devices`. По умолчанию — trial-сборка: она ставится рядом с
+          # основной и ничего в ней не трогает.
+          (mk "onym-install-phone" ''
+            set -eu
+            apk="''${1:-app/build/outputs/apk/trial/app-trial.apk}"
+            [ -f "$apk" ] || { echo "Нет файла: $apk (сначала onym-build assembleTrial)" >&2; exit 1; }
+            adb_bin="$ANDROID_HOME/platform-tools/adb"
+            if [ -z "$("$adb_bin" devices | awk 'NR>1 && $2=="device"{print $1; exit}')" ]; then
+              echo "adb не видит ни одного устройства:" >&2
+              "$adb_bin" devices -l >&2
+              echo >&2
+              echo "Телефон по USB: нужны udev-правила для Android — на NixOS это" >&2
+              echo "  programs.adb.enable = true;" >&2
+              echo "  users.users.andy.extraGroups = [ \"adbusers\" ];" >&2
+              echo "плюс перелогин. Без USB: Отладка по Wi-Fi → adb pair <ip>:<port>." >&2
+              exit 1
+            fi
+            "$adb_bin" -d install -r "$apk"
+            echo "Установлено: $apk"
           '')
         ];
 
@@ -326,6 +352,7 @@ BANNER
         avd = runApp "onym-avd";
         emu = runApp "onym-emu";
         ui-test = runApp "onym-ui-test";
+        install-phone = runApp "onym-install-phone";
         doctor = runApp "onym-doctor";
         default = runApp "onym-doctor";
       };
