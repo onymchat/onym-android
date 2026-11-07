@@ -60,7 +60,10 @@ class SepContractChainStateReader(
     private val contracts: ContractsRepository,
     private val networkPreference: NetworkPreferenceProvider,
     private val makeContractTransport: (String) -> SepContractTransport = { url ->
-        OkHttpSepContractTransport(httpClient = OkHttpClient(), endpointUrl = url)
+        OkHttpSepContractTransport(
+            httpClient = SepContractHttp.relayerClient(OkHttpClient(), endpointUrl = url),
+            endpointUrl = url,
+        )
     },
 ) : ChainStateReading {
     override suspend fun tyrannyCommitment(groupId: ByteArray): SepCommitmentEntry =

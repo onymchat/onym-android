@@ -17,6 +17,7 @@ import app.onym.android.chain.OnymGroupProofGenerator
 import app.onym.android.chain.RelayerRepository
 import app.onym.android.chain.SepContractClient
 import app.onym.android.chain.SepContractError
+import app.onym.android.chain.SepContractHttp
 import app.onym.android.chain.SepContractTransport
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
@@ -87,7 +88,10 @@ open class CreateGroupInteractor(
      *  per-call. Injected so tests can swap in a fake without
      *  touching OkHttp. */
     private val makeContractTransport: (String) -> SepContractTransport = { url ->
-        OkHttpSepContractTransport(httpClient = OkHttpClient(), endpointUrl = url)
+        OkHttpSepContractTransport(
+            httpClient = SepContractHttp.relayerClient(OkHttpClient(), endpointUrl = url),
+            endpointUrl = url,
+        )
     },
 ) {
 

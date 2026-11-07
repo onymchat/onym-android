@@ -10,7 +10,6 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.onEach
 import androidx.fragment.app.FragmentActivity
 import androidx.room.Room
-import app.onym.android.chain.BearerAuthInterceptor
 import app.onym.android.moderation.authorityContactLine
 import app.onym.android.chain.ContractsRepository
 import app.onym.android.chain.DataStoreNetworkPreferenceProvider
@@ -50,7 +49,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.lang.ref.WeakReference
@@ -852,24 +850,22 @@ class OnymApplication : Application() {
                 UITestRegistry.contractTransportFactory!!
             } else {
                 { url ->
-                    // ONY-001: this is the ONLY place the relayer bearer
-                    // token is attached. Derive a client from the shared
-                    // (bearer-free) `httpClient` via `newBuilder()` so we
-                    // reuse its connection pool + dispatcher, then add a
-                    // bearer interceptor scoped to THIS relayer endpoint's
-                    // host. A cross-origin redirect therefore can't carry
-                    // the token off the relayer (OkHttp also strips
-                    // `Authorization` on cross-host redirects).
-                    val relayerHost = url.toHttpUrlOrNull()?.host
-                    val relayerClient = httpClient.newBuilder()
-                        .addInterceptor(
-                            BearerAuthInterceptor(
-                                token = relayerAuthToken,
-                                allowedHost = relayerHost,
-                            ),
-                        )
-                        .build()
-                    OkHttpSepContractTransport(httpClient = relayerClient, endpointUrl = url)
+                    // ONY-001: [SepContractHttp.relayerClient] is the only
+                    // place the relayer bearer token is attached — the
+                    // derivation reuses the shared (bearer-free) client's
+                    // connection pool, widens the timeouts to the iOS-parity
+                    // budget (this POST waits on `stellar contract invoke`
+                    // plus ledger inclusion, which OkHttp's 10 s default
+                    // would cut off mid-flight), and scopes the bearer to
+                    // THIS relayer endpoint's host.
+                    OkHttpSepContractTransport(
+                        httpClient = app.onym.android.chain.SepContractHttp.relayerClient(
+                            base = httpClient,
+                            token = relayerAuthToken,
+                            endpointUrl = url,
+                        ),
+                        endpointUrl = url,
+                    )
                 }
             }
         // Blossom media server for image messages + the lazy loaders.

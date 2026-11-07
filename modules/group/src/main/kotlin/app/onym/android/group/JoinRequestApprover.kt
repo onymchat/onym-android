@@ -15,6 +15,7 @@ import app.onym.android.chain.SepCommitmentEntry
 import app.onym.android.chain.SepContractClient
 import app.onym.android.chain.SepContractError
 import app.onym.android.chain.SepContractErrorCode
+import app.onym.android.chain.SepContractHttp
 import app.onym.android.chain.SepContractTransport
 import app.onym.android.chain.SepGroupType
 import app.onym.android.chain.SepTier
@@ -100,7 +101,10 @@ open class JoinRequestApprover(
      *  per-call. Injected so tests can swap a fake without touching
      *  OkHttp. */
     private val makeContractTransport: (String) -> SepContractTransport = { url ->
-        OkHttpSepContractTransport(httpClient = OkHttpClient(), endpointUrl = url)
+        OkHttpSepContractTransport(
+            httpClient = SepContractHttp.relayerClient(OkHttpClient(), endpointUrl = url),
+            endpointUrl = url,
+        )
     },
     /**
      * Where a member-add's new salt is written down before the
