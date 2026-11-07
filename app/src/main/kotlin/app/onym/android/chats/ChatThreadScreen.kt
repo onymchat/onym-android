@@ -1,6 +1,7 @@
 package app.onym.android.chats
 
 import app.onym.android.UITestRegistry
+import app.onym.android.PushMessagingService
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Lock
@@ -354,6 +356,13 @@ private fun ChatThreadBody(
     onReportRequested: ((ChatMessage) -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
+    // Opening a thread is what "reads" the nudge a push wake left
+    // behind: the wake carries nothing (no message, no chat), so this
+    // is the only place that knows the entry has gone stale. Without
+    // it a "New message" line outlives the reading and greets the user
+    // again much later.
+    val screenContext = LocalContext.current
+    LaunchedEffect(Unit) { PushMessagingService.cancel(screenContext) }
     // Defensive sort. The repository's contract is ascending by
     // sentAtMillis, but a future caller / test stub regressing
     // the order shouldn't surface as a visibly-misordered chat.
@@ -462,8 +471,16 @@ private fun ChatThreadBody(
     // would race the relayout and misfire on instant (non-animated)
     // keyboards.
     var anchoredBeforeIme by remember { mutableStateOf(true) }
-    LaunchedEffect(nearBottom, imeBottom) {
-        if (imeBottom == 0) anchoredBeforeIme = nearBottom
+    // Whether the conversation already needed scrolling while the
+    // keyboard was down. A thread that fits on screen has nothing to
+    // keep pinned: gluing it to the bottom slides its first messages
+    // above the top edge for as long as the keyboard is up.
+    var scrollableBeforeIme by remember { mutableStateOf(false) }
+    LaunchedEffect(nearBottom, imeBottom, listState.canScrollBackward) {
+        if (imeBottom == 0) {
+            anchoredBeforeIme = nearBottom
+            scrollableBeforeIme = listState.canScrollBackward
+        }
     }
 
     // Only rising frames re-pin. Falling frames (keyboard dismissing)
@@ -478,6 +495,7 @@ private fun ChatThreadBody(
         if (shouldGlueToBottomOnImeRise(
                 rising = rising,
                 anchoredBeforeIme = anchoredBeforeIme,
+                wasScrollable = scrollableBeforeIme,
                 hasMessages = lastRowIndex >= 0,
             )
         ) {
@@ -870,12 +888,20 @@ private fun FullScreenImageViewer(
  * `LazyListState` or driving a real soft keyboard; the composable
  * feeds it the rising-edge test on `WindowInsets.ime` and the
  * captured pre-keyboard `isNearBottom` state.
+ *
+ * [wasScrollable] gates the whole policy: a conversation short
+ * enough to fit on screen before the keyboard opened has nothing
+ * to keep pinned. Re-pinning it would push its first messages
+ * above the top edge for as long as the keyboard is up — visible
+ * exactly while the thread is still shorter than the screen, which
+ * is when the user reads it from the beginning.
  */
 internal fun shouldGlueToBottomOnImeRise(
     rising: Boolean,
     anchoredBeforeIme: Boolean,
+    wasScrollable: Boolean,
     hasMessages: Boolean,
-): Boolean = rising && anchoredBeforeIme && hasMessages
+): Boolean = rising && anchoredBeforeIme && wasScrollable && hasMessages
 
 /**
  * Swipeable full-screen album gallery. Pages horizontally through an

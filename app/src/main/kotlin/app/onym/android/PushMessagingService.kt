@@ -38,6 +38,12 @@ class PushMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
+        // The app is on screen: what arrived is already rendered (the
+        // thread updates live, the list carries unread badges), so a
+        // shade entry is noise. The flag is process-local and set by
+        // the activity lifecycle in [OnymApplication] — no dependency
+        // graph, per this service's cost contract.
+        if (appInForeground) return
         if (!canNotify()) return
         val manager = NotificationManagerCompat.from(this)
         ensureChannel(this)
@@ -81,6 +87,23 @@ class PushMessagingService : FirebaseMessagingService() {
     companion object {
         const val CHANNEL_ID = "messages"
         private const val NOTIFICATION_ID = 1
+
+        /**
+         * Whether an activity of this process is resumed. Flipped
+         * from [OnymApplication]'s lifecycle callbacks: FCM delivers
+         * on a binder thread while the main thread maintains it.
+         */
+        @Volatile
+        var appInForeground: Boolean = false
+
+        /**
+         * Drops the posted "New message" entry. The wake is
+         * content-free by design, so it cannot say when it went
+         * stale — reading the thread is the signal.
+         */
+        fun cancel(context: android.content.Context) {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+        }
 
         /**
          * A plain-SharedPreferences MIRROR of the push opt-in flag —

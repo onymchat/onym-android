@@ -252,9 +252,13 @@ class OnymApplication : Application() {
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) {
                 resumedActivity = WeakReference(activity)
+                // A wake that lands while the user is in the app would
+                // only duplicate what the screen already shows.
+                PushMessagingService.appInForeground = true
             }
             override fun onActivityPaused(activity: Activity) {
                 if (resumedActivity?.get() === activity) resumedActivity = null
+                PushMessagingService.appInForeground = false
             }
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
             override fun onActivityStarted(activity: Activity) {}

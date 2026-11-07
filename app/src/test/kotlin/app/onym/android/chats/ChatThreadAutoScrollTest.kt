@@ -88,6 +88,7 @@ class ChatThreadAutoScrollTest {
             shouldGlueToBottomOnImeRise(
                 rising = true,
                 anchoredBeforeIme = true,
+                wasScrollable = true,
                 hasMessages = true,
             ),
         )
@@ -101,6 +102,7 @@ class ChatThreadAutoScrollTest {
             shouldGlueToBottomOnImeRise(
                 rising = false,
                 anchoredBeforeIme = true,
+                wasScrollable = true,
                 hasMessages = true,
             ),
         )
@@ -114,6 +116,7 @@ class ChatThreadAutoScrollTest {
             shouldGlueToBottomOnImeRise(
                 rising = true,
                 anchoredBeforeIme = false,
+                wasScrollable = true,
                 hasMessages = true,
             ),
         )
@@ -127,7 +130,24 @@ class ChatThreadAutoScrollTest {
             shouldGlueToBottomOnImeRise(
                 rising = true,
                 anchoredBeforeIme = true,
+                wasScrollable = true,
                 hasMessages = false,
+            ),
+        )
+    }
+
+    @Test
+    fun shouldGlueToBottomOnImeRise_threadThatFitsOnScreen_doesNotGlue() {
+        // The whole conversation is on screen; the keyboard only takes
+        // room away from empty space. Gluing would scroll the first
+        // messages above the top edge while the user is still reading
+        // from the beginning.
+        assertFalse(
+            shouldGlueToBottomOnImeRise(
+                rising = true,
+                anchoredBeforeIme = true,
+                wasScrollable = false,
+                hasMessages = true,
             ),
         )
     }
