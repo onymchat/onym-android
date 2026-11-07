@@ -49,6 +49,15 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // `autoVerify` для App Link https://onym.app/join. Плейсхолдер, чтобы
+        // тестовая сборка (`trial`) могла снять притязание на тот же линк —
+        // см. buildTypes.trial ниже.
+        manifestPlaceholders["onymAutoVerify"] = "true"
+        // Схема `onym://join` — тоже плейсхолдер: у тестовой сборки своя
+        // (`onymtrial://join`), иначе на телефоне обе программы претендуют
+        // на один и тот же линк и система спрашивает, кем открыть.
+        manifestPlaceholders["onymJoinScheme"] = "onym"
+
         // Match the four Android ABIs the OnymSDK AAR ships .so files
         // for. Anything else would produce an APK that crashes on
         // System.loadLibrary("onym_sdk_jni").
@@ -155,6 +164,7 @@ android {
         }
     }
 
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -162,6 +172,29 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+
+        // Сборка «рядом» с основной: свой applicationId (`…​.trial`), а значит
+        // своя песочница — отдельная личность, чаты и настройки. Установленная
+        // основная сборка при этом не трогается и ничего не теряет, а обновлять
+        // её можно как обычно.
+        //
+        // Имя build type — `trial`, а не `test`: `src/test/` уже занят
+        // unit-тестами, и build type с тем же именем превратил бы их в
+        // продуктовые исходники.
+        create("trial") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".trial"
+            versionNameSuffix = "-trial"
+            signingConfig = signingConfigs.getByName("debug")
+            // Два пакета не могут одновременно владеть одним App Link:
+            // тестовая сборка не претендует на https://onym.app/join, иначе
+            // система показывает выбор приложения поверх основной.
+            manifestPlaceholders["onymAutoVerify"] = "false"
+            manifestPlaceholders["onymJoinScheme"] = "onymtrial"
+            // Библиотеки публикуют только debug/release: пусть `trial` берёт
+            // debug-варианты, иначе Gradle не находит совпадения.
+            matchingFallbacks += listOf("debug")
         }
     }
 

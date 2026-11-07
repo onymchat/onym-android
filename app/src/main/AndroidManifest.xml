@@ -99,7 +99,7 @@
                 before assetlinks fetch completes) and for direct
                 test invocations from adb / shell.
             -->
-            <intent-filter android:autoVerify="true">
+            <intent-filter android:autoVerify="${onymAutoVerify}">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -112,7 +112,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="onym" android:host="join" />
+                <data android:scheme="${onymJoinScheme}" android:host="join" />
             </intent-filter>
         </activity>
 

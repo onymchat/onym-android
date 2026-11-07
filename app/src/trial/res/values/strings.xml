@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Тестовая сборка ставится рядом с основной, поэтому в лаунчере её надо
+  отличать: имена совпадали бы («Onym» и «Onym»). Само приложение
+  по-прежнему зовётся Onym — «trial» это только ярлык иконки.
+-->
+<resources>
+    <string name="app_name" translatable="false">Onym trial</string>
+</resources>
