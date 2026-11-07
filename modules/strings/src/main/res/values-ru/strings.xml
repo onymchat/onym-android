@@ -525,6 +525,9 @@
   <string name="members_section_rules">ПРАВИЛА ГРУППЫ</string>
   <string name="members_you_suffix">(вы)</string>
   <string name="share_invite_cd">Поделиться приглашением</string>
+  <string name="members_invite_row">Пригласить в группу</string>
+  <string name="members_invite_row_hint">Ссылка или QR-код. Каждая заявка приходит вам на одобрение.</string>
+  <string name="members_invite_admin_only">Приглашать может только создатель группы.</string>
   <string name="group_photo_cd">Фото группы</string>
   <!-- In-thread membership notices (ChatSystemNotice). -->
   <string name="chat_system_member_joined">Теперь в группе: %1$s</string>

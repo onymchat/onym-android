@@ -529,6 +529,9 @@
   <string name="members_section_rules">GROUP RULES</string>
   <string name="members_you_suffix">(you)</string>
   <string name="share_invite_cd">Share invite</string>
+  <string name="members_invite_row">Invite people</string>
+  <string name="members_invite_row_hint">Send a link or a QR code. Each request comes to you for approval.</string>
+  <string name="members_invite_admin_only">Only the group\'s creator can invite people.</string>
   <string name="group_photo_cd">Group photo</string>
   <!-- In-thread membership notices (ChatSystemNotice). -->
   <string name="chat_system_member_joined">%1$s joined</string>
