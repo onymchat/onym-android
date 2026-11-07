@@ -239,10 +239,12 @@ EOF
               echo "adb не видит ни одного устройства:" >&2
               "$adb_bin" devices -l >&2
               echo >&2
-              echo "Телефон по USB: нужны udev-правила для Android — на NixOS это" >&2
-              echo "  programs.adb.enable = true;" >&2
-              echo "  users.users.andy.extraGroups = [ \"adbusers\" ];" >&2
-              echo "плюс перелогин. Без USB: Отладка по Wi-Fi → adb pair <ip>:<port>." >&2
+              echo "Телефон по USB: доступа к устройству нет. На nixpkgs 26.05 опция" >&2
+              echo "programs.adb УДАЛЕНА — вместо неё:" >&2
+              echo "  environment.systemPackages = with pkgs; [ android-tools ];" >&2
+              echo "правила uaccess даёт systemd (70-uaccess.rules), отдельная группа не нужна." >&2
+              echo "Телефон при этом должен быть в режиме «Передача файлов», иначе uaccess" >&2
+              echo "не пометит устройство. Без USB: Отладка по Wi-Fi → adb pair <ip>:<port>." >&2
               exit 1
             fi
             "$adb_bin" -d install -r "$apk"
