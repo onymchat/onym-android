@@ -189,9 +189,13 @@ EOF
           (mk "onym-build" ''
             set -eu
             ./gradlew ''${*:-assembleDebug} --no-daemon --console=plain
-            # Печатаем тот APK, который реально собрался: assembleTrial и
-            # assembleDebug кладут их в разные каталоги.
-            apk="$(ls -t app/build/outputs/apk/*/*.apk 2>/dev/null | head -1 || true)"
+            # Печатаем APK той сборки, которую просили: у вариантов разные
+            # каталоги, и «самый свежий файл» — не то же самое, что только
+            # что собранный.
+            first="''${1:-assembleDebug}"
+            variant="$(printf '%s' "$first" | sed -n 's/^assemble//p' | tr '[:upper:]' '[:lower:]')"
+            apk="$(ls app/build/outputs/apk/"''${variant:-debug}"/*.apk 2>/dev/null | head -1 || true)"
+            [ -n "$apk" ] || apk="$(ls -t app/build/outputs/apk/*/*.apk 2>/dev/null | head -1 || true)"
             [ -n "$apk" ] && echo "APK: $apk"
           '')
 
@@ -247,6 +251,7 @@ EOF
               echo "не пометит устройство. Без USB: Отладка по Wi-Fi → adb pair <ip>:<port>." >&2
               exit 1
             fi
+            echo "Ставлю $apk, собран $(date -r "$apk" '+%Y-%m-%d %H:%M')"
             "$adb_bin" -d install -r "$apk"
             echo "Установлено: $apk"
           '')
@@ -329,10 +334,17 @@ BANNER
       };
 
       # `nix run`-хелперы: каждый просто входит в контейнер и зовёт свой скрипт.
+      # Аргументы пробрасываем явно: контейнер исполняет `bash -c <строка>`,
+      # а не `bash -c <строка> "$@"`, поэтому без этой склейки
+      # `nix run .#build assembleTrial` молча терял задачу и собирал debug.
       runApp = script: {
         type = "app";
         program = "${pkgs.writeShellScript "onym-run-${script}" ''
-          exec ${fhs}/bin/${fhsName} -c ${pkgs.lib.escapeShellArg script}
+          cmd=${pkgs.lib.escapeShellArg script}
+          for arg in "$@"; do
+            cmd="$cmd $(printf '%q' "$arg")"
+          done
+          exec ${fhs}/bin/${fhsName} -c "$cmd"
         ''}";
       };
     in
