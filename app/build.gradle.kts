@@ -49,13 +49,13 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // `autoVerify` для App Link https://onym.app/join. Плейсхолдер, чтобы
-        // тестовая сборка (`trial`) могла снять притязание на тот же линк —
-        // см. buildTypes.trial ниже.
+        // `autoVerify` for the App Link https://onym.app/join. A placeholder so
+        // that the test build (`trial`) can drop its claim on the same link —
+        // see buildTypes.trial below.
         manifestPlaceholders["onymAutoVerify"] = "true"
-        // Схема `onym://join` — тоже плейсхолдер: у тестовой сборки своя
-        // (`onymtrial://join`), иначе на телефоне обе программы претендуют
-        // на один и тот же линк и система спрашивает, кем открыть.
+        // The `onym://join` scheme is a placeholder too: the test build gets
+        // its own (`onymtrial://join`), otherwise both apps on the phone
+        // claim one link and the system asks which of them should open it.
         manifestPlaceholders["onymJoinScheme"] = "onym"
 
         // Match the four Android ABIs the OnymSDK AAR ships .so files
@@ -174,26 +174,26 @@ android {
             )
         }
 
-        // Сборка «рядом» с основной: свой applicationId (`…​.trial`), а значит
-        // своя песочница — отдельная личность, чаты и настройки. Установленная
-        // основная сборка при этом не трогается и ничего не теряет, а обновлять
-        // её можно как обычно.
+        // A build that stands *beside* the daily one: its own applicationId
+        // (`….trial`), hence its own sandbox — a separate identity, chats
+        // and settings. The installed daily build is left untouched and
+        // loses nothing; it keeps updating as usual.
         //
-        // Имя build type — `trial`, а не `test`: `src/test/` уже занят
-        // unit-тестами, и build type с тем же именем превратил бы их в
-        // продуктовые исходники.
+        // The build type is `trial`, not `test`: `src/test/` already holds
+        // the unit tests, and a build type of that name would turn them into
+        // product sources.
         create("trial") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".trial"
             versionNameSuffix = "-trial"
             signingConfig = signingConfigs.getByName("debug")
-            // Два пакета не могут одновременно владеть одним App Link:
-            // тестовая сборка не претендует на https://onym.app/join, иначе
-            // система показывает выбор приложения поверх основной.
+            // Two packages cannot own one App Link at once: the test build
+            // does not claim https://onym.app/join, otherwise the system
+            // shows an app chooser over the daily app.
             manifestPlaceholders["onymAutoVerify"] = "false"
             manifestPlaceholders["onymJoinScheme"] = "onymtrial"
-            // Библиотеки публикуют только debug/release: пусть `trial` берёт
-            // debug-варианты, иначе Gradle не находит совпадения.
+            // Libraries publish debug/release only: let `trial` fall back
+            // to the debug variants, otherwise Gradle finds no match.
             matchingFallbacks += listOf("debug")
         }
     }
