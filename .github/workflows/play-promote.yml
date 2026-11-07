@@ -1,0 +1,125 @@
+name: Play Promote
+
+# Moves the newest release already uploaded to one Play track to another
+# (internal -> production by default) WITHOUT uploading a bundle.
+#
+# Why it exists: Play keys releases by versionCode, so a build that is
+# already on the internal track cannot be uploaded a second time to
+# production — `Play Publish` with the same tag fails there. Promotion is
+# the operation that carries that same release across tracks, and it is
+# what makes "verify on internal, then ship" possible without spending
+# another versionCode.
+#
+# Trigger:
+#   gh workflow run "Play Promote"                      # internal -> production, 100%
+#   gh workflow run "Play Promote" -f rollout=0.1       # staged: 10% of users
+#   gh workflow run "Play Promote" -f from=internal -f to=beta
+#
+# rollout is a user fraction in (0, 1]: a partial value publishes the
+# release as inProgress, and a later run without rollout (or with
+# rollout=1) finishes it at 100%. Play still reviews a production
+# release before any user sees it.
+#
+# Required secret: PLAY_SERVICE_ACCOUNT_JSON — the same key Play Publish
+# uses, so an account allowed to release on the app's tracks.
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'Track to promote FROM (internal | alpha | beta | production)'
+        required: false
+        type: string
+        default: 'internal'
+      to:
+        description: 'Track to promote TO (internal | alpha | beta | production)'
+        required: false
+        type: string
+        default: 'production'
+      rollout:
+        description: 'User fraction, e.g. 0.1 — empty or 1 promotes the whole release'
+        required: false
+        type: string
+        default: ''
+      status:
+        description: 'Release status: inProgress | completed (empty = derived from rollout)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: play-promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote the release between Play tracks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - uses: ruby/setup-ruby@a4effe49ee8ee5b8b5091268c473a4628afb5651  # v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install Fastlane
+        run: gem install fastlane --version 2.234.0 --no-document
+
+      - name: Validate inputs
+        # Fail before touching Play: a mistyped track name would otherwise
+        # reach the API as "create a brand-new track", which is the one
+        # outcome nobody wants from a promotion.
+        env:
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+          ROLLOUT: ${{ inputs.rollout }}
+          STATUS: ${{ inputs.status }}
+        run: |
+          set -eu
+          for value in "$FROM" "$TO"; do
+            case "$value" in
+              internal|alpha|beta|production) ;;
+              *) echo "unknown track: $value" >&2; exit 1 ;;
+            esac
+          done
+          if [ "$FROM" = "$TO" ]; then
+            echo "from and to are the same track ($FROM)" >&2
+            exit 1
+          fi
+          case "$STATUS" in
+            ''|inProgress|completed) ;;
+            *) echo "status must be inProgress or completed (got: $STATUS)" >&2; exit 1 ;;
+          esac
+          python3 - "$ROLLOUT" <<'PY'
+          import sys
+          raw = sys.argv[1].strip()
+          if not raw:
+              sys.exit(0)
+          try:
+              fraction = float(raw)
+          except ValueError:
+              sys.exit(f"rollout must be a number in (0, 1], got {raw!r}")
+          if not 0 < fraction <= 1:
+              sys.exit(f"rollout must be in (0, 1], got {fraction}")
+          PY
+
+      - name: Promote
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -eu
+          test -n "$PLAY_SERVICE_ACCOUNT_JSON" || {
+            echo "secret PLAY_SERVICE_ACCOUNT_JSON unset" >&2
+            exit 1
+          }
+          json_key="$RUNNER_TEMP/play-service-account.json"
+          printf '%s' "$PLAY_SERVICE_ACCOUNT_JSON" > "$json_key"
+          SUPPLY_JSON_KEY="$json_key" fastlane android promote \
+            from:"${{ inputs.from }}" \
+            to:"${{ inputs.to }}" \
+            rollout:"${{ inputs.rollout }}" \
+            status:"${{ inputs.status }}"

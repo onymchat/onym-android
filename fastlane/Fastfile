@@ -105,4 +105,42 @@ platform :android do
       sync_image_upload: true
     )
   end
+
+  desc "Promote the newest release from one Play track to another — no upload"
+  desc ""
+  desc "Play keys releases by versionCode, so a build already sitting on one"
+  desc "track cannot be uploaded again to a second one. Promotion is the"
+  desc "operation that moves it. With rollout < 1 the release goes out staged"
+  desc "(inProgress); leaving it out finishes the rollout at 100%."
+  desc ""
+  desc "  fastlane android promote from:internal to:production rollout:0.1"
+  lane :promote do |options|
+    from    = options[:from].to_s.strip
+    from    = "internal" if from.empty?
+    to      = options[:to].to_s.strip
+    to      = "production" if to.empty?
+    rollout = options[:rollout].to_s.strip
+    # A full rollout is not a fraction: Play wants it as a completed release.
+    rollout = nil if rollout.empty? || rollout == "1"
+    status  = options[:status].to_s.strip
+    # A partial rollout only exists as an inProgress release; a full one is
+    # "completed". Caller may override, but the default follows the fraction.
+    status = (rollout ? "inProgress" : "completed") if status.empty?
+
+    upload_to_play_store(
+      package_name: "app.onym.android",
+      track: from,
+      track_promote_to: to,
+      release_status: status,
+      rollout: rollout,
+      # Promotion moves an existing release; nothing is uploaded here.
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
+    )
+    UI.success("Promoted #{from} -> #{to}: rollout #{rollout || '100%'}, status #{status}")
+  end
 end

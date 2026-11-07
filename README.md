@@ -540,6 +540,39 @@ See [`keystore/README.md`](keystore/README.md) for keystore management
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
+### Google Play
+
+Three manual workflows own the store, deliberately separate from the APK
+release above — a Play push never gates, and is never gated by, a GitHub
+Release:
+
+| workflow | what it does |
+| --- | --- |
+| `play-publish.yml` | builds and signs an AAB, uploads it to one track (`internal` by default) |
+| `play-promote.yml` | moves a release that is already uploaded to another track, optionally staged |
+| `play-store-metadata.yml` | fastlane `upload_all`: listing text, icon, feature graphic, screenshots |
+
+```sh
+gh workflow run "Play Publish" -f tag=v0.0.89            # upload to internal
+gh workflow run "Play Promote" -f rollout=0.1            # internal -> production, 10% of users
+gh workflow run "Play Promote"                            # finish that rollout at 100%
+gh workflow run "Play Store Metadata"                     # listing only
+```
+
+Play keys releases by `versionCode` (`MAJOR*10000 + MINOR*100 + PATCH`), so one
+build cannot be uploaded twice: `Play Publish` with a tag that is already on a
+track fails with "version code already used". That is what `play-promote.yml`
+exists for — it carries the existing release across tracks instead of uploading
+a new one, which also means the build verified on `internal` is exactly the one
+that reaches users. A partial `rollout` publishes as `inProgress`; a run without
+`rollout` completes it.
+
+`play-publish.yml` and `play-promote.yml` both need
+`PLAY_SERVICE_ACCOUNT_JSON` — a service account with release rights on
+`app.onym.android` in the Play Console — plus the four keystore secrets above.
+The metadata workflow additionally needs an existing release on `internal`,
+because Supply ties listing uploads to a version code.
+
 ## Recovery-phrase backup flow
 
 The app's only screen today is the
