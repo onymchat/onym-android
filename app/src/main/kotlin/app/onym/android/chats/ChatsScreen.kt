@@ -66,7 +66,16 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -77,6 +86,9 @@ import app.onym.android.group.ApproveRequestsViewModel
 import app.onym.android.group.ChatGroup
 import app.onym.android.design.OnymAccent
 import app.onym.android.design.OnymGroupAvatar
+import app.onym.android.UITestRegistry
+import app.onym.android.group.IntroCapability
+import app.onym.android.inbox.JoinConfirmScreen
 import app.onym.android.inbox.PendingChatsViewModel
 
 /**
@@ -126,6 +138,73 @@ fun ChatsScreen(
     // chat" pitch for a frame or two *after* the first group landed,
     // and hid the compose button for the same beat.
     val hasAnyChats = groups.isNotEmpty() || pendingChats.isNotEmpty()
+
+    // The empty list resolves itself into the AMA group's join. The
+    // attempt is once per identity (the active identity's BLS key is
+    // both the key and the readiness signal — a null one means nothing
+    // to join with yet), and it is skipped under the UI-test harness,
+    // where addressable fakes would otherwise make the walk's door
+    // tests depend on an invitation nobody sent.
+    val identityKey by (activeBlsPubkeyHex?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf<String?>(null) })
+    val appContext = LocalContext.current.applicationContext
+    val amaScope = rememberCoroutineScope()
+    val amaController = remember(appContext, pendingChatsViewModel) {
+        AmaJoinController(
+            attempts = DataStoreAmaJoinAttempts(appContext),
+            invite = { IntroCapability.fromLink(AmaInvite.LINK) },
+            prepareJoin = { capability ->
+                pendingChatsViewModel?.prepareJoin(capability)
+                    ?: PendingChatsViewModel.JoinDestination.Failed(
+                        PendingChatsViewModel.JoinOutcome.FailureReason.NO_IDENTITY,
+                    )
+            },
+            onOpenChat = onOpenChat,
+            onOpenPending = onOpenPendingChat,
+        )
+    }
+    val amaPhase by amaController.phase.collectAsStateWithLifecycle()
+    LaunchedEffect(identityKey, hasAnyChats, pendingChatsViewModel) {
+        val key = identityKey
+        if (!UITestRegistry.enabled && key != null && !hasAnyChats && pendingChatsViewModel != null) {
+            amaController.resolveOnce(key)
+        }
+    }
+    val amaConfirmation = (amaPhase as? AmaJoinPhase.Confirm)?.confirmation
+    if (amaConfirmation != null) {
+        Dialog(
+            onDismissRequest = { amaController.onConfirmationDismissed() },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+            ) {
+                JoinConfirmScreen(
+                    confirmation = amaConfirmation,
+                    onSend = { label ->
+                        amaScope.launch {
+                            val outcome = pendingChatsViewModel
+                                ?.confirmJoin(amaConfirmation, label)
+                            // Back on the main thread: the write goes
+                            // through Room, and the callbacks navigate.
+                            withContext(Dispatchers.Main) {
+                                amaController.onConfirmationDismissed()
+                                when (outcome) {
+                                    is PendingChatsViewModel.JoinDestination.Waiting ->
+                                        onOpenPendingChat(outcome.rowId)
+                                    is PendingChatsViewModel.JoinDestination.AlreadyJoined ->
+                                        onOpenChat(outcome.groupIdHex)
+                                    else -> Unit
+                                }
+                            }
+                        }
+                    },
+                    onCancel = { amaController.onConfirmationDismissed() },
+                )
+            }
+        }
+    }
 
     // Pending join requests per group id, for the chat-list signal.
     //
@@ -221,6 +300,11 @@ fun ChatsScreen(
                 padding = padding,
                 onCreateGroup = onCreateGroup,
                 onScanToJoin = onScanToJoin,
+                amaPhase = amaPhase,
+                onAskAma = {
+                    val key = identityKey
+                    if (key != null) amaScope.launch { amaController.openManually(key) }
+                },
             )
         } else {
             LazyColumn(
@@ -506,7 +590,10 @@ private fun EmptyState(
     padding: PaddingValues,
     onCreateGroup: () -> Unit,
     onScanToJoin: () -> Unit,
+    amaPhase: AmaJoinPhase,
+    onAskAma: () -> Unit,
 ) {
+    val connecting = amaPhase is AmaJoinPhase.Resolving
     Column(
         modifier = Modifier
             .padding(padding)
@@ -523,12 +610,21 @@ private fun EmptyState(
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                Icons.Filled.Lock,
-                contentDescription = null,
-                modifier = Modifier.size(42.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            if (connecting) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .testTag("chats.ama_resolving"),
+                    strokeWidth = 3.dp,
+                )
+            } else {
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    modifier = Modifier.size(42.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
         Spacer(Modifier.height(20.dp))
         // Lead with the value, not "you have nothing" — turn the empty
@@ -597,6 +693,34 @@ private fun EmptyState(
             Text(
                 text = stringResource(R.string.chats_scan_to_join),
                 style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        // The AMA group by hand: the same join the automatic attempt
+        // makes on a first launch, offered as an ordinary entry for
+        // anyone who already spent that attempt (or dismissed it).
+        if (!connecting) {
+            TextButton(
+                onClick = onAskAma,
+                modifier = Modifier.testTag("chats.ask_ama"),
+            ) {
+                Icon(
+                    Icons.Filled.Forum,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    text = stringResource(R.string.chats_ask_ama),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+        }
+        if (connecting) {
+            Text(
+                text = stringResource(R.string.chats_empty_connecting),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp),
             )
         }
     }

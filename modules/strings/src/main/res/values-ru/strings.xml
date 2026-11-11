@@ -440,6 +440,8 @@
 
     <!-- Сканировать для присоединения (Чаты → отсканировать QR приглашения) -->
     <string name="chats_scan_to_join">Сканировать приглашение</string>
+    <string name="chats_ask_ama">Спросить в Onym AMA</string>
+    <string name="chats_empty_connecting">Готовим ваш первый чат…</string>
     <string name="scan_join_not_onym">Это не приглашение Onym.</string>
 
     <!-- ─── Create group — Step 2 CTA labels ──────────────────── -->

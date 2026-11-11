@@ -448,6 +448,10 @@
 
     <!-- Scan to join (Chats → scan an invite QR) -->
     <string name="chats_scan_to_join">Scan to join</string>
+    <!-- The empty chats list: the AMA group, and the short wait while
+         the first launch resolves it by itself. -->
+    <string name="chats_ask_ama">Ask in Onym AMA</string>
+    <string name="chats_empty_connecting">Setting up your first chat…</string>
     <string name="scan_join_not_onym">Not an Onym invite.</string>
 
     <!-- ─── Create group — Step 2 CTA labels ──────────────────── -->
