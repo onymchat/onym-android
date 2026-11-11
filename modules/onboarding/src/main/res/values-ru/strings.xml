@@ -5,6 +5,9 @@
     <string name="onboarding_skip">Пропустить</string>
     <string name="onboarding_back">Назад</string>
     <string name="onboarding_primary_welcome">Создать мою личность</string>
+
+    <string name="onboarding_welcome_door">Открыть чаты</string>
+    <string name="onboarding_welcome_setup_entry">Настроить по шагам</string>
     <string name="onboarding_primary_recovery">Я записал(а)</string>
     <string name="onboarding_primary_done">Начать общение</string>
     <string name="onboarding_skip_recovery">Напомнить позже</string>

@@ -5,6 +5,10 @@
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_back">Back</string>
     <string name="onboarding_primary_welcome">Create my identity</string>
+
+    <!-- Welcome: the door (the step's only action) -->
+    <string name="onboarding_welcome_door">Open chats</string>
+    <string name="onboarding_welcome_setup_entry">Set up step by step</string>
     <string name="onboarding_primary_recovery">I\'ve written it down</string>
     <string name="onboarding_primary_done">Start messaging</string>
     <string name="onboarding_skip_recovery">Remind me later</string>
