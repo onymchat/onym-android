@@ -49,6 +49,8 @@ class AppDependencies(
     /** Symmetric read-receipt setting, bound to the Settings → Chat
      *  toggle and read by the dispatcher + chat thread. */
     val readReceiptsPreferenceProvider: app.onym.android.chats.ReadReceiptsPreferenceProvider,
+    /** Bluetooth mesh switches (Settings → NEARBY). Null in test graphs. */
+    val meshController: app.onym.android.nearby.MeshController? = null,
     val makeCreateGroupViewModel: () -> CreateGroupViewModel,
     /** Chats tab — read-only view over [app.onym.android.group.GroupRepository.snapshots].
      *  Mirrors `makeChatsFlow` from onym-ios PR #30. */

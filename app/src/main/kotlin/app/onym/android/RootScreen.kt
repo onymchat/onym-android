@@ -794,8 +794,42 @@ fun RootScreen(
                     // Denied: nothing was persisted; the toggle stays
                     // off on its own.
                 }
+                val mesh = dependencies.meshController
+                val meshListen by (mesh?.settings?.listen ?: kotlinx.coroutines.flow.MutableStateFlow(false))
+                    .collectAsStateWithLifecycle()
+                val meshBroadcast by (mesh?.settings?.broadcast ?: kotlinx.coroutines.flow.MutableStateFlow(false))
+                    .collectAsStateWithLifecycle()
+                // Ask for Bluetooth only when a switch is turned on; the
+                // controller re-applies the switches with whatever was granted.
+                val meshPermissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestMultiplePermissions(),
+                ) { mesh?.refresh() }
+                val askMeshPermissions = {
+                    if (!app.onym.android.nearby.MeshController.hasRadioPermissions(settingsContext)) {
+                        meshPermissionLauncher.launch(
+                            app.onym.android.nearby.MeshController.radioPermissions() +
+                                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS)
+                                } else {
+                                    emptyArray()
+                                },
+                        )
+                    }
+                }
                 SettingsScreen(
                     identitiesViewModel = identitiesVm,
+                    meshListen = meshListen,
+                    onToggleMeshListen = mesh?.let { m ->
+                        { on: Boolean ->
+                            m.settings.setListen(on)
+                            if (on) askMeshPermissions()
+                        }
+                    },
+                    meshBroadcast = meshBroadcast,
+                    onToggleMeshBroadcast = { on ->
+                        mesh?.settings?.setBroadcast(on)
+                        if (on) askMeshPermissions()
+                    },
                     onRelayerClick = { navController.navigate(ROUTE_RELAYER_SETTINGS) },
                     onAnchorsClick = { navController.navigate(ROUTE_ANCHORS_ROOT) },
                     onBackup = { navController.navigate(ROUTE_RECOVERY_BACKUP) },

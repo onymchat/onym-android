@@ -1056,4 +1056,11 @@
   <string name="push_channel_name">Messages</string>
   <string name="push_notification_title">Onym</string>
   <string name="push_notification_body">New message</string>
+  <string name="settings_section_nearby">NEARBY</string>
+  <string name="settings_mesh_listen_title">Listen over Bluetooth</string>
+  <string name="settings_mesh_listen_subtitle">Receive messages from people nearby without internet. Your phone never transmits, so nobody can tell you received anything.</string>
+  <string name="settings_mesh_broadcast_title">Broadcast over Bluetooth</string>
+  <string name="settings_mesh_broadcast_subtitle">Your text messages also go out to group members nearby. People around you can see that an Onym phone is broadcasting.</string>
+  <string name="mesh_service_title">Onym nearby</string>
+  <string name="mesh_service_body">Bluetooth messaging is on</string>
 </resources>

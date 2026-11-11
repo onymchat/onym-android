@@ -66,6 +66,10 @@ dependencies {
     // of this module's public API surface.
     api(project(":transport"))
 
+    // MeshPairKey — the Bluetooth mesh's pair-key derivation, computed
+    // here so the inbox private key never leaves this module.
+    implementation(project(":mesh"))
+
     // api: StateFlow appears in public signatures (IdentityRepository.
     // snapshots/identities, ActiveIdentityProvider.currentIdentityId,
     // IdentitiesViewModel.items/error/addResult).

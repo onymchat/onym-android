@@ -1,6 +1,7 @@
 package app.onym.android.inbox
 
 import app.onym.android.identity.IdentityId
+import app.onym.android.transport.InboundDelivery
 import app.onym.android.transport.InboxTransport
 import app.onym.android.transport.TransportInboxId
 import kotlinx.coroutines.coroutineScope
@@ -66,8 +67,9 @@ class IncomingInvitationsInteractor(
                     ownerIdentityId = ownerIdentityId,
                     payload = inbound.payload,
                     receivedAt = inbound.receivedAt,
+                    delivery = inbound.delivery,
                 )
-            } else {
+            } else if (inbound.delivery == InboundDelivery.NETWORK) {
                 repository.recordIncoming(
                     id = inbound.messageId,
                     payload = inbound.payload,

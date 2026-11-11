@@ -291,6 +291,7 @@ dependencies {
     implementation(project(":group"))
     implementation(project(":chats-core"))
     implementation(project(":inbox"))
+    implementation(project(":mesh"))
     implementation(project(":search"))
     implementation(project(":onboarding"))
     implementation(project(":moderation"))

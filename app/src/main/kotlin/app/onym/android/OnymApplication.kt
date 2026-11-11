@@ -1092,6 +1092,15 @@ class OnymApplication : Application() {
         val chatSystemEvents = app.onym.android.chats.ChatSystemEventRecorder(
             messageRepository = messageRepository,
         )
+        // Bluetooth mesh (Settings → NEARBY, off by default): listens into
+        // the dispatcher below and broadcasts text sends. See MeshController.
+        val meshController = app.onym.android.nearby.MeshController(
+            context = this,
+            scope = applicationScope,
+            identityRepository = identityRepository,
+            groupStore = groupStore,
+            invitationsRepository = invitationsRepository,
+        )
         val incomingDispatcher = app.onym.android.inbox.IncomingMessageDispatcher(
             envelopeDecrypter = identityRepository,
             groupRepository = groupRepository,
@@ -1104,7 +1113,11 @@ class OnymApplication : Application() {
             receiptSender = chatReceiptSender,
             readReceiptsEnabled = { readReceiptsPreference.current() },
             systemEvents = chatSystemEvents,
+            bluetoothMessageArrived = { _, _ ->
+                app.onym.android.nearby.MeshArrivalNotifier.notify(this@OnymApplication)
+            },
         )
+        meshController.start(incomingDispatcher)
         // Close the loop for the Retry on a snapshot parked because
         // *this* device couldn't read the chain. The dispatcher owns
         // verification and holds the verifier, so the back-reference is
@@ -2158,6 +2171,7 @@ class OnymApplication : Application() {
             },
             networkPreferenceProvider = networkPreference,
             readReceiptsPreferenceProvider = readReceiptsPreference,
+            meshController = meshController,
             makeCreateGroupViewModel = {
                 val interactor = CreateGroupInteractor(
                     identity = identityRepository,
@@ -2217,6 +2231,7 @@ class OnymApplication : Application() {
                     outbox = chatOutbox,
                     imageLoader = imageLoader,
                     messageSigner = identityRepository,
+                    nearby = meshController,
                 )
                 app.onym.android.chats.ChatThreadViewModel(
                     groupId = groupId,

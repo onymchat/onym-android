@@ -2,6 +2,7 @@ package app.onym.android.identity
 
 import app.onym.android.foundation.Bip39
 import app.onym.android.foundation.StellarStrKey
+import app.onym.android.mesh.MeshPairKey
 import chat.onym.sdk.Common
 import chat.onym.sdk.OnymException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -606,6 +607,19 @@ class IdentityRepository(
             recipientX25519PrivateKey = inboxKeyAgreementPrivateKey(snapshot.nostrSecretKey).encoded,
         )
     }
+
+    /**
+     * The Bluetooth mesh key [asIdentity] shares with one peer — what the
+     * mesh's rotating recipient tags derive from (onym-ios
+     * docs/mesh-ble-v1.md §2). Computed here so the inbox private key
+     * never leaves the repository; the peer derives the same key from
+     * its side.
+     */
+    suspend fun meshPairKey(asIdentity: IdentityId, peerInboxPublicKey: ByteArray): ByteArray =
+        withContext(ioDispatcher) {
+            val snapshot = store.load(asIdentity) ?: throw InvitationDecryptError.IdentityNotLoaded
+            MeshPairKey.derive(inboxKeyAgreementPrivateKey(snapshot.nostrSecretKey), peerInboxPublicKey)
+        }
 
     private fun decryptInvitationLocked(
         snapshot: StoredSnapshot,
