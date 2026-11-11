@@ -101,6 +101,14 @@ fun OnboardingScreen(
         onSkip = if (flow.isSkippable(step)) ({ flow.skip() }) else null,
         skipTitle = stringResource(skipTitleRes(step)),
         onBack = if (step != OnboardingStep.Welcome) ({ flow.back() }) else null,
+        // Every step after the welcome one offers the same exit the
+        // door does — a person who stepped in to look around can leave
+        // without walking to the end.
+        onExit = if (step == OnboardingStep.Welcome) {
+            null
+        } else {
+            ({ scope.launch { flow.skipAll() } })
+        },
         modifier = modifier,
         // Unnumbered steps pass null so the scaffold never reserves a
         // blank indicator band.
