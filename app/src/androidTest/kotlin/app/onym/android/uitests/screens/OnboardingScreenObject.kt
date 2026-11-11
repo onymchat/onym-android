@@ -30,7 +30,9 @@ import kotlin.time.Duration.Companion.seconds
  * Tag vocabulary (the redesign contract; see RECONCILIATION.md at the
  * repo root):
  *
- *  - frame:      `onboarding.<stepTag>.{title,primary,skip,back}`
+ *  - frame:      `onboarding.<stepTag>.{title,primary,skip,back,exit}`
+ *                (`exit` is the leave-the-walk affordance every step
+ *                after welcome carries)
  *                with stepTag ∈ welcome/identity/services/moderation/
  *                recoveryPhrase/done
  *  - services:   `onboarding.services.{recommended,custom}` cards;
@@ -41,7 +43,9 @@ import kotlin.time.Duration.Companion.seconds
  *                `.confirm/.fingerprint/.pin/.added`; configured rows
  *                `.configured.<url>`; published notary rows
  *                `onboarding.services.groupIntegrity.published.<url>`
- *  - welcome:    restore entry `onboarding.welcome.restore` +
+ *  - welcome:    door `onboarding.welcome.primary` (completes the
+ *                walk), setup entry `onboarding.welcome.setup`,
+ *                restore entry `onboarding.welcome.restore` +
  *                overlay `onboarding.welcome.restore.{phrase_field,
  *                error,submit,cancel}` (iOS a11y-id parity)
  *  - recovery:   `onboarding.recoveryPhrase.{status,reveal}` <!-- onym:allow-secret-read -->
@@ -121,6 +125,33 @@ class OnboardingScreenObject(private val rule: ComposeContentTestRule) {
 
     fun tapBack(step: OnboardingStep): OnboardingScreenObject {
         backButton(step).performClick()
+        return this
+    }
+
+    /** The welcome step's "set up step by step" entry. */
+    fun setupEntry(step: OnboardingStep): SemanticsNodeInteraction =
+        rule.onNodeWithTag("onboarding.${step.tag}.setup")
+
+    fun tapSetup(step: OnboardingStep): OnboardingScreenObject {
+        setupEntry(step).performClick()
+        return this
+    }
+
+    /** The leave-the-walk affordance every step after welcome carries. */
+    fun exitButton(step: OnboardingStep): SemanticsNodeInteraction =
+        rule.onNodeWithTag("onboarding.${step.tag}.exit")
+
+    fun tapExit(step: OnboardingStep): OnboardingScreenObject {
+        exitButton(step).performClick()
+        return this
+    }
+
+    fun assertNoExit(step: OnboardingStep): OnboardingScreenObject {
+        assertTrue(
+            "step '${step.tag}' must not offer an exit affordance",
+            rule.onAllNodesWithTag("onboarding.${step.tag}.exit")
+                .fetchSemanticsNodes().isEmpty(),
+        )
         return this
     }
 
