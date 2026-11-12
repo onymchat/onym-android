@@ -45,10 +45,16 @@ dependencies {
     // api: BanState / CheckRequiredReason / GateStatus and the
     // repositories appear in this module's public signatures.
     api(project(":moderation"))
+    // SymbolHint, SettingsRow — the consent surface is textless on the shared atoms.
+    implementation(project(":design"))
 
     api(platform(libs.androidx.compose.bom))
     // api: Modifier / @Composable appear in public signatures.
     api(libs.androidx.compose.ui)
+
+    // ImageVector for the step symbols; extended for the onboarding's
+    // symbol vocabulary (door, lifebuoy, server, signature…).
+    api(libs.androidx.compose.material.icons.extended)
     // implementation: MaterialTheme reads, Text/Button/Scaffold — no
     // material3 type escapes this module.
     implementation(libs.androidx.compose.material3)

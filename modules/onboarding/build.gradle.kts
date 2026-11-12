@@ -75,6 +75,10 @@ dependencies {
     // and OnboardingScreen's public signatures.
     api(libs.androidx.compose.ui)
 
+    // ImageVector for the step symbols; extended for the onboarding's
+    // symbol vocabulary (door, lifebuoy, server, signature…).
+    api(libs.androidx.compose.material.icons.extended)
+
     // implementation: MaterialTheme reads, Text/Button/TextButton —
     // no material3 type escapes this module.
     implementation(libs.androidx.compose.material3)

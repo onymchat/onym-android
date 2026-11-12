@@ -84,4 +84,9 @@
     <item quantity="one">A moderation case is open against you. Tap to review or appeal.</item>
     <item quantity="other">%d moderation cases are open against you. Tap to review or appeal.</item>
   </plurals>
+  <string name="moderation_consent_read_terms">Read the terms</string>
+  <string name="moderation_consent_close">Close</string>
+  <string name="moderation_class_csam">Child sexual abuse material</string>
+  <string name="moderation_class_unsolicited_pornography">Unsolicited pornography</string>
+  <string name="moderation_class_spam">Spam</string>
 </resources>

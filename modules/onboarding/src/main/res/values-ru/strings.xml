@@ -177,4 +177,8 @@
     <string name="onboarding_outcome_chosen">Выбрано</string>
     <string name="onboarding_outcome_default">По умолчанию</string>
     <string name="onboarding_outcome_unavailable">Недоступно</string>
+  <string name="onboarding_primary_sign">Согласен и подписываю</string>
+  <string name="onboarding_done_agreed">Принято</string>
+  <string name="onboarding_done_tile_hint">Показать, что принято</string>
+  <string name="onboarding_done_backup_again">Сделать копию ещё раз</string>
 </resources>

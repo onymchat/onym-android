@@ -7,6 +7,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isEnabled
@@ -104,8 +106,14 @@ class OnboardingScreenObject(private val rule: ComposeContentTestRule) {
         return this
     }
 
+    /** The primary is an icon; its label is what TalkBack reads. */
     fun assertPrimaryLabel(step: OnboardingStep, label: String): OnboardingScreenObject {
-        primaryButton(step).assertTextEquals(label)
+        primaryButton(step).assert(hasContentDescription(label))
+        return this
+    }
+
+    fun assertSkipLabel(step: OnboardingStep, label: String): OnboardingScreenObject {
+        skipButton(step).assert(hasContentDescription(label))
         return this
     }
 
@@ -447,7 +455,11 @@ class OnboardingScreenObject(private val rule: ComposeContentTestRule) {
 
     /** Leave the backup surface (no quiz) back onto the walk frame. */
     fun tapBackupBack(): OnboardingScreenObject {
-        rule.onNodeWithContentDescription("Back").performClick()
+        // The backup surface's own Back, not the walk frame's ← under it.
+        rule.onNode(
+            // onym:allow-secret-read: a semantics test tag, not the phrase.
+            hasContentDescription("Back").and(hasTestTag("onboarding.recoveryPhrase.back").not()),
+        ).performClick()
         return this
     }
 
@@ -468,18 +480,35 @@ class OnboardingScreenObject(private val rule: ComposeContentTestRule) {
      *  fingerprint is the checkable detail, and the explicit
      *  "Not confirmed" trailing must be absent. */
     fun assertDoneDirectoryPinned(fingerprint: String): OnboardingScreenObject {
-        doneSummary()
+        openDoneTile("discovery")
             .assert(hasAnyDescendant(hasText(fingerprint)))
             .assert(hasNoDescendantWithText("Not confirmed"))
+        closeDoneDetail()
+        return this
+    }
+
+    /** Tap a Done tile; its words open in the detail sheet. */
+    fun openDoneTile(id: String): SemanticsNodeInteraction {
+        rule.onNodeWithTag("onboarding.done.tile.$id").performClick()
+        awaitTag("onboarding.done.detail")
+        return rule.onNodeWithTag("onboarding.done.detail")
+    }
+
+    fun closeDoneDetail(): OnboardingScreenObject {
+        androidx.test.espresso.Espresso.pressBack()
+        rule.waitUntil(timeoutMillis = TIMEOUT) {
+            rule.onAllNodesWithTag("onboarding.done.detail").fetchSemanticsNodes().isEmpty()
+        }
         return this
     }
 
     /** The summary's directory row in its UNPINNED state: explicit
      *  "Not confirmed" trailing, no fingerprint detail line. */
     fun assertDoneDirectoryNotConfirmed(fingerprint: String): OnboardingScreenObject {
-        doneSummary()
+        openDoneTile("discovery")
             .assert(hasAnyDescendant(hasText("Not confirmed")))
             .assert(hasNoDescendantWithText(fingerprint))
+        closeDoneDetail()
         return this
     }
 
