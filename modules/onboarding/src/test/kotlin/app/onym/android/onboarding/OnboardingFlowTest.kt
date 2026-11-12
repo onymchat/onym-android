@@ -569,4 +569,18 @@ class OnboardingFlowTest {
 
         assertEquals(1, store.markCount)
     }
+
+    /** The moderation step's content takes the primary over while terms
+     *  are up (the signature), and clears it when it leaves. */
+    @Test
+    fun primaryOverride_isHeldUntilCleared() {
+        val flow = flow(moderationEnabled = true)
+        assertEquals(null, flow.primaryOverride.value)
+        var signed = 0
+        flow.setPrimaryOverride { signed++ }
+        flow.primaryOverride.value?.invoke()
+        assertEquals(1, signed)
+        flow.setPrimaryOverride(null)
+        assertEquals(null, flow.primaryOverride.value)
+    }
 }

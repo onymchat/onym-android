@@ -1,6 +1,44 @@
 package app.onym.android.moderation.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.EscalatorWarning
+import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.GppMaybe
+import androidx.compose.material.icons.filled.MarkEmailUnread
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
+import app.onym.android.design.SettingsRow
+import app.onym.android.design.SettingsTile
+import app.onym.android.design.SettingsTileBox
+import app.onym.android.design.SymbolHint
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -68,6 +106,13 @@ fun ModerationConsentContent(
      * null — the enrollment-lost re-consent gate).
      */
     debugSkipAllowed: Boolean = false,
+    /**
+     * The host signs with its own button — the onboarding step's primary
+     * calls [ModerationConsentController.agree] — so the review drops its
+     * Agree button and offers re-choosing the authority instead (iOS
+     * `hostOwnsSigning` parity).
+     */
+    hostOwnsSigning: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val state by controller.snapshots.collectAsState()
@@ -88,158 +133,169 @@ fun ModerationConsentContent(
             ?.let { onConsented(it.record) }
     }
 
+    var showsAuthorities by remember { mutableStateOf(false) }
+    var showsTermsText by remember { mutableStateOf(false) }
+
+    // Textless, like iOS: every control an icon with its old wording as
+    // its accessibility label; the terms' class symbols name themselves on
+    // tap, and the full terms in words are one tap away.
     val body: @Composable (Modifier) -> Unit = { columnModifier ->
         Column(
             modifier = columnModifier
-                .padding(24.dp)
+                .padding(horizontal = 24.dp, vertical = 8.dp)
                 .testTag("moderation.consent"),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-        when (val current = state) {
-            is ModerationConsentController.UiState.Loading,
-            is ModerationConsentController.UiState.Consenting,
-            -> {
-                // fillMaxWidth, not fillMaxSize/Center: these branches
-                // must lay out under an unbounded scroll host too.
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    CircularProgressIndicator()
-                    Spacer(Modifier.height(12.dp))
-                    Text(stringResource(R.string.moderation_consent_loading))
-                }
+            if (standalone) {
+                Icon(
+                    Icons.Filled.Shield,
+                    contentDescription = stringResource(R.string.moderation_consent_pick_title),
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(64.dp),
+                )
             }
+            when (val current = state) {
+                is ModerationConsentController.UiState.Loading,
+                is ModerationConsentController.UiState.Consenting,
+                -> {
+                    val loading = stringResource(R.string.moderation_consent_loading)
+                    CircularProgressIndicator(Modifier.semantics { contentDescription = loading })
+                }
 
-            is ModerationConsentController.UiState.Unavailable -> {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = stringResource(R.string.moderation_consent_unavailable),
-                        style = MaterialTheme.typography.bodyLarge,
+                is ModerationConsentController.UiState.Unavailable -> {
+                    val message = stringResource(R.string.moderation_consent_unavailable)
+                    Icon(
+                        Icons.Filled.CloudOff,
+                        contentDescription = message,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(32.dp),
                     )
-                    Spacer(Modifier.height(16.dp))
-                    OutlinedButton(
-                        onClick = { scope.launch { controller.load() } },
-                        modifier = Modifier.testTag("moderation.consent.retry"),
-                    ) { Text(stringResource(R.string.moderation_consent_retry)) }
-                    if (onUnavailableContinue != null) {
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = onUnavailableContinue,
-                            modifier = Modifier.testTag("moderation.consent.continue"),
-                        ) { Text(stringResource(R.string.moderation_consent_continue)) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        RoundIcon(
+                            icon = Icons.Filled.Refresh,
+                            label = stringResource(R.string.moderation_consent_retry),
+                            onClick = { scope.launch { controller.load() } },
+                            modifier = Modifier.testTag("moderation.consent.retry"),
+                        )
+                        if (onUnavailableContinue != null) {
+                            RoundIcon(
+                                icon = Icons.AutoMirrored.Filled.ArrowForward,
+                                label = stringResource(R.string.moderation_consent_continue),
+                                onClick = onUnavailableContinue,
+                                filled = true,
+                                modifier = Modifier.testTag("moderation.consent.continue"),
+                            )
+                        }
                     }
                 }
-            }
 
-            is ModerationConsentController.UiState.Picking -> {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = stringResource(R.string.moderation_consent_pick_title),
-                        style = MaterialTheme.typography.headlineSmall,
+                is ModerationConsentController.UiState.Picking -> {
+                    // The authorities sit behind one configure icon — the
+                    // same sliders the welcome screen uses for setup.
+                    RoundIcon(
+                        icon = Icons.Filled.Tune,
+                        label = stringResource(R.string.moderation_consent_pick_title),
+                        onClick = { showsAuthorities = true },
+                        size = 64.dp,
+                        modifier = Modifier.testTag("moderation.consent.choose"),
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.moderation_consent_pick_body),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    current.error?.let { error ->
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = error,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.testTag("moderation.consent.error"),
+                    current.error?.let { ErrorSymbol(it) }
+                    if (showsAuthorities) {
+                        AuthorityListSheet(
+                            listings = current.listings,
+                            onPick = { listing ->
+                                showsAuthorities = false
+                                scope.launch { controller.select(listing) }
+                            },
+                            onDismiss = { showsAuthorities = false },
                         )
                     }
-                    Spacer(Modifier.height(12.dp))
-                    current.listings.forEach { listing ->
-                        OutlinedButton(
-                            onClick = { scope.launch { controller.select(listing) } },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("moderation.consent.pick.${listing.componentId}"),
-                        ) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = listing.name,
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                                Text(
-                                    text = listing.componentId,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                }
+
+                is ModerationConsentController.UiState.Review -> {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        modifier = Modifier.semantics(mergeDescendants = false) {
+                            contentDescription = current.listing.name
+                        },
+                    ) {
+                        current.manifest.violationClasses.forEach { violationClass ->
+                            SymbolHint(
+                                icon = violationClassIcon(violationClass.classId),
+                                label = violationClassName(violationClass.classId),
+                                size = 34.dp,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
                         }
-                        Spacer(Modifier.height(8.dp))
+                    }
+                    RoundIcon(
+                        icon = Icons.Filled.Description,
+                        label = stringResource(R.string.moderation_consent_read_terms),
+                        onClick = { showsTermsText = true },
+                        size = 64.dp,
+                        modifier = Modifier.testTag("moderation.consent.terms_text"),
+                    )
+                    current.error?.let { ErrorSymbol(it) }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (current.canPickAnother) {
+                            RoundIcon(
+                                icon = Icons.Filled.Tune,
+                                label = stringResource(R.string.moderation_consent_pick_another),
+                                onClick = { scope.launch { controller.backToAuthorities() } },
+                                modifier = Modifier.testTag("moderation.consent.pickAnother"),
+                            )
+                        }
+                        if (!hostOwnsSigning) {
+                            val agree = stringResource(R.string.moderation_consent_agree)
+                            Button(
+                                onClick = { scope.launch { controller.agree() } },
+                                modifier = Modifier
+                                    .height(52.dp)
+                                    .widthIn(min = 160.dp)
+                                    .semantics { contentDescription = agree }
+                                    .testTag("moderation.consent.agree"),
+                            ) { Icon(Icons.Filled.Gesture, contentDescription = null, modifier = Modifier.size(26.dp)) }
+                        }
+                    }
+                    if (debugSkipAllowed && onUnavailableContinue != null) {
+                        RoundIcon(
+                            icon = Icons.Filled.BugReport,
+                            label = stringResource(R.string.moderation_consent_debug_skip),
+                            onClick = onUnavailableContinue,
+                            modifier = Modifier.testTag("moderation.consent.debugSkip"),
+                        )
+                    }
+                    if (showsTermsText) {
+                        TermsTextSheet(
+                            authorityName = current.listing.name,
+                            onDismiss = { showsTermsText = false },
+                        ) {
+                            ModerationTermsDisplay(
+                                manifest = current.manifest,
+                                manifestHash = current.manifestHash,
+                                modifier = Modifier.testTag("moderation.consent.terms"),
+                                documents = controller.documents,
+                            )
+                        }
                     }
                 }
-            }
 
-            is ModerationConsentController.UiState.Review -> {
-                Text(
-                    text = stringResource(R.string.moderation_consent_title, current.listing.name),
-                    style = MaterialTheme.typography.headlineSmall,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = stringResource(R.string.moderation_consent_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(Modifier.height(4.dp))
-                // Structured cards from the DECODED manifest (iOS
-                // parity), laid out in the host's own scroll — no
-                // nested fixed-height JSON window. What the mandate
-                // pins stays the exact retained bytes; the hash card
-                // at the bottom shows what the signature binds.
-                ModerationTermsDisplay(
-                    manifest = current.manifest,
-                    manifestHash = current.manifestHash,
-                    modifier = Modifier.testTag("moderation.consent.terms"),
-                    documents = controller.documents,
-                )
-                current.error?.let { error ->
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.testTag("moderation.consent.error"),
+                is ModerationConsentController.UiState.Consented -> {
+                    // Terminal; the host navigated on [onConsented].
+                    Icon(
+                        Icons.Filled.Verified,
+                        contentDescription = stringResource(R.string.moderation_consent_done),
+                        tint = androidx.compose.ui.graphics.Color(0xFF30B45A),
+                        modifier = Modifier
+                            .size(64.dp)
+                            .testTag("moderation.consent.done"),
                     )
                 }
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = {
-                        scope.launch { controller.agree() }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("moderation.consent.agree"),
-                ) { Text(stringResource(R.string.moderation_consent_agree)) }
-                if (current.canPickAnother) {
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedButton(
-                        onClick = { scope.launch { controller.backToAuthorities() } },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("moderation.consent.pickAnother"),
-                    ) { Text(stringResource(R.string.moderation_consent_pick_another)) }
-                }
-                if (debugSkipAllowed && onUnavailableContinue != null) {
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedButton(
-                        onClick = onUnavailableContinue,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("moderation.consent.debugSkip"),
-                    ) { Text(stringResource(R.string.moderation_consent_debug_skip)) }
-                }
             }
-
-            is ModerationConsentController.UiState.Consented -> {
-                // Terminal; the host navigated on [onConsented].
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.moderation_consent_done))
-                }
-            }
-        }
         }
     }
 
@@ -259,4 +315,121 @@ fun ModerationConsentContent(
     } else {
         body(modifier.fillMaxWidth())
     }
+}
+
+@Composable
+private fun RoundIcon(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 52.dp,
+    filled: Boolean = false,
+) {
+    if (filled) {
+        FilledIconButton(onClick = onClick, modifier = modifier.size(size)) {
+            Icon(icon, contentDescription = label, modifier = Modifier.size(size * 0.42f))
+        }
+    } else {
+        FilledTonalIconButton(onClick = onClick, modifier = modifier.size(size)) {
+            Icon(icon, contentDescription = label, modifier = Modifier.size(size * 0.42f))
+        }
+    }
+}
+
+/** A failure the controller reports: a warning glyph, the message on its
+ *  accessibility label. */
+@Composable
+private fun ErrorSymbol(message: String) {
+    Icon(
+        Icons.Filled.Warning,
+        contentDescription = message,
+        tint = MaterialTheme.colorScheme.error,
+        modifier = Modifier
+            .size(26.dp)
+            .testTag("moderation.consent.error"),
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AuthorityListSheet(
+    listings: List<app.onym.android.moderation.AuthorityListing>,
+    onPick: (app.onym.android.moderation.AuthorityListing) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(bottom = 24.dp)) {
+            listings.forEach { listing ->
+                // The name is data — the one word the pick needs.
+                SettingsRow(
+                    leading = { SettingsTileBox(Icons.Filled.Shield, SettingsTile.Indigo) },
+                    title = listing.name,
+                    onClick = { onPick(listing) },
+                    modifier = Modifier.testTag("moderation.consent.pick.${listing.componentId}"),
+                )
+            }
+        }
+    }
+}
+
+/** The terms in words — what the review's document icon opens: every
+ *  class with all its terms, the procedure, and the hash being signed. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TermsTextSheet(
+    authorityName: String,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.moderation_consent_title, authorityName),
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.testTag("moderation.consent.terms_text.close"),
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.moderation_consent_close))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.moderation_consent_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            content()
+        }
+    }
+}
+
+/** A violation class as a symbol — child safety for CSAM, and so on. */
+private fun violationClassIcon(classId: String): ImageVector = when (classId) {
+    "csam" -> Icons.Filled.EscalatorWarning
+    "unsolicited-pornography" -> Icons.Filled.VisibilityOff
+    "spam" -> Icons.Filled.MarkEmailUnread
+    else -> Icons.Filled.GppMaybe
+}
+
+@Composable
+private fun violationClassName(classId: String): String = when (classId) {
+    "csam" -> stringResource(R.string.moderation_class_csam)
+    "unsolicited-pornography" -> stringResource(R.string.moderation_class_unsolicited_pornography)
+    "spam" -> stringResource(R.string.moderation_class_spam)
+    else -> classId.replace('-', ' ')
 }

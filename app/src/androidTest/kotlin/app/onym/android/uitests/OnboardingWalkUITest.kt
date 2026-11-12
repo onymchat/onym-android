@@ -3,11 +3,14 @@ package app.onym.android.uitests
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -243,7 +246,7 @@ class OnboardingWalkUITest {
         onboarding.awaitStep(OnboardingStep.Welcome)
         onboarding.assertNoSkip(OnboardingStep.Welcome)
         onboarding.assertNoExit(OnboardingStep.Welcome)
-        composeRule.onNodeWithText("Open chats").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open chats").assertIsDisplayed()
         onboarding.tapSetup(OnboardingStep.Welcome)
 
         // Identity: no skip; Continue is outcome-gated on the key
@@ -286,8 +289,7 @@ class OnboardingWalkUITest {
         onboarding.awaitRecoveryStatus()
         onboarding.assertPrimaryDisabled(OnboardingStep.RecoveryPhrase)
         onboarding.assertPrimaryLabel(OnboardingStep.RecoveryPhrase, "I've written it down")
-        onboarding.skipButton(OnboardingStep.RecoveryPhrase)
-            .assertTextEquals("Remind me later")
+        onboarding.assertSkipLabel(OnboardingStep.RecoveryPhrase, "Remind me later")
         onboarding.tapSkip(OnboardingStep.RecoveryPhrase)
 
         // Skip → Done → Back must RE-LOCK the gate: the surviving
@@ -336,7 +338,7 @@ class OnboardingWalkUITest {
         val onboarding = OnboardingScreenObject(composeRule)
 
         onboarding.awaitStep(OnboardingStep.Welcome)
-        composeRule.onNodeWithText("Open chats").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Open chats").assertIsDisplayed()
         onboarding.tapPrimary(OnboardingStep.Welcome) // the door
 
         onboarding.awaitTabShell()
@@ -404,32 +406,27 @@ class OnboardingWalkUITest {
         onboarding.awaitRecommendedCard()
         onboarding.tapPrimary(OnboardingStep.Services)
 
-        // The moderation step presents; its primary stays locked
-        // until the consent surface records an outcome.
+        // The moderation step presents; its primary is the signature.
         onboarding.awaitStep(OnboardingStep.Moderation)
-        onboarding.assertPrimaryDisabled(OnboardingStep.Moderation)
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.onAllNodes(
-                hasTestTag("moderation.consent.agree"),
-                useUnmergedTree = true,
-            ).fetchSemanticsNodes().isNotEmpty()
-        }
-        // The terms must be VISIBLE, not merely composed: inside the
-        // step's scrolling host a weighted terms body once measured to
-        // zero height — invisible terms with a live Agree below them.
+        awaitConsentTag("moderation.consent.terms_text")
+        // The terms in words, one tap from the symbols — and VISIBLE,
+        // not merely composed.
+        composeRule.onNodeWithTag("moderation.consent.terms_text", useUnmergedTree = true)
+            .performClick()
+        awaitConsentTag("moderation.consent.terms")
         composeRule.onNodeWithTag("moderation.consent.terms", useUnmergedTree = true)
             .assertIsDisplayed()
-        composeRule.onNodeWithTag("moderation.consent.agree", useUnmergedTree = true)
-            // The structured terms cards put Agree below the fold;
-            // scroll to it as a user would before tapping — a click
-            // on an off-viewport node injects outside the window.
-            .performScrollTo()
+        composeRule.onNodeWithTag("moderation.consent.terms_text.close", useUnmergedTree = true)
             .performClick()
-        // Consent ran the full scripted path and unlocked Continue.
+        // The step's primary IS the signature while terms are up; once
+        // signed the walk moves on by itself after the seal shows.
+        onboarding.assertPrimaryLabel(OnboardingStep.Moderation, "I agree and sign")
         onboarding.awaitPrimaryEnabled(OnboardingStep.Moderation)
+        onboarding.tapPrimary(OnboardingStep.Moderation)
+        // Consent ran the full scripted path.
+        onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
         assertTrue(moderationBackend.lastEnrollment != null)
         assertTrue(moderationBackend.lastCountersignedBytes != null)
-        onboarding.tapPrimary(OnboardingStep.Moderation)
 
         // The rest of the walk is the smoke path's shape.
         onboarding.awaitStep(OnboardingStep.RecoveryPhrase)
@@ -470,25 +467,15 @@ class OnboardingWalkUITest {
         onboarding.tapPrimary(OnboardingStep.Services)
 
         onboarding.awaitStep(OnboardingStep.Moderation)
-        onboarding.assertPrimaryDisabled(OnboardingStep.Moderation)
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.onAllNodes(
-                hasTestTag("moderation.consent.agree"),
-                useUnmergedTree = true,
-            ).fetchSemanticsNodes().isNotEmpty()
-        }
-        // Agree is refused deterministically: the surface stays
-        // Review with the reason — no consent, primary still locked.
-        composeRule.onNodeWithTag("moderation.consent.agree", useUnmergedTree = true)
-            .performScrollTo()
-            .performClick()
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.onAllNodes(
-                hasTestTag("moderation.consent.error"),
-                useUnmergedTree = true,
-            ).fetchSemanticsNodes().isNotEmpty()
-        }
-        onboarding.assertPrimaryDisabled(OnboardingStep.Moderation)
+        awaitConsentTag("moderation.consent.terms_text")
+        // Signing is refused deterministically: the surface stays on
+        // Review with the reason, no consent is recorded, and the walk
+        // doesn't move on.
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Moderation)
+        onboarding.tapPrimary(OnboardingStep.Moderation)
+        awaitConsentTag("moderation.consent.error")
+        onboarding.awaitStep(OnboardingStep.Moderation)
+        assertTrue(moderationBackend.lastCountersignedBytes == null)
 
         // The debug-only skip takes the deferral path and unlocks
         // the step without a mandate.
@@ -764,7 +751,7 @@ class OnboardingWalkUITest {
 
         onboarding.awaitStep(OnboardingStep.Identity)
         onboarding.title(OnboardingStep.Identity)
-            .assertTextEquals("Restoring your identity")
+            .assert(hasContentDescription("Restoring your identity", substring = true))
         onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
 
         // The destructive half, asserted rather than inferred: the id
@@ -809,6 +796,14 @@ class OnboardingWalkUITest {
     }
 
     // ─── fixtures ─────────────────────────────────────────────────
+
+
+    private fun awaitConsentTag(tag: String) {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.onAllNodes(hasTestTag(tag), useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
 
     private companion object {
         const val MANIFEST_URL = "https://discovery.onym.app/manifest.json"

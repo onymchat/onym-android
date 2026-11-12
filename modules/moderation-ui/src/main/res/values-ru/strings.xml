@@ -88,4 +88,9 @@
     <item quantity="many">Против вас открыто %d дел. Нажмите, чтобы изучить или обжаловать.</item>
     <item quantity="other">Против вас открыто %d дела. Нажмите, чтобы изучить или обжаловать.</item>
   </plurals>
+  <string name="moderation_consent_read_terms">Прочитать условия</string>
+  <string name="moderation_consent_close">Закрыть</string>
+  <string name="moderation_class_csam">Материалы сексуального насилия над детьми</string>
+  <string name="moderation_class_unsolicited_pornography">Непрошеная порнография</string>
+  <string name="moderation_class_spam">Спам</string>
 </resources>

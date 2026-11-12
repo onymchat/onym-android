@@ -174,4 +174,8 @@
     <string name="onboarding_outcome_chosen">Chosen</string>
     <string name="onboarding_outcome_default">Default</string>
     <string name="onboarding_outcome_unavailable">Unavailable</string>
+  <string name="onboarding_primary_sign">I agree and sign</string>
+  <string name="onboarding_done_agreed">Agreed</string>
+  <string name="onboarding_done_tile_hint">Show what was agreed</string>
+  <string name="onboarding_done_backup_again">Back up again</string>
 </resources>

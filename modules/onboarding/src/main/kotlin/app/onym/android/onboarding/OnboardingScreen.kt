@@ -12,7 +12,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.MeetingRoom
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,63 +67,71 @@ fun OnboardingScreen(
     modifier: Modifier = Modifier,
     /**
      * App-supplied content slot, consulted for EVERY step (Welcome
-     * and Done included). Return null to fall back to the built-ins:
-     * the Welcome/Done bodies, and a placeholder card for the middle
-     * steps.
+     * and Done included). Return null to fall back to the built-ins.
      */
     stepContent: (OnboardingStep) -> (@Composable () -> Unit)? = { null },
     /** App-supplied step indicator, given (zero-based index, count).
-     *  null renders the built-in dot indicator. Only invoked on the
-     *  steps that carry an [OnboardingFlow.Indicator]. */
+     *  null renders the built-in dot indicator. */
     stepIndicator: (@Composable (index: Int, count: Int) -> Unit)? = null,
+    /** App-supplied footer replacing a step's button row — the welcome
+     *  screen's icon row. null keeps the scaffold's own buttons (and the
+     *  built-in welcome row). */
+    stepFooter: (OnboardingStep) -> (@Composable () -> Unit)? = { null },
 ) {
     LaunchedEffect(flow) { flow.start() }
     val state by flow.state.collectAsState()
+    val override by flow.primaryOverride.collectAsState()
     val step = state.step
     val scope = rememberCoroutineScope()
     val indicator = flow.indicator(step)
+    val gated = flow.requiresOutcomeToAdvance(step) && !flow.outcomeSatisfiesGate(step)
+    // A mandatory moderation step finishes by signing, so its primary is
+    // the signature rather than an arrow (iOS parity).
+    val signs = step == OnboardingStep.Moderation && flow.isMandatory(step)
 
     OnboardingScaffold(
         step = step,
         title = stringResource(titleRes(step, state.identityOrigin)),
-        subtitle = subtitleRes(step, state.identityOrigin)?.let { stringResource(it) },
-        // The welcome step's action is its door (see WelcomeStepContent):
-        // one tap leaves the walk for the chats.
-        primaryTitle = if (step == OnboardingStep.Welcome) {
-            null
-        } else {
-            stringResource(primaryTitleRes(step))
+        hint = subtitleRes(step, state.identityOrigin)?.let { stringResource(it) },
+        symbol = symbolFor(step),
+        // The welcome step's action is its door (see WelcomeStepContent).
+        primaryLabel = when {
+            step == OnboardingStep.Welcome -> null
+            signs -> stringResource(R.string.onboarding_primary_sign)
+            else -> stringResource(primaryTitleRes(step))
         },
+        primaryIcon = if (signs) Icons.Filled.Gesture else primaryIconFor(step),
         // Outcome-gated steps render their primary disabled until the
-        // step content records a SATISFYING outcome (the identity
-        // bootstrap check, the recovery reveal) — a surviving Skipped
-        // from an earlier "Remind me later" does not count, so
-        // skip-then-Back re-disables the primary. `flow.advance()`
-        // carries the same guard as the second layer. (The collected
-        // `state` already recomposes this on every outcomes change;
-        // the predicate reads the same StateFlow value.)
-        primaryEnabled = !(flow.requiresOutcomeToAdvance(step) && !flow.outcomeSatisfiesGate(step)),
+        // step content records a SATISFYING outcome — unless the content
+        // has taken the primary over (moderation's signature).
+        primaryEnabled = !gated || override != null,
         onPrimary = {
-            if (step == OnboardingStep.Done) {
-                scope.launch { flow.complete() }
-            } else {
-                flow.advance()
+            val action = override
+            when {
+                gated && action != null -> action()
+                step == OnboardingStep.Done -> scope.launch { flow.complete() }
+                else -> flow.advance()
             }
         },
         onSkip = if (flow.isSkippable(step)) ({ flow.skip() }) else null,
-        skipTitle = stringResource(skipTitleRes(step)),
+        skipLabel = stringResource(skipTitleRes(step)),
+        // An alarm clock: "remind me later", not "skip for good".
+        skipIcon = if (step == OnboardingStep.RecoveryPhrase) Icons.Filled.Alarm else Icons.Filled.FastForward,
         onBack = if (step != OnboardingStep.Welcome) ({ flow.back() }) else null,
-        // Every step after the welcome one offers the same exit the
-        // door does — a person who stepped in to look around can leave
-        // without walking to the end.
-        onExit = if (step == OnboardingStep.Welcome) {
+        // Every step between the door and Done offers the door's exit —
+        // Done's own primary already finishes.
+        onExit = if (step == OnboardingStep.Welcome || step == OnboardingStep.Done) {
             null
         } else {
             ({ scope.launch { flow.skipAll() } })
         },
+        centersContent = true,
+        footer = stepFooter(step) ?: if (step == OnboardingStep.Welcome) {
+            { WelcomeFooter(onSetup = { flow.advance() }) }
+        } else {
+            null
+        },
         modifier = modifier,
-        // Unnumbered steps pass null so the scaffold never reserves a
-        // blank indicator band.
         indicator = indicator?.let { position ->
             {
                 if (stepIndicator != null) {
@@ -129,13 +149,32 @@ fun OnboardingScreen(
             when (step) {
                 OnboardingStep.Welcome -> WelcomeStepContent(
                     onDoor = { scope.launch { flow.skipAll() } },
-                    onSetup = { flow.advance() },
                 )
                 OnboardingStep.Done -> DoneStepContent(state = state)
                 else -> PlaceholderStepContent(step)
             }
         }
     }
+}
+
+// ── Symbols ───────────────────────────────────────────────────────
+
+/**
+ * What stands on screen in place of each step's title. null where the
+ * content is the symbol itself: welcome's door, identity's key (badged
+ * with the bootstrap's state), recovery's life preserver.
+ */
+private fun symbolFor(step: OnboardingStep): ImageVector? = when (step) {
+    OnboardingStep.Welcome, OnboardingStep.Identity, OnboardingStep.RecoveryPhrase -> null
+    OnboardingStep.Services -> Icons.Filled.Dns
+    OnboardingStep.Moderation -> Icons.Filled.Shield
+    OnboardingStep.Done -> Icons.Filled.Verified
+}
+
+private fun primaryIconFor(step: OnboardingStep): ImageVector = when (step) {
+    OnboardingStep.RecoveryPhrase -> Icons.Filled.Check
+    OnboardingStep.Done -> Icons.Filled.MeetingRoom
+    else -> Icons.AutoMirrored.Filled.ArrowForward
 }
 
 // ── Copy ──────────────────────────────────────────────────────────
@@ -212,35 +251,43 @@ private fun DefaultStepIndicator(index: Int, count: Int) {
 }
 
 /** Welcome step body for previews and standalone module tests: the
- *  door that leaves the walk, plus the entry into it. The app layer
- *  replaces this with the OnymMark-branded version — same two
- *  affordances, same tags. */
+ *  door that leaves the walk. The app layer supplies the real one —
+ *  same door, same tags. */
 @Composable
-private fun WelcomeStepContent(
-    onDoor: () -> Unit,
-    onSetup: () -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
+private fun WelcomeStepContent(onDoor: () -> Unit) {
+    FilledIconButton(
+        onClick = onDoor,
+        modifier = Modifier
+            .size(112.dp)
+            .testTag("onboarding.welcome.primary"),
     ) {
-        Button(
-            onClick = onDoor,
+        Icon(
+            imageVector = Icons.Filled.MeetingRoom,
+            contentDescription = stringResource(R.string.onboarding_welcome_door),
+            modifier = Modifier.size(48.dp),
+        )
+    }
+}
+
+/** The welcome screen's bottom row: step-by-step setup, as an icon. */
+@Composable
+private fun WelcomeFooter(onSetup: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        FilledTonalIconButton(
+            onClick = onSetup,
             modifier = Modifier
-                .size(104.dp)
-                .testTag("onboarding.welcome.primary"),
+                .size(56.dp)
+                .testTag("onboarding.welcome.setup"),
         ) {
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = stringResource(R.string.onboarding_welcome_door),
-                modifier = Modifier.size(40.dp),
+                Icons.Filled.Tune,
+                contentDescription = stringResource(R.string.onboarding_welcome_setup_entry),
             )
-        }
-        TextButton(
-            onClick = onSetup,
-            modifier = Modifier.testTag("onboarding.welcome.setup"),
-        ) {
-            Text(stringResource(R.string.onboarding_welcome_setup_entry))
         }
     }
 }

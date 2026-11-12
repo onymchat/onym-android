@@ -310,6 +310,21 @@ class OnboardingFlow(
     )
     val state: StateFlow<State> = _state.asStateFlow()
 
+    private val _primaryOverride = MutableStateFlow<(() -> Unit)?>(null)
+
+    /**
+     * Set by a step's content when the step's primary should do that
+     * step's work rather than advance — moderation's terms review, where
+     * the primary IS the signature (iOS `primaryOverride` parity).
+     * Consulted only while the step's gate is unmet; the content clears
+     * it when it leaves.
+     */
+    val primaryOverride: StateFlow<(() -> Unit)?> = _primaryOverride.asStateFlow()
+
+    fun setPrimaryOverride(action: (() -> Unit)?) {
+        _primaryOverride.value = action
+    }
+
     /** Guards the once-only directory probe kicked by [start]. */
     private val startMutex = Mutex()
     private var started = false

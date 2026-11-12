@@ -1,5 +1,28 @@
 package app.onym.android
 
+import androidx.compose.material.icons.filled.MeetingRoom
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Support
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.clickable
+import kotlinx.coroutines.delay
+import app.onym.android.design.SymbolHint
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -311,7 +334,10 @@ internal fun OnboardingHost(
     // visibility from the step, and clear the stale flag so it can't
     // linger.
     val hubShown = hubVisible && state.step == OnboardingStep.Services
-    val backupShown = backupVisible && state.step == OnboardingStep.RecoveryPhrase
+    // The backup runs from the recovery step, and again from the Done
+    // step's recovery tile.
+    val backupShown = backupVisible &&
+        (state.step == OnboardingStep.RecoveryPhrase || state.step == OnboardingStep.Done)
     // The restore overlay carries the full gate in its mount
     // condition, not just the entry that opens it: the saved flag
     // survives process death while the probe re-answers, and this
@@ -345,7 +371,9 @@ internal fun OnboardingHost(
     }
     LaunchedEffect(state.step) {
         if (state.step != OnboardingStep.Services) closeHub()
-        if (state.step != OnboardingStep.RecoveryPhrase) backupVisible = false
+        if (state.step != OnboardingStep.RecoveryPhrase && state.step != OnboardingStep.Done) {
+            backupVisible = false
+        }
         if (state.step != OnboardingStep.Welcome) restoreVisible = false
     }
 
@@ -390,17 +418,10 @@ internal fun OnboardingHost(
                 stepContent = { step ->
                     when (step) {
                         OnboardingStep.Welcome -> ({
-                            WelcomeStepContent(
-                                // Same two-part gate as the overlay's
-                                // mount: allowed AND the walk has
-                                // never moved past Welcome.
-                                restoreAvailable = restoreAllowed &&
-                                    state.neverLeftWelcome,
+                            WelcomeDoor(
                                 onDoor = {
                                     hostViewModel.viewModelScope.launch { flow.skipAll() }
                                 },
-                                onSetup = { flow.advance() },
-                                onRestore = { restoreVisible = true },
                             )
                         })
                         OnboardingStep.Identity -> ({
@@ -431,6 +452,7 @@ internal fun OnboardingHost(
                                 dependencies = dependencies,
                                 onboarding = onboarding,
                                 flow = flow,
+                                onBackup = { backupVisible = true },
                             )
                         })
                         OnboardingStep.Moderation -> ({
@@ -439,6 +461,22 @@ internal fun OnboardingHost(
                                 flow = flow,
                             )
                         })
+                    }
+                },
+                stepFooter = { step ->
+                    if (step == OnboardingStep.Welcome) {
+                        {
+                            WelcomeFooter(
+                                // Same two-part gate as the overlay's
+                                // mount: allowed AND the walk has never
+                                // moved past Welcome.
+                                restoreAvailable = restoreAllowed && state.neverLeftWelcome,
+                                onSetup = { flow.advance() },
+                                onRestore = { restoreVisible = true },
+                            )
+                        }
+                    } else {
+                        null
                     }
                 },
             )
@@ -573,88 +611,67 @@ internal fun OnboardingHost(
 // ── Welcome ───────────────────────────────────────────────────────
 
 /**
- * The door: the OnymMark, one round button that leaves the walk for the
- * chats, and the two ways a person who wants to slow down can take
- * instead — the step-by-step setup, and the restore entry. Nothing here
- * is a decision; the walk's own consents are offered only if it is
- * walked.
- *
- * [restoreAvailable] gates the restore entry: it is hidden when the
- * wiring is absent, when the walk runs over an identity that
- * [app.onym.android.identity.IdentityRepository.restore] would wipe
- * (restart walks, grandfathered users — see
- * [OnboardingUiDependencies.restoreIdentityAllowed]), and once the
- * walk has advanced past Welcome even if the user comes Back
- * ([OnboardingFlow.State.neverLeftWelcome]).
+ * The welcome screen, textless (iOS parity): one round door, dead centre,
+ * that leaves the walk for the chats. Nothing here is a decision; the
+ * walk's own consents are offered only if it is walked.
  */
 @Composable
-private fun WelcomeStepContent(
+private fun WelcomeDoor(onDoor: () -> Unit) {
+    FilledIconButton(
+        onClick = onDoor,
+        modifier = Modifier
+            .size(112.dp)
+            .testTag("onboarding.welcome.primary"),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.MeetingRoom,
+            contentDescription = stringResource(OnboardingR.string.onboarding_welcome_door),
+            modifier = Modifier.size(48.dp),
+        )
+    }
+}
+
+/**
+ * The welcome screen's bottom row: the two ways a person who wants to
+ * slow down can take instead — step-by-step setup (sliders) and restore
+ * from a recovery phrase (key). [restoreAvailable] gates the key: hidden
+ * when the wiring is absent, when the walk runs over an identity that
+ * [app.onym.android.identity.IdentityRepository.restore] would wipe, and
+ * once the walk has left Welcome ([OnboardingFlow.State.neverLeftWelcome]).
+ */
+@Composable
+private fun WelcomeFooter(
     restoreAvailable: Boolean,
-    onDoor: () -> Unit,
     onSetup: () -> Unit,
     onRestore: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 12.dp, bottom = 28.dp)
-                .clearAndSetSemantics { },
-            contentAlignment = Alignment.Center,
-        ) {
-            OnymMark(size = 88.dp, color = MaterialTheme.colorScheme.primary, strokeRatio = 0.14f)
-        }
-        FilledIconButton(
-            onClick = onDoor,
-            modifier = Modifier
-                .size(104.dp)
-                .testTag("onboarding.welcome.primary"),
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = stringResource(OnboardingR.string.onboarding_welcome_door),
-                modifier = Modifier.size(44.dp),
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = stringResource(OnboardingR.string.onboarding_welcome_door),
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(Modifier.height(20.dp))
-        TextButton(
+        FilledTonalIconButton(
             onClick = onSetup,
-            modifier = Modifier.testTag("onboarding.welcome.setup"),
+            modifier = Modifier
+                .size(56.dp)
+                .testTag("onboarding.welcome.setup"),
         ) {
             Icon(
-                imageVector = Icons.Filled.Tune,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.size(8.dp))
-            Text(
-                text = stringResource(OnboardingR.string.onboarding_welcome_setup_entry),
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                Icons.Filled.Tune,
+                contentDescription = stringResource(OnboardingR.string.onboarding_welcome_setup_entry),
             )
         }
         if (restoreAvailable) {
-            TextButton(
+            FilledTonalIconButton(
                 onClick = onRestore,
-                modifier = Modifier.testTag("onboarding.welcome.restore"),
+                modifier = Modifier
+                    .size(56.dp)
+                    .testTag("onboarding.welcome.restore"),
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Key,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.size(8.dp))
-                Text(
-                    text = stringResource(OnboardingR.string.onboarding_welcome_restore_entry),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    Icons.Filled.Key,
+                    contentDescription = stringResource(OnboardingR.string.onboarding_welcome_restore_entry),
                 )
             }
         }
@@ -822,23 +839,20 @@ private fun RestoreIdentityOverlay(
 // ── Identity ──────────────────────────────────────────────────────
 
 /**
- * "Making your keys" — the identity bootstrap already runs at app
- * start; this step BINDS to it instead of asserting success it can't
- * know about. The checklist shows progress while the bootstrap
- * resolves, checks once a snapshot exists, and an explicit failure
- * card (with retry) if it doesn't. The step is outcome-gated
- * ([OnboardingFlow.requiresOutcomeToAdvance]): Continue stays
- * disabled until a snapshot exists — the fail-closed dead end is
- * intentional, because a failed bootstrap must not walk the user on
- * to services and a recovery step whose reveal cannot work.
+ * "Making your keys" — one key, centred by the scaffold, its state badged
+ * on its corner (iOS parity): a spinner while the bootstrap resolves, a
+ * green check once a snapshot exists, a red cross and a retry if it
+ * doesn't. The bootstrap already runs at app start; this step BINDS to it
+ * instead of asserting success it can't know about. Outcome-gated
+ * ([OnboardingFlow.requiresOutcomeToAdvance]): the primary stays disabled
+ * until a snapshot exists, because a failed bootstrap must not walk the
+ * user on to services and a recovery step whose reveal cannot work.
  */
 @Composable
 private fun IdentityStepContent(
     flow: OnboardingFlow,
     identityReady: suspend () -> Boolean,
-    /** Copy flip for a restored identity (iOS identityOrigin parity):
-     *  "created"/"generated" would be a lie over keys the user just
-     *  brought here from a recovery phrase. */
+    /** Label flip for a restored identity (iOS identityOrigin parity). */
     restored: Boolean,
 ) {
     var phase by remember { mutableStateOf(IdentityPhase.Checking) }
@@ -848,10 +862,9 @@ private fun IdentityStepContent(
         phase = IdentityPhase.Checking
         if (identityReady()) {
             phase = IdentityPhase.Ready
-            // Unlocks the step's Continue — nothing was decided here,
-            // but the gate needs proof the keys exist. recordOutcome
-            // writes to the CURRENT step; guard against the check
-            // resolving after a quick Back.
+            // Unlocks the step's primary — nothing was decided here, but
+            // the gate needs proof the keys exist. recordOutcome writes to
+            // the CURRENT step; guard against a resolve after a quick Back.
             if (flow.state.value.step == OnboardingStep.Identity) {
                 flow.recordOutcome(StepOutcome.NotApplicable)
             }
@@ -860,203 +873,176 @@ private fun IdentityStepContent(
         }
     }
 
-    Column(Modifier.fillMaxWidth()) {
-        SettingsCard(modifier = Modifier.testTag("onboarding.identity.checklist")) {
-            IdentityChecklistRow(
-                phase = phase,
-                title = stringResource(
-                    if (restored) {
-                        OnboardingR.string.onboarding_identity_row_key_title_restored
-                    } else {
-                        OnboardingR.string.onboarding_identity_row_key_title
-                    },
-                ),
-                subtitle = stringResource(OnboardingR.string.onboarding_identity_row_key_subtitle),
-            )
-            SettingsHairline(insetStart = 52.dp)
-            IdentityChecklistRow(
-                phase = phase,
-                title = stringResource(
-                    if (restored) {
-                        OnboardingR.string.onboarding_identity_row_phrase_title_restored
-                    } else {
-                        OnboardingR.string.onboarding_identity_row_phrase_title
-                    },
-                ),
-                subtitle = stringResource(
-                    if (restored) {
-                        OnboardingR.string.onboarding_identity_row_phrase_subtitle_restored
-                    } else {
-                        OnboardingR.string.onboarding_identity_row_phrase_subtitle
-                    },
-                ),
-            )
-        }
+    val readyLabel = stringResource(
+        if (restored) {
+            OnboardingR.string.onboarding_identity_row_key_title_restored
+        } else {
+            OnboardingR.string.onboarding_identity_row_key_title
+        },
+    )
+    val makingLabel = stringResource(
+        if (restored) OnboardingR.string.onboarding_identity_title_restored else OnboardingR.string.onboarding_identity_title,
+    )
+    val failedLabel = stringResource(OnboardingR.string.onboarding_identity_failed)
 
-        if (phase == IdentityPhase.Failed) {
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier
-                    .padding(horizontal = 16.dp)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(SettingsTile.Red.copy(alpha = 0.10f))
-                    .padding(14.dp)
-                    .testTag("onboarding.identity.failed"),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    Icons.Filled.Warning,
-                    contentDescription = null,
-                    tint = SettingsTile.Red,
-                    modifier = Modifier.size(20.dp),
+    Box(
+        modifier = Modifier
+            .size(140.dp)
+            .testTag("onboarding.identity.checklist"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.VpnKey,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(88.dp),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .size(46.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (phase) {
+                IdentityPhase.Checking -> CircularProgressIndicator(
+                    strokeWidth = 3.dp,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .semantics { contentDescription = makingLabel },
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = stringResource(OnboardingR.string.onboarding_identity_failed),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    // A real button: Role.Button semantics + the M3
-                    // 48dp minimum touch target (a bare clickable
-                    // Text had neither).
-                    TextButton(
-                        onClick = { attempt += 1 },
-                        modifier = Modifier.testTag("onboarding.identity.retry"),
-                    ) {
-                        Text(
-                            text = stringResource(
-                                OnboardingR.string.onboarding_identity_retry,
-                            ),
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                            ),
-                        )
-                    }
-                }
+                IdentityPhase.Ready -> Icon(
+                    Icons.Filled.CheckCircle,
+                    contentDescription = readyLabel,
+                    tint = SettingsTile.Green,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .testTag("onboarding.identity.ready"),
+                )
+                IdentityPhase.Failed -> Icon(
+                    Icons.Filled.Cancel,
+                    contentDescription = failedLabel,
+                    tint = SettingsTile.Red,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .testTag("onboarding.identity.failed"),
+                )
             }
         }
+    }
 
-        SettingsFootnote(stringResource(OnboardingR.string.onboarding_identity_footnote))
+    if (phase == IdentityPhase.Failed) {
+        Spacer(Modifier.height(16.dp))
+        FilledTonalIconButton(
+            onClick = { attempt += 1 },
+            modifier = Modifier
+                .size(48.dp)
+                .testTag("onboarding.identity.retry"),
+        ) {
+            Icon(
+                Icons.Filled.Refresh,
+                contentDescription = stringResource(OnboardingR.string.onboarding_identity_retry),
+                tint = SettingsTile.Red,
+            )
+        }
     }
 }
 
 private enum class IdentityPhase { Checking, Ready, Failed }
 
-@Composable
-private fun IdentityChecklistRow(phase: IdentityPhase, title: String, subtitle: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        when (phase) {
-            IdentityPhase.Checking -> CircularProgressIndicator(
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(20.dp),
-            )
-            IdentityPhase.Ready -> Icon(
-                Icons.Filled.CheckCircle,
-                contentDescription = null,
-                tint = SettingsTile.Green,
-                modifier = Modifier.size(20.dp),
-            )
-            IdentityPhase.Failed -> Icon(
-                Icons.Filled.Close,
-                contentDescription = null,
-                tint = SettingsTile.Red,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-        Column {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-// ── Services ──────────────────────────────────────────────────────
+// ── Moderation ────────────────────────────────────────────────────
 
 /**
- * The moderation consent step: the reviewed manifest snapshot with
- * Agree wired to `ModerationRepository.consent`. Outcome-gated like
- * every core step — Consented on success; Unavailable when the
- * directory offers nothing (Continue acknowledges, per the flow's
- * mandatory/Unavailable arithmetic — opting out of moderation is not
- * a thing, but an empty directory cannot demand consent). A null
- * `dependencies.moderation` under an enabled step is unreachable:
- * the flow only enters the step when the seat is wired.
+ * The moderation consent step, in symbols (iOS parity): the shared
+ * consent surface with its authorities behind a configure icon and its
+ * terms as class symbols plus the full text one tap away. The step's
+ * primary IS the signature: while terms are on screen the scaffold's
+ * primary calls [ModerationConsentController.agree], and once signed the
+ * walk moves on by itself after the seal has shown.
+ *
+ * Outcome-gated: Consented on success; Unavailable when the directory
+ * offers nothing (opting out of moderation is not a thing, but an empty
+ * directory cannot demand consent).
  */
 @Composable
 private fun ModerationStepContent(
     dependencies: AppDependencies,
     flow: OnboardingFlow,
 ) {
-    // The step only enters the walk when the seat is wired (both read
-    // the same moderationUi), but if that invariant ever breaks, a
-    // silent `?: return` renders an EMPTY outcome-gated, unskippable,
-    // back-blocked step — the bricked wizard the old tripwire
-    // existed to prevent. Fail fast and name the missing piece.
+    // The step only enters the walk when the seat is wired; fail fast
+    // and name the missing piece rather than render a bricked step.
     val moderation = checkNotNull(dependencies.moderation) {
         "OnboardingStep.Moderation is in the walk but AppDependencies.moderation is null — " +
             "OnymApplication must construct the moderation dependencies whenever it enables " +
             "the step (moderationEnabled = moderationUi != null)"
     }
     val controller = remember { moderation.makeConsentController(true) }
+    val consent by controller.snapshots.collectAsState()
+    val scope = rememberCoroutineScope()
+    // Auto-advance only after a signature made HERE: a resumed mandate
+    // (Back into this step, a restart walk) re-emits Consented, and moving
+    // the user on from that would make the step impossible to revisit.
+    var signedHere by remember { mutableStateOf(false) }
+
+    LaunchedEffect(consent) {
+        val reviewing = consent is app.onym.android.moderation.ui.ModerationConsentController.UiState.Review
+        flow.setPrimaryOverride(
+            if (reviewing && flow.state.value.step == OnboardingStep.Moderation) {
+                {
+                    signedHere = true
+                    scope.launch { controller.agree() }
+                }
+            } else {
+                null
+            },
+        )
+    }
+    DisposableEffect(Unit) {
+        onDispose { flow.setPrimaryOverride(null) }
+    }
+
     app.onym.android.moderation.ui.ModerationConsentContent(
         controller = controller,
-        // The step scaffold already scrolls; the surface must not
-        // nest its own unbounded scroll inside it.
+        // The step scaffold already scrolls.
         standalone = false,
-        // Debug/emulator builds can never pass the backend's
-        // classifier; without this the deterministic refusal
-        // hard-blocks every local run at this step. Release binaries
-        // pass false and keep the strict retry-only surface.
+        // Debug/emulator builds can never pass the backend's classifier;
+        // release binaries pass false and keep the strict surface.
         debugSkipAllowed = app.onym.android.BuildConfig.DEBUG,
+        hostOwnsSigning = true,
         onConsented = { record ->
             if (flow.state.value.step == OnboardingStep.Moderation) {
                 flow.recordOutcome(StepOutcome.Consented(record.mandate.authority))
             }
-            // The iOS `consentCompleted` invariant: a fresh gate
-            // check immediately, so the gate reflects the mandate.
+            // The iOS `consentCompleted` invariant: a fresh gate check.
             moderation.gate.consentCompleted()
+            if (signedHere) {
+                scope.launch {
+                    delay(800)
+                    if (flow.state.value.step == OnboardingStep.Moderation) flow.advance()
+                }
+            }
         },
         onUnavailableContinue = {
             if (flow.state.value.step == OnboardingStep.Moderation) {
                 flow.recordOutcome(StepOutcome.Unavailable)
             }
-            // Also defer the ROOT gate for this process: without it,
-            // finishing the walk lands the user straight on the
-            // full-screen NeedsConsent surface they just continued
-            // past — the same unreachable authority, asked twice.
+            // Also defer the ROOT gate for this process, or finishing the
+            // walk lands on the NeedsConsent surface just continued past.
             moderation.gate.deferConsent()
         },
         modifier = Modifier.fillMaxWidth(),
     )
 }
 
+// ── Services ──────────────────────────────────────────────────────
+
 /**
- * "Your services" — one screen instead of the old four wizard steps.
- * The recommended setup is preselected (and the flow SEEDS the
- * services outcome as an accepted recommendation at construction, so
- * the "Selected" chip and the recorded outcome tell the same story
- * from the first frame); "Choose services myself" opens the hub
- * overlay, whose per-seat screens reuse the Settings surfaces.
- *
- * The recommended card's promised lines name the FIXED recommended
- * set (the seeded defaults plus the published lists installed on
- * completion) — they are a promise, not live state; the Done step's
- * summary is the live, checkable view.
+ * "Your services", in symbols (iOS parity): the recommended set as a card
+ * of its four seats' icons, "choose myself" as a sliders card, a check
+ * badge on the selected one. The recommended setup is preselected (the
+ * flow SEEDS the services outcome as an accepted recommendation); the
+ * sliders card opens the hub overlay, whose seat screens reuse Settings.
  */
 @Composable
 private fun ServicesStepContent(
@@ -1065,17 +1051,12 @@ private fun ServicesStepContent(
 ) {
     val state by flow.state.collectAsState()
     // Derived from the flow, never composable-local — Back/forward
-    // navigation rebuilds this content, and the chip must keep
-    // telling the truth about what the user configured.
+    // navigation rebuilds this content.
     val usingCustom = state.servicesChoice == ServicesChoice.Custom
 
-    // Parity with the hub's use-recommended caveat: tapping the
-    // Recommended card after a custom setup flips the chip and
-    // overwrites the outcome while persisted endpoints/pins STAY —
-    // so the same stays-configured footnote must be visible at the
-    // card whenever that tap matters: while Custom is selected, and
-    // lingering after a flip back within this visit (the flow-held
-    // choice alone can't say "was custom a moment ago").
+    // Tapping Recommended after a custom setup flips the choice while
+    // persisted endpoints/pins STAY; that caveat stays reachable (as an
+    // info symbol) whenever the tap matters.
     var sawCustomHere by remember { mutableStateOf(false) }
     LaunchedEffect(usingCustom) {
         if (usingCustom) sawCustomHere = true
@@ -1086,102 +1067,58 @@ private fun ServicesStepContent(
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ServicesCard(
             selected = !usingCustom,
+            label = stringResource(OnboardingR.string.onboarding_services_recommended_title) + ". " +
+                stringResource(OnboardingR.string.onboarding_services_recommended_subtitle),
             testTag = "onboarding.services.recommended",
             onClick = {
-                // An explicit affirmative pick of the recommended
-                // setup is a consent — recording over the seeded
-                // outcome is an honest no-op.
+                // An explicit affirmative pick of the recommended setup
+                // is a consent — recording over the seed is a no-op.
                 flow.recordServicesChoice(ServicesChoice.Recommended)
                 flow.recordOutcome(StepOutcome.Consented(null))
             },
         ) {
+            // The recommended set as its four seats — delivery, media,
+            // group integrity, directory: the fixed promise the Done
+            // step's tiles then show live.
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                Text(
-                    text = stringResource(
-                        OnboardingR.string.onboarding_services_recommended_title,
-                    ),
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                if (!usingCustom) SelectedChip()
+                listOf(
+                    Icons.Filled.SettingsInputAntenna,
+                    Icons.Filled.PhotoLibrary,
+                    Icons.Filled.Verified,
+                    Icons.Filled.Search,
+                ).forEach { icon ->
+                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
+                }
             }
-            Text(
-                text = stringResource(
-                    OnboardingR.string.onboarding_services_recommended_subtitle,
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
-            )
-            SummaryLine(
-                OnboardingR.string.onboarding_services_line_delivery,
-                OnboardingR.string.onboarding_services_value_delivery,
-            )
-            SummaryLine(
-                OnboardingR.string.onboarding_services_line_media,
-                OnboardingR.string.onboarding_services_value_media,
-            )
-            SummaryLine(
-                OnboardingR.string.onboarding_services_line_group,
-                OnboardingR.string.onboarding_services_value_group,
-            )
-            SummaryLine(
-                OnboardingR.string.onboarding_services_line_directory,
-                OnboardingR.string.onboarding_services_value_directory,
-            )
         }
 
         ServicesCard(
             selected = usingCustom,
+            label = stringResource(OnboardingR.string.onboarding_services_custom_title) + ". " +
+                stringResource(OnboardingR.string.onboarding_services_custom_subtitle),
             testTag = "onboarding.services.custom",
             onClick = onOpenHub,
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = stringResource(OnboardingR.string.onboarding_services_custom_title),
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                if (usingCustom) SelectedChip()
-            }
-            Text(
-                text = stringResource(OnboardingR.string.onboarding_services_custom_subtitle),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
+            Icon(
+                Icons.Filled.Tune,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(26.dp),
             )
         }
 
-        Text(
-            text = stringResource(OnboardingR.string.onboarding_services_footnote),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-
         if (usingCustom || sawCustomHere) {
-            Text(
-                text = stringResource(
-                    OnboardingR.string.onboarding_hub_use_recommended_footnote,
-                ),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .testTag("onboarding.services.stays_configured"),
+            SymbolHint(
+                icon = Icons.Filled.Info,
+                label = stringResource(OnboardingR.string.onboarding_hub_use_recommended_footnote),
+                modifier = Modifier.testTag("onboarding.services.stays_configured"),
             )
         }
     }
@@ -1190,83 +1127,58 @@ private fun ServicesStepContent(
 @Composable
 private fun ServicesCard(
     selected: Boolean,
+    label: String,
     testTag: String,
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     val shape = RoundedCornerShape(14.dp)
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .border(
                 width = 2.dp,
-                color = if (selected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    androidx.compose.ui.graphics.Color.Transparent
-                },
+                color = if (selected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
                 shape = shape,
             )
-            // The two cards are a mutually exclusive pair —
-            // selectable (not a bare clickable) so TalkBack reads
-            // "selected, radio button" and merges the card's text
-            // into one announced node (selectable merges
-            // descendants), mirroring the visual chip.
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = onClick,
-            )
-            .padding(16.dp)
+            // A mutually exclusive pair — selectable (not a bare
+            // clickable) so TalkBack reads "selected, radio button".
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = label }
+            .padding(vertical = 24.dp, horizontal = 16.dp)
             .testTag(testTag),
-    ) { content() }
-}
-
-@Composable
-private fun SelectedChip() {
-    Text(
-        text = stringResource(OnboardingR.string.onboarding_services_selected_chip),
-        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-        color = MaterialTheme.colorScheme.onPrimary,
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    )
-}
-
-@Composable
-private fun SummaryLine(labelRes: Int, valueRes: Int) {
-    Row(modifier = Modifier.padding(vertical = 2.dp)) {
-        Text(
-            text = stringResource(labelRes),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(120.dp),
-        )
-        Text(
-            text = stringResource(valueRes),
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+        // Stands in for the old "Selected" chip.
+        if (selected) {
+            Icon(
+                Icons.Filled.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 6.dp, y = (-14).dp)
+                    .size(20.dp),
+            )
+        }
     }
 }
 
 // ── Recovery phrase ───────────────────────────────────────────────
 
 /**
- * "Save your recovery phrase" — the backup walk, promoted from the
- * old Done-step footnote to a real step. The reveal launches the
- * SAME [RecoveryPhraseBackupScreen] Settings uses (biometric gate,
- * reveal, verify quiz), as a full-screen overlay.
+ * "Save your recovery phrase" — the identity step's twin (iOS parity):
+ * one life preserver, centred, badged at the same corner — an eye before
+ * the words were seen, a pencil once revealed (write them down), a green
+ * check once verified. Tapping it opens the SAME
+ * [RecoveryPhraseBackupScreen] Settings uses, as a full-screen overlay.
  *
- * The step's primary ("I've written it down") stays disabled until
- * an outcome is recorded ([OnboardingFlow.requiresOutcomeToAdvance])
- * — and the outcome is recorded when the phrase is actually
- * REVEALED, so the button can't assert something the user never saw.
- * "Remind me later" (the step's skip) is the honest escape.
+ * The primary (✓, "I've written it down") stays disabled until the phrase
+ * was actually REVEALED; the alarm clock (the skip, "Remind me later") is
+ * the honest escape.
  */
 @Composable
 private fun RecoveryStepContent(
@@ -1277,101 +1189,86 @@ private fun RecoveryStepContent(
     val backup = state.recoveryBackupState
     val backedUp = backup == RecoveryBackupState.Verified
     val sawPhrase = backup != RecoveryBackupState.None
-    // A restored identity's phrase may be 24 words — the "12 words"
-    // copy must not survive over a 24-word reveal.
     val restored = state.identityOrigin == IdentityOrigin.Restored
 
-    val statusColor = if (backedUp) SettingsTile.Green else SettingsTile.Amber
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(statusColor.copy(alpha = 0.10f))
-                .padding(14.dp)
-                // onym:allow-secret-read: a semantics test tag — the
-                // mandated onboarding.recoveryPhrase.* vocabulary, no
-                // mnemonic is read here.
-                .testTag("onboarding.recoveryPhrase.status"),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                if (backedUp) Icons.Filled.Verified else Icons.Filled.Key,
-                contentDescription = null,
-                tint = statusColor,
-                modifier = Modifier.size(22.dp),
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    text = stringResource(
-                        when (backup) {
-                            RecoveryBackupState.Verified ->
-                                OnboardingR.string.onboarding_recovery_status_verified
-                            RecoveryBackupState.Revealed ->
-                                OnboardingR.string.onboarding_recovery_status_revealed
-                            RecoveryBackupState.None ->
-                                OnboardingR.string.onboarding_recovery_status_none
-                        },
-                    ),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = stringResource(
-                        when (backup) {
-                            RecoveryBackupState.Verified ->
-                                OnboardingR.string.onboarding_recovery_body_verified
-                            RecoveryBackupState.Revealed ->
-                                if (restored) {
-                                    OnboardingR.string.onboarding_recovery_body_revealed_restored
-                                } else {
-                                    OnboardingR.string.onboarding_recovery_body_revealed
-                                }
-                            RecoveryBackupState.None ->
-                                if (restored) {
-                                    OnboardingR.string.onboarding_recovery_body_none_restored
-                                } else {
-                                    OnboardingR.string.onboarding_recovery_body_none
-                                }
-                        },
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+    val revealLabel = stringResource(
+        if (sawPhrase) OnboardingR.string.onboarding_recovery_view_again else OnboardingR.string.onboarding_recovery_reveal,
+    )
+    val statusLabel = stringResource(
+        when (backup) {
+            RecoveryBackupState.Verified -> OnboardingR.string.onboarding_recovery_status_verified
+            RecoveryBackupState.Revealed -> OnboardingR.string.onboarding_recovery_status_revealed
+            RecoveryBackupState.None -> OnboardingR.string.onboarding_recovery_status_none
+        },
+    ) + ". " + stringResource(
+        when (backup) {
+            RecoveryBackupState.Verified -> OnboardingR.string.onboarding_recovery_body_verified
+            RecoveryBackupState.Revealed ->
+                if (restored) OnboardingR.string.onboarding_recovery_body_revealed_restored else OnboardingR.string.onboarding_recovery_body_revealed
+            RecoveryBackupState.None ->
+                if (restored) OnboardingR.string.onboarding_recovery_body_none_restored else OnboardingR.string.onboarding_recovery_body_none
+        },
+    )
+    val tint = if (backedUp) SettingsTile.Green else MaterialTheme.colorScheme.primary
 
-        Spacer(Modifier.height(12.dp))
-        androidx.compose.material3.Button(
+    Box(Modifier.size(168.dp), contentAlignment = Alignment.Center) {
+        FilledTonalIconButton(
             onClick = onReveal,
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = tint.copy(alpha = 0.16f),
+                contentColor = tint,
+            ),
             modifier = Modifier
-                .fillMaxWidth()
-                // onym:allow-secret-read: a semantics test tag — see above.
+                .size(150.dp)
+                .semantics { contentDescription = revealLabel }
+                // onym:allow-secret-read: a semantics test tag — the
+                // mandated onboarding.recoveryPhrase.* vocabulary.
                 .testTag("onboarding.recoveryPhrase.reveal"),
         ) {
-            Text(
-                stringResource(
-                    if (sawPhrase) {
-                        OnboardingR.string.onboarding_recovery_view_again
-                    } else {
-                        OnboardingR.string.onboarding_recovery_reveal
-                    },
-                ),
-            )
+            Icon(Icons.Filled.Support, contentDescription = null, modifier = Modifier.size(72.dp))
         }
-
-        Text(
-            text = stringResource(OnboardingR.string.onboarding_recovery_footnote),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 12.dp),
+        // Outside the button so it stays its own node: what to do next,
+        // then that it's done.
+        StatusBadge(
+            status = when (backup) {
+                RecoveryBackupState.Verified -> TileStatus.Done
+                RecoveryBackupState.Revealed -> TileStatus.Pending
+                RecoveryBackupState.None -> TileStatus.Look
+            },
+            size = 44.dp,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .semantics { contentDescription = statusLabel }
+                // onym:allow-secret-read: a semantics test tag — see above.
+                .testTag("onboarding.recoveryPhrase.status"),
         )
+    }
+}
+
+/** A tile's or symbol's state, badged on its corner. */
+private enum class TileStatus { Done, Pending, Empty, Look }
+
+/** ✓ green (agreed / configured), ✎ amber (started), – grey (left empty),
+ *  👁 blue (go and look). */
+@Composable
+private fun StatusBadge(status: TileStatus, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+    val (icon: ImageVector, color: androidx.compose.ui.graphics.Color) = when (status) {
+        TileStatus.Done -> Icons.Filled.Check to SettingsTile.Green
+        TileStatus.Pending -> Icons.Filled.Edit to SettingsTile.Amber
+        TileStatus.Empty -> Icons.Filled.Remove to SettingsTile.Gray
+        TileStatus.Look -> Icons.Filled.Visibility to MaterialTheme.colorScheme.primary
+    }
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .padding(3.dp)
+            .clip(CircleShape)
+            .background(color),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(size * 0.55f))
     }
 }
 
@@ -1462,258 +1359,268 @@ private fun RecoveryBackupOverlay(
 
 // ── Done ──────────────────────────────────────────────────────────
 
+/** One reviewable thing on the Done step — a seat, the mandate, or the phrase. */
+private data class DoneTile(
+    val id: String,
+    val icon: ImageVector,
+    val status: TileStatus,
+    val title: String,
+    val value: String,
+    val detail: String?,
+    val trailing: String?,
+)
+
 /**
- * "You're ready" — the live summary. Read from the repositories, not
- * the walk's outcomes: what the app will actually use is the
- * checkable claim. Each row carries the chosen service's name, the
- * checkable detail (endpoint URL / key fingerprint) on its own
- * monospaced line, and a per-locale plural count.
+ * The review, in symbols (iOS parity): everything the walk set up or
+ * agreed to, as one-size tiles in balanced rows — up to three a row, each
+ * row centred — badged ✓ / ✎ / –. Read live from the repositories, not
+ * the walk's outcomes: what the app will actually use is the checkable
+ * claim. Tapping a tile opens what it stands for in words — the chosen
+ * name and the checkable detail (URL, key fingerprint, manifest hash) —
+ * and the recovery tile can run the backup again ([onBackup]).
  */
 @Composable
 private fun DoneStepContent(
     dependencies: AppDependencies,
     onboarding: OnboardingUiDependencies,
     flow: OnboardingFlow,
+    onBackup: () -> Unit,
 ) {
     val state by flow.state.collectAsState()
     val nostr by dependencies.nostrRelaysFlow.collectAsStateWithLifecycle()
     val blossom by dependencies.blossomServersFlow.collectAsStateWithLifecycle()
     val relayer by onboarding.relayerState.collectAsStateWithLifecycle()
-    val discoveryFlow = dependencies.discovery?.stateFlow
-    val discoveryState = discoveryFlow?.let { it.collectAsStateWithLifecycle().value }
+    val discoveryState = dependencies.discovery?.stateFlow?.let { it.collectAsStateWithLifecycle().value }
+    var mandate by remember { mutableStateOf<app.onym.android.moderation.MandateRecord?>(null) }
+    LaunchedEffect(dependencies.moderation) {
+        mandate = dependencies.moderation?.repository?.activeMandateRecord()
+    }
+    var reading by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.fillMaxWidth()) {
-        // Decorative hero — hidden from accessibility.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
-                .clearAndSetSemantics {},
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(62.dp)
-                    .clip(CircleShape)
-                    .background(SettingsTile.Green),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Check,
-                    contentDescription = null,
-                    tint = androidx.compose.ui.graphics.Color.White,
-                    modifier = Modifier.size(30.dp),
-                )
-            }
-        }
+    @Composable
+    fun count(n: Int) = n.takeIf { it > 0 }?.let {
+        pluralStringResource(OnboardingR.plurals.onboarding_done_services_count, it, it)
+    }
 
-        SettingsSectionLabel(stringResource(OnboardingR.string.onboarding_done_section_setup))
-        SettingsCard(modifier = Modifier.testTag("onboarding.done.summary")) {
-            val nostrFirst = nostr.endpoints.firstOrNull()
-            SummaryRow(
-                icon = Icons.Filled.SettingsInputAntenna,
+    val tiles = buildList {
+        val nostrFirst = nostr.endpoints.firstOrNull()
+        add(
+            DoneTile(
+                id = "messageTransport", icon = Icons.Filled.SettingsInputAntenna,
+                status = if (nostrFirst != null) TileStatus.Done else TileStatus.Empty,
                 title = stringResource(OnboardingR.string.onboarding_hub_row_message_title),
-                value = nostrFirst?.name
-                    ?: stringResource(OnboardingR.string.onboarding_done_none_configured),
-                detail = nostrFirst?.url,
-                trailing = nostr.endpoints.size.takeIf { it > 0 }?.let {
-                    pluralStringResource(
-                        OnboardingR.plurals.onboarding_done_services_count,
-                        it,
-                        it,
-                    )
-                },
-            )
-            SettingsHairline(insetStart = 52.dp)
-            val blossomFirst = blossom.endpoints.firstOrNull()
-            SummaryRow(
-                icon = Icons.Filled.PhotoLibrary,
+                value = nostrFirst?.name ?: stringResource(OnboardingR.string.onboarding_done_none_configured),
+                detail = nostrFirst?.url, trailing = count(nostr.endpoints.size),
+            ),
+        )
+        val blossomFirst = blossom.endpoints.firstOrNull()
+        add(
+            DoneTile(
+                id = "blobTransport", icon = Icons.Filled.PhotoLibrary,
+                status = if (blossomFirst != null) TileStatus.Done else TileStatus.Empty,
                 title = stringResource(OnboardingR.string.onboarding_hub_row_media_title),
-                value = blossomFirst?.name
-                    ?: stringResource(OnboardingR.string.onboarding_done_none_configured),
-                detail = blossomFirst?.url,
-                trailing = blossom.endpoints.size.takeIf { it > 0 }?.let {
-                    pluralStringResource(
-                        OnboardingR.plurals.onboarding_done_services_count,
-                        it,
-                        it,
-                    )
-                },
-            )
-            SettingsHairline(insetStart = 52.dp)
-            val relayerEndpoints = relayer.configuration.endpoints
-            SummaryRow(
-                icon = Icons.Filled.Verified,
+                value = blossomFirst?.name ?: stringResource(OnboardingR.string.onboarding_done_none_configured),
+                detail = blossomFirst?.url, trailing = count(blossom.endpoints.size),
+            ),
+        )
+        val relayers = relayer.configuration.endpoints
+        add(
+            DoneTile(
+                // Empty means the published defaults install on completion.
+                id = "notary", icon = Icons.Filled.Verified, status = TileStatus.Done,
                 title = stringResource(OnboardingR.string.onboarding_hub_row_group_title),
-                // Empty means the published defaults install on
-                // completion — the value already says so; a count
-                // trailing would just repeat it.
-                value = relayerEndpoints.firstOrNull()?.name
-                    ?: stringResource(OnboardingR.string.onboarding_services_value_group),
-                detail = relayerEndpoints.firstOrNull()?.url,
-                trailing = relayerEndpoints.size.takeIf { it > 0 }?.let {
-                    pluralStringResource(
-                        OnboardingR.plurals.onboarding_done_services_count,
-                        it,
-                        it,
-                    )
-                },
-            )
-            // The directory row must distinguish the same states the
-            // hub does. Pinned: the fingerprint IS the checkable
-            // detail (+ the source count). NOT pinned: an explicit
-            // "Not confirmed" trailing and NO detail line — a URL
-            // there would render indistinguishably from a confirmed
-            // source's fingerprint. A pinned source wins the row
-            // when several exist (it is the one refresh trusts).
-            val sources = discoveryState?.sources.orEmpty()
-            val pinnedSource = sources.firstOrNull { it.pinnedOperatorKeyHex != null }
-            val displaySource = pinnedSource ?: sources.firstOrNull()
-            if (discoveryState != null && displaySource != null) {
-                SettingsHairline(insetStart = 52.dp)
-                SummaryRow(
-                    icon = Icons.Filled.Search,
-                    title = stringResource(
-                        OnboardingR.string.onboarding_hub_row_directory_title,
-                    ),
-                    value = displaySource.label,
-                    detail = pinnedSource?.operatorKeyFingerprint,
-                    trailing = if (pinnedSource != null) {
-                        pluralStringResource(
-                            OnboardingR.plurals.onboarding_done_sources_count,
-                            sources.size,
-                            sources.size,
-                        )
+                value = relayers.firstOrNull()?.name ?: stringResource(OnboardingR.string.onboarding_services_value_group),
+                detail = relayers.firstOrNull()?.url, trailing = count(relayers.size),
+            ),
+        )
+        // Pinned: the fingerprint IS the checkable detail. Not pinned: an
+        // explicit "Not confirmed" and no detail — a URL there would read
+        // like a confirmed source's fingerprint.
+        val sources = discoveryState?.sources.orEmpty()
+        val pinned = sources.firstOrNull { it.pinnedOperatorKeyHex != null }
+        val shown = pinned ?: sources.firstOrNull()
+        if (discoveryState != null && shown != null) {
+            add(
+                DoneTile(
+                    id = "discovery", icon = Icons.Filled.Search,
+                    status = if (pinned != null) TileStatus.Done else TileStatus.Pending,
+                    title = stringResource(OnboardingR.string.onboarding_hub_row_directory_title),
+                    value = shown.label, detail = pinned?.operatorKeyFingerprint,
+                    trailing = if (pinned != null) {
+                        pluralStringResource(OnboardingR.plurals.onboarding_done_sources_count, sources.size, sources.size)
                     } else {
-                        stringResource(
-                            OnboardingR.string.onboarding_done_directory_not_confirmed,
-                        )
+                        stringResource(OnboardingR.string.onboarding_done_directory_not_confirmed)
                     },
-                )
-            }
+                ),
+            )
         }
-
-        // Backup nudge, gated on how far the recovery step actually
-        // got: hidden once revealed AND verified, softened to "finish
-        // verifying" after a reveal alone, the full nudge only when
-        // the step was deferred.
-        if (state.recoveryBackupState != RecoveryBackupState.Verified) {
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier
-                    .padding(horizontal = 16.dp)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(SettingsTile.Amber.copy(alpha = 0.10f))
-                    .padding(14.dp)
-                    .testTag("onboarding.done.backup_nudge"),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    Icons.Filled.Key,
-                    contentDescription = null,
-                    tint = SettingsTile.Amber,
-                    modifier = Modifier.size(22.dp),
+        if (dependencies.moderation != null) {
+            val record = mandate
+            add(
+                DoneTile(
+                    id = "moderation", icon = Icons.Filled.Shield,
+                    status = if (record != null) TileStatus.Done else TileStatus.Empty,
+                    title = stringResource(OnboardingR.string.onboarding_moderation_title),
+                    value = record?.authorityName ?: stringResource(OnboardingR.string.onboarding_done_none_configured),
+                    detail = record?.mandate?.manifestHash,
+                    trailing = record?.let { stringResource(OnboardingR.string.onboarding_done_agreed) },
+                ),
+            )
+        }
+        val restored = state.identityOrigin == IdentityOrigin.Restored
+        add(
+            when (state.recoveryBackupState) {
+                RecoveryBackupState.Verified -> DoneTile(
+                    "recoveryPhrase", Icons.Filled.Support, TileStatus.Done,
+                    stringResource(OnboardingR.string.onboarding_recovery_title),
+                    stringResource(OnboardingR.string.onboarding_recovery_status_verified), null, null,
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    val revealed =
-                        state.recoveryBackupState == RecoveryBackupState.Revealed
-                    // The restored variants avoid the minted copy's
-                    // "12 words" (the phrase may be 24) and its
-                    // "created on this device / exists nowhere else"
-                    // claims (the user brought it here).
-                    val restored = state.identityOrigin == IdentityOrigin.Restored
-                    Text(
-                        text = stringResource(
-                            if (revealed) {
-                                OnboardingR.string.onboarding_done_nudge_revealed_title
-                            } else {
-                                OnboardingR.string.onboarding_done_nudge_full_title
-                            },
-                        ),
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = stringResource(
-                            when {
-                                revealed && restored ->
-                                    OnboardingR.string.onboarding_done_nudge_revealed_body_restored
-                                revealed ->
-                                    OnboardingR.string.onboarding_done_nudge_revealed_body
-                                restored ->
-                                    OnboardingR.string.onboarding_done_nudge_full_body_restored
-                                else ->
-                                    OnboardingR.string.onboarding_done_nudge_full_body
-                            },
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                RecoveryBackupState.Revealed -> DoneTile(
+                    "recoveryPhrase", Icons.Filled.Support, TileStatus.Pending,
+                    stringResource(OnboardingR.string.onboarding_done_nudge_revealed_title),
+                    stringResource(
+                        if (restored) OnboardingR.string.onboarding_done_nudge_revealed_body_restored else OnboardingR.string.onboarding_done_nudge_revealed_body,
+                    ),
+                    null, null,
+                )
+                RecoveryBackupState.None -> DoneTile(
+                    "recoveryPhrase", Icons.Filled.Support, TileStatus.Empty,
+                    stringResource(OnboardingR.string.onboarding_done_nudge_full_title),
+                    stringResource(
+                        if (restored) OnboardingR.string.onboarding_done_nudge_full_body_restored else OnboardingR.string.onboarding_done_nudge_full_body,
+                    ),
+                    null, null,
+                )
+            },
+        )
+    }
+
+    val hint = stringResource(OnboardingR.string.onboarding_done_tile_hint)
+    Column(
+        modifier = Modifier.testTag("onboarding.done.summary"),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        balancedRows(tiles).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                row.forEach { tile ->
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .clickable(role = Role.Button) { reading = tile.id }
+                            .semantics {
+                                contentDescription = listOfNotNull(tile.title, tile.value, tile.trailing).joinToString(", ")
+                                onClick(label = hint) { reading = tile.id; true }
+                            }
+                            .testTag(if (tile.id == "recoveryPhrase") "onboarding.done.backup_nudge" else "onboarding.done.tile.${tile.id}"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            tile.icon,
+                            contentDescription = null,
+                            tint = if (tile.status == TileStatus.Empty) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(30.dp),
+                        )
+                        StatusBadge(tile.status, 24.dp, Modifier.align(Alignment.BottomEnd).offset(x = (-4).dp, y = (-4).dp))
+                    }
                 }
             }
         }
+    }
 
-        SettingsFootnote(stringResource(OnboardingR.string.onboarding_done_footnote))
+    // Looked up live, not snapshotted: a backup run from the sheet must
+    // be reflected while it is still open.
+    tiles.firstOrNull { it.id == reading }?.let { tile ->
+        DoneTileSheet(
+            tile = tile,
+            onDismiss = { reading = null },
+            onBackup = if (tile.id == "recoveryPhrase") {
+                {
+                    reading = null
+                    onBackup()
+                }
+            } else {
+                null
+            },
+            backupLabel = stringResource(
+                if (state.recoveryBackupState == RecoveryBackupState.None) {
+                    OnboardingR.string.onboarding_recovery_reveal
+                } else {
+                    OnboardingR.string.onboarding_done_backup_again
+                },
+            ),
+            backupIcon = if (state.recoveryBackupState == RecoveryBackupState.None) Icons.Filled.Visibility else Icons.Filled.Refresh,
+        )
     }
 }
 
+/** Balanced rows: 5 tiles are 3 + 2, 4 are 2 + 2 — never a full row over
+ *  a lone straggler when an even split exists. */
+private fun <T> balancedRows(items: List<T>, perRow: Int = 3): List<List<T>> {
+    if (items.isEmpty()) return emptyList()
+    val rows = (items.size + perRow - 1) / perRow
+    val base = items.size / rows
+    var extra = items.size % rows
+    var index = 0
+    return List(rows) {
+        val size = base + if (extra-- > 0) 1 else 0
+        items.subList(index, index + size).also { index += size }
+    }
+}
+
+/** What a tile stands for, in words — the one place this step spells
+ *  anything out, and only when asked. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SummaryRow(
-    icon: ImageVector,
-    title: String,
-    value: String,
-    detail: String?,
-    trailing: String?,
+private fun DoneTileSheet(
+    tile: DoneTile,
+    onDismiss: () -> Unit,
+    onBackup: (() -> Unit)?,
+    backupLabel: String,
+    backupIcon: ImageVector,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-            // The checkable claim: URL / key fingerprint on its own
-            // monospaced line, not folded into the value text.
-            if (detail != null) {
-                Text(
-                    text = middleTruncate(detail),
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    maxLines = 1,
-                )
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+                .testTag("onboarding.done.detail"),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box {
+                Icon(tile.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(44.dp))
+                StatusBadge(tile.status, 20.dp, Modifier.align(Alignment.BottomEnd).offset(x = 8.dp, y = 8.dp))
             }
-        }
-        if (trailing != null) {
-            Text(
-                text = trailing,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text(tile.title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), textAlign = TextAlign.Center)
+            Text(tile.value, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            tile.trailing?.let {
+                Text(it, style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold), color = SettingsTile.Green)
+            }
+            tile.detail?.let {
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+            if (onBackup != null) {
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.Button(
+                    onClick = onBackup,
+                    modifier = Modifier
+                        .height(48.dp)
+                        .widthIn(min = 120.dp)
+                        .semantics { contentDescription = backupLabel }
+                        .testTag("onboarding.done.backup_again"),
+                ) { Icon(backupIcon, contentDescription = null) }
+            }
         }
     }
 }
