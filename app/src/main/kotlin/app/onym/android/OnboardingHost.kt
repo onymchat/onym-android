@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -32,11 +33,13 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -393,6 +396,10 @@ internal fun OnboardingHost(
                                 // never moved past Welcome.
                                 restoreAvailable = restoreAllowed &&
                                     state.neverLeftWelcome,
+                                onDoor = {
+                                    hostViewModel.viewModelScope.launch { flow.skipAll() }
+                                },
+                                onSetup = { flow.advance() },
                                 onRestore = { restoreVisible = true },
                             )
                         })
@@ -566,9 +573,13 @@ internal fun OnboardingHost(
 // ── Welcome ───────────────────────────────────────────────────────
 
 /**
- * Brand framing: the OnymMark over three "yours, not ours" bullets,
- * plus — iOS parity — the "I have a recovery phrase" entry beneath
- * the card. [restoreAvailable] gates the entry: it is hidden when the
+ * The door: the OnymMark, one round button that leaves the walk for the
+ * chats, and the two ways a person who wants to slow down can take
+ * instead — the step-by-step setup, and the restore entry. Nothing here
+ * is a decision; the walk's own consents are offered only if it is
+ * walked.
+ *
+ * [restoreAvailable] gates the restore entry: it is hidden when the
  * wiring is absent, when the walk runs over an identity that
  * [app.onym.android.identity.IdentityRepository.restore] would wipe
  * (restart walks, grandfathered users — see
@@ -579,58 +590,72 @@ internal fun OnboardingHost(
 @Composable
 private fun WelcomeStepContent(
     restoreAvailable: Boolean,
+    onDoor: () -> Unit,
+    onSetup: () -> Unit,
     onRestore: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 28.dp)
-                .clearAndSetSemantics {},
+                .padding(top = 12.dp, bottom = 28.dp)
+                .clearAndSetSemantics { },
             contentAlignment = Alignment.Center,
         ) {
             OnymMark(size = 88.dp, color = MaterialTheme.colorScheme.primary, strokeRatio = 0.14f)
         }
-        SettingsCard {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                WelcomeBullet(
-                    icon = Icons.Filled.Lock,
-                    text = stringResource(OnboardingR.string.onboarding_welcome_bullet_identity),
-                )
-                WelcomeBullet(
-                    icon = Icons.Filled.SettingsInputAntenna,
-                    text = stringResource(OnboardingR.string.onboarding_welcome_bullet_transport),
-                )
-                WelcomeBullet(
-                    icon = Icons.Filled.Shield,
-                    text = stringResource(OnboardingR.string.onboarding_welcome_bullet_reports),
-                )
-            }
+        FilledIconButton(
+            onClick = onDoor,
+            modifier = Modifier
+                .size(104.dp)
+                .testTag("onboarding.welcome.primary"),
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Send,
+                contentDescription = stringResource(OnboardingR.string.onboarding_welcome_door),
+                modifier = Modifier.size(44.dp),
+            )
         }
-
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = stringResource(OnboardingR.string.onboarding_welcome_door),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(20.dp))
+        TextButton(
+            onClick = onSetup,
+            modifier = Modifier.testTag("onboarding.welcome.setup"),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Tune,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                text = stringResource(OnboardingR.string.onboarding_welcome_setup_entry),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+            )
+        }
         if (restoreAvailable) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                contentAlignment = Alignment.Center,
+            TextButton(
+                onClick = onRestore,
+                modifier = Modifier.testTag("onboarding.welcome.restore"),
             ) {
-                TextButton(
-                    onClick = onRestore,
-                    modifier = Modifier.testTag("onboarding.welcome.restore"),
-                ) {
-                    Text(
-                        text = stringResource(
-                            OnboardingR.string.onboarding_welcome_restore_entry,
-                        ),
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Filled.Key,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    text = stringResource(OnboardingR.string.onboarding_welcome_restore_entry),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
             }
         }
     }
@@ -791,23 +816,6 @@ private fun RestoreIdentityOverlay(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun WelcomeBullet(icon: ImageVector, text: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

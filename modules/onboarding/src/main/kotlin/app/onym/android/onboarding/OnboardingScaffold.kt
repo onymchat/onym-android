@@ -15,6 +15,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,7 +46,13 @@ fun OnboardingScaffold(
     step: OnboardingStep,
     title: String,
     subtitle: String? = null,
-    primaryTitle: String,
+    /**
+     * The pinned primary button's label. null hides the button — the
+     * welcome step's action is its own door, drawn by the step body,
+     * and a second labelled button under it would be the same tap
+     * twice.
+     */
+    primaryTitle: String? = null,
     /**
      * Disables the primary button — mandatory steps with no recorded
      * outcome render Continue disabled (the flow's `advance()` guard
@@ -58,6 +68,12 @@ fun OnboardingScaffold(
     skipTitle: String? = null,
     /** null hides the Back affordance (the first step). */
     onBack: (() -> Unit)? = null,
+    /**
+     * Leaves the walk for the product (the same exit as the welcome
+     * step's door). null hides it — the welcome step has the door
+     * itself, and a second exit there would be the same tap twice.
+     */
+    onExit: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     /** Step indicator slot, rendered centered above the title. null
      *  on the unnumbered steps — no blank indicator band is
@@ -96,15 +112,33 @@ fun OnboardingScaffold(
                 ) { indicator() }
             }
 
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface,
+            Row(
                 modifier = Modifier
+                    .fillMaxWidth()
                     .padding(horizontal = 20.dp)
-                    .padding(top = if (indicator != null) 16.dp else 24.dp)
-                    .testTag("onboarding.${step.tag}.title"),
-            )
+                    .padding(top = if (indicator != null) 16.dp else 24.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("onboarding.${step.tag}.title"),
+                )
+                if (onExit != null) {
+                    IconButton(
+                        onClick = onExit,
+                        modifier = Modifier.testTag("onboarding.${step.tag}.exit"),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.onboarding_exit_walk),
+                        )
+                    }
+                }
+            }
 
             if (subtitle != null) {
                 Text(
@@ -129,14 +163,16 @@ fun OnboardingScaffold(
                 .padding(top = 12.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Button(
-                onClick = onPrimary,
-                enabled = primaryEnabled,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("onboarding.${step.tag}.primary"),
-            ) {
-                Text(primaryTitle, style = MaterialTheme.typography.titleMedium)
+            if (primaryTitle != null) {
+                Button(
+                    onClick = onPrimary,
+                    enabled = primaryEnabled,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("onboarding.${step.tag}.primary"),
+                ) {
+                    Text(primaryTitle, style = MaterialTheme.typography.titleMedium)
+                }
             }
 
             // Back and Skip anchor opposite edges when both exist; a

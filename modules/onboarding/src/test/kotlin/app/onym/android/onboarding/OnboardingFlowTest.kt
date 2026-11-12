@@ -509,4 +509,64 @@ class OnboardingFlowTest {
         flow.advance()
         assertEquals(OnboardingStep.Done, flow.step)
     }
+
+    // ── skipAll (the welcome door) ────────────────────────────────
+
+    @Test
+    fun skipAll_writesTheFlagAndLeavesTheOutcomesAlone() = runTest {
+        val store = InMemoryOnboardingStore()
+        val flow = flow(store = store)
+        // A fresh flow already carries the SEEDED services consent —
+        // that is the recommended setup, not a walk decision.
+        val before = flow.state.value.outcomes
+
+        flow.skipAll()
+
+        assertTrue(store.completed)
+        assertEquals(1, store.markCount)
+        assertTrue(flow.state.value.completed)
+        // The door records nothing for the steps the user never saw.
+        assertEquals(before, flow.state.value.outcomes)
+    }
+
+    @Test
+    fun skipAll_isIdempotent() = runTest {
+        val store = InMemoryOnboardingStore()
+        val flow = flow(store = store)
+
+        flow.skipAll()
+        flow.skipAll()
+
+        assertEquals(1, store.markCount)
+        assertEquals(OnboardingStep.Welcome, flow.step)
+    }
+
+    @Test
+    fun skipAll_midWalk_keepsWhatTheUserDecidedAndNothingElse() = runTest {
+        val store = InMemoryOnboardingStore()
+        val flow = flow(store = store)
+        flow.walkTo(OnboardingStep.Services)
+        flow.recordOutcome(StepOutcome.Consented(componentId = null))
+
+        flow.skipAll()
+
+        val state = flow.state.value
+        assertTrue(state.completed)
+        // The decision the user actually made survives; the steps they
+        // never saw carry no outcome at all.
+        assertEquals(StepOutcome.Consented(componentId = null), state.outcomes[OnboardingStep.Services])
+        assertNull(state.outcomes[OnboardingStep.RecoveryPhrase])
+        assertNull(state.outcomes[OnboardingStep.Done])
+    }
+
+    @Test
+    fun complete_afterSkipAll_isANoOp() = runTest {
+        val store = InMemoryOnboardingStore()
+        val flow = flow(store = store)
+
+        flow.skipAll()
+        flow.complete()
+
+        assertEquals(1, store.markCount)
+    }
 }

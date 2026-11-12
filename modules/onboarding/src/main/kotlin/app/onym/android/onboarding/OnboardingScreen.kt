@@ -3,13 +3,19 @@ package app.onym.android.onboarding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -18,6 +24,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
@@ -29,8 +36,11 @@ import kotlinx.coroutines.launch
  * [OnboardingStep], driven by an [OnboardingFlow].
  *
  * Presentation contract: RootScreen shows this full-screen with
- * system-back blocked before the tab/nav flow; the only exits are the
- * Done step's primary action ([OnboardingFlow.complete] →
+ * system-back blocked before the tab/nav flow. The welcome step's door
+ * ([OnboardingFlow.skipAll]) and the exit offered on every later step
+ * leave with the flag persisted and no decision recorded; walking to
+ * the end exits through the Done step's primary action
+ * ([OnboardingFlow.complete] →
  * `state.completed`) and the recovery step's "Remind me later".
  *
  * Dependency posture: this module renders the *frame* of each step.
@@ -65,7 +75,13 @@ fun OnboardingScreen(
         step = step,
         title = stringResource(titleRes(step, state.identityOrigin)),
         subtitle = subtitleRes(step, state.identityOrigin)?.let { stringResource(it) },
-        primaryTitle = stringResource(primaryTitleRes(step)),
+        // The welcome step's action is its door (see WelcomeStepContent):
+        // one tap leaves the walk for the chats.
+        primaryTitle = if (step == OnboardingStep.Welcome) {
+            null
+        } else {
+            stringResource(primaryTitleRes(step))
+        },
         // Outcome-gated steps render their primary disabled until the
         // step content records a SATISFYING outcome (the identity
         // bootstrap check, the recovery reveal) — a surviving Skipped
@@ -85,6 +101,14 @@ fun OnboardingScreen(
         onSkip = if (flow.isSkippable(step)) ({ flow.skip() }) else null,
         skipTitle = stringResource(skipTitleRes(step)),
         onBack = if (step != OnboardingStep.Welcome) ({ flow.back() }) else null,
+        // Every step after the welcome one offers the same exit the
+        // door does — a person who stepped in to look around can leave
+        // without walking to the end.
+        onExit = if (step == OnboardingStep.Welcome) {
+            null
+        } else {
+            ({ scope.launch { flow.skipAll() } })
+        },
         modifier = modifier,
         // Unnumbered steps pass null so the scaffold never reserves a
         // blank indicator band.
@@ -103,7 +127,10 @@ fun OnboardingScreen(
             injected()
         } else {
             when (step) {
-                OnboardingStep.Welcome -> WelcomeStepContent()
+                OnboardingStep.Welcome -> WelcomeStepContent(
+                    onDoor = { scope.launch { flow.skipAll() } },
+                    onSetup = { flow.advance() },
+                )
                 OnboardingStep.Done -> DoneStepContent(state = state)
                 else -> PlaceholderStepContent(step)
             }
@@ -184,17 +211,37 @@ private fun DefaultStepIndicator(index: Int, count: Int) {
     }
 }
 
-/** Welcome step body: framing copy in a Settings card. The app layer
- *  replaces this with the OnymMark-branded bullet version. */
+/** Welcome step body for previews and standalone module tests: the
+ *  door that leaves the walk, plus the entry into it. The app layer
+ *  replaces this with the OnymMark-branded version — same two
+ *  affordances, same tags. */
 @Composable
-private fun WelcomeStepContent() {
-    SettingsCard {
-        Text(
-            text = stringResource(R.string.onboarding_welcome_bullet_identity),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(16.dp),
-        )
+private fun WelcomeStepContent(
+    onDoor: () -> Unit,
+    onSetup: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Button(
+            onClick = onDoor,
+            modifier = Modifier
+                .size(104.dp)
+                .testTag("onboarding.welcome.primary"),
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Send,
+                contentDescription = stringResource(R.string.onboarding_welcome_door),
+                modifier = Modifier.size(40.dp),
+            )
+        }
+        TextButton(
+            onClick = onSetup,
+            modifier = Modifier.testTag("onboarding.welcome.setup"),
+        ) {
+            Text(stringResource(R.string.onboarding_welcome_setup_entry))
+        }
     }
 }
 

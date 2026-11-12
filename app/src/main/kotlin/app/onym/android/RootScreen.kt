@@ -519,6 +519,9 @@ fun RootScreen(
                         initializer { dependencies.makeChatThreadViewModel(groupId) }
                     },
                 )
+                // The invite gate compares the active identity's BLS key
+                // with the group's stored admin key, so the screen needs it.
+                val activeBls by dependencies.activeBlsPubkeyHex.collectAsStateWithLifecycle()
                 app.onym.android.chats.ChatThreadScreen(
                     viewModel = vm,
                     onBack = { navController.popBackStack() },
@@ -526,6 +529,10 @@ fun RootScreen(
                         navController.navigate("chat_members/$groupId")
                     },
                     scrollToMessageId = scrollTo,
+                    onShareInvite = {
+                        navController.navigate("share_invite/$groupId")
+                    },
+                    activeBlsPubkeyHex = activeBls,
                 )
             }
             composable("chat_members/{groupId}") { entry ->

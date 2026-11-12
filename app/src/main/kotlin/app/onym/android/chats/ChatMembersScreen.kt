@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
@@ -66,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.ChatGroup
+import app.onym.android.group.canInviteToGroup
 import app.onym.android.group.GroupAvatarImage
 import app.onym.android.group.GroupRulesProof
 import app.onym.android.group.GroupRulesStanding
@@ -120,8 +122,7 @@ fun ChatMembersScreen(
     // so it would falsely report "you own this" everywhere.
     val canShareInvite = remember(group, identityRows, activeBlsHex) {
         val g = group ?: return@remember false
-        if (g.groupType != SepGroupType.TYRANNY) return@remember false
-        g.isAdmin(activeBlsHex)
+        canInviteToGroup(g.groupType, g.isAdmin(activeBlsHex))
     }
     val showShareInvite = onShareInviteClick != null && canShareInvite
 
@@ -202,6 +203,8 @@ fun ChatMembersScreen(
                 group = group,
                 activeBlsHex = activeBlsHex,
                 canEditAvatar = canEditAvatar,
+                canInvite = showShareInvite,
+                onInvite = onShareInviteClick,
                 onPickPhoto = {
                     photoPicker.launch(
                         PickVisualMediaRequest(
@@ -248,6 +251,57 @@ fun ChatMembersScreen(
     }
 }
 
+/** Invite entry point on the roster: a real row with words, because the
+ *  toolbar icon alone is invisible to anyone who never saw the post-create
+ *  screen. Locked for non-admins rather than hidden — a member who cannot
+ *  invite should learn why, not find an empty corner. */
+@Composable
+private fun InviteRow(canInvite: Boolean, onClick: (() -> Unit)?) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(if (canInvite) "members.invite_row" else "members.invite_locked")
+            .then(
+                if (canInvite && onClick != null) {
+                    Modifier.clickable { onClick?.invoke() }
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = 24.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            imageVector = if (canInvite) Icons.Filled.Share else Icons.Filled.Lock,
+            contentDescription = null,
+            tint = if (canInvite) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.members_invite_row),
+                fontSize = 15.sp,
+                color = if (canInvite) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Text(
+                text = stringResource(
+                    if (canInvite) R.string.members_invite_row_hint else R.string.members_invite_admin_only,
+                ),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 /** The group's invitation message (greeting / policy / articles),
  *  shown as the group's intro at the top of the info screen. */
 @Composable
@@ -283,6 +337,8 @@ private fun ChatMembersBody(
     group: ChatGroup,
     activeBlsHex: String?,
     canEditAvatar: Boolean,
+    canInvite: Boolean,
+    onInvite: (() -> Unit)?,
     onPickPhoto: () -> Unit,
     onRemovePhoto: () -> Unit,
     modifier: Modifier = Modifier,
@@ -344,6 +400,13 @@ private fun ChatMembersBody(
             onPickPhoto = onPickPhoto,
             onRemovePhoto = onRemovePhoto,
         )
+        // The invite lives on this screen, not only behind the toolbar icon:
+        // after group creation this is the only way back to that surface, and
+        // a bare share glyph in the corner is where people stop looking.
+        // Non-admins get the reason instead of an empty toolbar.
+        if (group.groupType == SepGroupType.TYRANNY) {
+            InviteRow(canInvite = canInvite && onInvite != null, onClick = onInvite)
+        }
         group.invitationMessage?.takeIf { it.isNotBlank() }?.let { message ->
             InvitationSection(message)
         }

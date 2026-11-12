@@ -549,15 +549,45 @@ class OnboardingFlow(
      */
     suspend fun complete() {
         if (_state.value.step != OnboardingStep.Done) return
-        store.markCompleted()
-        _state.update { current ->
-            val outcomes =
-                if (current.outcomes[current.step] == null) {
-                    current.outcomes + (current.step to StepOutcome.NotApplicable)
-                } else {
-                    current.outcomes
-                }
-            current.copy(outcomes = outcomes, completed = true)
+        finish(recordOutcome = true)
+    }
+
+    /**
+     * The welcome step's door, and the exit offered on every step after
+     * it: leave the walk for the product itself, without deciding.
+     * Persists the same completion flag as [complete] and records NO
+     * outcome — the walk's consents are an offer, not a prerequisite.
+     * Every seat carries a first-launch default (the nostr and blossom
+     * seeds, discovery's unpinned default source, the relayer's
+     * auto-populate), and moderation still gates the shell through its
+     * own RootGate, so a skipped walk is a working app.
+     *
+     * Idempotent: the flag is written at most once.
+     */
+    suspend fun skipAll() {
+        finish()
+    }
+
+    /**
+     * Shared tail of [complete] and [skipAll]: persist the flag, then
+     * publish `completed` so the presenter can dismiss. Holds
+     * [startMutex] — the flow's existing lock — so the two entry
+     * points cannot both pass the `completed` guard on a fast double
+     * tap.
+     */
+    private suspend fun finish(recordOutcome: Boolean = false) {
+        startMutex.withLock {
+            if (_state.value.completed) return@withLock
+            store.markCompleted()
+            _state.update { current ->
+                val outcomes =
+                    if (recordOutcome && current.outcomes[current.step] == null) {
+                        current.outcomes + (current.step to StepOutcome.NotApplicable)
+                    } else {
+                        current.outcomes
+                    }
+                current.copy(outcomes = outcomes, completed = true)
+            }
         }
     }
 

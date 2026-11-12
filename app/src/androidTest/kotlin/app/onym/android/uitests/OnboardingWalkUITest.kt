@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
@@ -236,12 +237,14 @@ class OnboardingWalkUITest {
     fun smokeDefaultPathCompletesThenNeverAgain() {
         val onboarding = OnboardingScreenObject(composeRule)
 
-        // Welcome: unskippable; the primary reads "Create my
-        // identity".
+        // Welcome: a door and two entries — no skip, no exit (the
+        // door IS the exit here), and the walk is entered through
+        // "Set up step by step".
         onboarding.awaitStep(OnboardingStep.Welcome)
         onboarding.assertNoSkip(OnboardingStep.Welcome)
-        onboarding.assertPrimaryLabel(OnboardingStep.Welcome, "Create my identity")
-        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.assertNoExit(OnboardingStep.Welcome)
+        composeRule.onNodeWithText("Open chats").assertIsDisplayed()
+        onboarding.tapSetup(OnboardingStep.Welcome)
 
         // Identity: no skip; Continue is outcome-gated on the key
         // bootstrap yielding a snapshot — wait for the unlock.
@@ -320,6 +323,62 @@ class OnboardingWalkUITest {
         assertEquals("re-resolution must not re-write the flag", 1, onboardingStore.markCount)
     }
 
+    // ─── (1a) the door: one tap to the chats ──────────────────────
+
+    /**
+     * The welcome step's door leaves for the chats without deciding
+     * anything: the flag is written once, no consent is recorded, and
+     * the walk never re-presents. That is the shortcut's whole point —
+     * the seats already carry first-launch defaults.
+     */
+    @Test
+    fun doorFromWelcomeOpensChatsWithoutDecidingAnything() {
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        composeRule.onNodeWithText("Open chats").assertIsDisplayed()
+        onboarding.tapPrimary(OnboardingStep.Welcome) // the door
+
+        onboarding.awaitTabShell()
+        onboarding.assertNotShown()
+        assertTrue("the door must persist the flag", onboardingStore.completed)
+        assertEquals("flag written exactly once", 1, onboardingStore.markCount)
+        assertTrue(
+            "the door must not pin anything on the user's behalf",
+            discoveryStore.loadConfigurationBlocking().sources
+                .all { it.pinnedOperatorKeyHex == null },
+        )
+
+        val app = ApplicationProvider.getApplicationContext<OnymApplication>()
+        app.rebuildDependenciesForTest()
+        composeRule.activityRule.scenario.recreate()
+        onboarding.awaitTabShell()
+        onboarding.assertNotShown()
+    }
+
+    // ─── (1b') leaving from the middle of the walk ────────────────
+
+    /** The exit every step after welcome carries: same outcome as the
+     *  door, taken later. */
+    @Test
+    fun exitFromAStepLeavesForTheChats() {
+        val onboarding = OnboardingScreenObject(composeRule)
+
+        onboarding.awaitStep(OnboardingStep.Welcome)
+        onboarding.tapSetup(OnboardingStep.Welcome)
+
+        onboarding.awaitStep(OnboardingStep.Identity)
+        onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
+        onboarding.tapPrimary(OnboardingStep.Identity)
+
+        onboarding.awaitStep(OnboardingStep.Services)
+        onboarding.tapExit(OnboardingStep.Services)
+
+        onboarding.awaitTabShell()
+        onboarding.assertNotShown()
+        assertTrue(onboardingStore.completed)
+    }
+
     // ─── (1b) the walk WITH the moderation step ────────────────────
 
     /**
@@ -337,7 +396,7 @@ class OnboardingWalkUITest {
         val onboarding = OnboardingScreenObject(composeRule)
 
         onboarding.awaitStep(OnboardingStep.Welcome)
-        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.tapSetup(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
         onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
         onboarding.tapPrimary(OnboardingStep.Identity)
@@ -402,7 +461,7 @@ class OnboardingWalkUITest {
         val onboarding = OnboardingScreenObject(composeRule)
 
         onboarding.awaitStep(OnboardingStep.Welcome)
-        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.tapSetup(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
         onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
         onboarding.tapPrimary(OnboardingStep.Identity)
@@ -478,7 +537,7 @@ class OnboardingWalkUITest {
         val onboarding = OnboardingScreenObject(composeRule)
 
         onboarding.awaitStep(OnboardingStep.Welcome)
-        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.tapSetup(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
         onboarding.awaitPrimaryEnabled(OnboardingStep.Identity)
         onboarding.tapPrimary(OnboardingStep.Identity)
@@ -600,13 +659,13 @@ class OnboardingWalkUITest {
         val onboarding = OnboardingScreenObject(composeRule)
 
         onboarding.awaitStep(OnboardingStep.Welcome)
-        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.tapSetup(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
 
         onboarding.tapBack(OnboardingStep.Identity)
         onboarding.awaitStep(OnboardingStep.Welcome)
 
-        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.tapSetup(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
         assertFalse("the walk must not have completed", onboardingStore.completed)
     }
@@ -629,7 +688,7 @@ class OnboardingWalkUITest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
 
-        onboarding.tapPrimary(OnboardingStep.Welcome)
+        onboarding.tapSetup(OnboardingStep.Welcome)
         onboarding.awaitStep(OnboardingStep.Identity)
         onboarding.tapBack(OnboardingStep.Identity)
         onboarding.awaitStep(OnboardingStep.Welcome)

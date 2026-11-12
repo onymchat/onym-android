@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,6 +79,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.onym.android.group.MemberProfile
+import app.onym.android.group.canInviteToGroup
 import app.onym.android.design.OnymAccent
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -110,6 +112,11 @@ fun ChatThreadScreen(
     /** When non-null (opened from Search), the thread cold-opens scrolled
      *  to this message and flashes it, instead of opening at the bottom. */
     scrollToMessageId: java.util.UUID? = null,
+    /** Opens the share-invite surface; null when the host has none. */
+    onShareInvite: (() -> Unit)? = null,
+    /** Active identity's lowercase BLS pubkey hex — the half of the invite
+     *  gate that says whether this device speaks for the group's admin. */
+    activeBlsPubkeyHex: String? = null,
 ) {
     val group by viewModel.group.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -192,6 +199,27 @@ fun ChatThreadScreen(
                     }
                 },
                 actions = {
+                    // Invite sits one tap from the conversation, behind the
+                    // same gate the roster applies — the post-create screen is
+                    // the only other way in, and nobody finds it twice.
+                    val shareInvite = onShareInvite
+                    val inviteGroup = group
+                    if (shareInvite != null && inviteGroup != null &&
+                        canInviteToGroup(
+                            inviteGroup.groupType,
+                            inviteGroup.isAdmin(activeBlsPubkeyHex),
+                        )
+                    ) {
+                        IconButton(
+                            onClick = shareInvite,
+                            modifier = Modifier.testTag("chat_thread.invite_button"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Share,
+                                contentDescription = stringResource(R.string.share_invite_cd),
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = onShowMembers,
                         modifier = Modifier.testTag("chat_thread.info_button"),

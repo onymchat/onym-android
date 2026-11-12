@@ -1,5 +1,6 @@
 package app.onym.android
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -37,6 +38,11 @@ class PushMessagingService : FirebaseMessagingService() {
         PushTokenRelay.offer(token)
     }
 
+    // The permission check is canNotify()'s, one call away: lint reads
+    // only this method and cannot see it, so the MissingPermission
+    // report is silenced here rather than by inlining a second copy of
+    // the same check next to the first.
+    @SuppressLint("MissingPermission")
     override fun onMessageReceived(message: RemoteMessage) {
         // The app is on screen: what arrived is already rendered (the
         // thread updates live, the list carries unread badges), so a
