@@ -1064,4 +1064,11 @@
   <string name="push_channel_name">Сообщения</string>
   <string name="push_notification_title">Onym</string>
   <string name="push_notification_body">Новое сообщение</string>
+  <string name="settings_section_nearby">РЯДОМ</string>
+  <string name="settings_mesh_listen_title">Принимать по Bluetooth</string>
+  <string name="settings_mesh_listen_subtitle">Получать сообщения от людей рядом без интернета. Телефон ничего не передаёт, поэтому никто не узнает, что вы что-то получили.</string>
+  <string name="settings_mesh_broadcast_title">Передавать по Bluetooth</string>
+  <string name="settings_mesh_broadcast_subtitle">Ваши текстовые сообщения также уходят участникам групп поблизости. Люди рядом видят, что телефон с Onym ведёт передачу.</string>
+  <string name="mesh_service_title">Onym рядом</string>
+  <string name="mesh_service_body">Сообщения по Bluetooth включены</string>
 </resources>

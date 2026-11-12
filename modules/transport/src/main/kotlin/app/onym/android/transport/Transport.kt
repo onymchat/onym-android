@@ -81,12 +81,25 @@ data class InboundMessage(
     }
 }
 
+/** How an inbound payload reached this device. */
+enum class InboundDelivery {
+    /** A relay or server — the default for every network transport. */
+    NETWORK,
+
+    /**
+     * Heard on the Bluetooth mesh. Nobody learns this device heard it,
+     * and the app must keep it that way: no receipt goes back for it.
+     */
+    BLUETOOTH,
+}
+
 /** Inbox variant of [InboundMessage]. */
 data class InboundInbox(
     val inbox: TransportInboxId,
     val payload: ByteArray,
     val receivedAt: Instant,
     val messageId: String,
+    val delivery: InboundDelivery = InboundDelivery.NETWORK,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -94,7 +107,8 @@ data class InboundInbox(
         return inbox == other.inbox &&
                 payload.contentEquals(other.payload) &&
                 receivedAt == other.receivedAt &&
-                messageId == other.messageId
+                messageId == other.messageId &&
+                delivery == other.delivery
     }
 
     override fun hashCode(): Int {
@@ -102,6 +116,7 @@ data class InboundInbox(
         result = 31 * result + payload.contentHashCode()
         result = 31 * result + receivedAt.hashCode()
         result = 31 * result + messageId.hashCode()
+        result = 31 * result + delivery.hashCode()
         return result
     }
 }

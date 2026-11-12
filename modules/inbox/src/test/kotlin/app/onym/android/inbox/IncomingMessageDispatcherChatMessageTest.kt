@@ -16,6 +16,7 @@ import app.onym.android.group.MemberProfile
 import app.onym.android.identity.DecryptedEnvelope
 import app.onym.android.identity.IdentityId
 import app.onym.android.identity.InvitationEnvelopeDecrypter
+import app.onym.android.transport.InboundDelivery
 import app.onym.android.persistence.InMemoryInvitationStore
 import app.onym.android.support.FakeActiveIdentityProvider
 import app.onym.android.support.InMemoryGroupStore
@@ -263,6 +264,43 @@ class IncomingMessageDispatcherChatMessageTest {
 
     // ─── receipts ─────────────────────────────────────────────────
 
+    // ─── Bluetooth mesh ─────────────────────────────────────────────
+
+    /** Heard on the mesh: stored, the app told, and no receipt — even a
+     *  later one over a relay would tell the sender this device was in
+     *  range of the broadcast. */
+    @Test
+    fun bluetoothChatMessage_isStoredWithoutReceipt() = runTest {
+        val fx = newFixture()
+        fx.seedGroup(owner = ownerIdentity, withSenderProfile = true)
+        val spy = SpyReceiptSender()
+        val arrivals = mutableListOf<Pair<IdentityId, String>>()
+        val id = UUID.randomUUID()
+        fx.dispatchChat(
+            ownerIdentity, chatPayload(id, "over the air"), senderSendingKey, spy,
+            delivery = InboundDelivery.BLUETOOTH,
+            bluetoothMessageArrived = { owner, group -> arrivals += owner to group },
+        )
+        assertEquals(listOf(id), fx.messageStore.listForGroup(ownerIdentity.value, groupIdHex).map { it.id })
+        assertTrue("a mesh delivery must never be acknowledged", spy.sends.isEmpty())
+        assertEquals(listOf(ownerIdentity to groupIdHex), arrivals)
+    }
+
+    /** Over a radio, bytes that aren't a chat message are dropped — never
+     *  queued as an invitation the way an unknown relay payload is. */
+    @Test
+    fun bluetoothNonChatPayload_isNotQueuedAsInvitation() = runTest {
+        val fx = newFixture()
+        IncomingMessageDispatcher(
+            envelopeDecrypter = StubDecrypterChat("{}".toByteArray(), senderSendingKey),
+            groupRepository = fx.groupRepository,
+            invitationsRepository = fx.invitationsRepository,
+            messageRepository = fx.messageRepository,
+        ).dispatch("ble:1", ownerIdentity, byteArrayOf(), Instant.EPOCH, InboundDelivery.BLUETOOTH)
+        fx.invitationsRepository.bootstrap()
+        assertTrue(fx.invitationsRepository.invitations.value.isEmpty())
+    }
+
     @Test
     fun incomingChatMessage_shipsDeliveredReceiptToSender() = runTest {
         val fx = newFixture()
@@ -424,6 +462,8 @@ class IncomingMessageDispatcherChatMessageTest {
             signer: ByteArray?,
             receiptSender: ChatReceiptSending,
             readReceiptsEnabled: () -> Boolean = { true },
+            delivery: InboundDelivery = InboundDelivery.NETWORK,
+            bluetoothMessageArrived: suspend (IdentityId, String) -> Unit = { _, _ -> },
         ) {
             val plaintext = jsonFormat
                 .encodeToString(ChatMessagePayload.serializer(), payload)
@@ -435,7 +475,8 @@ class IncomingMessageDispatcherChatMessageTest {
                 messageRepository = messageRepository,
                 receiptSender = receiptSender,
                 readReceiptsEnabled = readReceiptsEnabled,
-            ).dispatch("env-${payload.messageId}", owner, byteArrayOf(), Instant.EPOCH)
+                bluetoothMessageArrived = bluetoothMessageArrived,
+            ).dispatch("env-${payload.messageId}", owner, byteArrayOf(), Instant.EPOCH, delivery)
         }
 
         suspend fun dispatchReceipt(

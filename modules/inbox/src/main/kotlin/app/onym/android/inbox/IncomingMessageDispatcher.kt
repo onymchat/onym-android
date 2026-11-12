@@ -30,6 +30,7 @@ import app.onym.android.group.MemberProfile
 import app.onym.android.identity.DecryptedEnvelope
 import app.onym.android.identity.IdentityId
 import app.onym.android.identity.IdentitySummary
+import app.onym.android.transport.InboundDelivery
 import app.onym.android.identity.InvitationEnvelopeDecrypter
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.Json
@@ -117,6 +118,10 @@ class IncomingMessageDispatcher(
      *  their construction sites — a null recorder simply writes no
      *  notices. */
     private val systemEvents: ChatSystemEventRecorder? = null,
+    /** Told when a chat message heard on the Bluetooth mesh is stored —
+     *  the app's cue for a local notification, since no push comes for a
+     *  message that never touched a relay. */
+    private val bluetoothMessageArrived: suspend (owner: IdentityId, groupIdHex: String) -> Unit = { _, _ -> },
 ) {
 
     suspend fun dispatch(
@@ -124,7 +129,12 @@ class IncomingMessageDispatcher(
         ownerIdentityId: IdentityId,
         payload: ByteArray,
         receivedAt: Instant,
+        delivery: InboundDelivery = InboundDelivery.NETWORK,
     ) {
+        if (delivery == InboundDelivery.BLUETOOTH) {
+            dispatchFromMesh(ownerIdentityId, payload, receivedAt)
+            return
+        }
         // Decrypt once at receive time and grab the sender's Ed25519
         // pubkey at the same hop — fast paths use it for provenance
         // (announcement: verify against stored admin in PR 84;
@@ -236,6 +246,31 @@ class IncomingMessageDispatcher(
 
         // Plaintext didn't match any known payload — fall through.
         fallThrough(messageId, ownerIdentityId, payload, receivedAt)
+    }
+
+    /**
+     * What the Bluetooth mesh may deliver: chat messages, and nothing
+     * else. Anything that doesn't decrypt is dropped rather than queued
+     * as an invitation ([fallThrough]) — over a radio, an envelope that
+     * doesn't open is almost always a tag collision, and radio bytes must
+     * never land in a store. Group state, invitations and offers need the
+     * chain or the relays anyway, and arrive that way. Mirrors iOS's
+     * `dispatchFromMesh`.
+     */
+    private suspend fun dispatchFromMesh(ownerIdentityId: IdentityId, payload: ByteArray, receivedAt: Instant) {
+        val envelope = try {
+            envelopeDecrypter.decryptInvitationWithSender(envelopeBytes = payload, asIdentity = ownerIdentityId)
+        } catch (_: Throwable) {
+            return
+        }
+        val chatMessage = tryDecodeChatMessage(envelope.plaintext) ?: return
+        persistChatMessage(
+            payload = chatMessage,
+            ownerIdentityId = ownerIdentityId,
+            senderEd25519PublicKey = envelope.senderEd25519PublicKey,
+            receivedAt = receivedAt,
+            delivery = InboundDelivery.BLUETOOTH,
+        )
     }
 
     /**
@@ -952,6 +987,7 @@ class IncomingMessageDispatcher(
         ownerIdentityId: IdentityId,
         senderEd25519PublicKey: ByteArray?,
         receivedAt: Instant,
+        delivery: InboundDelivery = InboundDelivery.NETWORK,
     ) {
         val messages = messageRepository ?: return
         val signerPubkey = senderEd25519PublicKey ?: return
@@ -1003,7 +1039,16 @@ class IncomingMessageDispatcher(
         // arrival" UI follow-up — wire `sentAtMillis` is the
         // canonical sort key today.
         @Suppress("UNUSED_VARIABLE") val _receivedAt = receivedAt
-        messages.append(message)
+        val inserted = messages.append(message)
+
+        // Heard on the mesh: store it, tell the app, and say nothing to
+        // anyone. A receipt — even one sent later over a relay — would
+        // tell the sender this device was in range of a broadcast. If a
+        // relay copy arrives afterwards, that delivery acks on its own.
+        if (delivery == InboundDelivery.BLUETOOTH) {
+            if (inserted) bluetoothMessageArrived(ownerIdentityId, groupIdHex)
+            return
+        }
 
         // Ack the sender: delivered now (unconditional — it only
         // reveals a device received the ciphertext). Read receipts are
