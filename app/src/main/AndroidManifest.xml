@@ -52,6 +52,35 @@
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        Bluetooth mesh (Settings → NEARBY), both switches off by default and
+        requested only when one is turned on. Listening never transmits and
+        never connects; broadcasting is non-connectable. Neither derives a
+        location: SCAN is declared neverForLocation, and on API 26-30, where
+        Android ties LE scanning to it, ACCESS_FINE_LOCATION is the price of
+        listening at all. The foreground service keeps the radio alive with
+        the screen off.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="false" />
+
     <application
         android:name=".OnymApplication"
         android:label="@string/app_name"
@@ -127,6 +156,12 @@
             when the push seat is dark or google-services.json is
             absent — no FCM delivery ever occurs then.
         -->
+        <!-- Bluetooth mesh: holds the process in the foreground while on. -->
+        <service
+            android:name=".nearby.MeshService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
         <service
             android:name=".PushMessagingService"
             android:exported="false">

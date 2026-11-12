@@ -3,6 +3,7 @@ package app.onym.android.chats
 import app.onym.android.chain.SepGroupType
 import app.onym.android.group.GroupRepository
 import app.onym.android.identity.ActiveIdentityProvider
+import app.onym.android.identity.IdentityId
 import app.onym.android.identity.IdentityMessageSigner
 import app.onym.android.identity.IdentityRepository
 import app.onym.android.identity.IdentitySummary
@@ -92,6 +93,8 @@ class SendMessageInteractor(
      *  never block a send. Mirrors iOS, where a signing throw is
      *  logged and the proof dropped. */
     private val messageSigner: IdentityMessageSigner? = null,
+    /** Text messages also go out over the Bluetooth mesh; see [NearbyBroadcaster]. */
+    private val nearby: NearbyBroadcaster = NearbyBroadcaster.None,
 ) {
 
     /**
@@ -161,7 +164,7 @@ class SendMessageInteractor(
 
         val recipients = recipientInboxKeysFor(group, myBlsHex)
         val finalStatus = try {
-            val successCount = fanOut(payload, recipients)
+            val successCount = fanOut(payload, recipients, nearbyAs = activeIdentityId)
             if (recipients.isEmpty() || successCount > 0) MessageStatus.SENT
             else MessageStatus.FAILED
         } catch (e: EncodingException) {
@@ -927,6 +930,8 @@ class SendMessageInteractor(
     private suspend fun fanOut(
         payload: ChatMessagePayload,
         recipients: List<ByteArray>,
+        /** Broadcast each envelope nearby as this identity — text sends only. */
+        nearbyAs: IdentityId? = null,
     ): Int {
         val payloadBytes = try {
             jsonFormat.encodeToString(ChatMessagePayload.serializer(), payload)
@@ -940,6 +945,16 @@ class SendMessageInteractor(
                 envelopeSealer.sealInvitation(payloadBytes, inboxKey)
             } catch (_: Throwable) {
                 continue
+            }
+            // Before the relay send, which throws offline — the case the
+            // mesh is for. Its outcome doesn't count toward SENT: nothing
+            // on the air confirms a delivery, and a message that only went
+            // out over Bluetooth should stay retryable once back online.
+            if (nearbyAs != null) {
+                try {
+                    nearby.broadcast(sealed, nearbyAs, inboxKey)
+                } catch (_: Throwable) {
+                }
             }
             val tag = TransportInboxId(IdentityRepository.inboxTag(inboxKey))
             val receipt = try {

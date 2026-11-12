@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Anchor
 import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DoneAll
@@ -103,6 +105,12 @@ fun SettingsScreen(
      *  → "Send read receipts" Switch. */
     sendReadReceipts: Boolean = true,
     onToggleReadReceipts: (Boolean) -> Unit = {},
+    /** Bluetooth mesh switches (Settings → NEARBY). The section shows
+     *  only when [onToggleMeshListen] is wired. */
+    meshListen: Boolean = false,
+    onToggleMeshListen: ((Boolean) -> Unit)? = null,
+    meshBroadcast: Boolean = false,
+    onToggleMeshBroadcast: (Boolean) -> Unit = {},
     /** Settings → Transport → Nostr Relays entry. PR 87. */
     onNostrRelaysClick: (() -> Unit)? = null,
     /** Live count of configured Nostr relays — drives the Settings
@@ -449,6 +457,54 @@ fun SettingsScreen(
                 }
                 item {
                     SettingsFootnote(stringResource(R.string.settings_push_footnote))
+                }
+            }
+
+            // ─── NEARBY ────────────────────────────────────────────
+            if (onToggleMeshListen != null) {
+                item { SettingsSectionLabel(stringResource(R.string.settings_section_nearby)) }
+                item {
+                    SettingsCard {
+                        SettingsRow(
+                            leading = {
+                                SettingsTileBox(
+                                    icon = Icons.Filled.Bluetooth,
+                                    background = if (meshListen) SettingsTile.Indigo else SettingsTile.Gray,
+                                )
+                            },
+                            title = stringResource(R.string.settings_mesh_listen_title),
+                            subtitle = stringResource(R.string.settings_mesh_listen_subtitle),
+                            showChevron = false,
+                            trailing = {
+                                Switch(
+                                    checked = meshListen,
+                                    onCheckedChange = onToggleMeshListen,
+                                    modifier = Modifier.testTag("settings.mesh_listen_toggle"),
+                                )
+                            },
+                            onClick = { onToggleMeshListen(!meshListen) },
+                        )
+                        SettingsRow(
+                            leading = {
+                                SettingsTileBox(
+                                    icon = Icons.Filled.CellTower,
+                                    background = if (meshBroadcast) SettingsTile.Indigo else SettingsTile.Gray,
+                                )
+                            },
+                            title = stringResource(R.string.settings_mesh_broadcast_title),
+                            subtitle = stringResource(R.string.settings_mesh_broadcast_subtitle),
+                            showChevron = false,
+                            trailing = {
+                                Switch(
+                                    checked = meshBroadcast,
+                                    onCheckedChange = onToggleMeshBroadcast,
+                                    modifier = Modifier.testTag("settings.mesh_broadcast_toggle"),
+                                )
+                            },
+                            onClick = { onToggleMeshBroadcast(!meshBroadcast) },
+                            isLast = true,
+                        )
+                    }
                 }
             }
 
