@@ -32,6 +32,9 @@ dependencies {
     api(libs.kotlinx.coroutines.core)
     // X25519 + HKDF, the same library :identity derives inbox keys with.
     api(libs.bouncycastle)
+    // JsonObject parsing for the binary ↔ JSON sealed-envelope transcode
+    // (no serialization plugin needed for JsonElement).
+    implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

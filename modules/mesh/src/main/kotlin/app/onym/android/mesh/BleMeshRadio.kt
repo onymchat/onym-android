@@ -100,12 +100,15 @@ class BleMeshScanner(private val context: Context) {
 /**
  * Puts [outbox] on the air — the station half of the mesh.
  *
- * One legacy advertising set, non-connectable and non-scannable (spec §3),
- * whose data is swapped to the next compact frame every [frameInterval]
- * milliseconds. Nothing comes back: no connection can be made to it and no
- * scan request sent, so it never learns who heard what. The set is
- * restarted at every epoch boundary so the random device address rotates
- * along with the tags — one address must not link two epochs.
+ * Up to [lanes] legacy advertising sets at once, each non-connectable and
+ * non-scannable (spec §3), each with its own random address, each cycling
+ * its own stream of coded frames every [frameInterval] ms. More sets is
+ * more frames on the air per second, and a listener sees each as a
+ * separate advertiser, so any per-device throttling it does doesn't cap
+ * the total. Nothing comes back: no connection can be made and no scan
+ * request sent. Every set restarts at each epoch boundary so its address
+ * rotates with the tags. A set the controller refuses (too many
+ * advertisers) is dropped and the rest carry on.
  *
  * Requires `BLUETOOTH_ADVERTISE`.
  */
@@ -113,6 +116,7 @@ class BleMeshBroadcaster(
     private val context: Context,
     private val outbox: MeshOutbox,
     private val frameInterval: Long = 200,
+    private val lanes: Int = 3,
     private val now: () -> Instant = Instant::now,
 ) {
     private var job: Job? = null
@@ -129,25 +133,37 @@ class BleMeshBroadcaster(
         job = null
     }
 
+    private inner class Lane(val number: Int) {
+        @Volatile var set: AdvertisingSet? = null
+        @Volatile var refused = false
+        var epoch = -1L
+        val callback = object : AdvertisingSetCallback() {
+            override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
+                when (status) {
+                    ADVERTISE_SUCCESS -> {
+                        set = advertisingSet
+                        Log.i(TAG, "lane $number advertising (tx power $txPower)")
+                    }
+                    ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> {
+                        refused = true
+                        Log.i(TAG, "lane $number refused: too many advertisers; carrying on with fewer")
+                    }
+                    else -> Log.w(TAG, "lane $number advertising failed: $status")
+                }
+            }
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private suspend fun CoroutineScope.run() {
-        val advertiser = context.getSystemService(BluetoothManager::class.java)?.adapter?.bluetoothLeAdvertiser
+        val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
+        val advertiser = adapter?.bluetoothLeAdvertiser
         if (advertiser == null) {
             Log.w(TAG, "no Bluetooth LE advertiser; is Bluetooth on?")
             return
         }
-        var set: AdvertisingSet? = null
-        var setEpoch = -1L
-        val callback = object : AdvertisingSetCallback() {
-            override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
-                if (status == ADVERTISE_SUCCESS) {
-                    set = advertisingSet
-                    Log.i(TAG, "advertising started (tx power $txPower)")
-                } else {
-                    Log.w(TAG, "advertising failed: $status")
-                }
-            }
-        }
+        val laneCount = if (adapter.isMultipleAdvertisementSupported) lanes.coerceAtLeast(1) else 1
+        val all = List(laneCount) { Lane(it) }
         val parameters = AdvertisingSetParameters.Builder()
             .setLegacyMode(true)
             .setConnectable(false)
@@ -156,48 +172,53 @@ class BleMeshBroadcaster(
             .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MEDIUM)
             .build()
 
-        fun stopSet() {
+        fun stop(lane: Lane) {
             try {
-                advertiser.stopAdvertisingSet(callback)
+                advertiser.stopAdvertisingSet(lane.callback)
             } catch (_: SecurityException) {
             } catch (_: IllegalStateException) {
             }
-            set = null
-            setEpoch = -1
+            lane.set = null
+            lane.epoch = -1
         }
 
         try {
             while (isActive) {
-                val frame = outbox.next()
-                if (frame == null) {
-                    if (setEpoch >= 0) stopSet()
-                    delay(1_000)
-                    continue
-                }
-                val data = AdvertiseData.Builder()
-                    .setIncludeDeviceName(false)
-                    .setIncludeTxPowerLevel(false)
-                    .addManufacturerData(MeshFrameCodec.COMPANY_ID, frame)
-                    .build()
-                val epoch = MeshEpoch.number(now())
-                if (setEpoch != epoch) {
-                    // New epoch (or first frame): a fresh set, so a fresh address.
-                    Log.i(TAG, "starting advertising set for epoch $epoch (${outbox.size} envelopes queued)")
-                    if (setEpoch >= 0) stopSet()
-                    try {
-                        advertiser.startAdvertisingSet(parameters, data, null, null, null, callback)
-                        setEpoch = epoch
-                    } catch (e: SecurityException) {
-                        Log.w(TAG, "no permission to advertise", e)
-                        return
+                val live = all.filterNot { it.refused }
+                var sent = 0
+                for (lane in live) {
+                    val frame = outbox.next() ?: break
+                    sent++
+                    val data = AdvertiseData.Builder()
+                        .setIncludeDeviceName(false)
+                        .setIncludeTxPowerLevel(false)
+                        .addManufacturerData(MeshFrameCodec.COMPANY_ID, frame)
+                        .build()
+                    val epoch = MeshEpoch.number(now())
+                    if (lane.epoch != epoch) {
+                        // New epoch (or first frame): a fresh set, so a fresh address.
+                        if (lane.epoch >= 0) stop(lane)
+                        Log.i(TAG, "lane ${lane.number}: starting for epoch $epoch (${outbox.size} envelopes queued)")
+                        try {
+                            advertiser.startAdvertisingSet(parameters, data, null, null, null, lane.callback)
+                            lane.epoch = epoch
+                        } catch (e: SecurityException) {
+                            Log.w(TAG, "no permission to advertise", e)
+                            return
+                        }
+                    } else {
+                        lane.set?.setAdvertisingData(data)
                     }
-                } else {
-                    set?.setAdvertisingData(data)
                 }
-                delay(frameInterval)
+                if (sent == 0) {
+                    all.filter { it.epoch >= 0 }.forEach(::stop)
+                    delay(1_000)
+                } else {
+                    delay(frameInterval)
+                }
             }
         } finally {
-            stopSet()
+            all.forEach(::stop)
         }
     }
 }

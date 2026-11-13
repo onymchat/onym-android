@@ -5,58 +5,81 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * What this device broadcasts: sealed envelopes as compact frames,
- * looped for 24 hours, because nothing on the air ever confirms a
- * delivery — repetition is the only reliability (spec §3).
+ * What this device broadcasts: binary sealed envelopes as coded frames
+ * (onym-ios docs/mesh-ble-v1.md §4c), looped for 24 hours — nothing on the
+ * air ever confirms a delivery, so repetition is the only reliability.
  *
- * The tag is fixed at enqueue time for that epoch; listeners accept
- * epochs up to [MeshInboxTransport.RETENTION] old, so a frame stays
- * matchable for as long as it loops. [next] interleaves envelopes, so a
- * long one doesn't hold back the rest.
+ * Each envelope sends its K source frames, then an unending run of fresh
+ * repair frames: a listener needs any K of them, so every frame it catches
+ * counts, and it never waits on one particular missing piece.
+ *
+ * The newest envelope gets three of every four turns while it is under
+ * [freshFor] old — a message just sent should cross the room in seconds,
+ * not wait behind a day's backlog taking equal turns.
+ *
+ * The tag is fixed at enqueue time; listeners accept epochs up to
+ * [MeshInboxTransport.RETENTION] old, so a frame stays matchable for as
+ * long as it loops.
  */
 class MeshOutbox(
     private val now: () -> Instant = Instant::now,
     private val retention: Duration = MeshInboxTransport.RETENTION,
     private val maxEnvelopes: Int = 64,
-    private val maxChunk: Int = MeshFrameCodec.COMPACT_MAX_CHUNK,
+    private val freshFor: Duration = Duration.ofSeconds(60),
     private val random: SecureRandom = SecureRandom(),
 ) {
-    private class Entry(val frames: List<ByteArray>, val expires: Instant) {
-        var cursor = 0
+    private class Entry(
+        val encoder: MeshFountain.Encoder,
+        val epoch: Long,
+        val tag: Int,
+        val queuedAt: Instant,
+        val expires: Instant,
+    ) {
+        var next = 0
     }
 
     private val entries = ArrayList<Entry>()
     private var turn = 0
+    private var slot = 0
 
-    /** False when the envelope doesn't fit the compact format (255 × 15 bytes). */
+    /** False when the envelope doesn't fit 255 coded symbols. */
     @Synchronized
     fun enqueue(envelope: ByteArray, pairKey: ByteArray): Boolean {
         val at = now()
         val epoch = MeshEpoch.number(at)
-        val frames = MeshFrameCodec.fragmentCompact(
-            envelope = envelope,
-            tag = MeshTag.derive(pairKey, epoch),
-            epoch = epoch,
-            envelopeId = random.nextInt(0x1_0000),
-            maxChunk = maxChunk,
-        ) ?: return false
+        val encoder = MeshFountain.Encoder.of(envelope, random.nextInt(0x1_0000)) ?: return false
         expire(at)
         if (entries.size >= maxEnvelopes) entries.removeAt(0)
-        entries.add(Entry(frames, at.plus(retention)))
+        entries.add(Entry(encoder, epoch, MeshTag.derive(pairKey, epoch), at, at.plus(retention)))
         return true
     }
 
-    /** The next frame to put on the air, or null when there's nothing to send. */
+    /** The next coded frame to put on the air, or null with nothing queued. */
     @Synchronized
     fun next(): ByteArray? {
-        expire(now())
+        val at = now()
+        expire(at)
         if (entries.isEmpty()) return null
-        turn %= entries.size
-        val entry = entries[turn]
-        turn++
-        val frame = entry.frames[entry.cursor % entry.frames.size]
-        entry.cursor++
-        return frame
+        val newest = entries.last()
+        val fresh = Duration.between(newest.queuedAt, at) < freshFor
+        val entry = if (fresh && entries.size > 1 && slot++ % 4 != 3) {
+            newest
+        } else {
+            turn %= entries.size
+            entries[turn++]
+        }
+        val index = entry.next
+        // Source frames once, then fresh repair indices; wrap past the
+        // 16-bit space back to the first repair index.
+        entry.next = if (index >= 0xFFFF) entry.encoder.k else index + 1
+        return MeshCodedFrame(
+            epochLow = (entry.epoch and 0xFF).toInt(),
+            tag = entry.tag,
+            envelopeId = entry.encoder.envelopeId,
+            k = entry.encoder.k,
+            index = index,
+            symbol = entry.encoder.symbol(index),
+        ).encode()
     }
 
     @get:Synchronized

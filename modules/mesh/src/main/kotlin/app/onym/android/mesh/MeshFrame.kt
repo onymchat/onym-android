@@ -145,7 +145,7 @@ object MeshFrameCodec {
  * completed is simply forgotten. Not thread-safe; one collector owns it.
  */
 class MeshReassembler(
-    private val timeout: Duration = Duration.ofMinutes(10),
+    private val timeout: Duration = Duration.ofMinutes(30),
     private val maxPending: Int = 64,
     /** Delivered envelopes are ignored this long, so a looping broadcaster doesn't redeliver each lap. */
     private val deliveredMemory: Duration = Duration.ofMinutes(30),

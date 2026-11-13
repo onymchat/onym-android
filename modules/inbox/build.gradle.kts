@@ -68,6 +68,8 @@ dependencies {
     // method parameters of IncomingInvitationsInteractor and
     // GroupStateVerifier.
     api(project(":transport"))
+    // MeshPayload.expand — Bluetooth deliveries carry a compressed payload.
+    implementation(project(":mesh"))
 
     // api: InvitationStore is a public constructor parameter of
     // IncomingInvitationsRepository; IncomingInvitationStatus is the
