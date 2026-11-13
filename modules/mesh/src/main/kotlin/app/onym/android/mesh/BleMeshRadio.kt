@@ -27,10 +27,18 @@ import java.util.UUID
 /** The mesh's 128-bit service UUID, for v1 frames in Service Data (spec §3). */
 val MESH_SERVICE_UUID: UUID = UUID.fromString("76797324-4B57-4664-8E4D-53F4C3D38BC4")
 
+/**
+ * The 16-bit UUID coded frames travel under (spec §4c), both listed and
+ * keying their Service Data: the list is what a locked iPhone's filtered
+ * scan matches, and a 16-bit one leaves room for the frame.
+ */
+val MESH_CODED_UUID: ParcelUuid = ParcelUuid.fromString("00004F4E-0000-1000-8000-00805F9B34FB")
+
 private const val TAG = "OnymMesh"
 
 /**
- * Listens for mesh frames: compact ones in Manufacturer Specific Data under
+ * Listens for mesh frames: coded ones in Service Data under
+ * [MESH_CODED_UUID], compact ones in Manufacturer Specific Data under
  * company `0xFFFF`, v1 ones in the mesh Service Data. Never connects.
  *
  * Listening sends nothing on the air: a scanner only sends scan requests to
@@ -63,6 +71,7 @@ class BleMeshScanner(private val context: Context) {
             }
         }
         val filters = listOf(
+            ScanFilter.Builder().setServiceData(MESH_CODED_UUID, byteArrayOf(MeshCodedFrame.KIND), byteArrayOf(0xFF.toByte())).build(),
             ScanFilter.Builder()
                 .setManufacturerData(MeshFrameCodec.COMPANY_ID, byteArrayOf(MeshFrameCodec.COMPACT_KIND), byteArrayOf(0xFF.toByte()))
                 .build(),
@@ -90,6 +99,9 @@ class BleMeshScanner(private val context: Context) {
 
     private fun frame(result: ScanResult): ByteArray? {
         val record = result.scanRecord ?: return null
+        record.getServiceData(MESH_CODED_UUID)
+            ?.takeIf { it.firstOrNull() == MeshCodedFrame.KIND }
+            ?.let { return it }
         record.getManufacturerSpecificData(MeshFrameCodec.COMPANY_ID)
             ?.takeIf { it.firstOrNull() == MeshFrameCodec.COMPACT_KIND }
             ?.let { return it }
@@ -101,14 +113,16 @@ class BleMeshScanner(private val context: Context) {
  * Puts [outbox] on the air — the station half of the mesh.
  *
  * Up to [lanes] legacy advertising sets at once, each non-connectable and
- * non-scannable (spec §3), each with its own random address, each cycling
- * its own stream of coded frames every [frameInterval] ms. More sets is
- * more frames on the air per second, and a listener sees each as a
- * separate advertiser, so any per-device throttling it does doesn't cap
- * the total. Nothing comes back: no connection can be made and no scan
- * request sent. Every set restarts at each epoch boundary so its address
- * rotates with the tags. A set the controller refuses (too many
- * advertisers) is dropped and the rest carry on.
+ * non-scannable (spec §3), each cycling its own stream of coded frames
+ * every [frameInterval] ms. More sets is more frames on the air per
+ * second. Nothing comes back: no connection can be made and no scan
+ * request sent. A set the controller refuses (too many advertisers) is
+ * dropped and the rest carry on.
+ *
+ * Every [framesPerAddress] frames, and at each epoch boundary, a lane
+ * starts a fresh set, so a fresh random address: a locked iPhone's scan
+ * reports each advertiser once however often its data changes, so a
+ * frame on a new address is a frame it can hear.
  *
  * Requires `BLUETOOTH_ADVERTISE`.
  */
@@ -117,6 +131,7 @@ class BleMeshBroadcaster(
     private val outbox: MeshOutbox,
     private val frameInterval: Long = 200,
     private val lanes: Int = 3,
+    private val framesPerAddress: Int = 1,
     private val now: () -> Instant = Instant::now,
 ) {
     private var job: Job? = null
@@ -137,13 +152,11 @@ class BleMeshBroadcaster(
         @Volatile var set: AdvertisingSet? = null
         @Volatile var refused = false
         var epoch = -1L
+        var framesOnAddress = 0
         val callback = object : AdvertisingSetCallback() {
             override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
                 when (status) {
-                    ADVERTISE_SUCCESS -> {
-                        set = advertisingSet
-                        Log.i(TAG, "lane $number advertising (tx power $txPower)")
-                    }
+                    ADVERTISE_SUCCESS -> set = advertisingSet
                     ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> {
                         refused = true
                         Log.i(TAG, "lane $number refused: too many advertisers; carrying on with fewer")
@@ -180,6 +193,7 @@ class BleMeshBroadcaster(
             }
             lane.set = null
             lane.epoch = -1
+            lane.framesOnAddress = 0
         }
 
         try {
@@ -192,22 +206,29 @@ class BleMeshBroadcaster(
                     val data = AdvertiseData.Builder()
                         .setIncludeDeviceName(false)
                         .setIncludeTxPowerLevel(false)
-                        .addManufacturerData(MeshFrameCodec.COMPANY_ID, frame)
+                        .addServiceUuid(MESH_CODED_UUID)
+                        .addServiceData(MESH_CODED_UUID, frame)
                         .build()
                     val epoch = MeshEpoch.number(now())
-                    if (lane.epoch != epoch) {
-                        // New epoch (or first frame): a fresh set, so a fresh address.
+                    if (lane.epoch != epoch || lane.framesOnAddress >= framesPerAddress) {
+                        // A fresh set, so a fresh address.
                         if (lane.epoch >= 0) stop(lane)
-                        Log.i(TAG, "lane ${lane.number}: starting for epoch $epoch (${outbox.size} envelopes queued)")
+                        if (lane.epoch != epoch) {
+                            Log.i(TAG, "lane ${lane.number}: epoch $epoch (${outbox.size} envelopes queued)")
+                        }
                         try {
                             advertiser.startAdvertisingSet(parameters, data, null, null, null, lane.callback)
                             lane.epoch = epoch
+                            lane.framesOnAddress = 1
                         } catch (e: SecurityException) {
                             Log.w(TAG, "no permission to advertise", e)
                             return
+                        } catch (e: IllegalArgumentException) {
+                            Log.w(TAG, "lane ${lane.number} could not start", e)
                         }
                     } else {
                         lane.set?.setAdvertisingData(data)
+                        lane.framesOnAddress++
                     }
                 }
                 if (sent == 0) {

@@ -40,7 +40,12 @@ internal object GF256 {
  * frames rebuild the envelope, whichever ones a listener happened to catch.
  */
 object MeshFountain {
-    const val SYMBOL_SIZE = 17
+    /**
+     * Envelope bytes per frame: a 31-byte legacy advertisement less the
+     * 16-bit UUID list (4), the Service Data header and UUID (4), and the
+     * frame header (10).
+     */
+    const val SYMBOL_SIZE = 13
     const val MAX_ENVELOPE = 255 * SYMBOL_SIZE - 2
 
     /** xorshift32 seeded from envelope ID and index; zero mapped to one. */
@@ -124,7 +129,7 @@ object MeshFountain {
     }
 }
 
-/** A coded frame (kind 0xC2, §4c): 10-byte header + 17-byte symbol. */
+/** A coded frame (kind 0xC2, §4c): 10-byte header + 13-byte symbol, in Service Data under [MESH_CODED_UUID]. */
 class MeshCodedFrame(
     val epochLow: Int,
     val tag: Int,
