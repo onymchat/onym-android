@@ -140,7 +140,12 @@ class BleMeshBroadcaster(
         var setEpoch = -1L
         val callback = object : AdvertisingSetCallback() {
             override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
-                if (status == ADVERTISE_SUCCESS) set = advertisingSet else Log.w(TAG, "advertising failed: $status")
+                if (status == ADVERTISE_SUCCESS) {
+                    set = advertisingSet
+                    Log.i(TAG, "advertising started (tx power $txPower)")
+                } else {
+                    Log.w(TAG, "advertising failed: $status")
+                }
             }
         }
         val parameters = AdvertisingSetParameters.Builder()
@@ -177,6 +182,7 @@ class BleMeshBroadcaster(
                 val epoch = MeshEpoch.number(now())
                 if (setEpoch != epoch) {
                     // New epoch (or first frame): a fresh set, so a fresh address.
+                    Log.i(TAG, "starting advertising set for epoch $epoch (${outbox.size} envelopes queued)")
                     if (setEpoch >= 0) stopSet()
                     try {
                         advertiser.startAdvertisingSet(parameters, data, null, null, null, callback)
