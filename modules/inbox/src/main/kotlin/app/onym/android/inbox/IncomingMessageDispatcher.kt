@@ -30,6 +30,7 @@ import app.onym.android.group.MemberProfile
 import app.onym.android.identity.DecryptedEnvelope
 import app.onym.android.identity.IdentityId
 import app.onym.android.identity.IdentitySummary
+import app.onym.android.mesh.MeshPayload
 import app.onym.android.transport.InboundDelivery
 import app.onym.android.identity.InvitationEnvelopeDecrypter
 import kotlinx.coroutines.flow.StateFlow
@@ -263,7 +264,10 @@ class IncomingMessageDispatcher(
         } catch (_: Throwable) {
             return
         }
-        val chatMessage = tryDecodeChatMessage(envelope.plaintext) ?: return
+        // Mesh senders seal a compressed payload (spec §4c); older frames
+        // carry the JSON as is, which expand passes through.
+        val plaintext = MeshPayload.expand(envelope.plaintext) ?: return
+        val chatMessage = tryDecodeChatMessage(plaintext) ?: return
         persistChatMessage(
             payload = chatMessage,
             ownerIdentityId = ownerIdentityId,

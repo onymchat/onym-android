@@ -99,25 +99,43 @@ class MeshTransportAndOutboxTest {
 
     // ─── outbox ─────────────────────────────────────────────────────
 
-    /** The outbox's frames are exactly what a listener reassembles. */
-    @Test fun outboxFramesRoundTripThroughAListener() = runTest {
-        val envelope = ByteArray(200) { (it % 251).toByte() }
+    /** The outbox's coded frames are what a listener rebuilds: any k of
+     *  them, here only repair frames after skipping the sources. */
+    @Test fun outboxFramesDecodeThroughAListener() = runTest {
+        val envelope = binaryEnvelope(ciphertextSize = 300)
         val outbox = MeshOutbox(now = { now })
         assertTrue(outbox.enqueue(envelope, pairKey))
-        val lap = (0 until 14).map { outbox.next()!! } // 200 / 15 → 14 frames
-        lap.forEach { assertTrue("fits a legacy advertisement", it.size <= MeshFrameCodec.COMPACT_HEADER + MeshFrameCodec.COMPACT_MAX_CHUNK) }
-        val out = received(transport(), lap, expect = 1)
-        assertArrayEquals(envelope, out.single().payload)
+        val k = MeshFountain.Encoder.of(envelope, 0)!!.k
+        val stream = (0 until 3 * k).map { outbox.next()!! }
+        stream.forEach { assertEquals("a full legacy advertisement", MeshCodedFrame.SIZE, it.size) }
+        val out = received(transport(), stream.drop(k), expect = 1)
+        assertArrayEquals(MeshEnvelope.jsonFromBinary(envelope), out.single().payload)
+        assertEquals(InboundDelivery.BLUETOOTH, out.single().delivery)
     }
 
-    @Test fun outboxLoopsAndInterleaves() {
+    /** Sources once, then fresh repair indices — never the same frame twice. */
+    @Test fun outboxSendsSourcesThenFreshRepairs() {
         val outbox = MeshOutbox(now = { now })
-        outbox.enqueue(ByteArray(30) { 1 }, pairKey) // 2 frames
-        outbox.enqueue(ByteArray(15) { 2 }, pairKey) // 1 frame
-        val seen = (0 until 6).map { MeshFrameCodec.decodeCompact(outbox.next()!!)!! }
-        // A, B, A, B, A, B — the long one doesn't hold the short one back.
-        assertEquals(listOf(2, 1, 2, 1, 2, 1), seen.map { it.count })
-        assertEquals(listOf(0, 0, 1, 0, 0, 0), seen.map { it.index })
+        outbox.enqueue(ByteArray(40) { 1 }, pairKey)
+        val indices = (0 until 10).map { MeshCodedFrame.decode(outbox.next()!!)!!.index }
+        assertEquals((0 until 10).toList(), indices)
+    }
+
+    /** A message just sent gets three of every four turns while it's fresh. */
+    @Test fun outboxGivesTheNewestMessageMostOfTheAir() {
+        var clock = now
+        val outbox = MeshOutbox(now = { clock })
+        outbox.enqueue(ByteArray(40) { 1 }, pairKey)
+        clock = now.plusSeconds(1)
+        outbox.enqueue(ByteArray(40) { 2 }, pairKey)
+        val ids = (0 until 40).map { MeshCodedFrame.decode(outbox.next()!!)!!.envelopeId }
+        val newest = ids.groupingBy { it }.eachCount().maxBy { it.value }
+        assertTrue("newest got ${newest.value} of 40", newest.value >= 28)
+
+        // Once it isn't fresh any more, turns are shared again.
+        clock = now.plusSeconds(120)
+        val later = (0 until 40).map { MeshCodedFrame.decode(outbox.next()!!)!!.envelopeId }
+        assertEquals(setOf(20), later.groupingBy { it }.eachCount().values.toSet())
     }
 
     @Test fun outboxForgetsAfterRetention() {
@@ -130,12 +148,16 @@ class MeshTransportAndOutboxTest {
         assertNull(outbox.next())
     }
 
-    @Test fun outboxRefusesWhatCompactFramesCantCarry() {
+    @Test fun outboxRefusesWhatCodedFramesCantCarry() {
         val outbox = MeshOutbox(now = { now })
-        assertFalse(outbox.enqueue(ByteArray(255 * 15 + 1), pairKey))
+        assertFalse(outbox.enqueue(ByteArray(MeshFountain.MAX_ENVELOPE + 1), pairKey))
         assertFalse(outbox.enqueue(ByteArray(0), pairKey))
         assertEquals(0, outbox.size)
     }
+
+    /** A plausible binary sealed envelope: format byte, fixed fields, ciphertext. */
+    private fun binaryEnvelope(ciphertextSize: Int): ByteArray =
+        byteArrayOf(1) + ByteArray(156) { (it * 7).toByte() } + ByteArray(ciphertextSize) { (it * 13).toByte() }
 
     // ─── codec edges ────────────────────────────────────────────────
 

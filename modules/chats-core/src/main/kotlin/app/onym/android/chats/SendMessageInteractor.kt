@@ -952,7 +952,7 @@ class SendMessageInteractor(
             // out over Bluetooth should stay retryable once back online.
             if (nearbyAs != null) {
                 try {
-                    nearby.broadcast(sealed, nearbyAs, inboxKey)
+                    nearby.broadcast(payloadBytes, nearbyAs, inboxKey)
                 } catch (_: Throwable) {
                 }
             }

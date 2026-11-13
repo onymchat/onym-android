@@ -16,10 +16,13 @@ import app.onym.android.mesh.BleMeshBroadcaster
 import app.onym.android.mesh.BleMeshScanner
 import android.util.Log
 import app.onym.android.mesh.MeshContact
+import app.onym.android.mesh.MeshEnvelope
 import app.onym.android.mesh.MeshEpoch
+import app.onym.android.mesh.MeshFountain
 import app.onym.android.mesh.MeshTag
 import app.onym.android.mesh.MeshInboxTransport
 import app.onym.android.mesh.MeshOutbox
+import app.onym.android.mesh.MeshPayload
 import app.onym.android.transport.TransportInboxId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -115,20 +118,33 @@ class MeshController(
         if ((listen || broadcast) && permitted) MeshService.start(context) else MeshService.stop(context)
     }
 
-    override suspend fun broadcast(sealedEnvelope: ByteArray, sender: IdentityId, recipientInboxKey: ByteArray) {
+    /**
+     * Seal the message for the air and queue it: compress the payload,
+     * seal it to the recipient as the sending identity, convert the sealed
+     * envelope to its compact binary form, and queue it as coded frames
+     * under the pair's rotating tag (spec §4c). A short text drops from
+     * ~1.1 KB of JSON envelope to a few hundred bytes.
+     */
+    override suspend fun broadcast(payload: ByteArray, sender: IdentityId, recipientInboxKey: ByteArray) {
         if (!settings.broadcast.value) {
             Log.i(TAG, "not queued: broadcasting is off")
             return
         }
+        val sealed = identityRepository.sealInvitationAs(sender, MeshPayload.compress(payload), recipientInboxKey)
+        val binary = MeshEnvelope.binaryFromJson(sealed) ?: run {
+            Log.w(TAG, "not queued: sealed envelope has no compact form")
+            return
+        }
         val pairKey = identityRepository.meshPairKey(sender, recipientInboxKey)
-        val queued = outbox.enqueue(sealedEnvelope, pairKey)
+        val queued = outbox.enqueue(binary, pairKey)
         // Field-test diagnostics. The tag is public — it rotates every 15
         // minutes and says nothing without the pair key, never logged.
         val epoch = MeshEpoch.number(java.time.Instant.now())
         Log.i(
             TAG,
             "queued=$queued for inbox ${IdentityRepository.inboxTag(recipientInboxKey)}: " +
-                "${sealedEnvelope.size} bytes → ${(sealedEnvelope.size + 14) / 15} frames, " +
+                "payload ${payload.size} → envelope ${binary.size} bytes → " +
+                "${(binary.size + 2 + MeshFountain.SYMBOL_SIZE - 1) / MeshFountain.SYMBOL_SIZE} source frames, " +
                 "epoch $epoch tag %06x, radio permitted=${hasRadioPermissions(context)}, outbox ${outbox.size}"
                     .format(MeshTag.derive(pairKey, epoch)),
         )
