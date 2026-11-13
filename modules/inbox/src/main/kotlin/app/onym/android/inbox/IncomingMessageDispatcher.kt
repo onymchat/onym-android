@@ -123,6 +123,9 @@ class IncomingMessageDispatcher(
      *  the app's cue for a local notification, since no push comes for a
      *  message that never touched a relay. */
     private val bluetoothMessageArrived: suspend (owner: IdentityId, groupIdHex: String) -> Unit = { _, _ -> },
+    /** People the owner blocked: their chat messages are dropped on
+     *  arrival — never stored, never acknowledged. */
+    private val blockedSenders: app.onym.android.chats.BlockedSenders? = null,
 ) {
 
     suspend fun dispatch(
@@ -1001,6 +1004,8 @@ class IncomingMessageDispatcher(
         val profile = group.memberProfiles[claimedSenderHex] ?: return
         if (!profile.sendingPubkey.contentEquals(signerPubkey)) return
         if (!variantMatchesGroup(payload.variant, group.groupType)) return
+        // Blocked: dropped before anything is stored or acknowledged.
+        if (blockedSenders?.isBlocked(claimedSenderHex, ownerIdentityId.value) == true) return
 
         val body = payload.variant.body
         val message = ChatMessage(

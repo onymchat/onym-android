@@ -291,6 +291,36 @@ class MessageRepository(
         }
     }
 
+    /**
+     * Remove everything a blocked sender wrote from [ownerIdentityId]'s
+     * chats in [groupIds], at once: blocking takes their messages out of
+     * the feed, not just future ones. Returns how many were removed.
+     */
+    suspend fun removeIncoming(
+        fromSenderBlsPubkeyHex: String,
+        ownerIdentityId: String,
+        groupIds: List<String>,
+    ): Int = mutex.withLock {
+        val sender = fromSenderBlsPubkeyHex.lowercase()
+        var removed = 0
+        for (groupId in groupIds) {
+            store.listForGroup(ownerIdentityId, groupId)
+                .filter {
+                    it.direction == MessageDirection.INCOMING && !it.isSystem &&
+                        it.senderBlsPubkeyHex.lowercase() == sender
+                }
+                .forEach {
+                    store.deleteById(it.id, ownerIdentityId)
+                    removed++
+                }
+        }
+        val activeOwnerId = identity.currentIdentityId.value?.value
+        if (ownerIdentityId == activeOwnerId) {
+            for (groupId in groupIds) refreshGroupLocked(activeOwnerId, groupId)
+        }
+        removed
+    }
+
     // ─── private ──────────────────────────────────────────────────
 
     private suspend fun handleOwnerRemovalLocked(id: IdentityId) {

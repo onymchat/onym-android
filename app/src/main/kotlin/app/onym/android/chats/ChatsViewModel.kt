@@ -60,6 +60,7 @@ class ChatsViewModel(
     private val repository: GroupRepository,
     private val messageRepository: MessageRepository,
     private val avatarBroadcaster: GroupAvatarBroadcaster? = null,
+    private val blockedSenders: BlockedSenders? = null,
 ) : ViewModel() {
 
     /**
@@ -144,5 +145,38 @@ class ChatsViewModel(
         viewModelScope.launch {
             broadcaster.setName(groupId, name)
         }
+    }
+
+    // ─── blocking ───────────────────────────────────────────────────
+
+    /** Bumped on every block / unblock, so screens re-read [isBlocked]. */
+    val blockRevision: StateFlow<Int> =
+        blockedSenders?.revision ?: kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    /** Whether the identity holding [groupId] has blocked this sender. */
+    fun isBlocked(senderBlsPubkeyHex: String, groupId: String): Boolean {
+        val owner = groups.value.firstOrNull { it.id == groupId }?.ownerIdentityId ?: return false
+        return blockedSenders?.isBlocked(senderBlsPubkeyHex, owner) == true
+    }
+
+    /** Block for the identity holding [groupId]: their messages leave
+     *  every one of its chats now, and new ones are dropped on arrival. */
+    fun block(senderBlsPubkeyHex: String, groupId: String) {
+        val blocked = blockedSenders ?: return
+        val owner = groups.value.firstOrNull { it.id == groupId }?.ownerIdentityId ?: return
+        blocked.block(senderBlsPubkeyHex, owner)
+        viewModelScope.launch {
+            messageRepository.removeIncoming(
+                fromSenderBlsPubkeyHex = senderBlsPubkeyHex,
+                ownerIdentityId = owner,
+                groupIds = groups.value.filter { it.ownerIdentityId == owner }.map { it.id },
+            )
+        }
+    }
+
+    /** New messages get through again; removed ones stay removed. */
+    fun unblock(senderBlsPubkeyHex: String, groupId: String) {
+        val owner = groups.value.firstOrNull { it.id == groupId }?.ownerIdentityId ?: return
+        blockedSenders?.unblock(senderBlsPubkeyHex, owner)
     }
 }

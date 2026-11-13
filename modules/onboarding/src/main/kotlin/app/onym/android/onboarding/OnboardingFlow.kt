@@ -177,6 +177,12 @@ class OnboardingFlow(
      * the reserved step is the probe's only consumer.
      */
     private val moderationDirectoryNonEmpty: suspend () -> Boolean = { true },
+    /**
+     * Whether the welcome screen's Terms of Use checkbox gates every way
+     * off it (App Review guideline 1.2). On in production; off by
+     * default so walk tests needn't tick it first.
+     */
+    private val requireTerms: Boolean = false,
 ) {
 
     /** One immutable snapshot of the walk. */
@@ -239,6 +245,9 @@ class OnboardingFlow(
         /** Set by [complete] after the flag is persisted, so the
          *  presenter can dismiss and hand control back. */
         val completed: Boolean = false,
+        /** The welcome screen's "I agree to the Terms of Use" checkbox,
+         *  loaded from the store by [start]. */
+        val termsAccepted: Boolean = false,
     ) {
         /** Whether the directory probe has answered — the UI shows a
          *  progress state on the moderation step while this is false. */
@@ -446,6 +455,10 @@ class OnboardingFlow(
      * in the sequence: the probe has no other consumer.
      */
     suspend fun start() {
+        if (requireTerms) {
+            val accepted = store.hasAcceptedTerms()
+            _state.update { it.copy(termsAccepted = accepted) }
+        }
         if (!moderationInSequence) return
         startMutex.withLock {
             if (started) return
@@ -506,6 +519,7 @@ class OnboardingFlow(
     fun advance() {
         _state.update { current ->
             val next = neighbor(current.step, offset = 1) ?: return@update current
+            if (current.step == OnboardingStep.Welcome && !termsSatisfied(current)) return@update current
             if (requiresOutcomeToAdvance(current.step, current) &&
                 !satisfiesGate(current.outcomes[current.step])
             ) {
@@ -580,7 +594,17 @@ class OnboardingFlow(
      * Idempotent: the flag is written at most once.
      */
     suspend fun skipAll() {
+        if (!termsSatisfied(_state.value)) return
         finish()
+    }
+
+    /** Whether every way off the welcome screen is open. */
+    fun termsSatisfied(state: State = _state.value): Boolean = !requireTerms || state.termsAccepted
+
+    /** The welcome screen's checkbox, persisted the moment it changes. */
+    suspend fun setTermsAccepted(accepted: Boolean) {
+        _state.update { it.copy(termsAccepted = accepted) }
+        store.setTermsAccepted(accepted)
     }
 
     /**

@@ -124,6 +124,8 @@ fun ChatThreadScreen(
     val replyingTo by viewModel.replyingTo.collectAsStateWithLifecycle()
     val pendingMedia by viewModel.pendingMedia.collectAsStateWithLifecycle()
     val reportState by viewModel.reportState.collectAsStateWithLifecycle()
+    val blockedWithoutReport by viewModel.blockedWithoutReport.collectAsStateWithLifecycle()
+    var blockCandidate by remember { mutableStateOf<ChatMessage?>(null) }
 
     // The video attachment currently shown in the full-screen player, if any.
     var playingVideo by remember { mutableStateOf<ChatVideoAttachment?>(null) }
@@ -279,6 +281,7 @@ fun ChatThreadScreen(
                     { message: ChatMessage -> viewModel.canReport(message, resolved) }
                 },
                 onReportRequested = viewModel::beginReport,
+                onBlockRequested = { blockCandidate = it },
             )
         }
     }
@@ -313,6 +316,70 @@ fun ChatThreadScreen(
             imageLoader = viewModel.imageLoader,
             videoLoader = viewModel.videoLoader,
             onDismiss = { galleryContext = null },
+        )
+    }
+
+    // Block: confirm, then block and open the report — the report is
+    // how the moderators hear about it.
+    blockCandidate?.let { message ->
+        val alias = group?.memberProfiles?.get(message.senderBlsPubkeyHex.lowercase())?.alias
+            ?.trim()?.takeIf { it.isNotEmpty() }
+            ?: stringResource(app.onym.android.strings.R.string.chat_block_someone)
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { blockCandidate = null },
+            title = {
+                androidx.compose.material3.Text(
+                    stringResource(app.onym.android.strings.R.string.chat_block_title, alias),
+                )
+            },
+            text = {
+                androidx.compose.material3.Text(
+                    stringResource(app.onym.android.strings.R.string.chat_block_message),
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        viewModel.blockAndReport(message)
+                        blockCandidate = null
+                    },
+                    modifier = Modifier.testTag("chat_thread.block.confirm"),
+                ) {
+                    androidx.compose.material3.Text(
+                        stringResource(app.onym.android.strings.R.string.chat_block_confirm),
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { blockCandidate = null }) {
+                    androidx.compose.material3.Text(
+                        stringResource(app.onym.android.strings.R.string.cancel),
+                    )
+                }
+            },
+        )
+    }
+    if (blockedWithoutReport) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = viewModel::dismissBlockedNotice,
+            title = {
+                androidx.compose.material3.Text(
+                    stringResource(app.onym.android.strings.R.string.chat_blocked_title),
+                )
+            },
+            text = {
+                androidx.compose.material3.Text(
+                    stringResource(app.onym.android.strings.R.string.chat_blocked_no_report),
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = viewModel::dismissBlockedNotice) {
+                    androidx.compose.material3.Text(
+                        stringResource(app.onym.android.strings.R.string.ok),
+                    )
+                }
+            },
         )
     }
 
@@ -382,6 +449,8 @@ private fun ChatThreadBody(
      *  when the moderation seat is dark. */
     canReport: ((ChatMessage) -> Boolean)? = null,
     onReportRequested: ((ChatMessage) -> Unit)? = null,
+    /** Long-press Block on someone else's message. */
+    onBlockRequested: ((ChatMessage) -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
     // Opening a thread is what "reads" the nudge a push wake left
@@ -621,6 +690,14 @@ private fun ChatThreadBody(
                             canReport?.invoke(message) == true && onReportRequested != null
                         ) {
                             { onReportRequested(message) }
+                        } else {
+                            null
+                        },
+                        onBlock = if (
+                            message.direction == MessageDirection.INCOMING && !message.isSystem &&
+                            onBlockRequested != null
+                        ) {
+                            { onBlockRequested(message) }
                         } else {
                             null
                         },

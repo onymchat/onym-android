@@ -1070,4 +1070,34 @@
   <string name="settings_mesh_broadcast_subtitle">Your text messages also go out to group members nearby. People around you can see that an Onym phone is broadcasting.</string>
   <string name="mesh_service_title">Onym nearby</string>
   <string name="mesh_service_body">Bluetooth messaging is on</string>
+
+  <!-- Blocking and Terms of Use (App Review guideline 1.2) -->
+  <string name="chat_block">Block</string>
+  <string name="chat_block_title">Block %1$s?</string>
+  <string name="chat_block_message">Their messages are removed from your chats now and new ones won\'t reach you. Then tell the moderators what they sent.</string>
+  <string name="chat_block_confirm">Block and report</string>
+  <string name="chat_blocked_title">Blocked</string>
+  <string name="chat_blocked_no_report">Their messages are gone from your chats. This message couldn\'t be sent to the moderators as evidence, because Onym couldn\'t confirm the sender signed it.</string>
+  <string name="chat_block_someone">this person</string>
+  <string name="members_block">Block</string>
+  <string name="members_unblock">Unblock</string>
+  <string name="members_block_message">Their messages are removed from your chats now, and new ones won\'t reach you.</string>
+  <string name="members_more_cd">More actions for %1$s</string>
+  <string name="terms_title">Terms of Use</string>
+  <string name="terms_agree_prefix">I agree to the</string>
+  <string name="terms_link">Terms of Use</string>
+  <string name="terms_checkbox_cd">I agree to the Terms of Use</string>
+  <string name="terms_done">Done</string>
+  <string name="terms_1_title">Agreement</string>
+  <string name="terms_1_body">These Terms of Use are an agreement between you and Onym for your use of the Onym app. By checking “I agree” you accept them. If you don\'t agree, don\'t use Onym. The app is licensed to you, not sold.</string>
+  <string name="terms_2_title">No tolerance for objectionable content or abusive users</string>
+  <string name="terms_2_body">Onym has zero tolerance for objectionable content and abusive behaviour. You must not send, share or store through Onym:\n• child sexual abuse material, or anything sexualising minors;\n• harassment, bullying, threats or intimidation;\n• hate speech, or content promoting violence or terrorism;\n• sexual content shared without the consent of the people in it;\n• fraud, scams, spam, malware, or anything illegal where you or the recipient live.\nBreaking this rule ends your right to use Onym.</string>
+  <string name="terms_3_title">Reporting and blocking</string>
+  <string name="terms_3_body">Long-press any message to report it. The report goes to your chosen moderation authority with the message as evidence, signed by its sender so it can\'t be forged.\nLong-press a message, or use the menu beside a person in a chat\'s member list, to block them. Their messages disappear from your chats at once, new ones never reach you, and blocking from a message takes you straight to reporting it to the moderators.</string>
+  <string name="terms_4_title">What happens to reports</string>
+  <string name="terms_4_body">Reports are reviewed within 24 hours. Content that breaks these terms is removed, and the user who sent it is banned from the moderation authority and the groups that rely on it. Material that the law requires to be reported to the authorities is reported.</string>
+  <string name="terms_5_title">Privacy</string>
+  <string name="terms_5_body">Messages are end-to-end encrypted: nobody but the people in a chat can read them — not Onym, and not the relays that carry them. The only exception is a message you choose to report, which you disclose to the moderators yourself.</string>
+  <string name="terms_6_title">Contact</string>
+  <string name="terms_6_body">Questions, or something the in-app tools can\'t handle: hello@onym.app.</string>
 </resources>

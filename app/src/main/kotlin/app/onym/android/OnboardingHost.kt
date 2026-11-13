@@ -120,6 +120,7 @@ import app.onym.android.settings.ModuleConsentScreen
 import app.onym.android.settings.ModuleConsentViewModel
 import kotlinx.coroutines.launch
 import app.onym.android.onboarding.R as OnboardingR
+import app.onym.android.strings.R as TermsR
 
 /**
  * The first-launch onboarding presentation: mounts the :onboarding
@@ -419,6 +420,7 @@ internal fun OnboardingHost(
                     when (step) {
                         OnboardingStep.Welcome -> ({
                             WelcomeDoor(
+                                enabled = flow.termsSatisfied(state),
                                 onDoor = {
                                     hostViewModel.viewModelScope.launch { flow.skipAll() }
                                 },
@@ -471,6 +473,11 @@ internal fun OnboardingHost(
                                 // mount: allowed AND the walk has never
                                 // moved past Welcome.
                                 restoreAvailable = restoreAllowed && state.neverLeftWelcome,
+                                termsAccepted = state.termsAccepted,
+                                enabled = flow.termsSatisfied(state),
+                                onTermsAccepted = { accepted ->
+                                    hostViewModel.viewModelScope.launch { flow.setTermsAccepted(accepted) }
+                                },
                                 onSetup = { flow.advance() },
                                 onRestore = { restoreVisible = true },
                             )
@@ -616,9 +623,10 @@ internal fun OnboardingHost(
  * walk's own consents are offered only if it is walked.
  */
 @Composable
-private fun WelcomeDoor(onDoor: () -> Unit) {
+private fun WelcomeDoor(enabled: Boolean, onDoor: () -> Unit) {
     FilledIconButton(
         onClick = onDoor,
+        enabled = enabled,
         modifier = Modifier
             .size(112.dp)
             .testTag("onboarding.welcome.primary"),
@@ -642,17 +650,31 @@ private fun WelcomeDoor(onDoor: () -> Unit) {
 @Composable
 private fun WelcomeFooter(
     restoreAvailable: Boolean,
+    termsAccepted: Boolean,
+    enabled: Boolean,
+    onTermsAccepted: (Boolean) -> Unit,
     onSetup: () -> Unit,
     onRestore: () -> Unit,
 ) {
+    var readingTerms by remember { mutableStateOf(false) }
+    androidx.compose.foundation.layout.Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+    TermsAgreementRow(
+        accepted = termsAccepted,
+        onAcceptedChange = onTermsAccepted,
+        onRead = { readingTerms = true },
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 24.dp),
+            .padding(top = 16.dp, bottom = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
     ) {
         FilledTonalIconButton(
             onClick = onSetup,
+            enabled = enabled,
             modifier = Modifier
                 .size(56.dp)
                 .testTag("onboarding.welcome.setup"),
@@ -665,6 +687,7 @@ private fun WelcomeFooter(
         if (restoreAvailable) {
             FilledTonalIconButton(
                 onClick = onRestore,
+                enabled = enabled,
                 modifier = Modifier
                     .size(56.dp)
                     .testTag("onboarding.welcome.restore"),
@@ -673,6 +696,97 @@ private fun WelcomeFooter(
                     Icons.Filled.Key,
                     contentDescription = stringResource(OnboardingR.string.onboarding_welcome_restore_entry),
                 )
+            }
+        }
+    }
+    }
+    if (readingTerms) TermsOfUseDialog(onDismiss = { readingTerms = false })
+}
+
+/**
+ * "☐ I agree to the Terms of Use" — every way off the welcome screen
+ * waits on it (App Review guideline 1.2). The only words on the
+ * screen: an agreement has to say what is being agreed to.
+ */
+@Composable
+private fun TermsAgreementRow(
+    accepted: Boolean,
+    onAcceptedChange: (Boolean) -> Unit,
+    onRead: () -> Unit,
+) {
+    val checkboxLabel = stringResource(app.onym.android.strings.R.string.terms_checkbox_cd)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.Checkbox(
+            checked = accepted,
+            onCheckedChange = onAcceptedChange,
+            modifier = Modifier
+                .testTag("onboarding.welcome.terms.checkbox")
+                .semantics { contentDescription = checkboxLabel },
+        )
+        Text(
+            text = stringResource(app.onym.android.strings.R.string.terms_agree_prefix),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        androidx.compose.material3.TextButton(
+            onClick = onRead,
+            modifier = Modifier.testTag("onboarding.welcome.terms.read"),
+        ) {
+            Text(stringResource(app.onym.android.strings.R.string.terms_link))
+        }
+    }
+}
+
+/** The full Terms of Use, readable before agreeing. */
+@Composable
+private fun TermsOfUseDialog(onDismiss: () -> Unit) {
+    val sections = listOf(
+        TermsR.string.terms_1_title to TermsR.string.terms_1_body,
+        TermsR.string.terms_2_title to TermsR.string.terms_2_body,
+        TermsR.string.terms_3_title to TermsR.string.terms_3_body,
+        TermsR.string.terms_4_title to TermsR.string.terms_4_body,
+        TermsR.string.terms_5_title to TermsR.string.terms_5_body,
+        TermsR.string.terms_6_title to TermsR.string.terms_6_body,
+    )
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(modifier = Modifier.fillMaxSize().testTag("terms.document")) {
+            androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(TermsR.string.terms_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    androidx.compose.material3.TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("terms.done"),
+                    ) { Text(stringResource(TermsR.string.terms_done)) }
+                }
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    sections.forEach { (title, body) ->
+                        androidx.compose.foundation.layout.Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                stringResource(body),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

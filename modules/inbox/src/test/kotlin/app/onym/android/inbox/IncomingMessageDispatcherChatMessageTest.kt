@@ -59,6 +59,34 @@ class IncomingMessageDispatcherChatMessageTest {
 
     // ─── happy path ───────────────────────────────────────────────
 
+    /** App Review guideline 1.2: a blocked sender's messages leave the
+     *  feed at once, new ones are dropped — not stored, not acked — and
+     *  unblocking lets new ones through again. */
+    @Test
+    fun blockedSender_isDroppedAndTheirMessagesRemoved() = runTest {
+        val fixture = newFixture()
+        fixture.seedGroup(ownerIdentity, withSenderProfile = true)
+        val blocked = app.onym.android.chats.BlockedSenders.inMemory()
+        val receipts = SpyReceiptSender()
+
+        fixture.dispatchChat(ownerIdentity, chatPayload(UUID.randomUUID(), body = "before"), senderSendingKey, receipts, blockedSenders = blocked)
+        assertEquals(1, fixture.messageStore.listForGroup(ownerIdentity.value, groupIdHex).size)
+
+        blocked.block(senderBlsHex.uppercase(), ownerIdentity.value)
+        val removed = fixture.messageRepository.removeIncoming(senderBlsHex, ownerIdentity.value, listOf(groupIdHex))
+        assertEquals(1, removed)
+        assertTrue(fixture.messageStore.listForGroup(ownerIdentity.value, groupIdHex).isEmpty())
+
+        val sendsBefore = receipts.sends.size
+        fixture.dispatchChat(ownerIdentity, chatPayload(UUID.randomUUID(), body = "after"), senderSendingKey, receipts, blockedSenders = blocked)
+        assertTrue("dropped", fixture.messageStore.listForGroup(ownerIdentity.value, groupIdHex).isEmpty())
+        assertEquals("never acknowledged", sendsBefore, receipts.sends.size)
+
+        blocked.unblock(senderBlsHex, ownerIdentity.value)
+        fixture.dispatchChat(ownerIdentity, chatPayload(UUID.randomUUID(), body = "unblocked"), senderSendingKey, receipts, blockedSenders = blocked)
+        assertEquals(1, fixture.messageStore.listForGroup(ownerIdentity.value, groupIdHex).size)
+    }
+
     @Test
     fun chatMessage_persistsAndDoesNotFallThrough() = runTest {
         val fixture = newFixture()
@@ -464,6 +492,7 @@ class IncomingMessageDispatcherChatMessageTest {
             readReceiptsEnabled: () -> Boolean = { true },
             delivery: InboundDelivery = InboundDelivery.NETWORK,
             bluetoothMessageArrived: suspend (IdentityId, String) -> Unit = { _, _ -> },
+            blockedSenders: app.onym.android.chats.BlockedSenders? = null,
         ) {
             val plaintext = jsonFormat
                 .encodeToString(ChatMessagePayload.serializer(), payload)
@@ -476,6 +505,7 @@ class IncomingMessageDispatcherChatMessageTest {
                 receiptSender = receiptSender,
                 readReceiptsEnabled = readReceiptsEnabled,
                 bluetoothMessageArrived = bluetoothMessageArrived,
+                blockedSenders = blockedSenders,
             ).dispatch("env-${payload.messageId}", owner, byteArrayOf(), Instant.EPOCH, delivery)
         }
 
