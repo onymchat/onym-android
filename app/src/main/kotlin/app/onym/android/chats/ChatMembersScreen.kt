@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
@@ -100,6 +101,9 @@ fun ChatMembersScreen(
     onShareInviteClick: (() -> Unit)? = null,
 ) {
     val chatItems by chatsViewModel.items.collectAsStateWithLifecycle()
+    // Read so a block / unblock recomposes the rows' menus.
+    @Suppress("UNUSED_VARIABLE")
+    val blockRevision by chatsViewModel.blockRevision.collectAsStateWithLifecycle()
     val identityRows by identityViewModel.items.collectAsStateWithLifecycle()
     val activeBlsHex: String? = identityRows.firstOrNull { it.isActive }
         ?.summary
@@ -202,6 +206,9 @@ fun ChatMembersScreen(
             ChatMembersBody(
                 group = group,
                 activeBlsHex = activeBlsHex,
+                isBlocked = { chatsViewModel.isBlocked(it, groupId) },
+                onBlock = { chatsViewModel.block(it, groupId) },
+                onUnblock = { chatsViewModel.unblock(it, groupId) },
                 canEditAvatar = canEditAvatar,
                 canInvite = showShareInvite,
                 onInvite = onShareInviteClick,
@@ -336,6 +343,9 @@ private fun InvitationSection(message: String) {
 private fun ChatMembersBody(
     group: ChatGroup,
     activeBlsHex: String?,
+    isBlocked: (String) -> Boolean,
+    onBlock: (String) -> Unit,
+    onUnblock: (String) -> Unit,
     canEditAvatar: Boolean,
     canInvite: Boolean,
     onInvite: (() -> Unit)?,
@@ -382,6 +392,7 @@ private fun ChatMembersBody(
         )
     }
     var proofFor by remember { mutableStateOf<String?>(null) }
+    var blockCandidate by remember { mutableStateOf<MemberRow?>(null) }
 
     // The only place exports are swept. From the roster rather than
     // from the sheet, so a sheet left open past the hour can't have its
@@ -413,7 +424,13 @@ private fun ChatMembersBody(
         if (rows.isEmpty()) {
             EmptyState(modifier = Modifier.fillMaxSize())
         } else {
-            MembersCard(rows = rows, onOpenProof = { proofFor = it })
+            MembersCard(
+                rows = rows,
+                onOpenProof = { proofFor = it },
+                isBlocked = isBlocked,
+                onBlock = { blockCandidate = it },
+                onUnblock = onUnblock,
+            )
             Spacer(Modifier.height(8.dp))
             Text(
                 text = pluralStringResource(R.plurals.members_count, rows.size, rows.size),
@@ -429,6 +446,28 @@ private fun ChatMembersBody(
     // otherwise leave a proof rendered beside a group it no longer
     // describes. A member who vanished underneath closes it rather than
     // showing an empty sheet.
+    blockCandidate?.let { row ->
+        AlertDialog(
+            onDismissRequest = { blockCandidate = null },
+            title = { Text(stringResource(R.string.chat_block_title, row.displayAlias)) },
+            text = { Text(stringResource(R.string.members_block_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onBlock(row.blsHex)
+                        blockCandidate = null
+                    },
+                    modifier = Modifier.testTag("members.block.confirm"),
+                ) {
+                    Text(stringResource(R.string.members_block), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { blockCandidate = null }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
     proofFor?.let { blsHex ->
         // Remembered on the same inputs the standings are, and *not*
         // rebuilt per recomposition. `GroupRulesProof` has no `equals`,
@@ -463,7 +502,13 @@ private fun ChatMembersBody(
 }
 
 @Composable
-private fun MembersCard(rows: List<MemberRow>, onOpenProof: (String) -> Unit) {
+private fun MembersCard(
+    rows: List<MemberRow>,
+    onOpenProof: (String) -> Unit,
+    isBlocked: (String) -> Boolean,
+    onBlock: (MemberRow) -> Unit,
+    onUnblock: (String) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -472,7 +517,13 @@ private fun MembersCard(rows: List<MemberRow>, onOpenProof: (String) -> Unit) {
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         rows.forEachIndexed { idx, row ->
-            MemberRowView(row = row, onOpenProof = onOpenProof)
+            MemberRowView(
+                row = row,
+                onOpenProof = onOpenProof,
+                blocked = isBlocked(row.blsHex),
+                onBlock = { onBlock(row) },
+                onUnblock = { onUnblock(row.blsHex) },
+            )
             if (idx != rows.lastIndex) {
                 HorizontalDivider(thickness = 0.5.dp)
             }
@@ -481,7 +532,13 @@ private fun MembersCard(rows: List<MemberRow>, onOpenProof: (String) -> Unit) {
 }
 
 @Composable
-private fun MemberRowView(row: MemberRow, onOpenProof: (String) -> Unit) {
+private fun MemberRowView(
+    row: MemberRow,
+    onOpenProof: (String) -> Unit,
+    blocked: Boolean,
+    onBlock: () -> Unit,
+    onUnblock: () -> Unit,
+) {
     val mark = groupRulesMark(row.standing)
     Row(
         modifier = Modifier
@@ -556,6 +613,47 @@ private fun MemberRowView(row: MemberRow, onOpenProof: (String) -> Unit) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
             )
+        }
+        if (!row.isSelf) {
+            MemberActions(row = row, blocked = blocked, onBlock = onBlock, onUnblock = onUnblock)
+        }
+    }
+}
+
+/** Block / Unblock behind a member's overflow menu. */
+@Composable
+private fun MemberActions(row: MemberRow, blocked: Boolean, onBlock: () -> Unit, onUnblock: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(
+            onClick = { open = true },
+            modifier = Modifier.testTag("members.actions.${row.blsHex}"),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.MoreVert,
+                contentDescription = stringResource(R.string.members_more_cd, row.displayAlias),
+            )
+        }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (blocked) {
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(stringResource(R.string.members_unblock)) },
+                    onClick = {
+                        open = false
+                        onUnblock()
+                    },
+                    modifier = Modifier.testTag("members.unblock.${row.blsHex}"),
+                )
+            } else {
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(stringResource(R.string.members_block), color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        open = false
+                        onBlock()
+                    },
+                    modifier = Modifier.testTag("members.block.${row.blsHex}"),
+                )
+            }
         }
     }
 }

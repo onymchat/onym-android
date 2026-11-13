@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import kotlinx.coroutines.flow.first
 
 /**
@@ -44,6 +45,21 @@ interface OnboardingStore {
      *  sets the restart bit (cleared again by [markCompleted]).
      *  Idempotent. */
     suspend fun requestRestart()
+
+    /** Whether the current [TermsOfUse.VERSION] was agreed on this
+     *  device. Stores that don't track it (test fakes) answer yes. */
+    suspend fun hasAcceptedTerms(): Boolean = true
+
+    /** The welcome screen's checkbox: record, or withdraw, agreement. */
+    suspend fun setTermsAccepted(accepted: Boolean) {}
+}
+
+/** Onym's Terms of Use, agreed on the welcome screen — onym-ios
+ *  `TermsOfUse` parity. Bump [VERSION] when the text changes in
+ *  substance, and everyone is asked again. The text itself lives in
+ *  the app's strings (`terms_*`). */
+object TermsOfUse {
+    const val VERSION = 1
 }
 
 /**
@@ -67,7 +83,19 @@ class DataStorePreferencesOnboardingStore(
     }
 
     override suspend fun reset() {
-        dataStore.edit { it.remove(KEY_COMPLETED) }
+        dataStore.edit {
+            it.remove(KEY_COMPLETED)
+            it.remove(KEY_TERMS_VERSION)
+        }
+    }
+
+    override suspend fun hasAcceptedTerms(): Boolean =
+        (dataStore.data.first()[KEY_TERMS_VERSION] ?: 0) >= TermsOfUse.VERSION
+
+    override suspend fun setTermsAccepted(accepted: Boolean) {
+        dataStore.edit {
+            if (accepted) it[KEY_TERMS_VERSION] = TermsOfUse.VERSION else it.remove(KEY_TERMS_VERSION)
+        }
     }
 
     override suspend fun isRestartRequested(): Boolean =
@@ -89,6 +117,9 @@ class DataStorePreferencesOnboardingStore(
          *  process death so a mid-restart-walk kill resumes. */
         internal val KEY_RESTART_REQUESTED =
             booleanPreferencesKey("onboarding.restartRequested")
+
+        /** The [TermsOfUse.VERSION] last agreed to. */
+        internal val KEY_TERMS_VERSION = intPreferencesKey("onboarding.termsAcceptedVersion")
     }
 }
 
@@ -126,6 +157,10 @@ object OnboardingGate {
         // cancel the restart. Cold-boot grandfathering is untouched:
         // this bit is only ever set by the explicit Settings action.
         if (store.isRestartRequested()) return true
+        // Someone who never agreed to the current Terms of Use — anyone
+        // onboarded before there were terms — sees the welcome screen
+        // once more to agree; its door goes straight back to the tabs.
+        if (!store.hasAcceptedTerms()) return true
         if (store.hasCompleted()) return false
         if (isExistingUser()) return false
         return true

@@ -607,6 +607,11 @@ class OnymApplication : Application() {
         val readReceiptsPreference = app.onym.android.chats.DataStoreReadReceiptsPreferenceProvider(
             dataStore = applicationContext.chatPreferencesDataStore,
         )
+        // Who each identity blocked. Read by the dispatcher (drops their
+        // messages) and the chat screens (block / unblock).
+        val blockedSenders = app.onym.android.chats.BlockedSenders.sharedPreferences(
+            getSharedPreferences("onym_blocked_senders", MODE_PRIVATE),
+        )
         val networkPreference = DataStoreNetworkPreferenceProvider(
             dataStore = applicationContext.networkPreferenceDataStore,
         )
@@ -1116,6 +1121,7 @@ class OnymApplication : Application() {
             bluetoothMessageArrived = { _, _ ->
                 app.onym.android.nearby.MeshArrivalNotifier.notify(this@OnymApplication)
             },
+            blockedSenders = blockedSenders,
         )
         meshController.start(incomingDispatcher)
         // Close the loop for the Retry on a snapshot parked because
@@ -1953,6 +1959,7 @@ class OnymApplication : Application() {
                     moderationDirectoryNonEmpty = {
                         moderationUi?.directoryNonEmpty?.invoke() ?: false
                     },
+                    requireTerms = true,
                 )
             },
             onCompleted = {
@@ -2203,6 +2210,7 @@ class OnymApplication : Application() {
                 app.onym.android.chats.ChatsViewModel(
                     repository = groupRepository,
                     messageRepository = messageRepository,
+                    blockedSenders = blockedSenders,
                     avatarBroadcaster = app.onym.android.group.GroupAvatarBroadcaster(
                         activeIdentity = identityRepository,
                         identitiesFlow = identityRepository.identities,
@@ -2272,6 +2280,19 @@ class OnymApplication : Application() {
                     unnamedJoinerLabel = getString(
                         app.onym.android.strings.R.string.chat_join_request_unnamed,
                     ),
+                    blockSender = { senderHex ->
+                        val ownerId = identityRepository.currentIdentityId.value?.value
+                        if (ownerId != null) {
+                            blockedSenders.block(senderHex, ownerId)
+                            messageRepository.removeIncoming(
+                                fromSenderBlsPubkeyHex = senderHex,
+                                ownerIdentityId = ownerId,
+                                groupIds = groupRepository.snapshots.value
+                                    .filter { it.ownerIdentityId == ownerId }
+                                    .map { it.id },
+                            )
+                        }
+                    },
                 )
             },
             makeSearchViewModel = {

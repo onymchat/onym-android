@@ -103,6 +103,9 @@ class ChatThreadViewModel(
      *  seat is dark — the Report menu entry then never renders,
      *  matching every other moderation surface. */
     private val reporting: ChatReporting? = null,
+    /** Block a sender for the active identity: their messages leave its
+     *  chats at once and new ones are dropped on arrival. */
+    private val blockSender: suspend (senderBlsPubkeyHex: String) -> Unit = {},
 ) : ViewModel() {
 
     /** Incoming message ids we've already emitted a read receipt for,
@@ -494,6 +497,33 @@ class ChatThreadViewModel(
                     submitting.copy(submitting = false, error = outcome.error)
             }
         }
+    }
+
+    // ─── block ──────────────────────────────────────────────────────
+
+    private val _blockedWithoutReport = MutableStateFlow(false)
+
+    /** Blocked, but the message couldn't go to the moderators as
+     *  evidence — said rather than left silent. */
+    val blockedWithoutReport: StateFlow<Boolean> = _blockedWithoutReport.asStateFlow()
+
+    /**
+     * Block the sender, then open the report — how the moderators hear
+     * about it. The report starts first: it prepares its evidence from
+     * this message, which blocking removes from the thread.
+     */
+    fun blockAndReport(message: ChatMessage) {
+        val currentGroup = group.value
+        val reportable = currentGroup != null && canReport(message, currentGroup)
+        if (reportable) beginReport(message)
+        viewModelScope.launch {
+            blockSender(message.senderBlsPubkeyHex)
+            if (!reportable) _blockedWithoutReport.value = true
+        }
+    }
+
+    fun dismissBlockedNotice() {
+        _blockedWithoutReport.value = false
     }
 
     fun dismissReport() {

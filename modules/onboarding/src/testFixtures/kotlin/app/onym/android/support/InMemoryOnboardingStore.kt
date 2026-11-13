@@ -9,7 +9,18 @@ import app.onym.android.onboarding.OnboardingStore
  */
 class InMemoryOnboardingStore(
     initiallyCompleted: Boolean = false,
+    /** Terms agreed already, so walk tests needn't tick the box. */
+    termsAccepted: Boolean = true,
 ) : OnboardingStore {
+
+    var termsAccepted: Boolean = termsAccepted
+        private set
+
+    override suspend fun hasAcceptedTerms(): Boolean = termsAccepted
+
+    override suspend fun setTermsAccepted(accepted: Boolean) {
+        termsAccepted = accepted
+    }
 
     var completed: Boolean = initiallyCompleted
         private set
@@ -32,6 +43,7 @@ class InMemoryOnboardingStore(
 
     override suspend fun reset() {
         completed = false
+        termsAccepted = false
     }
 
     override suspend fun isRestartRequested(): Boolean = restartRequested

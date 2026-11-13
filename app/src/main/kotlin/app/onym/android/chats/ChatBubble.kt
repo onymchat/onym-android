@@ -163,6 +163,9 @@ fun ChatBubble(
      *  seat is live — absent otherwise, like every moderation
      *  surface. Rides the same long-press menu as Copy. */
     onReport: (() -> Unit)? = null,
+    /** Block this message's sender. Non-null for incoming messages from
+     *  someone else, reportable or not. Same long-press menu. */
+    onBlock: (() -> Unit)? = null,
 ) {
     val isOutgoing = message.direction == MessageDirection.OUTGOING
     // The Chats tab is Material-themed (no OnymTheme provider), so we
@@ -321,6 +324,7 @@ fun ChatBubble(
                     isHighlighted = isHighlighted,
                     onQuoteTap = onQuoteTap,
                     onReport = onReport,
+                    onBlock = onBlock,
                 )
                 if (isOutgoing) {
                     val visual = statusVisualFor(message.status)
@@ -358,6 +362,7 @@ private fun BubbleBody(
     isHighlighted: Boolean,
     onQuoteTap: (() -> Unit)?,
     onReport: (() -> Unit)?,
+    onBlock: (() -> Unit)?,
 ) {
     // Brief background pulse when the host scrolls here from a tapped
     // quote — blends the fill toward the surface tint and animates
@@ -419,7 +424,7 @@ private fun BubbleBody(
     val reportLabel = stringResource(R.string.chat_report)
     // The long-press menu mounts for any bubble with text to copy OR a
     // report action — a captionless photo must still be reportable.
-    val interactionModifier = if (body.isNotEmpty() || onReport != null) {
+    val interactionModifier = if (body.isNotEmpty() || onReport != null || onBlock != null) {
         Modifier
             .indication(
                 pressInteractions,
@@ -511,6 +516,16 @@ private fun BubbleBody(
                         copyMenuOpen = false
                     },
                     modifier = Modifier.testTag("chat_thread.report.$messageId"),
+                )
+            }
+            if (onBlock != null) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.chat_block)) },
+                    onClick = {
+                        onBlock()
+                        copyMenuOpen = false
+                    },
+                    modifier = Modifier.testTag("chat_thread.block.$messageId"),
                 )
             }
         }
