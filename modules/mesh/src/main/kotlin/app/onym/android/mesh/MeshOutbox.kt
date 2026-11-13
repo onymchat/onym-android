@@ -69,9 +69,9 @@ class MeshOutbox(
             entries[turn++]
         }
         val index = entry.next
-        // Source frames once, then fresh repair indices; wrap past the
-        // 16-bit space back to the first repair index.
-        entry.next = if (index >= 0xFFFF) entry.encoder.k else index + 1
+        // Source frames once, then every distinct repair row (k…255),
+        // then the repairs again.
+        entry.next = if (index >= 255) entry.encoder.k else index + 1
         return MeshCodedFrame(
             epochLow = (entry.epoch and 0xFF).toInt(),
             tag = entry.tag,

@@ -29,7 +29,6 @@ class MeshCodingTest {
     @Test fun coefficientsMatchTheVectors() {
         val c = coded.getValue("coefficients").jsonObject
         val values = MeshFountain.coefficients(
-            envelopeId = c.getValue("envelopeID").jsonPrimitive.content.toInt(16),
             index = c.getValue("index").jsonPrimitive.int,
             k = c.getValue("k").jsonPrimitive.int,
         )
@@ -59,18 +58,19 @@ class MeshCodingTest {
         assertArrayEquals(str("envelopeHex").hexToBytes(), out)
     }
 
+    /** Exactly k distinct frames, any of them, any order — including k > 33, where the old coefficients failed. */
     @Test fun anyKFramesInAnyOrderDecode() {
-        val envelope = ByteArray(500) { (it * 37).toByte() }
-        val encoder = MeshFountain.Encoder.of(envelope, 0x1234)!!
-        var failures = 0
-        repeat(50) {
-            val indices = (0 until encoder.k * 2).shuffled().take(encoder.k + 1)
-            val decoder = MeshFountain.Decoder(encoder.k, 0x1234)
-            var out: ByteArray? = null
-            for (i in indices) out = decoder.add(i, encoder.symbol(i)) ?: out
-            if (!envelope.contentEquals(out)) failures++
+        for (size in listOf(40, 500, 900)) {
+            val envelope = ByteArray(size) { (it * 37).toByte() }
+            val encoder = MeshFountain.Encoder.of(envelope, 0x1234)!!
+            repeat(30) {
+                val indices = (0 until 256).shuffled().take(encoder.k)
+                val decoder = MeshFountain.Decoder(encoder.k, 0x1234)
+                var out: ByteArray? = null
+                for (i in indices) out = decoder.add(i, encoder.symbol(i)) ?: out
+                assertArrayEquals("k = ${encoder.k}, indices $indices", envelope, out)
+            }
         }
-        assertTrue("k+1 random frames should almost always decode ($failures failures)", failures <= 1)
     }
 
     @Test fun envelopeBinaryRoundTripsWithTheVectors() {

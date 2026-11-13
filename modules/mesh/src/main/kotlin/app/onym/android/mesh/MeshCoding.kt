@@ -48,23 +48,20 @@ object MeshFountain {
     const val SYMBOL_SIZE = 13
     const val MAX_ENVELOPE = 255 * SYMBOL_SIZE - 2
 
-    /** xorshift32 seeded from envelope ID and index; zero mapped to one. */
-    fun coefficients(envelopeId: Int, index: Int, k: Int): IntArray {
-        var x = (((envelopeId.toLong() shl 16) or index.toLong()) * 0x9E3779B1L).toInt() xor 0x6D2B79F5
-        if (x == 0) x = 1
-        return IntArray(k) {
-            x = x xor (x shl 13)
-            x = x xor (x ushr 17)
-            x = x xor (x shl 5)
-            val c = x and 0xFF
-            if (c == 0) 1 else c
-        }
+    /**
+     * A Cauchy row, `1 / (x ⊕ m)`, with `x = k + (index − k) mod (256 − k)`:
+     * sources at 0…k−1 and repairs at k…255 are disjoint, so any k distinct
+     * frames are independent. Indices past 255 repeat earlier rows.
+     */
+    fun coefficients(index: Int, k: Int): IntArray {
+        val x = k + (index - k) % (256 - k)
+        return IntArray(k) { GF256.inv(x xor it) }
     }
 
     class Encoder private constructor(val k: Int, val envelopeId: Int, private val symbols: Array<ByteArray>) {
         fun symbol(index: Int): ByteArray {
             if (index < k) return symbols[index].copyOf()
-            val c = coefficients(envelopeId, index, k)
+            val c = coefficients(index, k)
             val out = ByteArray(SYMBOL_SIZE)
             for (m in 0 until k) {
                 val s = symbols[m]
@@ -95,7 +92,7 @@ object MeshFountain {
 
         fun add(index: Int, symbol: ByteArray): ByteArray? {
             if (symbol.size != SYMBOL_SIZE || rows.size >= k) return null
-            val v = if (index < k) IntArray(k).also { it[index] = 1 } else coefficients(envelopeId, index, k)
+            val v = if (index < k) IntArray(k).also { it[index] = 1 } else coefficients(index, k)
             val d = IntArray(SYMBOL_SIZE) { symbol[it].toInt() and 0xFF }
             for ((pivot, row) in rows) {
                 val f = v[pivot]

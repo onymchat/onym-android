@@ -6,6 +6,7 @@ import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertisingSet
 import android.bluetooth.le.AdvertisingSetCallback
 import android.bluetooth.le.AdvertisingSetParameters
+import android.bluetooth.le.BluetoothLeAdvertiser
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
@@ -13,6 +14,7 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
@@ -21,6 +23,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.util.UUID
 
@@ -116,8 +121,8 @@ class BleMeshScanner(private val context: Context) {
  * non-scannable (spec §3), each cycling its own stream of coded frames
  * every [frameInterval] ms. More sets is more frames on the air per
  * second. Nothing comes back: no connection can be made and no scan
- * request sent. A set the controller refuses (too many advertisers) is
- * dropped and the rest carry on.
+ * request sent. A lane the controller keeps refusing sits out 30 s while
+ * the rest carry on.
  *
  * Every [framesPerAddress] frames, and at each epoch boundary, a lane
  * starts a fresh set, so a fresh random address: a locked iPhone's scan
@@ -148,20 +153,82 @@ class BleMeshBroadcaster(
         job = null
     }
 
+    /**
+     * One advertising set at a time. Starting and stopping are
+     * asynchronous in the controller: starting the next set before the
+     * last has stopped is refused as "too many advertisers", so each
+     * waits for its callback.
+     */
     private inner class Lane(val number: Int) {
         @Volatile var set: AdvertisingSet? = null
-        @Volatile var refused = false
         var epoch = -1L
         var framesOnAddress = 0
+        /** Refused starts in a row; a lane the controller keeps refusing is benched. */
+        var refusals = 0
+        var benchedUntil = 0L
+        private var started: CompletableDeferred<Int>? = null
+        private var stopped: CompletableDeferred<Unit>? = null
+
         val callback = object : AdvertisingSetCallback() {
             override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
-                when (status) {
-                    ADVERTISE_SUCCESS -> set = advertisingSet
-                    ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> {
-                        refused = true
-                        Log.i(TAG, "lane $number refused: too many advertisers; carrying on with fewer")
+                if (status == ADVERTISE_SUCCESS) set = advertisingSet
+                started?.complete(status)
+            }
+
+            override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet?) {
+                stopped?.complete(Unit)
+            }
+        }
+
+        val live: Boolean get() = epoch >= 0
+
+        @SuppressLint("MissingPermission")
+        suspend fun stop(advertiser: BluetoothLeAdvertiser) {
+            if (!live) return
+            val done = CompletableDeferred<Unit>().also { stopped = it }
+            try {
+                advertiser.stopAdvertisingSet(callback)
+                withTimeoutOrNull(CALLBACK_TIMEOUT) { done.await() }
+            } catch (_: SecurityException) {
+            } catch (_: IllegalStateException) {
+            }
+            set = null
+            epoch = -1
+            framesOnAddress = 0
+        }
+
+        /** False when this lane can't advertise right now. */
+        @SuppressLint("MissingPermission")
+        suspend fun start(
+            advertiser: BluetoothLeAdvertiser,
+            parameters: AdvertisingSetParameters,
+            data: AdvertiseData,
+            epoch: Long,
+        ): Boolean {
+            val done = CompletableDeferred<Int>().also { started = it }
+            try {
+                advertiser.startAdvertisingSet(parameters, data, null, null, null, callback)
+            } catch (e: IllegalArgumentException) {
+                Log.w(TAG, "lane $number could not start", e)
+                return false
+            }
+            // Live from here on, so a late success is still stopped.
+            this.epoch = epoch
+            framesOnAddress = 1
+            val status = withTimeoutOrNull(CALLBACK_TIMEOUT) { done.await() } ?: return true
+            return when (status) {
+                AdvertisingSetCallback.ADVERTISE_SUCCESS -> {
+                    refusals = 0
+                    true
+                }
+                else -> {
+                    this.epoch = -1
+                    if (++refusals >= 3) {
+                        benchedUntil = System.currentTimeMillis() + BENCH_MILLIS
+                        refusals = 0
+                        Log.i(TAG, "lane $number benched: advertising refused ($status); carrying on with fewer")
                     }
-                    else -> Log.w(TAG, "lane $number advertising failed: $status")
+                    false
                 }
             }
         }
@@ -184,23 +251,14 @@ class BleMeshBroadcaster(
             .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
             .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MEDIUM)
             .build()
-
-        fun stop(lane: Lane) {
-            try {
-                advertiser.stopAdvertisingSet(lane.callback)
-            } catch (_: SecurityException) {
-            } catch (_: IllegalStateException) {
-            }
-            lane.set = null
-            lane.epoch = -1
-            lane.framesOnAddress = 0
-        }
+        var loggedEpoch = -1L
 
         try {
             while (isActive) {
-                val live = all.filterNot { it.refused }
+                val nowMillis = System.currentTimeMillis()
                 var sent = 0
-                for (lane in live) {
+                for (lane in all) {
+                    if (lane.benchedUntil > nowMillis) continue
                     val frame = outbox.next() ?: break
                     sent++
                     val data = AdvertiseData.Builder()
@@ -210,21 +268,18 @@ class BleMeshBroadcaster(
                         .addServiceData(MESH_CODED_UUID, frame)
                         .build()
                     val epoch = MeshEpoch.number(now())
+                    if (epoch != loggedEpoch) {
+                        loggedEpoch = epoch
+                        Log.i(TAG, "epoch $epoch: ${all.size} lanes, ${outbox.size} envelopes queued")
+                    }
                     if (lane.epoch != epoch || lane.framesOnAddress >= framesPerAddress) {
                         // A fresh set, so a fresh address.
-                        if (lane.epoch >= 0) stop(lane)
-                        if (lane.epoch != epoch) {
-                            Log.i(TAG, "lane ${lane.number}: epoch $epoch (${outbox.size} envelopes queued)")
-                        }
+                        lane.stop(advertiser)
                         try {
-                            advertiser.startAdvertisingSet(parameters, data, null, null, null, lane.callback)
-                            lane.epoch = epoch
-                            lane.framesOnAddress = 1
+                            lane.start(advertiser, parameters, data, epoch)
                         } catch (e: SecurityException) {
                             Log.w(TAG, "no permission to advertise", e)
                             return
-                        } catch (e: IllegalArgumentException) {
-                            Log.w(TAG, "lane ${lane.number} could not start", e)
                         }
                     } else {
                         lane.set?.setAdvertisingData(data)
@@ -232,14 +287,19 @@ class BleMeshBroadcaster(
                     }
                 }
                 if (sent == 0) {
-                    all.filter { it.epoch >= 0 }.forEach(::stop)
+                    all.forEach { it.stop(advertiser) }
                     delay(1_000)
                 } else {
                     delay(frameInterval)
                 }
             }
         } finally {
-            all.forEach(::stop)
+            withContext(NonCancellable) { all.forEach { it.stop(advertiser) } }
         }
+    }
+
+    private companion object {
+        const val CALLBACK_TIMEOUT = 500L
+        const val BENCH_MILLIS = 30_000L
     }
 }
