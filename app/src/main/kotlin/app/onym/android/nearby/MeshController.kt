@@ -14,7 +14,10 @@ import app.onym.android.inbox.IncomingInvitationsRepository
 import app.onym.android.inbox.IncomingMessageDispatcher
 import app.onym.android.mesh.BleMeshBroadcaster
 import app.onym.android.mesh.BleMeshScanner
+import android.util.Log
 import app.onym.android.mesh.MeshContact
+import app.onym.android.mesh.MeshEpoch
+import app.onym.android.mesh.MeshTag
 import app.onym.android.mesh.MeshInboxTransport
 import app.onym.android.mesh.MeshOutbox
 import app.onym.android.transport.TransportInboxId
@@ -113,9 +116,22 @@ class MeshController(
     }
 
     override suspend fun broadcast(sealedEnvelope: ByteArray, sender: IdentityId, recipientInboxKey: ByteArray) {
-        if (!settings.broadcast.value) return
+        if (!settings.broadcast.value) {
+            Log.i(TAG, "not queued: broadcasting is off")
+            return
+        }
         val pairKey = identityRepository.meshPairKey(sender, recipientInboxKey)
-        outbox.enqueue(sealedEnvelope, pairKey)
+        val queued = outbox.enqueue(sealedEnvelope, pairKey)
+        // Field-test diagnostics. The tag is public — it rotates every 15
+        // minutes and says nothing without the pair key, never logged.
+        val epoch = MeshEpoch.number(java.time.Instant.now())
+        Log.i(
+            TAG,
+            "queued=$queued for inbox ${IdentityRepository.inboxTag(recipientInboxKey)}: " +
+                "${sealedEnvelope.size} bytes → ${(sealedEnvelope.size + 14) / 15} frames, " +
+                "epoch $epoch tag %06x, radio permitted=${hasRadioPermissions(context)}, outbox ${outbox.size}"
+                    .format(MeshTag.derive(pairKey, epoch)),
+        )
     }
 
     private suspend fun listen(dispatcher: IncomingMessageDispatcher) {
@@ -164,6 +180,8 @@ class MeshController(
     }
 
     companion object {
+        private const val TAG = "OnymMesh"
+
         /** What the switches need: scan + advertise on 12+, location for scanning before it. */
         fun radioPermissions(): Array<String> =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

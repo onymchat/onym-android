@@ -33,7 +33,9 @@ class MeshService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureChannel(this)
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            // A single-color vector: a foreground service whose
+            // notification icon Android rejects crashes the app.
+            .setSmallIcon(R.drawable.ic_stat_onym_nearby)
             .setContentTitle(getString(app.onym.android.strings.R.string.mesh_service_title))
             .setContentText(getString(app.onym.android.strings.R.string.mesh_service_body))
             .setOngoing(true)
@@ -101,7 +103,7 @@ object MeshArrivalNotifier {
         ) return
         PushMessagingService.ensureChannel(context)
         val notification = NotificationCompat.Builder(context, PushMessagingService.CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setSmallIcon(R.drawable.ic_stat_onym_message)
             .setContentTitle(context.getString(app.onym.android.strings.R.string.push_notification_title))
             .setContentText(context.getString(app.onym.android.strings.R.string.push_notification_body))
             .setAutoCancel(true)

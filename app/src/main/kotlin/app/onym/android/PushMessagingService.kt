@@ -62,7 +62,7 @@ class PushMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setSmallIcon(R.drawable.ic_stat_onym_message)
             .setContentTitle(getString(app.onym.android.strings.R.string.push_notification_title))
             .setContentText(getString(app.onym.android.strings.R.string.push_notification_body))
             .setAutoCancel(true)
